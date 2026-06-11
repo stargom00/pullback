@@ -142,7 +142,7 @@ function card(s) {
   return `<div class="card">
     <div class="card-top">
       <div>
-        <div class="name">${s.name}<span class="mkt">${s.market}</span></div>
+        <div class="name">${s.leader ? '👑 ' : ''}${s.name}<span class="mkt">${s.market}</span></div>
         <div class="tick mono">${s.ticker}</div>
       </div>
       ${scoreRing(s.score)}

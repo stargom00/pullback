@@ -25,6 +25,10 @@ CONFIG = {
     "recent_high_window": 40,  # 60일 고점이 최근 N봉 안에 있어야 함
     "rs_min": 50,              # RS 등급 최소치 (유니버스 내 백분위)
     "pivot_window": 10,        # 피벗(돌파가) = 직전 N봉 고가
+    # 주도주(RS 90+) 완화 기준: 얕고 짧은 눌림도 인정
+    "leader_rs": 90,
+    "leader_pullback_min": 0.015,
+    "leader_rsi_max": 72,
 }
 
 
@@ -81,9 +85,12 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, cfg: dict = CONFIG) ->
     if len(df) < cfg["min_bars"]:
         return None
 
-    # ── 0) RS 필터 ──
+    # ── 0) RS 필터 + 주도주 판정 ──
     if rs_rank is not None and rs_rank < cfg["rs_min"]:
         return None
+    is_leader = rs_rank is not None and rs_rank >= cfg["leader_rs"]
+    pb_min = cfg["leader_pullback_min"] if is_leader else cfg["pullback_min"]
+    rsi_max = cfg["leader_rsi_max"] if is_leader else cfg["rsi_max"]
 
     c = df["Close"]
     h = df["High"]
@@ -121,7 +128,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, cfg: dict = CONFIG) ->
 
     # ── 3) 조정폭 (눌림 깊이) ──
     pullback = (high60 - close) / high60
-    pullback_ok = cfg["pullback_min"] <= pullback <= cfg["pullback_max"]
+    pullback_ok = pb_min <= pullback <= cfg["pullback_max"]
     if not pullback_ok:
         return None
 
@@ -145,7 +152,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, cfg: dict = CONFIG) ->
     vol_dry = vol_ratio <= cfg["vol_contraction"]
 
     # ── 6) RSI 중립권 ──
-    rsi_ok = cfg["rsi_min"] <= cur_rsi <= cfg["rsi_max"]
+    rsi_ok = cfg["rsi_min"] <= cur_rsi <= rsi_max
     if not rsi_ok:
         return None
 
@@ -185,6 +192,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, cfg: dict = CONFIG) ->
         "change_pct": round(change_pct, 2),
         "score": round(score, 1),
         "rs": rs_rank,
+        "leader": is_leader,
         "pullback_pct": round(pullback * 100, 1),
         "support_ma": support_ma,
         "ma_dist_pct": round(near_ma * 100, 2),
