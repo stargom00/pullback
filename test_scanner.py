@@ -73,3 +73,36 @@ df6 = pd.DataFrame({"Open": closes6, "High": [c*1.01 for c in closes6],
                     "Volume": [float(v) for v in vols6]})
 r6a, r6b = analyze(df6, rs_rank=95), analyze(df6, rs_rank=70)
 print("Case6 주도주 얕은눌림:", "OK ✓" if (r6a and r6a["leader"] and r6b is None) else "오류 ✗")
+
+# ── Case 7: 추세전환 — 역배열 1년 → 최근 정배열 형성 (탐지) ──
+from scanner import analyze_turnaround
+rng7 = np.random.default_rng(3)
+downtrend = list(200 * np.cumprod(1 + rng7.normal(-0.002, 0.015, 170)))   # 완만한 하락
+base = list(downtrend[-1] * np.cumprod(1 + rng7.normal(0.0005, 0.012, 50)))  # 바닥 다지기
+recovery = list(base[-1] * np.cumprod(1 + rng7.normal(0.005, 0.012, 38)))    # 회복 랠리
+closes7 = downtrend + base + recovery
+vols7 = [800_000] * 220 + [1_400_000] * 38
+df7 = pd.DataFrame({"Open": closes7, "High": [c*1.01 for c in closes7],
+                    "Low": [c*0.99 for c in closes7], "Close": closes7,
+                    "Volume": [float(v) for v in vols7]})
+r7 = analyze_turnaround(df7, rs_rank=55, rs_mom=35)
+print("Case7 추세전환:", f"탐지 ✓ score {r7['score']} | 정배열 D+{r7['align_days']} | 200선 +{r7['ma200_dist_pct']}%" if r7 else "미탐지 ✗")
+
+# ── Case 8: 같은 차트, RS 모멘텀 음수 (탈락해야) ──
+r8 = analyze_turnaround(df7, rs_rank=55, rs_mom=-5)
+print("Case8 RS모멘텀 음수:", "탈락 ✓" if r8 is None else "오탐 ✗")
+
+# ── Case 9: 1년 내내 정배열 (전환 아님 → 탈락해야) ──
+steady = list(100 * np.cumprod(1 + rng7.normal(0.003, 0.012, 265)))
+df9 = pd.DataFrame({"Open": steady, "High": [c*1.01 for c in steady],
+                    "Low": [c*0.99 for c in steady], "Close": steady,
+                    "Volume": [1_000_000.0] * 265})
+r9 = analyze_turnaround(df9, rs_rank=90, rs_mom=5)
+print("Case9 장기 정배열:", "탈락 ✓ (전환 아님)" if r9 is None else f"오탐 ✗ (D+{r9['align_days']})")
+
+# ── Case 10: RS 곱셈 — 모양 같으면 RS 높은 쪽이 점수 위 ──
+# Case1 차트 재사용 (df1, 위에서 정의됨)
+hi = analyze(df1, rs_rank=95)
+lo_ = analyze(df1, rs_rank=55)
+print("Case10 RS 곱셈:", "OK ✓" if hi and lo_ and hi["score"] > lo_["score"] + 5 else "오류 ✗",
+      f"(RS95 {hi['score'] if hi else '-'} vs RS55 {lo_['score'] if lo_ else '-'})")

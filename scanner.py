@@ -72,7 +72,7 @@ def to_rs_rank(raw_scores: dict[str, float]) -> dict[str, int]:
     return ranks
 
 
-def analyze(df: pd.DataFrame, rs_rank: int | None = None, cfg: dict = CONFIG) -> dict | None:
+def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = None, cfg: dict = CONFIG) -> dict | None:
     """
     일봉 DataFrame(Open/High/Low/Close/Volume)을 받아
     눌림목 조건 충족 여부와 점수를 반환. 미충족이면 None.
@@ -183,6 +183,10 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, cfg: dict = CONFIG) ->
         score += 15 * max(0.0, (rs_rank - 50) / 49)
     score += 5 if tightening else 0
     score += 5 if recent_high_ok else 0
+    score += 3 if (rs_mom is not None and rs_mom >= 10) else 0
+    # RS 곱셈 반영: 힘(RS) × 모양 — 둘 다 좋아야 고득점
+    if rs_rank is not None:
+        score *= 0.7 + 0.3 * rs_rank / 99
 
     prev_close = float(c.iloc[-2])
     change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
@@ -192,7 +196,9 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, cfg: dict = CONFIG) ->
         "change_pct": round(change_pct, 2),
         "score": round(score, 1),
         "rs": rs_rank,
+        "rs_mom": rs_mom,
         "leader": is_leader,
+        "mode": "pullback",
         "pullback_pct": round(pullback * 100, 1),
         "support_ma": support_ma,
         "ma_dist_pct": round(near_ma * 100, 2),
@@ -201,6 +207,114 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, cfg: dict = CONFIG) ->
         "rsi": round(cur_rsi, 1),
         "tightening": tightening,
         "recent_high_ok": recent_high_ok,
+        "pivot": round(pivot, 2),
+        "pivot_dist_pct": round(pivot_dist_pct, 2),
+        "stop": round(stop, 2),
+        "risk_pct": round(risk_pct, 2),
+        "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
+        "spark_ma20": [
+            None if math.isnan(x) else round(float(x), 4)
+            for x in ma20.iloc[-60:].tolist()
+        ],
+    }
+
+
+# ══════════════════════════════════════════════════════
+# 추세 전환 스캔: 역배열 → 정배열 첫 형성 (최근 1개월 내)
+# ══════════════════════════════════════════════════════
+TURN_CONFIG = {
+    "min_bars": 210,
+    "align_window": 22,      # 정배열 형성이 최근 N봉 이내여야 함
+    "max_ma200_dist": 0.25,  # 200일선에서 25% 이상 떨어졌으면 이미 늦음
+    "rs_min": 30,            # 전환 초입은 RS가 낮은 게 정상 → 완화
+}
+
+
+def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
+                       rs_mom: int | None = None, cfg: dict = TURN_CONFIG) -> dict | None:
+    """역배열에서 정배열(20>60>200, 종가>200일선)로 갓 전환한 종목 탐지"""
+    if df is None or len(df) < cfg["min_bars"]:
+        return None
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if len(df) < cfg["min_bars"]:
+        return None
+
+    if rs_rank is not None and rs_rank < cfg["rs_min"]:
+        return None
+    # RS 모멘텀이 명확히 꺾인 종목은 제외 (전환의 핵심 = 상대강도 개선)
+    if rs_mom is not None and rs_mom < 0:
+        return None
+
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+    ma20 = c.rolling(20).mean()
+    ma60 = c.rolling(60).mean()
+    ma200 = c.rolling(200).mean()
+    r = rsi(c)
+
+    close = float(c.iloc[-1])
+    m20, m60, m200 = float(ma20.iloc[-1]), float(ma60.iloc[-1]), float(ma200.iloc[-1])
+    cur_rsi = float(r.iloc[-1])
+    if any(math.isnan(x) for x in (m20, m60, m200, cur_rsi)):
+        return None
+
+    # 정배열 시리즈 (오늘 포함 최근 구간)
+    aligned = (ma20 > ma60) & (ma60 > ma200) & (c > ma200)
+    if not bool(aligned.iloc[-1]):
+        return None
+    # 며칠 전에 처음 정배열이 됐는가 (직전 False까지 거슬러)
+    align_days = 0
+    for val in reversed(aligned.tolist()):
+        if val:
+            align_days += 1
+        else:
+            break
+    if align_days > cfg["align_window"]:
+        return None  # 이미 한 달 넘게 정배열 → 전환 아님
+
+    # 200일선에서 너무 멀면(이미 급등) 제외
+    ma200_dist = (close - m200) / m200
+    if ma200_dist > cfg["max_ma200_dist"]:
+        return None
+
+    # 거래량: 전환 구간(최근 10일)이 평소(50일)보다 늘었는가 (확장이 좋음)
+    vol10 = float(v.iloc[-10:].mean())
+    vol50 = float(v.iloc[-50:].mean())
+    vol_ratio = vol10 / vol50 if vol50 > 0 else 0.0
+
+    # 피벗/손절: 60일 고가 돌파가 다음 트리거, 손절은 60일선 -2%
+    pivot = float(h.iloc[-60:].max())
+    stop = m60 * 0.98
+    candidates = [x for x in (stop, float(lo.iloc[-10:].min())) if x < close]
+    stop = max(candidates) if candidates else float(lo.iloc[-10:].min())
+    risk_pct = (pivot - stop) / pivot * 100 if pivot > 0 else 0.0
+    pivot_dist_pct = (pivot - close) / close * 100
+
+    # ── 점수 (100점) ──
+    score = 0.0
+    score += 30 * (cfg["align_window"] + 1 - align_days) / cfg["align_window"]  # 신선도
+    if rs_mom is not None:
+        score += 25 * max(0.0, min(rs_mom, 40)) / 40                            # RS 개선 폭
+    if rs_rank is not None:
+        score += 15 * rs_rank / 99                                              # 현재 RS
+    score += 15 * max(0.0, min((vol_ratio - 0.9) / 0.9, 1.0))                   # 거래량 확장
+    score += 15 * (1 - min(ma200_dist, 0.25) / 0.25)                            # 200일선 근접
+
+    prev_close = float(c.iloc[-2])
+    change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
+
+    return {
+        "mode": "turnaround",
+        "close": round(close, 2),
+        "change_pct": round(change_pct, 2),
+        "score": round(score, 1),
+        "rs": rs_rank,
+        "rs_mom": rs_mom,
+        "leader": False,
+        "align_days": align_days,
+        "ma200_dist_pct": round(ma200_dist * 100, 1),
+        "vol_ratio": round(vol_ratio, 2),
+        "vol_dry": False,
+        "rsi": round(cur_rsi, 1),
         "pivot": round(pivot, 2),
         "pivot_dist_pct": round(pivot_dist_pct, 2),
         "stop": round(stop, 2),

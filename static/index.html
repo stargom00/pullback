@@ -85,8 +85,12 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v2.2</span> <span class="dot">●</span></h1>
-    <div class="sub">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
+    <h1>눌림목 스캐너 <span class="ver">v3.0</span> <span class="dot">●</span></h1>
+    <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
+  </div>
+  <div class="tabs" role="tablist" id="modeTabs">
+    <button class="tab active" data-mode="pullback">눌림목</button>
+    <button class="tab" data-mode="turnaround">추세전환</button>
   </div>
   <div class="tabs" role="tablist">
     <button class="tab active" data-market="all">전체</button>
@@ -153,27 +157,45 @@ function card(s) {
       <span class="chg ${chgCls}">${chgSign}${s.change_pct}%</span>
     </div>
     ${sparkSVG(s.spark, s.spark_ma20)}
+    ${s.mode === 'turnaround' ? `
+    <div class="metrics mono">
+      <div class="metric"><div class="k">정배열</div><div class="v">D+${s.align_days}</div></div>
+      <div class="metric"><div class="k">200일선 위</div><div class="v">+${s.ma200_dist_pct}%</div></div>
+      <div class="metric"><div class="k">거래량비</div><div class="v">${s.vol_ratio}×</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
+    </div>` : `
     <div class="metrics mono">
       <div class="metric"><div class="k">눌림 깊이</div><div class="v">-${s.pullback_pct}%</div></div>
       <div class="metric"><div class="k">지지선</div><div class="v">${s.support_ma} <span style="color:var(--muted);font-size:11px">${s.ma_dist_pct}%</span></div></div>
       <div class="metric"><div class="k">거래량비</div><div class="v">${s.vol_ratio}×</div></div>
       <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
-    </div>
+    </div>`}
     <div class="metrics mono" style="border-top:none;padding-top:0">
-      <div class="metric"><div class="k">RS</div><div class="v" style="color:${s.rs >= 80 ? 'var(--green)' : s.rs >= 65 ? 'var(--amber)' : 'var(--text)'}">${s.rs ?? '-'}</div></div>
+      <div class="metric"><div class="k">RS</div><div class="v" style="color:${s.rs >= 80 ? 'var(--green)' : s.rs >= 65 ? 'var(--amber)' : 'var(--text)'}">${s.rs ?? '-'}${s.rs_mom >= 10 ? ' <span style="color:var(--green)" title="상대강도 개선 중">↗</span>' : ''}</div></div>
       <div class="metric"><div class="k">피벗 (돌파가)</div><div class="v">${fmtPrice(s.pivot, s.market)} <span style="color:var(--muted);font-size:11px">+${s.pivot_dist_pct}%</span></div></div>
       <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
       <div class="metric"><div class="k">리스크</div><div class="v">${s.risk_pct}%</div></div>
     </div>
+    ${s.mode === 'turnaround' ? `
+    <div class="badges">
+      <span class="badge on">정배열 전환</span>
+      <span class="badge ${s.rs_mom >= 10 ? 'on' : ''}">RS 개선</span>
+      <span class="badge ${s.vol_ratio >= 1.2 ? 'on' : ''}">거래량 확장</span>
+    </div>` : `
     <div class="badges">
       <span class="badge ${s.vol_dry ? 'on' : ''}">거래량 수축</span>
       <span class="badge ${s.tightening ? 'on' : ''}">변동폭 축소</span>
       <span class="badge ${s.recent_high_ok ? 'on' : ''}">고점 유지</span>
-    </div>
+    </div>`}
   </div>`;
 }
 
 let market = 'all';
+let mode = 'pullback';
+const DESC = {
+  pullback: '우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+',
+  turnaround: '역배열→정배열 첫 전환(1개월 내) · RS 개선 중 · 200일선 +25% 이내'
+};
 
 async function load(refresh = false) {
   const content = document.getElementById('content');
@@ -181,23 +203,30 @@ async function load(refresh = false) {
   content.innerHTML = '<div class="loading"><div class="spinner"></div>스캔 중… (첫 스캔은 1~2분 걸릴 수 있어요)</div>';
   status.innerHTML = '';
   try {
-    const res = await fetch(`/api/scan?market=${market}${refresh ? '&refresh=true' : ''}`);
+    const res = await fetch(`/api/scan?market=${market}&mode=${mode}${refresh ? '&refresh=true' : ''}`);
     const data = await res.json();
     status.innerHTML = `<span><b>${data.fetched ?? data.scanned}</b>/${data.scanned}개 종목 스캔</span>
       <span>눌림목 후보 <b>${data.hits.length}</b>개</span>
       <span>기준 ${data.generated_at}${data.cached ? ' (캐시)' : ''}</span>`;
     content.innerHTML = data.hits.length
       ? `<div class="grid">${data.hits.map(card).join('')}</div>`
-      : '<div class="empty">현재 조건을 충족하는 눌림목 종목이 없습니다.<br>장이 과열이거나 조정장일 때 자연스러운 결과예요.</div>';
+      : `<div class="empty">현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : '눌림목'} 종목이 없습니다.<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.</div>`;
   } catch (e) {
     content.innerHTML = '<div class="empty">스캔에 실패했습니다. 서버 로그를 확인한 뒤 다시 시도해 주세요.</div>';
   }
 }
 
-document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
-  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('[data-market]').forEach(x => x.classList.remove('active'));
   t.classList.add('active');
   market = t.dataset.market;
+  load();
+}));
+document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('[data-mode]').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  mode = t.dataset.mode;
+  document.getElementById('subDesc').textContent = DESC[mode];
   load();
 }));
 document.getElementById('refresh').addEventListener('click', () => load(true));
