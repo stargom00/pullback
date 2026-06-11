@@ -20,7 +20,7 @@ app = FastAPI(title="눌림목 스캐너")
 
 CACHE_TTL = 600  # 10분
 _cache: dict[str, dict] = {}
-_executor = ThreadPoolExecutor(max_workers=8)
+_executor = ThreadPoolExecutor(max_workers=12)
 
 
 def _fetch(ticker: str):

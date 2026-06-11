@@ -20,6 +20,7 @@ header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;
   padding:20px 24px;border-bottom:1px solid var(--line)}
 h1{font-size:18px;font-weight:700;letter-spacing:-.3px}
 h1 .dot{color:var(--amber)}
+h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(--line);border-radius:99px;padding:2px 8px;vertical-align:2px}
 .sub{font-size:12px;color:var(--muted)}
 
 .tabs{display:flex;gap:4px;margin-left:auto;background:var(--surface);
@@ -84,7 +85,7 @@ h1 .dot{color:var(--amber)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v2.2</span> <span class="dot">●</span></h1>
     <div class="sub">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist">
@@ -182,7 +183,7 @@ async function load(refresh = false) {
   try {
     const res = await fetch(`/api/scan?market=${market}${refresh ? '&refresh=true' : ''}`);
     const data = await res.json();
-    status.innerHTML = `<span><b>${data.scanned}</b>개 종목 스캔</span>
+    status.innerHTML = `<span><b>${data.fetched ?? data.scanned}</b>/${data.scanned}개 종목 스캔</span>
       <span>눌림목 후보 <b>${data.hits.length}</b>개</span>
       <span>기준 ${data.generated_at}${data.cached ? ' (캐시)' : ''}</span>`;
     content.innerHTML = data.hits.length

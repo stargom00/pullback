@@ -1,83 +1,194 @@
 """
-스캔 대상 유니버스.
-- KR: KOSPI/KOSDAQ 주요 종목 (yfinance용 .KS/.KQ 접미사)
-- US: S&P500 핵심 + 성장주 위주
-- watchlist.txt 파일이 있으면 거기 적힌 티커를 추가로 스캔
-  (한 줄에 하나, 예: 005930.KS 또는 NVDA)
+스캔 대상 유니버스 v2.2 — 약 480종목
+- KR: 코스피 주요 + 코스닥 (반도체 소부장 중점 보강)
+- US: S&P500 핵심 + 성장주
+- watchlist.txt 파일이 있으면 추가 스캔 (한 줄에 하나: "티커 이름")
+- 잘못되거나 상폐된 티커는 수집 실패 시 자동 제외됨
 """
 import os
 
 KR_UNIVERSE = {
-    # ── KOSPI 대형/주도주 ──
+    # ══ 코스피 대형 ══
     "005930.KS": "삼성전자", "000660.KS": "SK하이닉스", "373220.KS": "LG에너지솔루션",
     "207940.KS": "삼성바이오로직스", "005380.KS": "현대차", "000270.KS": "기아",
     "068270.KS": "셀트리온", "005490.KS": "POSCO홀딩스", "035420.KS": "NAVER",
     "035720.KS": "카카오", "051910.KS": "LG화학", "006400.KS": "삼성SDI",
-    "012450.KS": "한화에어로스페이스", "042660.KS": "한화오션", "009540.KS": "HD한국조선해양",
-    "329180.KS": "HD현대중공업", "010140.KS": "삼성중공업", "064350.KS": "현대로템",
-    "047810.KS": "한국항공우주", "079550.KS": "LIG넥스원", "272210.KS": "한화시스템",
-    "034020.KS": "두산에너빌리티", "267260.KS": "HD현대일렉트릭", "103140.KS": "풍산",
-    "010120.KS": "LS일렉트릭", "006260.KS": "LS", "001440.KS": "대한전선",
-    "298040.KS": "효성중공업", "105560.KS": "KB금융", "055550.KS": "신한지주",
-    "086790.KS": "하나금융지주", "316140.KS": "우리금융지주", "024110.KS": "기업은행",
-    "032830.KS": "삼성생명", "000810.KS": "삼성화재", "088350.KS": "한화생명",
-    "015760.KS": "한국전력", "036460.KS": "한국가스공사", "009830.KS": "한화솔루션",
-    "011200.KS": "HMM", "003490.KS": "대한항공", "086280.KS": "현대글로비스",
-    "028260.KS": "삼성물산", "000720.KS": "현대건설", "006360.KS": "GS건설",
-    "097950.KS": "CJ제일제당", "271560.KS": "오리온", "004370.KS": "농심",
-    "090430.KS": "아모레퍼시픽", "051900.KS": "LG생활건강", "161890.KS": "한국콜마",
-    "278530.KS": "코웨이", "008770.KS": "호텔신라", "035250.KS": "강원랜드",
-    "352820.KS": "하이브", "041510.KQ": "에스엠", "035900.KQ": "JYP Ent.",
-    "122870.KQ": "와이지엔터테인먼트", "377300.KS": "카카오페이", "323410.KS": "카카오뱅크",
-    "030200.KS": "KT", "017670.KS": "SK텔레콤", "032640.KS": "LG유플러스",
-    "009150.KS": "삼성전기", "011070.KS": "LG이노텍", "066570.KS": "LG전자",
-    "402340.KS": "SK스퀘어", "034730.KS": "SK", "003550.KS": "LG",
-    "018260.KS": "삼성에스디에스", "036570.KS": "엔씨소프트", "251270.KS": "넷마블",
-    "259960.KS": "크래프톤", "263750.KQ": "펄어비스", "293490.KQ": "카카오게임즈",
-    # ── KOSDAQ 주도주 ──
+    "028260.KS": "삼성물산", "034730.KS": "SK", "003550.KS": "LG",
+    "402340.KS": "SK스퀘어", "267250.KS": "HD현대", "000150.KS": "두산",
+    # ══ 반도체 (코스피) ══
+    "042700.KS": "한미반도체", "000990.KS": "DB하이텍", "108320.KQ": "LX세미콘",
+    "007660.KS": "이수페타시스", "353200.KS": "대덕전자", "195870.KS": "해성디에스",
+    "014680.KS": "한솔케미칼", "093370.KS": "후성", "003160.KS": "디아이",
+    "281820.KS": "케이씨텍", "009150.KS": "삼성전기", "011070.KS": "LG이노텍",
+    # ══ 반도체 소부장 — 장비 (코스닥) ══
+    "240810.KQ": "원익IPS", "036930.KQ": "주성엔지니어링", "084370.KQ": "유진테크",
+    "095610.KQ": "테스", "319660.KQ": "피에스케이", "031980.KQ": "피에스케이홀딩스",
+    "039030.KQ": "이오테크닉스", "403870.KQ": "HPSP", "036200.KQ": "유니셈",
+    "083450.KQ": "GST", "039440.KQ": "에스티아이", "160980.KQ": "싸이맥스",
+    "079370.KQ": "제우스", "092870.KQ": "엑시콘", "086390.KQ": "유니테스트",
+    "253590.KQ": "네오셈", "168360.KQ": "펨트론", "137400.KQ": "피엔티",
+    "222080.KQ": "씨아이에스", "348210.KQ": "넥스틴", "140860.KQ": "파크시스템스",
+    "064290.KQ": "인텍플러스", "131970.KQ": "두산테스나", "232140.KQ": "와이씨",
+    # ══ 반도체 소부장 — 소재/부품 (코스닥) ══
+    "357780.KQ": "솔브레인", "036830.KQ": "솔브레인홀딩스", "005290.KQ": "동진쎄미켐",
+    "074600.KQ": "원익QnC", "104830.KQ": "원익머트리얼즈", "064760.KQ": "티씨케이",
+    "166090.KQ": "하나머티리얼즈", "183300.KQ": "코미코", "059090.KQ": "미코",
+    "101490.KQ": "에스앤에스텍", "036810.KQ": "에프에스티", "092070.KQ": "디엔에프",
+    "281740.KQ": "레이크머티리얼즈", "101160.KQ": "월덱스", "272110.KQ": "케이엔제이",
+    "120110.KS": "코오롱인더", "011790.KS": "SKC", "336370.KS": "솔루스첨단소재",
+    # ══ 반도체 소부장 — 테스트/패키징/기판 (코스닥) ══
+    "058470.KQ": "리노공업", "095340.KQ": "ISC", "131290.KQ": "티에스이",
+    "067310.KQ": "하나마이크론", "033640.KQ": "네패스", "222800.KQ": "심텍",
+    "080220.KQ": "제주반도체", "420770.KQ": "기가비스", "252990.KQ": "샘씨엔에스",
+    # ══ 반도체 설계/IP (코스닥) ══
+    "399720.KQ": "가온칩스", "200710.KQ": "에이디테크놀로지", "394280.KQ": "오픈엣지테크놀로지",
+    "432720.KQ": "퀄리타스반도체", "054450.KQ": "텔레칩스", "094360.KQ": "칩스앤미디어",
+    "102120.KQ": "어보브반도체",
+    # ══ 2차전지 ══
     "247540.KQ": "에코프로비엠", "086520.KQ": "에코프로", "066970.KQ": "엘앤에프",
-    "028300.KQ": "HLB", "196170.KQ": "알테오젠", "141080.KQ": "리가켐바이오",
-    "328130.KQ": "루닛", "145020.KQ": "휴젤", "214150.KQ": "클래시스",
-    "039030.KQ": "이오테크닉스", "240810.KQ": "원익IPS", "058470.KQ": "리노공업",
-    "403870.KQ": "HPSP", "112040.KQ": "위메이드", "095340.KQ": "ISC",
-    "036930.KQ": "주성엔지니어링", "140860.KQ": "파크시스템스", "277810.KQ": "레인보우로보틱스",
-    "108320.KQ": "LX세미콘", "098460.KQ": "고영", "025900.KQ": "동화기업",
-    "393890.KQ": "더블유씨피", "121600.KQ": "나노신소재", "005290.KQ": "동진쎄미켐",
-    "067310.KQ": "하나마이크론", "357780.KQ": "솔브레인", "000250.KQ": "삼천당제약",
+    "393890.KQ": "더블유씨피", "121600.KQ": "나노신소재", "278280.KQ": "천보",
+    "078600.KQ": "대주전자재료", "450080.KS": "에코프로머티", "005070.KS": "코스모신소재",
+    "348370.KQ": "엔켐", "372170.KQ": "윤성에프앤씨", "003670.KS": "포스코퓨처엠",
+    # ══ 방산/우주 ══
+    "012450.KS": "한화에어로스페이스", "047810.KS": "한국항공우주", "079550.KS": "LIG넥스원",
+    "272210.KS": "한화시스템", "064350.KS": "현대로템", "103140.KS": "풍산",
+    "214430.KQ": "아이쓰리시스템",
+    # ══ 조선/기자재 ══
+    "042660.KS": "한화오션", "009540.KS": "HD한국조선해양", "329180.KS": "HD현대중공업",
+    "010140.KS": "삼성중공업", "443060.KS": "HD현대마린솔루션", "082740.KS": "한화엔진",
+    "077970.KS": "STX엔진", "075580.KS": "세진중공업", "033500.KQ": "동성화인텍",
+    "014620.KQ": "성광벤드", "023160.KQ": "태광", "013030.KQ": "하이록코리아",
+    "010120.KS": "LS일렉트릭",
+    # ══ 전력기기/전선 ══
+    "267260.KS": "HD현대일렉트릭", "298040.KS": "효성중공업", "006260.KS": "LS",
+    "001440.KS": "대한전선", "103590.KS": "일진전기", "000500.KS": "가온전선",
+    "229640.KS": "LS에코에너지", "033100.KQ": "제룡전기", "034020.KS": "두산에너빌리티",
+    # ══ 로봇/AI ══
+    "277810.KQ": "레인보우로보틱스", "454910.KS": "두산로보틱스", "348340.KQ": "뉴로메카",
+    "108490.KQ": "로보티즈", "328130.KQ": "루닛", "338220.KQ": "뷰노",
+    "304100.KQ": "솔트룩스", "402030.KQ": "코난테크놀로지",
+    # ══ 바이오/제약 ══
+    "196170.KQ": "알테오젠", "141080.KQ": "리가켐바이오", "028300.KQ": "HLB",
+    "145020.KQ": "휴젤", "214150.KQ": "클래시스", "000250.KQ": "삼천당제약",
     "214450.KQ": "파마리서치", "237690.KQ": "에스티팜", "298380.KQ": "에이비엘바이오",
-    "347850.KQ": "디앤디파마텍",
+    "347850.KQ": "디앤디파마텍", "326030.KS": "SK바이오팜", "302440.KS": "SK바이오사이언스",
+    "000100.KS": "유한양행", "128940.KS": "한미약품", "185750.KS": "종근당",
+    "069620.KS": "대웅제약", "006280.KS": "녹십자", "009420.KS": "한올바이오파마",
+    "195940.KQ": "HK이노엔", "086900.KQ": "메디톡스", "214370.KQ": "케어젠",
+    "039200.KQ": "오스코텍", "087010.KQ": "펩트론", "206650.KQ": "유바이오로직스",
+    "053030.KQ": "바이넥스", "068760.KQ": "셀트리온제약",
+    # ══ 금융 ══
+    "105560.KS": "KB금융", "055550.KS": "신한지주", "086790.KS": "하나금융지주",
+    "316140.KS": "우리금융지주", "024110.KS": "기업은행", "032830.KS": "삼성생명",
+    "000810.KS": "삼성화재", "088350.KS": "한화생명", "138040.KS": "메리츠금융지주",
+    "005830.KS": "DB손해보험", "001450.KS": "현대해상", "006800.KS": "미래에셋증권",
+    "071050.KS": "한국금융지주", "005940.KS": "NH투자증권", "016360.KS": "삼성증권",
+    "039490.KS": "키움증권", "323410.KS": "카카오뱅크", "377300.KS": "카카오페이",
+    # ══ 인터넷/게임/엔터 ══
+    "036570.KS": "엔씨소프트", "251270.KS": "넷마블", "259960.KS": "크래프톤",
+    "263750.KQ": "펄어비스", "293490.KQ": "카카오게임즈", "112040.KQ": "위메이드",
+    "078340.KQ": "컴투스", "194480.KQ": "데브시스터즈", "462870.KS": "시프트업",
+    "067160.KQ": "SOOP", "035760.KQ": "CJ ENM", "253450.KQ": "스튜디오드래곤",
+    "352820.KS": "하이브", "041510.KQ": "에스엠", "035900.KQ": "JYP Ent.",
+    "122870.KQ": "와이지엔터테인먼트", "376300.KQ": "디어유",
+    "018260.KS": "삼성에스디에스", "030200.KS": "KT", "017670.KS": "SK텔레콤",
+    "032640.KS": "LG유플러스",
+    # ══ 자동차/부품 ══
+    "012330.KS": "현대모비스", "011210.KS": "현대위아", "204320.KS": "HL만도",
+    "161390.KS": "한국타이어앤테크놀로지", "086280.KS": "현대글로비스",
+    # ══ 화학/정유/소재 ══
+    "096770.KS": "SK이노베이션", "010950.KS": "S-Oil", "078930.KS": "GS",
+    "011170.KS": "롯데케미칼", "011780.KS": "금호석유", "298020.KS": "효성티앤씨",
+    "009830.KS": "한화솔루션", "000880.KS": "한화", "010130.KS": "고려아연",
+    # ══ 산업재/건설/운송 ══
+    "042670.KS": "HD현대인프라코어", "267270.KS": "HD현대건설기계", "241560.KS": "두산밥캣",
+    "000720.KS": "현대건설", "006360.KS": "GS건설", "011200.KS": "HMM",
+    "003490.KS": "대한항공", "017800.KS": "현대엘리베이터", "015760.KS": "한국전력",
+    "036460.KS": "한국가스공사",
+    # ══ 소비재/유통 ══
+    "097950.KS": "CJ제일제당", "271560.KS": "오리온", "004370.KS": "농심",
+    "003230.KS": "삼양식품", "007310.KS": "오뚜기", "005180.KS": "빙그레",
+    "000080.KS": "하이트진로", "033780.KS": "KT&G", "090430.KS": "아모레퍼시픽",
+    "051900.KS": "LG생활건강", "161890.KS": "한국콜마", "278530.KS": "코웨이",
+    "139480.KS": "이마트", "023530.KS": "롯데쇼핑", "282330.KS": "BGF리테일",
+    "007070.KS": "GS리테일", "004170.KS": "신세계", "069960.KS": "현대백화점",
+    "383220.KS": "F&F", "081660.KS": "휠라홀딩스", "111770.KS": "영원무역",
+    "105630.KS": "한세실업", "020000.KS": "한섬", "008770.KS": "호텔신라",
+    "035250.KS": "강원랜드", "030000.KS": "제일기획", "066570.KS": "LG전자",
+    "034220.KS": "LG디스플레이",
 }
 
 US_UNIVERSE = {
-    # ── 메가캡 / 지수 주도주 ──
+    # ══ 메가캡 ══
     "AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "GOOGL": "Alphabet",
     "AMZN": "Amazon", "META": "Meta", "TSLA": "Tesla", "AVGO": "Broadcom",
     "BRK-B": "Berkshire", "LLY": "Eli Lilly", "JPM": "JPMorgan", "V": "Visa",
     "UNH": "UnitedHealth", "XOM": "Exxon", "MA": "Mastercard", "COST": "Costco",
     "HD": "Home Depot", "PG": "P&G", "NFLX": "Netflix", "JNJ": "J&J",
-    # ── 반도체 / AI ──
+    "WMT": "Walmart", "ORCL": "Oracle", "IBM": "IBM", "ACN": "Accenture",
+    # ══ 반도체 ══
     "AMD": "AMD", "TSM": "TSMC", "ASML": "ASML", "MU": "Micron",
     "QCOM": "Qualcomm", "ARM": "Arm", "MRVL": "Marvell", "LRCX": "Lam Research",
-    "AMAT": "Applied Materials", "KLAC": "KLA", "SMCI": "Supermicro",
-    "VRT": "Vertiv", "ANET": "Arista", "DELL": "Dell", "TER": "Teradyne",
-    # ── 소프트웨어 / 클라우드 ──
-    "CRM": "Salesforce", "ORCL": "Oracle", "ADBE": "Adobe", "NOW": "ServiceNow",
-    "PLTR": "Palantir", "SNOW": "Snowflake", "CRWD": "CrowdStrike",
-    "PANW": "Palo Alto", "ZS": "Zscaler", "DDOG": "Datadog", "NET": "Cloudflare",
-    "MDB": "MongoDB", "SHOP": "Shopify", "UBER": "Uber", "ABNB": "Airbnb",
+    "AMAT": "Applied Materials", "KLAC": "KLA", "INTC": "Intel", "TXN": "Texas Instruments",
+    "ADI": "Analog Devices", "NXPI": "NXP", "MCHP": "Microchip", "ON": "onsemi",
+    "MPWR": "Monolithic Power", "SWKS": "Skyworks", "ENTG": "Entegris", "TER": "Teradyne",
+    "GFS": "GlobalFoundries", "COHR": "Coherent", "AMKR": "Amkor", "SMCI": "Supermicro",
+    "VRT": "Vertiv", "ANET": "Arista", "DELL": "Dell", "WDC": "Western Digital",
+    "STX": "Seagate", "NTAP": "NetApp", "PSTG": "Pure Storage", "KEYS": "Keysight",
+    # ══ 소프트웨어/클라우드 ══
+    "CRM": "Salesforce", "ADBE": "Adobe", "NOW": "ServiceNow", "INTU": "Intuit",
+    "PLTR": "Palantir", "SNOW": "Snowflake", "CRWD": "CrowdStrike", "PANW": "Palo Alto",
+    "ZS": "Zscaler", "DDOG": "Datadog", "NET": "Cloudflare", "MDB": "MongoDB",
+    "FTNT": "Fortinet", "CYBR": "CyberArk", "S": "SentinelOne", "OKTA": "Okta",
+    "WDAY": "Workday", "TEAM": "Atlassian", "HUBS": "HubSpot", "GTLB": "GitLab",
+    "TWLO": "Twilio", "SHOP": "Shopify", "UBER": "Uber", "ABNB": "Airbnb",
     "APP": "AppLovin", "DUOL": "Duolingo", "AXON": "Axon", "SPOT": "Spotify",
-    # ── 금융 / 핀테크 ──
+    "RBLX": "Roblox", "EA": "EA", "TTWO": "Take-Two", "RDDT": "Reddit",
+    "PINS": "Pinterest", "TTD": "Trade Desk", "ROKU": "Roku", "DKNG": "DraftKings",
+    "MELI": "MercadoLibre", "SE": "Sea", "BABA": "Alibaba", "PDD": "PDD",
+    # ══ 금융 ══
     "GS": "Goldman", "MS": "Morgan Stanley", "BAC": "BofA", "WFC": "Wells Fargo",
+    "C": "Citi", "SCHW": "Schwab", "BLK": "BlackRock", "BX": "Blackstone",
+    "KKR": "KKR", "APO": "Apollo", "AXP": "AmEx", "USB": "US Bancorp",
+    "PNC": "PNC", "ICE": "ICE", "CME": "CME", "SPGI": "S&P Global",
+    "MCO": "Moody's", "MSCI": "MSCI", "NDAQ": "Nasdaq",
     "COIN": "Coinbase", "HOOD": "Robinhood", "SOFI": "SoFi", "PYPL": "PayPal",
-    # ── 헬스케어 / 바이오 ──
+    # ══ 헬스케어 ══
     "NVO": "Novo Nordisk", "MRK": "Merck", "ABBV": "AbbVie", "VRTX": "Vertex",
     "REGN": "Regeneron", "ISRG": "Intuitive Surgical", "GILD": "Gilead",
-    # ── 산업 / 에너지 / 소비 ──
+    "AMGN": "Amgen", "PFE": "Pfizer", "BMY": "Bristol Myers", "BIIB": "Biogen",
+    "MRNA": "Moderna", "AZN": "AstraZeneca", "NVS": "Novartis", "ZTS": "Zoetis",
+    "TMO": "Thermo Fisher", "DHR": "Danaher", "A": "Agilent", "IDXX": "IDEXX",
+    "MDT": "Medtronic", "SYK": "Stryker", "BSX": "Boston Scientific", "EW": "Edwards",
+    "BDX": "Becton Dickinson", "DXCM": "Dexcom", "PODD": "Insulet",
+    "HCA": "HCA", "CI": "Cigna", "ELV": "Elevance", "CVS": "CVS", "MCK": "McKesson",
+    # ══ 에너지/유틸 ══
+    "CVX": "Chevron", "COP": "ConocoPhillips", "EOG": "EOG", "SLB": "SLB",
+    "OXY": "Occidental", "DVN": "Devon", "FANG": "Diamondback", "MPC": "Marathon",
+    "PSX": "Phillips 66", "VLO": "Valero", "WMB": "Williams", "KMI": "Kinder Morgan",
+    "LNG": "Cheniere", "FSLR": "First Solar", "CEG": "Constellation Energy",
+    "VST": "Vistra", "NEE": "NextEra", "DUK": "Duke", "SO": "Southern", "AEP": "AEP",
+    # ══ 산업재 ══
     "GE": "GE Aerospace", "CAT": "Caterpillar", "DE": "Deere", "RTX": "RTX",
-    "LMT": "Lockheed", "BA": "Boeing", "ETN": "Eaton", "PWR": "Quanta",
-    "CEG": "Constellation Energy", "VST": "Vistra", "NEE": "NextEra",
+    "LMT": "Lockheed", "BA": "Boeing", "NOC": "Northrop", "GD": "General Dynamics",
+    "LHX": "L3Harris", "HWM": "Howmet", "TDG": "TransDigm", "HEI": "HEICO",
+    "ETN": "Eaton", "EMR": "Emerson", "ROK": "Rockwell", "PH": "Parker Hannifin",
+    "ITW": "ITW", "MMM": "3M", "HON": "Honeywell", "CMI": "Cummins",
+    "PWR": "Quanta", "URI": "United Rentals", "FAST": "Fastenal", "GWW": "Grainger",
+    "UNP": "Union Pacific", "CSX": "CSX", "NSC": "Norfolk Southern",
+    "UPS": "UPS", "FDX": "FedEx", "PCAR": "PACCAR", "CARR": "Carrier",
+    "TT": "Trane", "JCI": "Johnson Controls", "WM": "Waste Management", "RSG": "Republic Services",
+    # ══ 소비재 ══
     "NKE": "Nike", "SBUX": "Starbucks", "MCD": "McDonald's", "DIS": "Disney",
     "CMG": "Chipotle", "LULU": "Lululemon", "TJX": "TJX", "BKNG": "Booking",
+    "TGT": "Target", "LOW": "Lowe's", "ROST": "Ross", "ULTA": "Ulta",
+    "DECK": "Deckers", "ONON": "On Holding", "EL": "Estee Lauder", "CL": "Colgate",
+    "KO": "Coca-Cola", "PEP": "PepsiCo", "MDLZ": "Mondelez", "MO": "Altria",
+    "PM": "Philip Morris", "GIS": "General Mills", "HSY": "Hershey", "STZ": "Constellation Brands",
+    "YUM": "Yum Brands", "DPZ": "Domino's",
+    # ══ 통신/리츠 ══
+    "T": "AT&T", "VZ": "Verizon", "TMUS": "T-Mobile", "CMCSA": "Comcast",
+    "PLD": "Prologis", "AMT": "American Tower", "EQIX": "Equinix", "DLR": "Digital Realty",
 }
 
 
@@ -106,6 +217,6 @@ def get_universe(market: str) -> dict:
     elif market == "us":
         base = dict(US_UNIVERSE)
         base.update({t: n for t, n in wl.items() if not t.endswith((".KS", ".KQ"))})
-    else:  # all
+    else:
         base = {**KR_UNIVERSE, **US_UNIVERSE, **wl}
     return base
