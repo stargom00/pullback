@@ -85,7 +85,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v3.0</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v3.1</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -161,7 +161,7 @@ function card(s) {
     <div class="metrics mono">
       <div class="metric"><div class="k">정배열</div><div class="v">D+${s.align_days}</div></div>
       <div class="metric"><div class="k">200일선 위</div><div class="v">+${s.ma200_dist_pct}%</div></div>
-      <div class="metric"><div class="k">거래량비</div><div class="v">${s.vol_ratio}×</div></div>
+      <div class="metric"><div class="k">거래량비</div><div class="v">${s.vol_ratio}× <span style="color:${s.ud >= 1 ? 'var(--green)' : 'var(--up)'};font-size:11px">U/D ${s.ud}</span></div></div>
       <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
     </div>` : `
     <div class="metrics mono">
@@ -172,7 +172,7 @@ function card(s) {
     </div>`}
     <div class="metrics mono" style="border-top:none;padding-top:0">
       <div class="metric"><div class="k">RS</div><div class="v" style="color:${s.rs >= 80 ? 'var(--green)' : s.rs >= 65 ? 'var(--amber)' : 'var(--text)'}">${s.rs ?? '-'}${s.rs_mom >= 10 ? ' <span style="color:var(--green)" title="상대강도 개선 중">↗</span>' : ''}</div></div>
-      <div class="metric"><div class="k">피벗 (돌파가)</div><div class="v">${fmtPrice(s.pivot, s.market)} <span style="color:var(--muted);font-size:11px">+${s.pivot_dist_pct}%</span></div></div>
+      <div class="metric"><div class="k">피벗 (${s.pivot_type ?? '돌파가'})</div><div class="v">${fmtPrice(s.pivot, s.market)} <span style="color:${s.pivot_dist_pct >= 15 ? 'var(--up)' : 'var(--muted)'};font-size:11px">+${s.pivot_dist_pct}%${s.pivot_dist_pct >= 15 ? ' 관찰' : ''}</span></div></div>
       <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
       <div class="metric"><div class="k">리스크</div><div class="v">${s.risk_pct}%</div></div>
     </div>
@@ -180,12 +180,12 @@ function card(s) {
     <div class="badges">
       <span class="badge on">정배열 전환</span>
       <span class="badge ${s.rs_mom >= 10 ? 'on' : ''}">RS 개선</span>
-      <span class="badge ${s.vol_ratio >= 1.2 ? 'on' : ''}">거래량 확장</span>
+      <span class="badge ${s.vol_ratio >= 1.2 && s.ud >= 1 ? 'on' : ''}">거래량 확장</span>${s.tl_break ? '<span class="badge on">추세선 돌파</span>' : ''}
     </div>` : `
     <div class="badges">
       <span class="badge ${s.vol_dry ? 'on' : ''}">거래량 수축</span>
       <span class="badge ${s.tightening ? 'on' : ''}">변동폭 축소</span>
-      <span class="badge ${s.recent_high_ok ? 'on' : ''}">고점 유지</span>
+      <span class="badge ${s.recent_high_ok ? 'on' : ''}">고점 유지</span>${s.tl_break ? '<span class="badge on">추세선 돌파</span>' : ''}
     </div>`}
   </div>`;
 }

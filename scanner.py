@@ -40,6 +40,81 @@ def rsi(close: pd.Series, period: int = 14) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 
+
+
+def trendline_level(h: pd.Series, lookback: int = 40, order: int = 2):
+    """
+    최근 lookback봉의 스윙 고점들로 하락 추세선을 그어 오늘의 추세선 값을 반환.
+    스윙 고점 2개 미만이거나 기울기가 하락이 아니면 None.
+    """
+    seg = h.iloc[-lookback:].reset_index(drop=True)
+    n = len(seg)
+    if n < lookback:
+        return None
+    peaks = []
+    for i in range(order, n - order):
+        window = seg.iloc[i - order:i + order + 1]
+        if seg.iloc[i] >= float(window.max()):
+            peaks.append((i, float(seg.iloc[i])))
+    if len(peaks) < 2:
+        return None
+    peaks = peaks[-3:]  # 최근 고점 최대 3개
+    xs = [p[0] for p in peaks]
+    ys = [p[1] for p in peaks]
+    # 1차 직선 적합
+    npts = len(xs)
+    mean_x, mean_y = sum(xs) / npts, sum(ys) / npts
+    denom = sum((x - mean_x) ** 2 for x in xs)
+    if denom == 0:
+        return None
+    slope = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)) / denom
+    if slope >= 0:
+        return None  # 하락 추세선만 의미 있음
+    intercept = mean_y - slope * mean_x
+    level = slope * (n - 1) + intercept
+    return level if level > 0 else None
+
+
+def select_pivot(h, lo, c, close, recent_high_window: int):
+    """
+    피벗 후보 3종 중 현재가 위에서 가장 가까운 것 선택.
+    - 타이트존: 최근 5봉 고가 (VCP 마지막 수축 상단)
+    - 전고: 최근 N봉 고가
+    - 추세선: 하락 추세선의 오늘 값
+    반환: (pivot, pivot_type, tl_break)
+    tl_break = 최근 3봉 내 추세선 상향 돌파 여부 (미너비니 조기 신호)
+    """
+    cands = []
+    hi5 = float(h.iloc[-5:].max())
+    cands.append((hi5, "타이트존"))
+    hiN = float(h.iloc[-recent_high_window:].max())
+    cands.append((hiN, "전고"))
+    tl = trendline_level(h)
+    tl_break = False
+    if tl is not None:
+        if close > tl and float(c.iloc[-3]) <= tl:
+            tl_break = True          # 갓 돌파 → 배지
+        elif close <= tl:
+            cands.append((tl, "추세선"))
+    above = [(p, t) for p, t in cands if p > close * 1.001]
+    if above:
+        pivot, ptype = min(above, key=lambda x: x[0])
+    else:
+        pivot, ptype = max(cands, key=lambda x: x[0])
+    return pivot, ptype, tl_break
+
+
+def ud_volume_ratio(c: pd.Series, v: pd.Series, days: int = 10) -> float:
+    """상승일 거래량 합 / 하락일 거래량 합 (최근 N일). 1보다 크면 매집 우위."""
+    ret = c.diff().iloc[-days:]
+    vv = v.iloc[-days:]
+    up = float(vv[ret > 0].sum())
+    down = float(vv[ret < 0].sum())
+    if down <= 0:
+        return 9.9
+    return round(min(up / down, 9.9), 2)
+
+
 def rs_raw_score(close: pd.Series) -> float | None:
     """
     IBD 방식 상대강도 원점수: 최근 3개월 수익률에 2배 가중,
@@ -115,7 +190,9 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     trend_above_ma60 = close > m60
     above_ma200 = close > m200          # 200일선 위 = Stage 2 추세만
     ma_stack = m20 > m60
-    ma20_slope = m20 > float(ma20.iloc[-11])
+    # 주도주(RS90+)는 20일선이 평평해도 허용 (VCP 베이스 빌딩 중 정상)
+    slope_floor = 0.98 if is_leader else 1.0  # 주도주는 10봉간 -2%까지 허용
+    ma20_slope = m20 > float(ma20.iloc[-11]) * slope_floor
     in_uptrend = trend_above_ma60 and above_ma200 and ma_stack and ma20_slope
     if not in_uptrend:
         return None
@@ -162,7 +239,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
 
     # ── 8) 피벗 / 손절 / 리스크 ──
     pw = cfg["pivot_window"]
-    pivot = float(h.iloc[-pw:].max())          # 직전 N봉 고가 = 돌파 트리거
+    pivot, pivot_type, tl_break = select_pivot(h, lo, c, close, pw)
     pullback_low = float(lo.iloc[-pw:].min())  # 눌림 저점
     # 손절 = 눌림 저점과 지지 이평선(1% 이탈 허용) 중 더 높은 쪽
     # 단, 현재가보다 위에 있는 후보는 제외 (가격이 지지선 살짝 아래일 때 방지)
@@ -208,6 +285,9 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "tightening": tightening,
         "recent_high_ok": recent_high_ok,
         "pivot": round(pivot, 2),
+        "pivot_type": pivot_type,
+        "tl_break": tl_break,
+        "ud": ud_volume_ratio(c, v),
         "pivot_dist_pct": round(pivot_dist_pct, 2),
         "stop": round(stop, 2),
         "risk_pct": round(risk_pct, 2),
@@ -281,8 +361,9 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
     vol50 = float(v.iloc[-50:].mean())
     vol_ratio = vol10 / vol50 if vol50 > 0 else 0.0
 
-    # 피벗/손절: 60일 고가 돌파가 다음 트리거, 손절은 60일선 -2%
-    pivot = float(h.iloc[-60:].max())
+    # 피벗: 20봉 고가/타이트존/하락추세선 중 가장 가까운 트리거, 손절은 60일선 -2%
+    pivot, pivot_type, tl_break = select_pivot(h, lo, c, close, 20)
+    ud = ud_volume_ratio(c, v)
     stop = m60 * 0.98
     candidates = [x for x in (stop, float(lo.iloc[-10:].min())) if x < close]
     stop = max(candidates) if candidates else float(lo.iloc[-10:].min())
@@ -316,6 +397,9 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
         "vol_dry": False,
         "rsi": round(cur_rsi, 1),
         "pivot": round(pivot, 2),
+        "pivot_type": pivot_type,
+        "tl_break": tl_break,
+        "ud": ud,
         "pivot_dist_pct": round(pivot_dist_pct, 2),
         "stop": round(stop, 2),
         "risk_pct": round(risk_pct, 2),

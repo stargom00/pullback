@@ -106,3 +106,32 @@ hi = analyze(df1, rs_rank=95)
 lo_ = analyze(df1, rs_rank=55)
 print("Case10 RS 곱셈:", "OK ✓" if hi and lo_ and hi["score"] > lo_["score"] + 5 else "오류 ✗",
       f"(RS95 {hi['score'] if hi else '-'} vs RS55 {lo_['score'] if lo_ else '-'})")
+
+# ── Case 11: 인텔 패턴 — 급등 후 4주 횡보(20일선 평평), RS95만 탐지 ──
+rng11 = np.random.default_rng(21)
+run = list(100 * np.cumprod(1 + rng11.normal(0.006, 0.012, 185)))      # 강한 랠리
+spike = list(run[-1] * np.cumprod(1 + np.array([0.02, 0.015, 0.01])))            # 고점 형성
+flat = list(spike[-1] * 0.95 * np.cumprod(1 + rng11.normal(0.0, 0.006, 25)))  # 고점 -5%서 횡보
+closes11 = run + spike + flat
+vols11 = [2_000_000] * 188 + [int(1_100_000 - 8_000*i) for i in range(25)]
+df11 = pd.DataFrame({"Open": closes11, "High": [c*1.012 for c in closes11],
+                     "Low": [c*0.988 for c in closes11], "Close": closes11,
+                     "Volume": [float(v) for v in vols11]})
+r11a = analyze(df11, rs_rank=97)
+r11b = analyze(df11, rs_rank=70)
+print("Case11 주도주 횡보베이스:",
+      f"RS97 탐지 ✓ (score {r11a['score']}, 피벗종류 {r11a['pivot_type']})" if r11a else "RS97 미탐지 ✗",
+      "| RS70", "탈락 ✓" if r11b is None else "오탐 ✗")
+
+# ── Case 12: 추세선 돌파 감지 — 하락 고점 3개 후 상향 돌파 ──
+from scanner import trendline_level, select_pivot
+# 하락 지그재그: 고점 110 → 106 → 102 (스윙 고점 3개), 마지막 3봉 상향 돌파
+zig = []
+for hi, lo_ in [(110, 100), (106, 97), (102, 95)]:
+    zig += list(np.linspace(lo_ + 4, hi, 6)) + list(np.linspace(hi, lo_, 7))
+closes12 = [100.0] * 30 + zig + [97.0, 100.0, 103.5]  # 마지막 3봉 돌파
+h12 = pd.Series([c * 1.005 for c in closes12])
+c12 = pd.Series(closes12)
+tl = trendline_level(h12)
+pivot, ptype, tlb = select_pivot(h12, pd.Series([c*0.995 for c in closes12]), c12, float(c12.iloc[-1]), 10)
+print(f"Case12 추세선: level={'None' if tl is None else round(tl,1)} | 돌파감지={tlb} | 피벗종류={ptype}")
