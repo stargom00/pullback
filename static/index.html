@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>눌림목 스캐너</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0C111B; --surface:#141C2B; --surface2:#1A2436; --line:#233047;
+  --text:#E6ECF5; --muted:#8A97AC; --dim:#5A6578;
+  --up:#FF5A6E; --down:#4D8DFF; --amber:#F2B33D; --green:#3DD68C;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans KR',sans-serif;min-height:100vh}
+.mono{font-family:'IBM Plex Mono',monospace}
+
+header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+  padding:20px 24px;border-bottom:1px solid var(--line)}
+h1{font-size:18px;font-weight:700;letter-spacing:-.3px}
+h1 .dot{color:var(--amber)}
+.sub{font-size:12px;color:var(--muted)}
+
+.tabs{display:flex;gap:4px;margin-left:auto;background:var(--surface);
+  border:1px solid var(--line);border-radius:8px;padding:3px}
+.tab{border:none;background:none;color:var(--muted);font:inherit;font-size:13px;
+  padding:6px 14px;border-radius:6px;cursor:pointer}
+.tab.active{background:var(--surface2);color:var(--text);font-weight:500}
+.tab:focus-visible,button:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+
+.refresh{border:1px solid var(--line);background:var(--surface);color:var(--text);
+  font:inherit;font-size:13px;padding:8px 16px;border-radius:8px;cursor:pointer}
+.refresh:hover{border-color:var(--amber)}
+
+.statusbar{padding:12px 24px;font-size:12px;color:var(--muted);
+  display:flex;gap:16px;flex-wrap:wrap}
+.statusbar b{color:var(--text)}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));
+  gap:14px;padding:0 24px 40px}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;
+  padding:16px;display:flex;flex-direction:column;gap:12px}
+.card:hover{border-color:#33455F}
+.card-top{display:flex;align-items:flex-start;gap:12px}
+.name{font-size:15px;font-weight:700;line-height:1.2}
+.tick{font-size:11px;color:var(--muted);margin-top:2px}
+.mkt{font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;
+  border:1px solid var(--line);color:var(--muted);margin-left:6px;vertical-align:1px}
+
+.score-ring{margin-left:auto;position:relative;width:46px;height:46px;flex:none}
+.score-ring svg{transform:rotate(-90deg)}
+.score-num{position:absolute;inset:0;display:flex;align-items:center;
+  justify-content:center;font-size:13px;font-weight:600}
+
+.price-row{display:flex;align-items:baseline;gap:8px}
+.price{font-size:17px;font-weight:600}
+.chg{font-size:13px;font-weight:500}
+.chg.up{color:var(--up)}.chg.down{color:var(--down)}
+
+.spark{width:100%;height:64px;display:block}
+
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;
+  border-top:1px solid var(--line);padding-top:12px}
+.metric .k{font-size:10px;color:var(--muted);margin-bottom:3px}
+.metric .v{font-size:13px;font-weight:500}
+
+.badges{display:flex;gap:6px;flex-wrap:wrap}
+.badge{font-size:10px;padding:3px 8px;border-radius:99px;
+  background:var(--surface2);color:var(--muted);border:1px solid var(--line)}
+.badge.on{color:var(--green);border-color:rgba(61,214,140,.35)}
+
+.empty{padding:80px 24px;text-align:center;color:var(--muted);font-size:14px}
+.loading{padding:80px 24px;text-align:center;color:var(--muted)}
+.spinner{width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--amber);
+  border-radius:50%;margin:0 auto 16px;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spinner{animation:none}}
+@media (max-width:600px){header{padding:16px}.grid{padding:0 16px 32px;grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>눌림목 스캐너 <span class="dot">●</span></h1>
+    <div class="sub">우상향 추세 · 이평선 지지 · 거래량 수축</div>
+  </div>
+  <div class="tabs" role="tablist">
+    <button class="tab active" data-market="all">전체</button>
+    <button class="tab" data-market="kr">한국</button>
+    <button class="tab" data-market="us">미국</button>
+  </div>
+  <button class="refresh" id="refresh">다시 스캔</button>
+</header>
+
+<div class="statusbar" id="status"></div>
+<div id="content"><div class="loading"><div class="spinner"></div>스캔 중…</div></div>
+
+<script>
+const fmtPrice = (p, mkt) => mkt === 'KR'
+  ? Math.round(p).toLocaleString('ko-KR') + '원'
+  : '$' + p.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+function sparkSVG(closes, ma20) {
+  const W = 300, H = 64, PAD = 4;
+  const vals = closes.concat(ma20.filter(v => v != null));
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const x = i => PAD + i * (W - 2 * PAD) / (closes.length - 1);
+  const y = v => H - PAD - (v - min) / (max - min || 1) * (H - 2 * PAD);
+  const path = arr => arr.map((v, i) => v == null ? '' :
+    `${arr.slice(0, i).every(p => p == null) ? 'M' : 'L'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
+
+  // 눌림 구간 음영: 60봉 내 최고점 이후 구간
+  const hiIdx = closes.indexOf(Math.max(...closes));
+  const zone = hiIdx < closes.length - 1
+    ? `<rect x="${x(hiIdx)}" y="0" width="${x(closes.length - 1) - x(hiIdx)}" height="${H}"
+        fill="rgba(242,179,61,.07)"/>` : '';
+  const last = closes.length - 1;
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+    ${zone}
+    <path d="${path(ma20)}" fill="none" stroke="#4D8DFF" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/>
+    <path d="${path(closes)}" fill="none" stroke="#E6ECF5" stroke-width="1.5"/>
+    <circle cx="${x(last)}" cy="${y(closes[last])}" r="3" fill="#F2B33D"/>
+  </svg>`;
+}
+
+function scoreRing(score) {
+  const r = 19, c = 2 * Math.PI * r, off = c * (1 - score / 100);
+  const color = score >= 75 ? 'var(--green)' : score >= 55 ? 'var(--amber)' : 'var(--muted)';
+  return `<div class="score-ring" title="눌림목 점수 ${score}">
+    <svg width="46" height="46"><circle cx="23" cy="23" r="${r}" fill="none" stroke="var(--line)" stroke-width="4"/>
+    <circle cx="23" cy="23" r="${r}" fill="none" stroke="${color}" stroke-width="4"
+      stroke-dasharray="${c}" stroke-dashoffset="${off}" stroke-linecap="round"/></svg>
+    <div class="score-num mono">${Math.round(score)}</div></div>`;
+}
+
+function card(s) {
+  const chgCls = s.change_pct >= 0 ? 'up' : 'down';
+  const chgSign = s.change_pct >= 0 ? '+' : '';
+  return `<div class="card">
+    <div class="card-top">
+      <div>
+        <div class="name">${s.name}<span class="mkt">${s.market}</span></div>
+        <div class="tick mono">${s.ticker}</div>
+      </div>
+      ${scoreRing(s.score)}
+    </div>
+    <div class="price-row mono">
+      <span class="price">${fmtPrice(s.close, s.market)}</span>
+      <span class="chg ${chgCls}">${chgSign}${s.change_pct}%</span>
+    </div>
+    ${sparkSVG(s.spark, s.spark_ma20)}
+    <div class="metrics mono">
+      <div class="metric"><div class="k">눌림 깊이</div><div class="v">-${s.pullback_pct}%</div></div>
+      <div class="metric"><div class="k">지지선</div><div class="v">${s.support_ma} <span style="color:var(--muted);font-size:11px">${s.ma_dist_pct}%</span></div></div>
+      <div class="metric"><div class="k">거래량비</div><div class="v">${s.vol_ratio}×</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
+    </div>
+    <div class="badges">
+      <span class="badge ${s.vol_dry ? 'on' : ''}">거래량 수축</span>
+      <span class="badge ${s.tightening ? 'on' : ''}">변동폭 축소</span>
+      <span class="badge ${s.recent_high_ok ? 'on' : ''}">고점 유지</span>
+    </div>
+  </div>`;
+}
+
+let market = 'all';
+
+async function load(refresh = false) {
+  const content = document.getElementById('content');
+  const status = document.getElementById('status');
+  content.innerHTML = '<div class="loading"><div class="spinner"></div>스캔 중… (첫 스캔은 1~2분 걸릴 수 있어요)</div>';
+  status.innerHTML = '';
+  try {
+    const res = await fetch(`/api/scan?market=${market}${refresh ? '&refresh=true' : ''}`);
+    const data = await res.json();
+    status.innerHTML = `<span><b>${data.scanned}</b>개 종목 스캔</span>
+      <span>눌림목 후보 <b>${data.hits.length}</b>개</span>
+      <span>기준 ${data.generated_at}${data.cached ? ' (캐시)' : ''}</span>`;
+    content.innerHTML = data.hits.length
+      ? `<div class="grid">${data.hits.map(card).join('')}</div>`
+      : '<div class="empty">현재 조건을 충족하는 눌림목 종목이 없습니다.<br>장이 과열이거나 조정장일 때 자연스러운 결과예요.</div>';
+  } catch (e) {
+    content.innerHTML = '<div class="empty">스캔에 실패했습니다. 서버 로그를 확인한 뒤 다시 시도해 주세요.</div>';
+  }
+}
+
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  market = t.dataset.market;
+  load();
+}));
+document.getElementById('refresh').addEventListener('click', () => load(true));
+load();
+</script>
+</body>
+</html>
