@@ -51,7 +51,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .mkt{font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;
   border:1px solid var(--line);color:var(--muted);margin-left:6px;vertical-align:1px}
 
-.score-ring{margin-left:auto;position:relative;width:46px;height:46px;flex:none}
+.score-ring{position:relative;width:46px;height:46px;flex:none}
 .score-ring svg{transform:rotate(-90deg)}
 .score-num{position:absolute;inset:0;display:flex;align-items:center;
   justify-content:center;font-size:13px;font-weight:600}
@@ -86,7 +86,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v3.2</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v3.3</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -151,7 +151,10 @@ function card(s) {
         <div class="name">${s.triggered ? '🔥 ' : ''}${s.leader ? '👑 ' : ''}${s.name}<span class="mkt">${s.market}</span></div>
         <div class="tick mono">${s.ticker}</div>
       </div>
-      ${scoreRing(s.score)}
+      <div style="margin-left:auto;display:flex;flex-direction:column;align-items:center;gap:2px">
+        ${scoreRing(s.score)}
+        ${s.setup_score != null ? `<div class="mono" style="font-size:10px;color:var(--amber)">전일 ${Math.round(s.setup_score)}</div>` : ''}
+      </div>
     </div>
     <div class="price-row mono">
       <span class="price">${fmtPrice(s.close, s.market)}</span>

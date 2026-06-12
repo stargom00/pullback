@@ -147,7 +147,7 @@ def to_rs_rank(raw_scores: dict[str, float]) -> dict[str, int]:
     return ranks
 
 
-def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = None, cfg: dict = CONFIG) -> dict | None:
+def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = None, cfg: dict = CONFIG, _setup_eval: bool = False) -> dict | None:
     """
     일봉 DataFrame(Open/High/Low/Close/Volume)을 받아
     눌림목 조건 충족 여부와 점수를 반환. 미충족이면 None.
@@ -279,12 +279,19 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
 
     # 🔥 트리거 발동: 당일 강한 양봉 + (추세선 돌파 or 피벗 코앞/돌파)
     triggered = change_pct >= 4.0 and (tl_break or pivot_dist_pct <= 2.0)
+    # 전날 셋업 점수: 오늘 봉을 빼고 재평가 (🔥 카드 표시용, 재귀 1회 제한)
+    setup_score = None
+    if triggered and not _setup_eval:
+        prev = analyze(df.iloc[:-1], rs_rank=rs_rank, rs_mom=rs_mom, cfg=cfg, _setup_eval=True)
+        if prev:
+            setup_score = prev["score"]
 
     return {
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
         "score": round(score, 1),
         "triggered": triggered,
+        "setup_score": setup_score,
         "rs": rs_rank,
         "rs_mom": rs_mom,
         "leader": is_leader,
@@ -324,7 +331,7 @@ TURN_CONFIG = {
 
 
 def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
-                       rs_mom: int | None = None, cfg: dict = TURN_CONFIG) -> dict | None:
+                       rs_mom: int | None = None, cfg: dict = TURN_CONFIG, _setup_eval: bool = False) -> dict | None:
     """역배열에서 정배열(20>60>200, 종가>200일선)로 갓 전환한 종목 탐지"""
     if df is None or len(df) < cfg["min_bars"]:
         return None
@@ -396,6 +403,11 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
     prev_close = float(c.iloc[-2])
     change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
     triggered = change_pct >= 4.0 and (tl_break or pivot_dist_pct <= 2.0)
+    setup_score = None
+    if triggered and not _setup_eval:
+        prev = analyze_turnaround(df.iloc[:-1], rs_rank=rs_rank, rs_mom=rs_mom, cfg=cfg, _setup_eval=True)
+        if prev:
+            setup_score = prev["score"]
 
     return {
         "mode": "turnaround",
@@ -403,6 +415,7 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
         "change_pct": round(change_pct, 2),
         "score": round(score, 1),
         "triggered": triggered,
+        "setup_score": setup_score,
         "rs": rs_rank,
         "rs_mom": rs_mom,
         "leader": False,

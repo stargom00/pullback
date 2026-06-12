@@ -147,3 +147,8 @@ flat_day = analyze(df11, rs_rank=97)   # 돌파 전날
 print("Case13 트리거:", 
       ("발동 ✓ 🔥" if (r13 and r13.get("triggered")) else "미발동 ✗") + 
       " | 전날은 " + ("미발동 ✓" if (flat_day and not flat_day.get("triggered")) else "오발동 ✗"))
+
+# ── Case 14: 전날 셋업 점수 — 🔥 발동 시 전일 점수가 함께 나오는지 ──
+r14 = analyze(df13, rs_rank=97)
+ok14 = r14 and r14.get("triggered") and r14.get("setup_score") is not None
+print("Case14 전일점수:", f"OK ✓ (오늘 {r14['score']} / 전일 {r14['setup_score']})" if ok14 else "오류 ✗")
