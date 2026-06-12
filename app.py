@@ -18,7 +18,7 @@ from universe import get_universe
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v3.1"
+VERSION = "v3.2"
 CACHE_TTL = 600
 _cache: dict[str, dict] = {}
 _executor = ThreadPoolExecutor(max_workers=12)
@@ -79,7 +79,7 @@ async def run_scan(market: str, mode: str) -> dict:
         mkt = "KR" if t.endswith((".KS", ".KQ")) else "US"
         hits.append({"ticker": t, "name": universe[t], "market": mkt, **result})
 
-    hits.sort(key=lambda x: x["score"], reverse=True)
+    hits.sort(key=lambda x: (x.get("triggered", False), x["score"]), reverse=True)
     return {
         "version": VERSION,
         "market": market,

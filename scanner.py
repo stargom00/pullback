@@ -197,14 +197,23 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     if not in_uptrend:
         return None
 
+    # ── 돌파일 판정: +4% 이상 양봉이면 셋업은 "전날 기준"으로 평가 ──
+    prev_close = float(c.iloc[-2])
+    change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
+    breakout_day = change_pct >= 4.0
+
     # ── 2) 최근 고점이 살아있는가 ──
     last60 = c.iloc[-60:].reset_index(drop=True)
     high60 = float(last60.max())
     bars_since_high = len(last60) - 1 - int(last60.idxmax())
     recent_high_ok = bars_since_high <= cfg["recent_high_window"]
 
-    # ── 3) 조정폭 (눌림 깊이) ──
-    pullback = (high60 - close) / high60
+    # ── 3) 조정폭 (눌림 깊이) — 돌파일엔 전날 종가/전날까지의 고점 기준 ──
+    if breakout_day:
+        high60_ref = float(c.iloc[-61:-1].max())
+        pullback = (high60_ref - prev_close) / high60_ref
+    else:
+        pullback = (high60 - close) / high60
     pullback_ok = pb_min <= pullback <= cfg["pullback_max"]
     if not pullback_ok:
         return None
@@ -215,7 +224,9 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     dist60 = (close - m60) / m60
     prox = cfg["ma_proximity"]
     near_ma = min(abs(dist10), abs(dist20), abs(dist60))
-    ma_touch = near_ma <= prox
+    # 돌파일(+4% 이상 양봉)에는 그날 상승분만큼 거리 허용 — 출발하는 날 목록에서 사라지지 않게
+    prox_allow = prox + max(0.0, change_pct / 100) if change_pct >= 4.0 else prox
+    ma_touch = near_ma <= prox_allow
     support_ma = min(
         [(abs(dist10), "MA10"), (abs(dist20), "MA20"), (abs(dist60), "MA60")]
     )[1]
@@ -228,8 +239,9 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     vol_ratio = vol3 / vol20 if vol20 > 0 else 9.9
     vol_dry = vol_ratio <= cfg["vol_contraction"]
 
-    # ── 6) RSI 중립권 ──
-    rsi_ok = cfg["rsi_min"] <= cur_rsi <= rsi_max
+    # ── 6) RSI 중립권 — 돌파일엔 전날 RSI로 평가 ──
+    rsi_eval = float(r.iloc[-2]) if breakout_day else cur_rsi
+    rsi_ok = cfg["rsi_min"] <= rsi_eval <= rsi_max
     if not rsi_ok:
         return None
 
@@ -253,7 +265,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     score = 0.0
     ideal = 1 - min(abs(pullback - 0.075) / 0.075, 1)
     score += 20 * ideal
-    score += 20 * (1 - near_ma / prox)
+    score += 20 * max(0.0, 1 - near_ma / prox)
     score += 20 * max(0.0, min(1.0, (1.1 - vol_ratio) / 0.5))
     score += 15 * (1 - min(abs(cur_rsi - 45) / 20, 1))
     if rs_rank is not None:                     # RS 기여 (최대 15점)
@@ -265,13 +277,14 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     if rs_rank is not None:
         score *= 0.7 + 0.3 * rs_rank / 99
 
-    prev_close = float(c.iloc[-2])
-    change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
+    # 🔥 트리거 발동: 당일 강한 양봉 + (추세선 돌파 or 피벗 코앞/돌파)
+    triggered = change_pct >= 4.0 and (tl_break or pivot_dist_pct <= 2.0)
 
     return {
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
         "score": round(score, 1),
+        "triggered": triggered,
         "rs": rs_rank,
         "rs_mom": rs_mom,
         "leader": is_leader,
@@ -382,12 +395,14 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
 
     prev_close = float(c.iloc[-2])
     change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
+    triggered = change_pct >= 4.0 and (tl_break or pivot_dist_pct <= 2.0)
 
     return {
         "mode": "turnaround",
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
         "score": round(score, 1),
+        "triggered": triggered,
         "rs": rs_rank,
         "rs_mom": rs_mom,
         "leader": False,

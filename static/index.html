@@ -44,6 +44,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;
   padding:16px;display:flex;flex-direction:column;gap:12px}
 .card:hover{border-color:#33455F}
+.card.fired{border-color:rgba(242,179,61,.55)}
 .card-top{display:flex;align-items:flex-start;gap:12px}
 .name{font-size:15px;font-weight:700;line-height:1.2}
 .tick{font-size:11px;color:var(--muted);margin-top:2px}
@@ -85,7 +86,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v3.1</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v3.2</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -144,10 +145,10 @@ function scoreRing(score) {
 function card(s) {
   const chgCls = s.change_pct >= 0 ? 'up' : 'down';
   const chgSign = s.change_pct >= 0 ? '+' : '';
-  return `<div class="card">
+  return `<div class="card${s.triggered ? ' fired' : ''}">
     <div class="card-top">
       <div>
-        <div class="name">${s.leader ? '👑 ' : ''}${s.name}<span class="mkt">${s.market}</span></div>
+        <div class="name">${s.triggered ? '🔥 ' : ''}${s.leader ? '👑 ' : ''}${s.name}<span class="mkt">${s.market}</span></div>
         <div class="tick mono">${s.ticker}</div>
       </div>
       ${scoreRing(s.score)}
