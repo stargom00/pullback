@@ -169,3 +169,28 @@ ok15 = (summary[0]["sector"] == "클라우드SW" and summary[0]["count"] == 3
         and all(x["count"] >= 2 for x in summary)
         and not any(x["sector"] == "기타" for x in summary))
 print("Case15 섹터 매핑/요약:", "OK ✓" if ok15 else "오류 ✗", "|", [(s["sector"], s["count"]) for s in summary])
+
+# ── Case 16: 대장후보(leader) — 신고가 부근 강세 종목 탐지 ──
+from scanner import analyze_leader
+rng16 = np.random.default_rng(33)
+strong = list(100 * np.cumprod(1 + rng16.normal(0.005, 0.012, 255)))  # 꾸준한 신고가 행진
+# 마지막을 고점 근처로 (눌림 2% 미만)
+strong[-1] = max(strong) * 0.985
+vols16 = [1_000_000] * 255
+df16 = pd.DataFrame({"Open": strong, "High": [c*1.01 for c in strong],
+                     "Low": [c*0.99 for c in strong], "Close": strong,
+                     "Volume": [float(v) for v in vols16]})
+r16a = analyze_leader(df16, rs_rank=95, rs_mom=15)
+r16b = analyze_leader(df16, rs_rank=70)   # RS 낮으면 탈락
+print("Case16 대장후보:", 
+      (f"RS95 탐지 ✓ (score {r16a['score']}, 고점까지 {r16a['dist_from_high_pct']}%)" if r16a else "RS95 미탐지 ✗"),
+      "| RS70", "탈락 ✓" if r16b is None else "오탐 ✗")
+
+# ── Case 17: 깊게 눌린 종목은 leader에서 탈락 (눌림목 영역) ──
+deep = list(strong)
+deep[-1] = max(strong) * 0.90   # 10% 눌림
+df17 = pd.DataFrame({"Open": deep, "High": [c*1.01 for c in deep],
+                     "Low": [c*0.99 for c in deep], "Close": deep,
+                     "Volume": [1_000_000.0]*255})
+r17 = analyze_leader(df17, rs_rank=95)
+print("Case17 깊은눌림 leader제외:", "탈락 ✓ (눌림목 영역)" if r17 is None else "오탐 ✗")

@@ -437,3 +437,89 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
             for x in ma20.iloc[-60:].tolist()
         ],
     }
+
+
+# ══════════════════════════════════════════════════════
+# 강세 신고가 스캔: RS 90+ & 신고가 근처 & 아직 눌림 전 (대장 후보)
+# ══════════════════════════════════════════════════════
+LEADER_CONFIG = {
+    "min_bars": 210,
+    "rs_min": 88,            # 대장 후보 = 상대강도 최상위
+    "near_high": 0.08,       # 60일 고점 대비 8% 이내 (아직 깊이 안 눌림)
+    "max_pullback": 0.03,    # 눌림 3% 미만 (= 눌림목 스캐너와 안 겹침)
+}
+
+
+def analyze_leader(df: pd.DataFrame, rs_rank: int | None = None,
+                   rs_mom: int | None = None, cfg: dict = LEADER_CONFIG) -> dict | None:
+    """RS 최상위 + 신고가 부근 + 아직 눌림 전인 '달리는 대장' 포착.
+    눌림목/추세전환과 겹치지 않게 눌림 3% 미만만."""
+    if df is None or len(df) < cfg["min_bars"]:
+        return None
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if len(df) < cfg["min_bars"]:
+        return None
+    if rs_rank is None or rs_rank < cfg["rs_min"]:
+        return None
+
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+    ma20 = c.rolling(20).mean()
+    ma60 = c.rolling(60).mean()
+    ma200 = c.rolling(200).mean()
+    r = rsi(c)
+
+    close = float(c.iloc[-1])
+    m20, m60, m200 = float(ma20.iloc[-1]), float(ma60.iloc[-1]), float(ma200.iloc[-1])
+    cur_rsi = float(r.iloc[-1])
+    if any(math.isnan(x) for x in (m20, m60, m200, cur_rsi)):
+        return None
+
+    # 정배열 + 강한 추세
+    if not (close > m20 > m60 > m200):
+        return None
+
+    high60 = float(c.iloc[-60:].max())
+    dist_from_high = (high60 - close) / high60
+    # 신고가 8% 이내 AND 눌림 3% 미만 (= 아직 안 쉼)
+    if dist_from_high > cfg["near_high"] or dist_from_high >= cfg["max_pullback"]:
+        return None
+
+    prev_close = float(c.iloc[-2])
+    change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
+    # 52주 고점 갱신 여부
+    high_all = float(h.max())
+    at_new_high = close >= high_all * 0.99
+    # 다음 눌림 시 지지 후보 = 20일선까지 거리
+    ma20_dist_pct = (close - m20) / m20 * 100
+    vol_ratio = float(v.iloc[-10:].mean()) / float(v.iloc[-50:].mean()) if float(v.iloc[-50:].mean()) > 0 else 0.0
+
+    # 점수 = RS 중심 (대장 후보는 강함이 전부)
+    score = 0.0
+    score += 60 * rs_rank / 99
+    score += 20 * (1 - min(dist_from_high / cfg["near_high"], 1))   # 신고가 밀착
+    score += 10 if at_new_high else 0
+    if rs_mom is not None:
+        score += 10 * max(0.0, min(rs_mom, 30)) / 30
+
+    return {
+        "mode": "leader",
+        "close": round(close, 2),
+        "change_pct": round(change_pct, 2),
+        "score": round(score, 1),
+        "triggered": False,
+        "setup_score": None,
+        "rs": rs_rank,
+        "rs_mom": rs_mom,
+        "leader": True,
+        "at_new_high": at_new_high,
+        "dist_from_high_pct": round(dist_from_high * 100, 1),
+        "ma20_dist_pct": round(ma20_dist_pct, 1),
+        "vol_ratio": round(vol_ratio, 2),
+        "vol_dry": False,
+        "rsi": round(cur_rsi, 1),
+        "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
+        "spark_ma20": [
+            None if math.isnan(x) else round(float(x), 4)
+            for x in ma20.iloc[-60:].tolist()
+        ],
+    }
