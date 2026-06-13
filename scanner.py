@@ -311,6 +311,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "pivot_dist_pct": round(pivot_dist_pct, 2),
         "stop": round(stop, 2),
         "risk_pct": round(risk_pct, 2),
+        "risk_warn": risk_pct > 8.0,
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
             None if math.isnan(x) else round(float(x), 4)
@@ -431,6 +432,7 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
         "pivot_dist_pct": round(pivot_dist_pct, 2),
         "stop": round(stop, 2),
         "risk_pct": round(risk_pct, 2),
+        "risk_warn": risk_pct > 15.0,
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
             None if math.isnan(x) else round(float(x), 4)

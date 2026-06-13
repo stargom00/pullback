@@ -209,6 +209,28 @@ def load_watchlist() -> dict:
     return extra
 
 
+
+
+def load_alerts() -> dict:
+    """alerts.txt에서 시장경보 종목 로드 → {티커: 유형}.
+    대시보드에서 추가한 항목(alerts_user.txt)도 병합."""
+    alerts = {}
+    for fname in ("alerts.txt", "alerts_user.txt"):
+        path = os.path.join(os.path.dirname(__file__), fname)
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split(maxsplit=1)
+                ticker = parts[0].upper()
+                kind = parts[1] if len(parts) > 1 else "경보"
+                alerts[ticker] = kind
+    return alerts
+
+
 def get_universe(market: str) -> dict:
     wl = load_watchlist()
     if market == "kr":

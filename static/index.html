@@ -39,6 +39,23 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .statusbar b{color:var(--text)}
 .sectorbar{display:flex;gap:8px;flex-wrap:wrap;padding:0 24px 12px}
 .sectorbar:empty{padding:0}
+.alert-tag{font-size:11px;color:#FF6B6B;background:rgba(255,107,107,.12);
+  padding:2px 7px;border-radius:6px;font-weight:600;vertical-align:middle}
+.alert-mgr{margin-left:12px;font-size:12px;color:var(--muted);cursor:pointer;
+  text-decoration:underline;text-underline-offset:3px}
+.alert-mgr:hover{color:var(--amber)}
+.alert-panel{padding:12px 24px;background:var(--surface);border-bottom:1px solid var(--line);
+  display:none;gap:8px;align-items:center;flex-wrap:wrap}
+.alert-panel.open{display:flex}
+.alert-panel input,.alert-panel select{background:var(--bg);border:1px solid var(--line);
+  color:var(--text);padding:6px 10px;border-radius:8px;font-size:13px;font-family:inherit}
+.alert-panel button{background:var(--amber);color:#000;border:none;padding:6px 14px;
+  border-radius:8px;font-size:13px;font-weight:600;cursor:pointer}
+.alert-list{display:flex;gap:6px;flex-wrap:wrap;margin-left:8px}
+.alert-list .chip{font-size:11px;background:rgba(255,107,107,.12);color:#FF6B6B;
+  padding:3px 8px;border-radius:6px;cursor:pointer}
+.alert-list .chip:hover{text-decoration:line-through}
+@media (max-width:600px){.alert-panel{padding:12px 16px}}
 .schip{font-size:12px;padding:5px 11px;border-radius:99px;background:var(--surface);
   border:1px solid var(--line);color:var(--muted);cursor:pointer;transition:all .12s}
 .schip:hover{border-color:var(--amber);color:var(--text)}
@@ -95,7 +112,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v3.7</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v3.8</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -114,6 +131,14 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 
 <div class="statusbar" id="status"></div>
 <div class="sectorbar" id="sectorbar"></div>
+<div class="alert-panel" id="alertPanel">
+  <input id="alertTicker" placeholder="티커 (예: 347850.KQ)" style="width:180px">
+  <select id="alertKind">
+    <option>투경</option><option>투주</option><option>정지</option><option>단기과열</option>
+  </select>
+  <button id="alertAdd">추가</button>
+  <div class="alert-list" id="alertList"></div>
+</div>
 <div id="content"><div class="loading"><div class="spinner"></div>스캔 중…</div></div>
 
 <script>
@@ -160,7 +185,7 @@ function card(s) {
   return `<div class="card${s.triggered ? ' fired' : ''}">
     <div class="card-top">
       <div>
-        <div class="name">${s.triggered ? '🔥 ' : ''}${s.leader ? '👑 ' : ''}${s.name}<span class="mkt">${s.market}</span></div>
+        <div class="name">${s.triggered ? '🔥 ' : ''}${s.leader ? '👑 ' : ''}${s.name}${s.alert ? ` <span class="alert-tag" title="시장경보">⚠️ ${s.alert}</span>` : ''}<span class="mkt">${s.market}</span></div>
         <div class="tick mono">${s.ticker}${s.sector && s.sector !== '기타' ? ` · ${s.sector}` : ''}</div>
       </div>
       <div style="margin-left:auto;display:flex;flex-direction:column;align-items:center;gap:2px">
@@ -221,7 +246,7 @@ function card(s) {
       <div class="metric"><div class="k">RS</div><div class="v" style="color:${s.rs >= 80 ? 'var(--green)' : s.rs >= 65 ? 'var(--amber)' : 'var(--text)'}">${s.rs ?? '-'}${s.rs_mom >= 10 ? ' <span style="color:var(--green)" title="상대강도 개선 중">↗</span>' : ''}</div></div>
       <div class="metric"><div class="k">피벗 (${s.pivot_type ?? '돌파가'})</div><div class="v">${fmtPrice(s.pivot, s.market)} <span style="color:${s.pivot_dist_pct >= 15 ? 'var(--up)' : 'var(--muted)'};font-size:11px">+${s.pivot_dist_pct}%${s.pivot_dist_pct >= 15 ? ' 관찰' : ''}</span></div></div>
       <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
-      <div class="metric"><div class="k">리스크</div><div class="v">${s.risk_pct}%</div></div>
+      <div class="metric"><div class="k">리스크</div><div class="v" style="${s.risk_warn ? 'color:var(--up)' : ''}">${s.risk_pct}%${s.risk_warn ? ' ⚠️' : ''}</div></div>
     </div>`}
     ${(s.mode === 'leader' || s.mode === 'super') ? '' : s.mode === 'turnaround' ? `
     <div class="badges">
@@ -258,7 +283,14 @@ async function load(refresh = false) {
     const data = await res.json();
     status.innerHTML = `<span><b>${data.fetched ?? data.scanned}</b>/${data.scanned}개 종목 스캔</span>
       <span>${mode === 'turnaround' ? '추세전환' : '눌림목'} 후보 <b>${data.hits.length}</b>개</span>
-      <span>기준 ${data.generated_at}${data.cached ? ' (캐시)' : ''}</span>`;
+      <span>기준 ${data.generated_at}${data.cached ? ' (캐시)' : ''}</span>
+      ${data.warn_count ? `<span style="color:#FF6B6B">⚠️ 경보/과대리스크 ${data.warn_count}</span>` : ''}
+      <span class="alert-mgr" id="alertToggle">경보종목 관리</span>`;
+    const tg = document.getElementById('alertToggle');
+    if (tg) tg.addEventListener('click', () => {
+      document.getElementById('alertPanel').classList.toggle('open');
+      loadAlertList();
+    });
     lastHits = data.hits;
     sectorFilter = null;
     renderSectors(data.sector_summary || []);
@@ -267,6 +299,32 @@ async function load(refresh = false) {
     content.innerHTML = '<div class="empty">스캔에 실패했습니다. 서버 로그를 확인한 뒤 다시 시도해 주세요.</div>';
   }
 }
+
+async function loadAlertList() {
+  try {
+    const r = await fetch('/api/alerts'); const data = await r.json();
+    const list = document.getElementById('alertList');
+    const keys = Object.keys(data);
+    list.innerHTML = keys.length
+      ? keys.map(t => `<span class="chip" data-t="${t}" title="클릭하면 삭제">${t} ${data[t]} ✕</span>`).join('')
+      : '<span style="color:var(--muted);font-size:12px">등록된 경보 종목 없음</span>';
+    list.querySelectorAll('.chip').forEach(c => c.addEventListener('click', async () => {
+      await fetch('/api/alerts', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ticker: c.dataset.t, remove: true})});
+      loadAlertList(); load(true);
+    }));
+  } catch(e) {}
+}
+
+document.getElementById('alertAdd').addEventListener('click', async () => {
+  const t = document.getElementById('alertTicker').value.trim();
+  const k = document.getElementById('alertKind').value;
+  if (!t) return;
+  await fetch('/api/alerts', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ticker: t, kind: k})});
+  document.getElementById('alertTicker').value = '';
+  loadAlertList(); load(true);
+});
 
 function renderSectors(summary) {
   const bar = document.getElementById('sectorbar');
@@ -292,7 +350,33 @@ function renderCards() {
 }
 
 document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('click', () => {
-  function renderSectors(summary) {
+  async function loadAlertList() {
+  try {
+    const r = await fetch('/api/alerts'); const data = await r.json();
+    const list = document.getElementById('alertList');
+    const keys = Object.keys(data);
+    list.innerHTML = keys.length
+      ? keys.map(t => `<span class="chip" data-t="${t}" title="클릭하면 삭제">${t} ${data[t]} ✕</span>`).join('')
+      : '<span style="color:var(--muted);font-size:12px">등록된 경보 종목 없음</span>';
+    list.querySelectorAll('.chip').forEach(c => c.addEventListener('click', async () => {
+      await fetch('/api/alerts', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ticker: c.dataset.t, remove: true})});
+      loadAlertList(); load(true);
+    }));
+  } catch(e) {}
+}
+
+document.getElementById('alertAdd').addEventListener('click', async () => {
+  const t = document.getElementById('alertTicker').value.trim();
+  const k = document.getElementById('alertKind').value;
+  if (!t) return;
+  await fetch('/api/alerts', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ticker: t, kind: k})});
+  document.getElementById('alertTicker').value = '';
+  loadAlertList(); load(true);
+});
+
+function renderSectors(summary) {
   const bar = document.getElementById('sectorbar');
   if (!summary.length) { bar.innerHTML = ''; return; }
   const chips = summary.map(s =>

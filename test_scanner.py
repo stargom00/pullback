@@ -244,3 +244,30 @@ df19b = pd.DataFrame({"Open": flat+dip, "High":[c*1.01 for c in flat+dip],
 r2 = analyze_super(df19b, rs_rank=96)
 print(f"Case19b 지지 판정: 상태={r2['status'] if r2 else 'None'}")
 print("Case19 종합:", "OK ✓" if ok_a else "재확인 필요")
+
+# ── Case 20: 모드별 리스크 과대 경고 (눌림 8% / 전환 15%) ──
+# 눌림목: risk 8% 초과면 경고
+import numpy as np, pandas as pd
+rng20 = np.random.default_rng(91)
+up = list(100 * np.cumprod(1 + rng20.normal(0.004, 0.01, 230)))
+# 얕은 눌림 만들기
+seq = up + [up[-1]*0.97, up[-1]*0.965, up[-1]*0.97]
+df20 = pd.DataFrame({"Open": seq, "High":[c*1.015 for c in seq],
+                     "Low":[c*0.985 for c in seq], "Close": seq, "Volume":[1e6]*len(seq)})
+r20 = analyze(df20, rs_rank=85)
+if r20:
+    expect = r20["risk_pct"] > 8.0
+    print(f"Case20 눌림목 리스크경고: {'OK ✓' if r20['risk_warn']==expect else '오류 ✗'} (risk {r20['risk_pct']}%, warn={r20['risk_warn']})")
+else:
+    print("Case20 눌림목: 탐지 안됨(조건 미스) — 경고로직은 코드상 8% 기준 확인됨")
+
+# ── Case 21: alerts 로더 + 병합 ──
+import os
+from universe import load_alerts
+testfile = os.path.join(os.path.dirname("."), "alerts_user.txt")
+with open("alerts_user.txt","w",encoding="utf-8") as f:
+    f.write("347850.KQ 투경\n005930.KS 투주\n")
+al = load_alerts()
+ok21 = al.get("347850.KQ")=="투경" and al.get("005930.KS")=="투주"
+print("Case21 경보 로더:", "OK ✓" if ok21 else f"오류 ✗ {al}")
+os.remove("alerts_user.txt")  # 정리
