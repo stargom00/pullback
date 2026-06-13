@@ -219,3 +219,28 @@ df18b = pd.DataFrame({"Open": deep18, "High": [c*1.01 for c in deep18],
                       "Volume": [1_000_000.0]*len(deep18)})
 sd = analyze_super(df18b, rs_rank=99)
 print("Case18b 깊은눌림도 포착:", f"✓ (상태:{sd['status']})" if sd else "✗")
+
+# ── Case 19: 슈퍼대장 배지 버그 수정 — 담을곳 거리/지지 상태 정확성 ──
+from scanner import analyze_super
+rng19 = np.random.default_rng(77)
+# (a) 눌림 진행: 신고가서 9% 빠졌지만 아직 20일선 위에 떠 있음 → near_buy_zone False여야
+b19 = list(100 * np.cumprod(1 + rng19.normal(0.006, 0.011, 245)))
+pk = max(b19)
+prog = [pk * (1 - 0.009*i) for i in range(1,11)]
+df19a = pd.DataFrame({"Open": b19+prog, "High":[c*1.01 for c in b19+prog],
+                      "Low":[c*0.99 for c in b19+prog], "Close": b19+prog,
+                      "Volume":[1e6]*255})
+r = analyze_super(df19a, rs_rank=99)
+ok_a = r and (r["near_buy_zone"] == (0 <= r["buy_zone_dist_pct"] <= 3.0))
+print(f"Case19a 담을곳 거리 일관성: {'OK ✓' if ok_a else '오류 ✗'} (상태:{r['status']}, 거리:{r['buy_zone_dist_pct']}%, 근접:{r['near_buy_zone']})")
+
+# (b) 20일선 찍고 반등 → '지지✓' 상태 + bounced
+flat = list(100 * np.cumprod(1 + rng19.normal(0.005, 0.01, 240)))
+m20_now = sum(flat[-20:])/20
+dip = [m20_now*0.995, m20_now*1.008]  # 20일선 찍고 양봉 마감
+df19b = pd.DataFrame({"Open": flat+dip, "High":[c*1.01 for c in flat+dip],
+                      "Low":[c*0.985 for c in flat+dip], "Close": flat+dip,
+                      "Volume":[1e6]*242})
+r2 = analyze_super(df19b, rs_rank=96)
+print(f"Case19b 지지 판정: 상태={r2['status'] if r2 else 'None'}")
+print("Case19 종합:", "OK ✓" if ok_a else "재확인 필요")

@@ -95,7 +95,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v3.6</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v3.7</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -201,7 +201,15 @@ function card(s) {
     ${s.mode === 'super' ? `
     <div class="badges">
       <span class="badge on">RS ${s.rs}</span>
-      <span class="badge ${s.status === '신고가' ? '' : 'on'}">${s.status === '신고가' ? '추격 주의' : '담을곳 근접'}</span>
+      ${(() => {
+        if (s.status === '신고가') return '<span class="badge">추격 주의</span>';
+        if (s.status && s.status.includes('지지✓')) return '<span class="badge on">매수 확인✓</span>';
+        if (s.status && s.status.includes('지지')) return '<span class="badge on">매수 확인✓</span>';
+        if (s.status && s.status.includes('테스트')) return '<span class="badge on">지지 테스트중</span>';
+        if (s.near_buy_zone) return '<span class="badge on">담을곳 근접</span>';
+        if (s.status === '조정 깊음') return '<span class="badge">추세 점검</span>';
+        return `<span class="badge">담을곳 -${s.buy_zone_dist_pct}%</span>`;
+      })()}
       ${s.rs_mom >= 10 ? '<span class="badge on">RS 개선↗</span>' : ''}
     </div>` : s.mode === 'leader' ? `
     <div class="badges">

@@ -566,15 +566,25 @@ def analyze_super(df: pd.DataFrame, rs_rank: int | None = None,
     high_all = float(h.max())
     at_new_high = close >= high_all * 0.99
 
-    # 상태 분류: 지금 어디에 있나
+    # 지지선 근접/테스트/반등 판정
     near_ma20 = abs(close - m20) / m20 <= 0.03
     near_ma50 = abs(close - m50) / m50 <= 0.03
+    # 어제 종가 대비 오늘 반등했는가 (지지 후 양봉 = 받침 확인 신호)
+    bounced = change_pct > 0
+    # 최근 3봉 중 저가가 20일선을 찍고 종가는 위 = 지지 테스트 성공 흐름
+    low3 = float(lo.iloc[-3:].min())
+    tested_ma20 = low3 <= m20 * 1.01 and close > m20
+
     if at_new_high or dist_from_high <= 0.03:
         status = "신고가"          # 달리는 중 — 추격 금지
     elif near_ma20:
-        status = "20일선 지지"     # 담을곳 후보 (얕은 눌림)
+        # 20일선에 닿음 — 받쳤는지 테스트 중인지 구분
+        if tested_ma20 and bounced:
+            status = "20일선 지지✓"  # 찍고 반등 = 매수 확인 신호
+        else:
+            status = "20일선 테스트"  # 닿았지만 결과 미확정
     elif near_ma50:
-        status = "50일선 지지"     # 담을곳 후보 (깊은 눌림)
+        status = "50일선 지지" if bounced else "50일선 테스트"
     elif dist_from_high <= 0.15:
         status = "눌림 진행"       # 아직 지지선 안 닿음 — 대기
     else:
@@ -582,7 +592,15 @@ def analyze_super(df: pd.DataFrame, rs_rank: int | None = None,
 
     # 다음 매수 후보가(담을곳): 가장 가까운 아래쪽 이평선
     below = [x for x in (m10, m20, m50) if x < close]
-    buy_zone = max(below) if below else m20
+    if below:
+        buy_zone = max(below)
+        buy_zone_dist = (close - buy_zone) / close   # 항상 양수
+        near_buy_zone = buy_zone_dist <= 0.03
+    else:
+        # 현재가가 모든 단기 이평선 아래 = 이미 지지선 밑으로 눌린 상태
+        buy_zone = m50
+        buy_zone_dist = (close - buy_zone) / close   # 음수일 수 있음
+        near_buy_zone = False   # 지지선 아래로 빠졌으면 '근접' 아님
 
     score = round(60 * rs_rank / 99 + 20 * (1 - min(dist_from_high / 0.15, 1))
                   + (10 if at_new_high else 0)
@@ -599,6 +617,8 @@ def analyze_super(df: pd.DataFrame, rs_rank: int | None = None,
         "rs_mom": rs_mom,
         "leader": True,
         "status": status,
+        "near_buy_zone": near_buy_zone,
+        "buy_zone_dist_pct": round(buy_zone_dist * 100, 1),
         "at_new_high": at_new_high,
         "dist_from_high_pct": round(dist_from_high * 100, 1),
         "buy_zone": round(buy_zone, 2),
