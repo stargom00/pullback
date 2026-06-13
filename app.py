@@ -14,11 +14,12 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from scanner import analyze, analyze_turnaround, rs_raw_score, to_rs_rank
+from sectors import get_sector
 from universe import get_universe
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v3.3"
+VERSION = "v3.4"
 CACHE_TTL = 600
 _cache: dict[str, dict] = {}
 _executor = ThreadPoolExecutor(max_workers=12)
@@ -77,9 +78,17 @@ async def run_scan(market: str, mode: str) -> dict:
         if result is None:
             continue
         mkt = "KR" if t.endswith((".KS", ".KQ")) else "US"
-        hits.append({"ticker": t, "name": universe[t], "market": mkt, **result})
+        hits.append({"ticker": t, "name": universe[t], "market": mkt, "sector": get_sector(t), **result})
 
     hits.sort(key=lambda x: (x.get("triggered", False), x.get("setup_score") or x["score"]), reverse=True)
+
+    # 섹터 요약: 2개 이상 잡힌 섹터를 개수 내림차순 (기타 제외)
+    from collections import Counter
+    sec_count = Counter(h["sector"] for h in hits if h["sector"] != "기타")
+    sector_summary = [
+        {"sector": s, "count": n} for s, n in sec_count.most_common() if n >= 2
+    ]
+
     return {
         "version": VERSION,
         "market": market,
@@ -87,6 +96,7 @@ async def run_scan(market: str, mode: str) -> dict:
         "scanned": len(universe),
         "fetched": len(data),
         "hits": hits,
+        "sector_summary": sector_summary,
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "ts": time.time(),
     }

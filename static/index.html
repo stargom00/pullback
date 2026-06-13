@@ -37,6 +37,15 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .statusbar{padding:12px 24px;font-size:12px;color:var(--muted);
   display:flex;gap:16px;flex-wrap:wrap}
 .statusbar b{color:var(--text)}
+.sectorbar{display:flex;gap:8px;flex-wrap:wrap;padding:0 24px 12px}
+.sectorbar:empty{padding:0}
+.schip{font-size:12px;padding:5px 11px;border-radius:99px;background:var(--surface);
+  border:1px solid var(--line);color:var(--muted);cursor:pointer;transition:all .12s}
+.schip:hover{border-color:var(--amber);color:var(--text)}
+.schip.on{background:var(--surface2);color:var(--text);border-color:var(--amber)}
+.schip b{color:var(--amber);margin-left:5px}
+.schip .clear{color:var(--muted)}
+@media (max-width:600px){.sectorbar{padding:0 16px 12px}}
 
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));
   gap:14px;padding:0 24px 40px}
@@ -86,7 +95,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v3.3</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v3.4</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -102,6 +111,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 </header>
 
 <div class="statusbar" id="status"></div>
+<div class="sectorbar" id="sectorbar"></div>
 <div id="content"><div class="loading"><div class="spinner"></div>스캔 중…</div></div>
 
 <script>
@@ -149,7 +159,7 @@ function card(s) {
     <div class="card-top">
       <div>
         <div class="name">${s.triggered ? '🔥 ' : ''}${s.leader ? '👑 ' : ''}${s.name}<span class="mkt">${s.market}</span></div>
-        <div class="tick mono">${s.ticker}</div>
+        <div class="tick mono">${s.ticker}${s.sector && s.sector !== '기타' ? ` · ${s.sector}` : ''}</div>
       </div>
       <div style="margin-left:auto;display:flex;flex-direction:column;align-items:center;gap:2px">
         ${scoreRing(s.score)}
@@ -196,6 +206,8 @@ function card(s) {
 
 let market = 'all';
 let mode = 'pullback';
+let sectorFilter = null;
+let lastHits = [];
 const DESC = {
   pullback: '우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+',
   turnaround: '역배열→정배열 첫 전환(1개월 내) · RS 개선 중 · 200일선 +25% 이내'
@@ -210,18 +222,65 @@ async function load(refresh = false) {
     const res = await fetch(`/api/scan?market=${market}&mode=${mode}${refresh ? '&refresh=true' : ''}`);
     const data = await res.json();
     status.innerHTML = `<span><b>${data.fetched ?? data.scanned}</b>/${data.scanned}개 종목 스캔</span>
-      <span>눌림목 후보 <b>${data.hits.length}</b>개</span>
+      <span>${mode === 'turnaround' ? '추세전환' : '눌림목'} 후보 <b>${data.hits.length}</b>개</span>
       <span>기준 ${data.generated_at}${data.cached ? ' (캐시)' : ''}</span>`;
-    content.innerHTML = data.hits.length
-      ? `<div class="grid">${data.hits.map(card).join('')}</div>`
-      : `<div class="empty">현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : '눌림목'} 종목이 없습니다.<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.</div>`;
+    lastHits = data.hits;
+    sectorFilter = null;
+    renderSectors(data.sector_summary || []);
+    renderCards();
   } catch (e) {
     content.innerHTML = '<div class="empty">스캔에 실패했습니다. 서버 로그를 확인한 뒤 다시 시도해 주세요.</div>';
   }
 }
 
+function renderSectors(summary) {
+  const bar = document.getElementById('sectorbar');
+  if (!summary.length) { bar.innerHTML = ''; return; }
+  const chips = summary.map(s =>
+    `<span class="schip" data-sec="${s.sector}">${s.sector}<b>${s.count}</b></span>`
+  ).join('');
+  bar.innerHTML = chips;
+  bar.querySelectorAll('.schip').forEach(ch => ch.addEventListener('click', () => {
+    const sec = ch.dataset.sec;
+    sectorFilter = (sectorFilter === sec) ? null : sec;
+    bar.querySelectorAll('.schip').forEach(x => x.classList.toggle('on', x.dataset.sec === sectorFilter));
+    renderCards();
+  }));
+}
+
+function renderCards() {
+  const content = document.getElementById('content');
+  const list = sectorFilter ? lastHits.filter(h => h.sector === sectorFilter) : lastHits;
+  content.innerHTML = list.length
+    ? `<div class="grid">${list.map(card).join('')}</div>`
+    : `<div class="empty">${sectorFilter ? `'${sectorFilter}' 섹터에 해당 종목이 없습니다.` : `현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : '눌림목'} 종목이 없습니다.<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.`}</div>`;
+}
+
 document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('click', () => {
-  document.querySelectorAll('[data-market]').forEach(x => x.classList.remove('active'));
+  function renderSectors(summary) {
+  const bar = document.getElementById('sectorbar');
+  if (!summary.length) { bar.innerHTML = ''; return; }
+  const chips = summary.map(s =>
+    `<span class="schip" data-sec="${s.sector}">${s.sector}<b>${s.count}</b></span>`
+  ).join('');
+  bar.innerHTML = chips;
+  bar.querySelectorAll('.schip').forEach(ch => ch.addEventListener('click', () => {
+    const sec = ch.dataset.sec;
+    sectorFilter = (sectorFilter === sec) ? null : sec;
+    bar.querySelectorAll('.schip').forEach(x => x.classList.toggle('on', x.dataset.sec === sectorFilter));
+    renderCards();
+  }));
+}
+
+function renderCards() {
+  const content = document.getElementById('content');
+  const list = sectorFilter ? lastHits.filter(h => h.sector === sectorFilter) : lastHits;
+  content.innerHTML = list.length
+    ? `<div class="grid">${list.map(card).join('')}</div>`
+    : `<div class="empty">${sectorFilter ? `'${sectorFilter}' 섹터에 해당 종목이 없습니다.` : `현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : '눌림목'} 종목이 없습니다.<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.`}</div>`;
+}
+
+document.querySelectorAll('[data-market]').forEach(x => x.classList.remove('active'));
   t.classList.add('active');
   market = t.dataset.market;
   load();

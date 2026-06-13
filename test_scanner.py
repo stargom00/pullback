@@ -152,3 +152,20 @@ print("Case13 트리거:",
 r14 = analyze(df13, rs_rank=97)
 ok14 = r14 and r14.get("triggered") and r14.get("setup_score") is not None
 print("Case14 전일점수:", f"OK ✓ (오늘 {r14['score']} / 전일 {r14['setup_score']})" if ok14 else "오류 ✗")
+
+# ── Case 15: 섹터 매핑 + 요약 집계 ──
+from sectors import get_sector
+from collections import Counter
+assert get_sector("AMD") == "반도체-연산"
+assert get_sector("WDC") == "반도체-메모리"
+assert get_sector("357780.KQ") == "반도체-소재"
+assert get_sector("UNKNOWN123") == "기타"
+# 가짜 hits로 요약 로직 검증
+fake_hits = [{"sector": s} for s in
+             ["반도체-연산","반도체-연산","반도체-메모리","클라우드SW","클라우드SW","클라우드SW","기타","기타"]]
+cnt = Counter(h["sector"] for h in fake_hits if h["sector"] != "기타")
+summary = [{"sector": s, "count": n} for s, n in cnt.most_common() if n >= 2]
+ok15 = (summary[0]["sector"] == "클라우드SW" and summary[0]["count"] == 3
+        and all(x["count"] >= 2 for x in summary)
+        and not any(x["sector"] == "기타" for x in summary))
+print("Case15 섹터 매핑/요약:", "OK ✓" if ok15 else "오류 ✗", "|", [(s["sector"], s["count"]) for s in summary])
