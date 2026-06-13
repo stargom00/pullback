@@ -37,6 +37,48 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .statusbar{padding:12px 24px;font-size:12px;color:var(--muted);
   display:flex;gap:16px;flex-wrap:wrap}
 .statusbar b{color:var(--text)}
+.journal-btn{width:100%;margin-top:10px;padding:7px;background:transparent;
+  border:1px dashed var(--line);color:var(--muted);border-radius:8px;font-size:12px;
+  cursor:pointer;font-family:inherit;transition:all .12s}
+.journal-btn:hover{border-color:var(--amber);color:var(--amber)}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;
+  align-items:center;justify-content:center;z-index:100}
+.modal-bg.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--line);border-radius:16px;
+  padding:24px;width:min(440px,92vw);max-height:90vh;overflow:auto}
+.modal h3{margin:0 0 4px;font-size:17px}
+.modal .sub{color:var(--muted);font-size:13px;margin-bottom:16px}
+.modal .auto{background:var(--bg);border-radius:10px;padding:12px;margin-bottom:16px;
+  font-size:12px;color:var(--muted);line-height:1.7}
+.modal .auto b{color:var(--text)}
+.modal label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
+.modal input,.modal textarea{width:100%;background:var(--bg);border:1px solid var(--line);
+  color:var(--text);padding:9px 11px;border-radius:8px;font-size:14px;font-family:inherit;
+  box-sizing:border-box}
+.modal textarea{resize:vertical;min-height:48px}
+.modal .row{display:flex;gap:10px}
+.modal .row>div{flex:1}
+.modal .actions{display:flex;gap:10px;margin-top:18px}
+.modal .actions button{flex:1;padding:10px;border-radius:8px;font-size:14px;font-weight:600;
+  cursor:pointer;border:none;font-family:inherit}
+.modal .save{background:var(--amber);color:#000}
+.modal .cancel{background:var(--surface2);color:var(--text)}
+.jrnl-wrap{padding:0 24px 40px}
+.jrnl-tools{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+.jrnl-tools button{padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer;
+  border:1px solid var(--line);background:var(--surface);color:var(--text);font-family:inherit}
+.jrnl-tools .exp{background:var(--amber);color:#000;border:none;font-weight:600}
+.jrnl-tools .stat{color:var(--muted);font-size:13px;margin-left:auto}
+.jtable{width:100%;border-collapse:collapse;font-size:12.5px}
+.jtable th,.jtable td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);
+  white-space:nowrap}
+.jtable th{color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase}
+.jtable td.mono{font-family:var(--mono)}
+.jtable .del{color:#FF6B6B;cursor:pointer}
+.jtable tr.open-pos{background:rgba(242,179,61,.04)}
+.jtable input.result{width:70px;background:var(--bg);border:1px solid var(--line);
+  color:var(--text);padding:4px 6px;border-radius:6px;font-size:12px;font-family:var(--mono)}
+.jrnl-empty{color:var(--muted);text-align:center;padding:60px 20px;line-height:1.7}
 .legend{display:flex;gap:18px;flex-wrap:wrap;padding:0 24px 10px;font-size:12px}
 .legend .lg{color:var(--muted);cursor:help;display:inline-flex;align-items:center;gap:5px}
 .legend .lg-h{color:var(--text);opacity:.7}
@@ -117,7 +159,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v3.9</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.0</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -125,6 +167,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
     <button class="tab" data-mode="turnaround">추세전환</button>
     <button class="tab" data-mode="leader">대장후보</button>
     <button class="tab" data-mode="super">⭐슈퍼대장</button>
+    <button class="tab" data-mode="journal">📒 내 일지</button>
   </div>
   <div class="tabs" role="tablist">
     <button class="tab active" data-market="all">전체</button>
@@ -270,6 +313,8 @@ function card(s) {
       <span class="badge ${s.tightening ? 'on' : ''}">변동폭 축소</span>
       <span class="badge ${s.recent_high_ok ? 'on' : ''}">고점 유지</span>${s.tl_break ? '<span class="badge on">추세선 돌파</span>' : ''}
     </div>`}
+    ${(s.mode === 'pullback' || s.mode === 'turnaround') ? `
+    <button class="journal-btn" onclick='openJournal(this)' data-stock='${JSON.stringify(s).replace(/'/g, "&#39;")}'>+ 일지에 추가</button>` : ''}
   </div>`;
 }
 
@@ -419,9 +464,141 @@ document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click'
   document.querySelectorAll('[data-mode]').forEach(x => x.classList.remove('active'));
   t.classList.add('active');
   mode = t.dataset.mode;
-  document.getElementById('subDesc').textContent = DESC[mode];
-  load();
+  const isJournal = mode === 'journal';
+  document.getElementById('content').style.display = isJournal ? 'none' : '';
+  document.getElementById('journalView').style.display = isJournal ? 'block' : 'none';
+  document.getElementById('subDesc').textContent = isJournal
+    ? '🔥/추세전환 신호를 기록하고 결과(R)를 추적 — 주말에 CSV로 내보내 구글시트에 백업'
+    : DESC[mode];
+  if (isJournal) { renderJournal(); } else { load(); }
 }));
+
+// ════════════════ 매매 일지 (localStorage 기반) ════════════════
+const JKEY = 'pullback_journal_v1';
+
+function getJournal() {
+  try { return JSON.parse(localStorage.getItem(JKEY) || '[]'); }
+  catch(e) { return []; }
+}
+function setJournal(arr) { localStorage.setItem(JKEY, JSON.stringify(arr)); }
+
+let pendingStock = null;
+function openJournal(btn) {
+  const s = JSON.parse(btn.dataset.stock.replace(/&#39;/g, "'"));
+  pendingStock = s;
+  document.getElementById('jmSub').textContent = `${s.name} (${s.ticker}) · ${s.market}`;
+  const tab = s.mode === 'turnaround' ? '추세전환' : '눌림목';
+  const sig = (s.triggered ? '🔥 트리거 ' : '') + (s.leader ? '👑 ' : '');
+  document.getElementById('jmAuto').innerHTML =
+    `<b>${tab}</b> 탭 · 섹터 <b>${s.sector || '-'}</b> · RS <b>${s.rs}</b>` +
+    `${s.setup_score != null ? ` · 전일점수 <b>${Math.round(s.setup_score)}</b>` : ''}<br>` +
+    `${sig ? `신호 <b>${sig}</b> · ` : ''}피벗종류 <b>${s.pivot_type || '-'}</b> · ` +
+    `현재가 <b>${fmtPrice(s.close, s.market)}</b> · 리스크 <b>${s.risk_pct != null ? s.risk_pct + '%' : '-'}</b>` +
+    `${s.alert ? ` · ⚠️ <b>${s.alert}</b>` : ''}`;
+  // 손절 기본값 = 스캐너 손절가
+  document.getElementById('jmEntry').value = s.pivot != null ? Math.round(s.close) : '';
+  document.getElementById('jmStop').value = s.stop != null ? Math.round(s.stop) : '';
+  document.getElementById('jmNote').value = '';
+  document.getElementById('journalModal').classList.add('open');
+}
+function closeJournal() {
+  document.getElementById('journalModal').classList.remove('open');
+  pendingStock = null;
+}
+function saveJournal() {
+  const s = pendingStock; if (!s) return;
+  const entry = parseFloat(document.getElementById('jmEntry').value) || null;
+  const stop = parseFloat(document.getElementById('jmStop').value) || null;
+  const note = document.getElementById('jmNote').value.trim();
+  const riskAmt = (entry && stop && entry > stop) ? ((entry - stop) / entry * 100) : (s.risk_pct ?? null);
+  const rec = {
+    id: Date.now(),
+    date: new Date().toISOString().slice(0, 10),
+    ticker: s.ticker, name: s.name, market: s.market, sector: s.sector || '',
+    tab: s.mode === 'turnaround' ? '추세전환' : '눌림목',
+    signal: (s.triggered ? '🔥' : '') + (s.leader ? '👑' : ''),
+    pivot_type: s.pivot_type || '', setup_score: s.setup_score != null ? Math.round(s.setup_score) : '',
+    rs: s.rs, entry, stop,
+    risk_pct: riskAmt != null ? Math.round(riskAmt * 10) / 10 : '',
+    alert: s.alert || '', note,
+    exit: '', result_r: '', held_days: '', review: ''
+  };
+  const j = getJournal(); j.unshift(rec); setJournal(j);
+  closeJournal();
+}
+
+function renderJournal() {
+  const wrap = document.getElementById('journalView');
+  const j = getJournal();
+  if (!j.length) {
+    wrap.innerHTML = `<div class="jrnl-empty">아직 기록이 없어요.<br>
+      눌림목·추세전환 탭의 카드에서 <b>"+ 일지에 추가"</b>를 눌러 신호를 기록하세요.<br>
+      진입가·손절·근거만 적으면 나머지는 자동으로 채워집니다.</div>`;
+    return;
+  }
+  const openCount = j.filter(r => r.result_r === '').length;
+  const closed = j.filter(r => r.result_r !== '' && !isNaN(parseFloat(r.result_r)));
+  const avgR = closed.length ? (closed.reduce((a, r) => a + parseFloat(r.result_r), 0) / closed.length).toFixed(2) : '–';
+  const winRate = closed.length ? Math.round(closed.filter(r => parseFloat(r.result_r) > 0).length / closed.length * 100) : '–';
+  wrap.innerHTML = `
+    <div class="jrnl-tools">
+      <button class="exp" onclick="exportCSV()">⬇ CSV 내보내기</button>
+      <button onclick="if(confirm('일지를 모두 지울까요? 되돌릴 수 없어요.')){setJournal([]);renderJournal();}">전체 삭제</button>
+      <span class="stat">총 ${j.length}건 · 진행 ${openCount} · 종료 ${closed.length} · 승률 ${winRate}${winRate!=='–'?'%':''} · 평균 ${avgR}R</span>
+    </div>
+    <div style="overflow-x:auto">
+    <table class="jtable">
+      <thead><tr>
+        <th>날짜</th><th>종목</th><th>탭</th><th>신호</th><th>섹터</th><th>피벗</th>
+        <th>전일점수</th><th>RS</th><th>진입가</th><th>손절</th><th>리스크%</th>
+        <th>결과R</th><th>근거/복기</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${j.map(r => `<tr class="${r.result_r===''?'open-pos':''}">
+          <td class="mono">${r.date}</td>
+          <td>${r.name}<div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div></td>
+          <td>${r.tab}</td>
+          <td>${r.signal || '-'}</td>
+          <td style="font-size:11px;color:var(--muted)">${r.sector || '-'}</td>
+          <td style="font-size:11px">${r.pivot_type || '-'}</td>
+          <td class="mono">${r.setup_score || '-'}</td>
+          <td class="mono">${r.rs ?? '-'}</td>
+          <td class="mono">${r.entry ?? '-'}</td>
+          <td class="mono">${r.stop ?? '-'}</td>
+          <td class="mono">${r.risk_pct || '-'}</td>
+          <td><input class="result" value="${r.result_r}" placeholder="R"
+              onchange="updateResult(${r.id}, this.value)"></td>
+          <td style="white-space:normal;max-width:200px;font-size:11px;color:var(--muted)">${r.note || ''}</td>
+          <td><span class="del" onclick="delJournal(${r.id})">✕</span></td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+}
+
+function updateResult(id, val) {
+  const j = getJournal();
+  const r = j.find(x => x.id === id);
+  if (r) { r.result_r = val.trim(); setJournal(j); renderJournal(); }
+}
+function delJournal(id) {
+  setJournal(getJournal().filter(x => x.id !== id));
+  renderJournal();
+}
+function exportCSV() {
+  const j = getJournal();
+  if (!j.length) return;
+  const cols = ['date','ticker','name','market','sector','tab','signal','pivot_type',
+    'setup_score','rs','entry','stop','risk_pct','alert','note','exit','result_r','held_days','review'];
+  const head = ['날짜','티커','종목','시장','섹터','탭','신호','피벗종류','전일점수','RS',
+    '진입가','손절','리스크%','경보','진입근거','청산가','결과R','보유일','복기'];
+  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const csv = [head.join(','), ...j.map(r => cols.map(c => esc(r[c])).join(','))].join('\\r\\n');
+  const blob = new Blob(['\\uFEFF' + csv], {type: 'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `눌림목일지_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
 document.getElementById('refresh').addEventListener('click', () => load(true));
 load();
 </script>
