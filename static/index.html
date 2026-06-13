@@ -37,6 +37,11 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .statusbar{padding:12px 24px;font-size:12px;color:var(--muted);
   display:flex;gap:16px;flex-wrap:wrap}
 .statusbar b{color:var(--text)}
+.legend{display:flex;gap:18px;flex-wrap:wrap;padding:0 24px 10px;font-size:12px}
+.legend .lg{color:var(--muted);cursor:help;display:inline-flex;align-items:center;gap:5px}
+.legend .lg-h{color:var(--text);opacity:.7}
+.legend .lg:hover{color:var(--text)}
+@media (max-width:600px){.legend{padding:0 16px 10px;gap:12px}}
 .sectorbar{display:flex;gap:8px;flex-wrap:wrap;padding:0 24px 12px}
 .sectorbar:empty{padding:0}
 .alert-tag{font-size:11px;color:#FF6B6B;background:rgba(255,107,107,.12);
@@ -112,7 +117,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v3.8</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v3.9</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -130,6 +135,12 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 </header>
 
 <div class="statusbar" id="status"></div>
+<div class="legend" id="legend">
+  <span class="lg" title="RS 90 이상 주도주. 시장 상위 10% 안에 드는 강자.">👑 주도주<span class="lg-h">RS 90+</span></span>
+  <span class="lg" title="당일 +4% 이상 + (추세선 돌파 또는 피벗 2% 이내). 지금 진입 구간에서 출발 중이라는 신호.">🔥 트리거<span class="lg-h">오늘 출발</span></span>
+  <span class="lg" title="시장경보(투경/투주/정지) 종목. 경보종목 관리에서 직접 등록한 것.">⚠️ 경보/리스크<span class="lg-h">주의</span></span>
+  <span class="lg" title="점수 링 아래 '전일 NN' = 🔥 발동 전날의 셋업 점수. 높을수록 좋은 자리에서 출발한 것.">⭕ 점수<span class="lg-h">셋업 완성도</span></span>
+</div>
 <div class="sectorbar" id="sectorbar"></div>
 <div class="alert-panel" id="alertPanel">
   <input id="alertTicker" placeholder="티커 (예: 347850.KQ)" style="width:180px">
