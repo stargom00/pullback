@@ -95,13 +95,14 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v3.5</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v3.6</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
     <button class="tab active" data-mode="pullback">눌림목</button>
     <button class="tab" data-mode="turnaround">추세전환</button>
     <button class="tab" data-mode="leader">대장후보</button>
+    <button class="tab" data-mode="super">⭐슈퍼대장</button>
   </div>
   <div class="tabs" role="tablist">
     <button class="tab active" data-market="all">전체</button>
@@ -172,7 +173,13 @@ function card(s) {
       <span class="chg ${chgCls}">${chgSign}${s.change_pct}%</span>
     </div>
     ${sparkSVG(s.spark, s.spark_ma20)}
-    ${s.mode === 'leader' ? `
+    ${s.mode === 'super' ? `
+    <div class="metrics mono">
+      <div class="metric"><div class="k">상태</div><div class="v" style="font-size:12px">${s.status}</div></div>
+      <div class="metric"><div class="k">고점까지</div><div class="v">${s.dist_from_high_pct}%</div></div>
+      <div class="metric"><div class="k">담을곳</div><div class="v">${fmtPrice(s.buy_zone, s.market)}</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
+    </div>` : s.mode === 'leader' ? `
     <div class="metrics mono">
       <div class="metric"><div class="k">고점까지</div><div class="v">${s.dist_from_high_pct}%</div></div>
       <div class="metric"><div class="k">20일선 위</div><div class="v">+${s.ma20_dist_pct}%</div></div>
@@ -191,7 +198,12 @@ function card(s) {
       <div class="metric"><div class="k">거래량비</div><div class="v">${s.vol_ratio}×</div></div>
       <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
     </div>`}
-    ${s.mode === 'leader' ? `
+    ${s.mode === 'super' ? `
+    <div class="badges">
+      <span class="badge on">RS ${s.rs}</span>
+      <span class="badge ${s.status === '신고가' ? '' : 'on'}">${s.status === '신고가' ? '추격 주의' : '담을곳 근접'}</span>
+      ${s.rs_mom >= 10 ? '<span class="badge on">RS 개선↗</span>' : ''}
+    </div>` : s.mode === 'leader' ? `
     <div class="badges">
       <span class="badge on">RS ${s.rs}</span>
       ${s.at_new_high ? '<span class="badge on">신고가</span>' : '<span class="badge">고점 근접</span>'}
@@ -203,7 +215,7 @@ function card(s) {
       <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
       <div class="metric"><div class="k">리스크</div><div class="v">${s.risk_pct}%</div></div>
     </div>`}
-    ${s.mode === 'leader' ? '' : s.mode === 'turnaround' ? `
+    ${(s.mode === 'leader' || s.mode === 'super') ? '' : s.mode === 'turnaround' ? `
     <div class="badges">
       <span class="badge on">정배열 전환</span>
       <span class="badge ${s.rs_mom >= 10 ? 'on' : ''}">RS 개선</span>
@@ -224,7 +236,8 @@ let lastHits = [];
 const DESC = {
   pullback: '우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+',
   turnaround: '역배열→정배열 첫 전환(1개월 내) · RS 개선 중 · 200일선 +25% 이내',
-  leader: 'RS 88+ · 신고가 8% 이내 · 아직 눌림 전 — 지금은 못 사도 눌림 오면 1순위'
+  leader: 'RS 88+ · 신고가 8% 이내 · 아직 눌림 전 — 지금은 못 사도 눌림 오면 1순위',
+  super: 'RS 95+ — 지금 시장에서 가장 강한 종목들 (위치 불문). 상태 라벨로 담을곳/대기 판단'
 };
 
 async function load(refresh = false) {

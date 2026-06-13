@@ -13,13 +13,13 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from scanner import analyze, analyze_turnaround, analyze_leader, rs_raw_score, to_rs_rank
+from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, rs_raw_score, to_rs_rank
 from sectors import get_sector
 from universe import get_universe
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v3.5"
+VERSION = "v3.6"
 CACHE_TTL = 600
 _cache: dict[str, dict] = {}
 _executor = ThreadPoolExecutor(max_workers=12)
@@ -71,7 +71,7 @@ async def run_scan(market: str, mode: str) -> dict:
         for t in data if t in rank3 and t in rank12
     }
 
-    fn = {"turnaround": analyze_turnaround, "leader": analyze_leader}.get(mode, analyze)
+    fn = {"turnaround": analyze_turnaround, "leader": analyze_leader, "super": analyze_super}.get(mode, analyze)
     hits = []
     for t, df in data.items():
         result = fn(df, rs_rank=rs_ranks.get(t), rs_mom=rs_moms.get(t))
@@ -105,7 +105,7 @@ async def run_scan(market: str, mode: str) -> dict:
 @app.get("/api/scan")
 async def scan(market: str = "all", mode: str = "pullback", refresh: bool = False):
     market = market if market in ("kr", "us", "all") else "all"
-    mode = mode if mode in ("pullback", "turnaround", "leader") else "pullback"
+    mode = mode if mode in ("pullback", "turnaround", "leader", "super") else "pullback"
     key = f"{market}:{mode}"
     cached = _cache.get(key)
     if cached and not refresh and time.time() - cached["ts"] < CACHE_TTL:

@@ -194,3 +194,28 @@ df17 = pd.DataFrame({"Open": deep, "High": [c*1.01 for c in deep],
                      "Volume": [1_000_000.0]*255})
 r17 = analyze_leader(df17, rs_rank=95)
 print("Case17 깊은눌림 leader제외:", "탈락 ✓ (눌림목 영역)" if r17 is None else "오탐 ✗")
+
+# ── Case 18: 슈퍼대장 — RS 95+ 무조건 포착, 상태 분류 ──
+from scanner import analyze_super
+rng18 = np.random.default_rng(50)
+# MU 패턴: 신고가 후 10% 눌림 (다른 모드엔 안 잡히는 사각지대)
+base18 = list(100 * np.cumprod(1 + rng18.normal(0.006, 0.012, 245)))
+peak18 = max(base18)
+pull18 = [peak18 * (1 - 0.012*i) for i in range(1, 11)]  # 약 10% 조정
+closes18 = base18 + pull18
+df18 = pd.DataFrame({"Open": closes18, "High": [c*1.01 for c in closes18],
+                     "Low": [c*0.99 for c in closes18], "Close": closes18,
+                     "Volume": [1_000_000.0]*255})
+s95 = analyze_super(df18, rs_rank=99, rs_mom=14)
+s90 = analyze_super(df18, rs_rank=90)  # 95 미만은 탈락
+print("Case18 슈퍼대장:",
+      (f"RS99 포착 ✓ (상태:{s95['status']}, 고점까지 {s95['dist_from_high_pct']}%, 담을곳 {s95['buy_zone']})" if s95 else "RS99 미포착 ✗"),
+      "| RS90", "탈락 ✓" if s90 is None else "오탐 ✗")
+
+# 같은 RS99인데 깊은 눌림(다른 모드 탈락)도 슈퍼대장엔 잡혀야
+deep18 = base18 + [peak18 * 0.82]
+df18b = pd.DataFrame({"Open": deep18, "High": [c*1.01 for c in deep18],
+                      "Low": [c*0.99 for c in deep18], "Close": deep18,
+                      "Volume": [1_000_000.0]*len(deep18)})
+sd = analyze_super(df18b, rs_rank=99)
+print("Case18b 깊은눌림도 포착:", f"✓ (상태:{sd['status']})" if sd else "✗")

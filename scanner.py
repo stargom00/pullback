@@ -523,3 +523,90 @@ def analyze_leader(df: pd.DataFrame, rs_rank: int | None = None,
             for x in ma20.iloc[-60:].tolist()
         ],
     }
+
+
+# ══════════════════════════════════════════════════════
+# 슈퍼대장 스캔: RS 95+ 무조건 표시 (위치 불문, 지금 가장 강한 종목들)
+# ══════════════════════════════════════════════════════
+SUPER_CONFIG = {
+    "min_bars": 210,
+    "rs_min": 95,            # 시장 최상위 상대강도만
+}
+
+
+def analyze_super(df: pd.DataFrame, rs_rank: int | None = None,
+                  rs_mom: int | None = None, cfg: dict = SUPER_CONFIG) -> dict | None:
+    """RS 95+ 종목을 위치(신고가/눌림/이평선 부근) 무관하게 모두 포착.
+    현재 상태를 status로 분류해 '담을곳'인지 '대기'인지 판단 보조."""
+    if df is None or len(df) < cfg["min_bars"]:
+        return None
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if len(df) < cfg["min_bars"]:
+        return None
+    if rs_rank is None or rs_rank < cfg["rs_min"]:
+        return None
+
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+    ma10 = c.rolling(10).mean()
+    ma20 = c.rolling(20).mean()
+    ma50 = c.rolling(50).mean()
+    ma200 = c.rolling(200).mean()
+    r = rsi(c)
+
+    close = float(c.iloc[-1])
+    m10, m20, m50, m200 = [float(x.iloc[-1]) for x in (ma10, ma20, ma50, ma200)]
+    cur_rsi = float(r.iloc[-1])
+    if any(math.isnan(x) for x in (m20, m50, m200, cur_rsi)):
+        return None
+
+    high60 = float(c.iloc[-60:].max())
+    dist_from_high = (high60 - close) / high60
+    prev_close = float(c.iloc[-2])
+    change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
+    high_all = float(h.max())
+    at_new_high = close >= high_all * 0.99
+
+    # 상태 분류: 지금 어디에 있나
+    near_ma20 = abs(close - m20) / m20 <= 0.03
+    near_ma50 = abs(close - m50) / m50 <= 0.03
+    if at_new_high or dist_from_high <= 0.03:
+        status = "신고가"          # 달리는 중 — 추격 금지
+    elif near_ma20:
+        status = "20일선 지지"     # 담을곳 후보 (얕은 눌림)
+    elif near_ma50:
+        status = "50일선 지지"     # 담을곳 후보 (깊은 눌림)
+    elif dist_from_high <= 0.15:
+        status = "눌림 진행"       # 아직 지지선 안 닿음 — 대기
+    else:
+        status = "조정 깊음"       # 15% 넘게 빠짐 — 추세 점검 필요
+
+    # 다음 매수 후보가(담을곳): 가장 가까운 아래쪽 이평선
+    below = [x for x in (m10, m20, m50) if x < close]
+    buy_zone = max(below) if below else m20
+
+    score = round(60 * rs_rank / 99 + 20 * (1 - min(dist_from_high / 0.15, 1))
+                  + (10 if at_new_high else 0)
+                  + (10 * max(0.0, min(rs_mom or 0, 30)) / 30), 1)
+
+    return {
+        "mode": "super",
+        "close": round(close, 2),
+        "change_pct": round(change_pct, 2),
+        "score": score,
+        "triggered": False,
+        "setup_score": None,
+        "rs": rs_rank,
+        "rs_mom": rs_mom,
+        "leader": True,
+        "status": status,
+        "at_new_high": at_new_high,
+        "dist_from_high_pct": round(dist_from_high * 100, 1),
+        "buy_zone": round(buy_zone, 2),
+        "rsi": round(cur_rsi, 1),
+        "vol_dry": False,
+        "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
+        "spark_ma20": [
+            None if math.isnan(x) else round(float(x), 4)
+            for x in ma20.iloc[-60:].tolist()
+        ],
+    }
