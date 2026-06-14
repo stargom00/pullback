@@ -632,3 +632,121 @@ def analyze_super(df: pd.DataFrame, rs_rank: int | None = None,
             for x in ma20.iloc[-60:].tolist()
         ],
     }
+
+
+# ══════════════════════════════════════════════════════
+# 돌파 스캔: 베이스(횡보) 직후 박스 천장을 거래량 동반 돌파한 종목
+# (눌림목/슈퍼대장이 못 잡는 "방금 이륙" 구간)
+# ══════════════════════════════════════════════════════
+BREAKOUT_CONFIG = {
+    "min_bars": 210,
+    "rs_min": 80,            # 돌파는 강한 종목만 의미 있음
+    "base_min_len": 20,      # 베이스(횡보) 최소 길이
+    "base_max_range": 0.25,  # 베이스 고저 폭이 25% 이내여야 "타이트한 베이스"
+    "vol_mult": 1.5,         # 돌파일 거래량 ≥ 평균의 1.5배
+    "extended_max": 0.12,    # 피벗 +12% 넘으면 너무 연장 → 제외
+    "valid_zone": 0.05,      # 피벗 +5% 이내 = 매수 유효 구간
+}
+
+
+def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
+                     rs_mom: int | None = None, cfg: dict = BREAKOUT_CONFIG) -> dict | None:
+    """베이스 천장을 거래량 동반 상향 돌파한 종목 포착.
+    돌파 후 +5% 이내=매수 유효, +5~12%=연장(추격주의), +12% 초과=제외."""
+    if df is None or len(df) < cfg["min_bars"]:
+        return None
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if len(df) < cfg["min_bars"]:
+        return None
+    if rs_rank is None or rs_rank < cfg["rs_min"]:
+        return None
+
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+    ma50 = c.rolling(50).mean()
+    ma200 = c.rolling(200).mean()
+    r = rsi(c)
+
+    close = float(c.iloc[-1])
+    m50, m200 = float(ma50.iloc[-1]), float(ma200.iloc[-1])
+    cur_rsi = float(r.iloc[-1])
+    if any(math.isnan(x) for x in (m50, m200, cur_rsi)):
+        return None
+
+    # 상승 추세 위에서의 돌파만 (200일선 위)
+    if close < m200:
+        return None
+
+    # ── 베이스 식별: 돌파일(오늘) 직전 N봉이 횡보였는가 ──
+    # 오늘 봉 제외하고, 그 앞 base_min_len~60봉 구간의 고/저
+    base = c.iloc[-(cfg["base_min_len"] + 1):-1]   # 오늘 직전 베이스 구간
+    if len(base) < cfg["base_min_len"]:
+        return None
+    base_high = float(base.max())
+    base_low = float(base.min())
+    if base_high <= 0:
+        return None
+    base_range = (base_high - base_low) / base_high
+    # 베이스가 너무 넓으면(추세 진행 중) 돌파 베이스 아님
+    if base_range > cfg["base_max_range"]:
+        return None
+
+    # ── 돌파 판정: 오늘 종가가 베이스 천장 위로 ──
+    pivot = base_high          # 돌파한 박스 천장 = 피벗
+    if close <= pivot:
+        return None            # 아직 돌파 안 함
+
+    # 연장도: 피벗 대비 현재가가 얼마나 위인가
+    ext = (close - pivot) / pivot
+    if ext > cfg["extended_max"]:
+        return None            # 너무 연장됨(+12% 초과) → 추격 금지, 제외
+
+    # ── 거래량 동반 확인 ──
+    vol_today = float(v.iloc[-1])
+    vol_avg = float(v.iloc[-51:-1].mean())   # 직전 50봉 평균(오늘 제외)
+    vol_mult = vol_today / vol_avg if vol_avg > 0 else 0.0
+    if vol_mult < cfg["vol_mult"]:
+        return None            # 거래량 없는 돌파 = 가짜 가능성
+
+    prev_close = float(c.iloc[-2])
+    change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
+    in_valid_zone = ext <= cfg["valid_zone"]   # +5% 이내 = 매수 유효
+    base_days = len(base)
+    # 손절: 베이스 천장(피벗) 살짝 아래 = 돌파 실패 기준
+    stop = round(pivot * 0.97, 2)
+    risk_pct = (close - stop) / close * 100 if close > 0 else 0.0
+
+    # 점수 = RS + 거래량 강도 + 유효구간(연장 안 됨) + 베이스 길이
+    score = round(
+        50 * rs_rank / 99
+        + 20 * min(vol_mult / 3.0, 1.0)        # 거래량 3배면 만점
+        + 20 * (1 - min(ext / cfg["valid_zone"], 1.0))   # 피벗에 가까울수록 높음
+        + 10 * min(base_days / 60, 1.0),       # 베이스 길수록(최대 60봉)
+        1)
+
+    return {
+        "mode": "breakout",
+        "close": round(close, 2),
+        "change_pct": round(change_pct, 2),
+        "score": score,
+        "triggered": in_valid_zone,   # 유효구간이면 카드 강조
+        "setup_score": None,
+        "rs": rs_rank,
+        "rs_mom": rs_mom,
+        "leader": True,
+        "pivot": round(pivot, 2),
+        "pivot_type": "베이스 천장",
+        "ext_pct": round(ext * 100, 1),
+        "in_valid_zone": in_valid_zone,
+        "vol_mult": round(vol_mult, 1),
+        "base_days": base_days,
+        "base_range_pct": round(base_range * 100, 1),
+        "stop": stop,
+        "risk_pct": round(risk_pct, 2),
+        "rsi": round(cur_rsi, 1),
+        "vol_dry": False,
+        "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
+        "spark_ma20": [
+            None if math.isnan(x) else round(float(x), 4)
+            for x in c.rolling(20).mean().iloc[-60:].tolist()
+        ],
+    }

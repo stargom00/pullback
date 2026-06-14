@@ -271,3 +271,40 @@ al = load_alerts()
 ok21 = al.get("347850.KQ")=="투경" and al.get("005930.KS")=="투주"
 print("Case21 경보 로더:", "OK ✓" if ok21 else f"오류 ✗ {al}")
 os.remove("alerts_user.txt")  # 정리
+
+# ── Case 22: 돌파 — 베이스 천장 거래량 동반 돌파 (메카로 패턴) ──
+from scanner import analyze_breakout
+rng22 = np.random.default_rng(101)
+# 상승 후 박스 횡보(40봉) → 오늘 돌파
+rally = list(100 * np.cumprod(1 + rng22.normal(0.006, 0.012, 200)))
+box_top = rally[-1]
+box = list(box_top * (1 + rng22.normal(0, 0.025, 25)))  # ±2.5% 횡보 박스
+box = [min(x, box_top * 1.02) for x in box]              # 천장 눌러둠
+today = [max(box) * 1.06]                                 # +6% 돌파
+closes22 = rally + box + today
+vols22 = [1_000_000.0]*225 + [3_500_000.0]               # 돌파일 거래량 3.5배
+df22 = pd.DataFrame({"Open": closes22, "High":[c*1.01 for c in closes22],
+                     "Low":[c*0.99 for c in closes22], "Close": closes22,
+                     "Volume": vols22})
+r22 = analyze_breakout(df22, rs_rank=98, rs_mom=20)
+print("Case22 돌파:", 
+      (f"탐지 ✓ (연장 {r22['ext_pct']}%, 거래량 {r22['vol_mult']}×, 베이스 {r22['base_days']}일, 유효구간 {r22['in_valid_zone']})" if r22 else "미탐지 ✗"))
+
+# ── Case 23: 너무 연장된 돌파(+15%)는 제외 ──
+today_ext = [max(box) * 1.15]
+df23 = pd.DataFrame({"Open": rally+box+today_ext, "High":[c*1.01 for c in rally+box+today_ext],
+                     "Low":[c*0.99 for c in rally+box+today_ext], "Close": rally+box+today_ext,
+                     "Volume": [1e6]*225 + [3.5e6]})
+r23 = analyze_breakout(df23, rs_rank=98)
+print("Case23 과연장(+15%) 제외:", "탈락 ✓ (추격금지)" if r23 is None else f"오탐 ✗ (ext {r23['ext_pct']}%)")
+
+# ── Case 24: 거래량 없는 돌파는 가짜로 제외 ──
+df24 = pd.DataFrame({"Open": closes22, "High":[c*1.01 for c in closes22],
+                     "Low":[c*0.99 for c in closes22], "Close": closes22,
+                     "Volume": [1e6]*226})  # 돌파일도 평균 거래량
+r24 = analyze_breakout(df24, rs_rank=98)
+print("Case24 거래량 없는 돌파 제외:", "탈락 ✓ (가짜 의심)" if r24 is None else "오탐 ✗")
+
+# ── Case 25: RS 낮으면 제외 ──
+r25 = analyze_breakout(df22, rs_rank=60)
+print("Case25 RS60 제외:", "탈락 ✓" if r25 is None else "오탐 ✗")
