@@ -117,8 +117,11 @@ def ud_volume_ratio(c: pd.Series, v: pd.Series, days: int = 10) -> float:
 
 def rs_raw_score(close: pd.Series) -> float | None:
     """
-    IBD 방식 상대강도 원점수: 최근 3개월 수익률에 2배 가중,
-    6/9/12개월 수익률 각 1배. (63/126/189/252 거래일 기준)
+    MarketSmith식에 근접한 상대강도 원점수.
+    최근일수록 무겁게: 1개월 ×0.4 + 3개월 ×0.4(=2개 합쳐 최근분기 강조)
+                      + 6개월 ×0.2 + 9개월 ×0.1 + 12개월 ×0.1.
+    (21/63/126/189/252 거래일 기준)
+    최근 1개월 모멘텀을 별도 반영해, 급등 초입 종목의 RS가 트뷰처럼 빠르게 오름.
     유니버스 전체에서 백분위로 환산해 RS 등급(1~99)이 됨.
     """
     c = close.dropna()
@@ -131,7 +134,12 @@ def rs_raw_score(close: pd.Series) -> float | None:
         past = float(c.iloc[idx])
         return now / past - 1 if past > 0 else 0.0
 
-    return 2 * ret(63) + ret(126) + ret(189) + ret(252)
+    # 최근 가중을 강화 (MarketSmith는 최근 분기에 ~40% 비중)
+    return (0.4 * ret(21)     # 1개월 — 급등 초입 민감도
+            + 0.4 * ret(63)   # 3개월
+            + 0.2 * ret(126)  # 6개월
+            + 0.1 * ret(189)  # 9개월
+            + 0.1 * ret(252)) # 12개월
 
 
 def to_rs_rank(raw_scores: dict[str, float]) -> dict[str, int]:
