@@ -761,6 +761,10 @@ SURGE_CONFIG = {
     "vol_mult": 4.0,         # ★조정 포인트: 거래량 20일평균 N배 (안 나오면 3.0으로)
     "change_min": 7.0,       # ★조정 포인트: 당일 등락률 % 하한 (안 나오면 5.0으로)
     "above_ma200": True,     # 200일선 위만(완전 잡주 제외). False로 풀 수 있음
+    # ── 첫날 포착: 어제까지 "조용했던" 종목만 (이미 며칠 달린 건 제외) ──
+    "quiet_days": 4,         # 오늘 직전 N일을 "조용했나" 검사 구간으로
+    "quiet_vol_max": 2.0,    # 직전 N일 거래량이 평균의 2배 넘었으면 = 이미 터짐(제외)
+    "quiet_run_max": 18.0,   # 직전 N일 누적 상승이 N%를 넘었으면 = 이미 달림(제외)
 }
 
 
@@ -790,7 +794,21 @@ def analyze_surge(df: pd.DataFrame, rs_rank: int | None = None,
     if vol_mult < cfg["vol_mult"]:
         return None
 
-    # ── 3) 최소 필터: 200일선 위 (완전 잡주 제외, 옵션) ──
+    # ── 3) 첫날 포착: 어제까지 조용했나 (이미 며칠 달린 종목 제외) ──
+    qd = cfg["quiet_days"]
+    if len(c) > qd + 21:
+        # (a) 직전 qd일 거래량이 그 이전 20일 평균 대비 조용했나
+        prior_vol_avg = float(v.iloc[-(qd + 21):-(qd + 1)].mean())
+        recent_vol_avg = float(v.iloc[-(qd + 1):-1].mean())
+        if prior_vol_avg > 0 and recent_vol_avg / prior_vol_avg > cfg["quiet_vol_max"]:
+            return None   # 직전 며칠 이미 거래량 터짐 = 첫날 아님
+        # (b) 직전 qd일 누적 상승폭이 과하지 않았나
+        run_start = float(c.iloc[-(qd + 1)])
+        prior_run = (prev_close / run_start - 1) * 100 if run_start > 0 else 0.0
+        if prior_run > cfg["quiet_run_max"]:
+            return None   # 오늘 전에 이미 크게 올랐음 = 첫날 아님
+
+    # ── 4) 최소 필터: 200일선 위 (완전 잡주 제외, 옵션) ──
     ma200 = c.rolling(200).mean()
     m200 = float(ma200.iloc[-1]) if len(c) >= 200 else None
     above_ma200 = (m200 is not None and close > m200)

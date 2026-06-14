@@ -167,7 +167,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.2</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.2.1</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -288,7 +288,7 @@ function card(s) {
       <div class="metric"><div class="k">위꼬리</div><div class="v" style="${s.upper_wick_pct > 3 ? 'color:var(--up)' : ''}">${s.upper_wick_pct}%</div></div>
       <div class="metric"><div class="k">RSI</div><div class="v" style="${s.rsi > 80 ? 'color:var(--up)' : ''}">${s.rsi}</div></div>
     </div>
-    <div class="surge-warn">⚡ 단타 신호 · 추세 아님 — 거래량 급증으로 잡힌 종목. 하루이틀 모멘텀일 수 있고 다음날 꺼질 수 있어요. RS 무관.</div>` : s.mode === 'breakout' ? `
+    <div class="surge-warn">⚡ 단타 신호 · 추세 아님 — 오늘 막 터진 급등 첫날. 하루이틀 모멘텀일 수 있고 다음날 꺼질 수 있어요. RS 무관.</div>` : s.mode === 'breakout' ? `
     <div class="metrics mono">
       <div class="metric"><div class="k">연장도</div><div class="v" style="${s.in_valid_zone ? 'color:var(--green)' : 'color:var(--up)'}">+${s.ext_pct}%${s.in_valid_zone ? ' ✓' : ' ⚠️'}</div></div>
       <div class="metric"><div class="k">거래량</div><div class="v">${s.vol_mult}×</div></div>
@@ -387,7 +387,7 @@ const DESC = {
   leader: 'RS 88+ · 신고가 8% 이내 · 아직 눌림 전 — 지금은 못 사도 눌림 오면 1순위',
   super: 'RS 95+ — 지금 시장에서 가장 강한 종목들 (위치 불문). 상태 라벨로 담을곳/대기 판단',
   breakout: 'RS 80+ · 베이스 천장을 거래량 동반 돌파 · 피벗 +5% 이내=유효 / +5~12%=연장 추격주의',
-  surge: '⚠️ 단타 신호(추세 아님) · 당일 +7%↑ & 거래량 4배↑ · RS 무관 · 하루이틀 모멘텀, 안 이어질 수 있음'
+  surge: '⚠️ 단타 신호(추세 아님) · 급등 첫날 포착: 당일 +7%↑ & 거래량 4배↑ & 직전 며칠은 조용 · RS 무관'
 };
 
 async function load(refresh = false) {

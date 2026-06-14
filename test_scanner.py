@@ -335,3 +335,24 @@ df28 = pd.DataFrame({"Open": closes26, "High":[c*1.01 for c in closes26], "Low":
                      "Close": closes26, "Volume": [1e6]*250 + [2e6]})
 r28 = analyze_surge(df28)
 print("Case28 거래량부족(2배) 제외:", "탈락 ✓" if r28 is None else "오탐 ✗")
+
+# ── Case 29: 급등 첫날만 포착 — 후성(4일째)은 제외, 진짜 첫날은 통과 ──
+from scanner import analyze_surge as _surge2
+rng29 = np.random.default_rng(303)
+base29 = list(100 * np.cumprod(1 + rng29.normal(0.003, 0.011, 250)))  # 조용한 상승
+# (A) 진짜 첫날: 직전 조용 → 오늘 +10% 거래량 5배
+A = base29 + [base29[-1] * 1.10]
+volA = [1_000_000.0]*250 + [5_000_000.0]
+dfA = pd.DataFrame({"Open": A, "High":[c*1.01 for c in A], "Low":[c*0.98 for c in A],
+                    "Close": A, "Volume": volA})
+rA = _surge2(dfA)
+# (B) 후성 패턴: 직전 4일 이미 +50% 급등 + 거래량 폭증 → 오늘도 +10%
+run = [base29[-1]*1.12, base29[-1]*1.25, base29[-1]*1.40, base29[-1]*1.55]
+B = base29 + run + [run[-1]*1.10]
+volB = [1_000_000.0]*250 + [8e6, 9e6, 7e6, 8e6] + [6.7e6]   # 직전 4일 이미 거래량 터짐
+dfB = pd.DataFrame({"Open": B, "High":[c*1.01 for c in B], "Low":[c*0.97 for c in B],
+                    "Close": B, "Volume": volB})
+rB = _surge2(dfB)
+print("Case29 첫날 포착:",
+      ("첫날 통과 ✓" if rA else "첫날 누락 ✗"),
+      "|", ("후행(4일째) 제외 ✓" if rB is None else f"후행 오탐 ✗"))
