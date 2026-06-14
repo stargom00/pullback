@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
+  <link rel="icon" href="data:,">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>눌림목 스캐너</title>
@@ -159,7 +160,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.0</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.0.1</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -194,6 +195,25 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
   <div class="alert-list" id="alertList"></div>
 </div>
 <div id="content"><div class="loading"><div class="spinner"></div>스캔 중…</div></div>
+<div class="jrnl-wrap" id="journalView" style="display:none"></div>
+
+<div class="modal-bg" id="journalModal">
+  <div class="modal">
+    <h3 id="jmTitle">일지에 추가</h3>
+    <div class="sub" id="jmSub"></div>
+    <div class="auto" id="jmAuto"></div>
+    <div class="row">
+      <div><label>진입 가정가</label><input id="jmEntry" inputmode="decimal" placeholder="예: 167000"></div>
+      <div><label>손절가</label><input id="jmStop" inputmode="decimal"></div>
+    </div>
+    <label>진입 근거 (한 줄)</label>
+    <textarea id="jmNote" placeholder="예: 추세선 돌파 + 섹터 동조, 피벗 코앞"></textarea>
+    <div class="actions">
+      <button class="cancel" onclick="closeJournal()">취소</button>
+      <button class="save" onclick="saveJournal()">저장</button>
+    </div>
+  </div>
+</div>
 
 <script>
 const fmtPrice = (p, mkt) => mkt === 'KR'
