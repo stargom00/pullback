@@ -45,6 +45,8 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;
   align-items:center;justify-content:center;z-index:100}
 .modal-bg.open{display:flex}
+.drag-handle{cursor:grab;user-select:none}
+.drag-handle:active{cursor:grabbing}
 .modal{background:var(--surface);border:1px solid var(--line);border-radius:16px;
   padding:24px;width:min(440px,92vw);max-height:90vh;overflow:auto}
 .modal h3{margin:0 0 4px;font-size:17px}
@@ -160,7 +162,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.0.1</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.0.2</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -199,7 +201,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 
 <div class="modal-bg" id="journalModal">
   <div class="modal">
-    <h3 id="jmTitle">일지에 추가</h3>
+    <h3 id="jmTitle" class="drag-handle">일지에 추가 <span style="font-size:11px;color:var(--muted);font-weight:400">⠿ 드래그</span></h3>
     <div class="sub" id="jmSub"></div>
     <div class="auto" id="jmAuto"></div>
     <div class="row">
@@ -471,12 +473,46 @@ function openJournal(ticker) {
   document.getElementById('jmEntry').value = s.pivot != null ? Math.round(s.close) : '';
   document.getElementById('jmStop').value = s.stop != null ? Math.round(s.stop) : '';
   document.getElementById('jmNote').value = '';
+  if (window._resetModalPos) window._resetModalPos();
   document.getElementById('journalModal').classList.add('open');
 }
 function closeJournal() {
   document.getElementById('journalModal').classList.remove('open');
   pendingStock = null;
 }
+
+// ── 모달 드래그 (헤더 잡고 이동) ──
+(function setupModalDrag() {
+  let dragging = false, startX = 0, startY = 0, curX = 0, curY = 0;
+  function onDown(e) {
+    const handle = document.querySelector('#journalModal .drag-handle');
+    if (!handle || !handle.contains(e.target)) return;
+    dragging = true;
+    const pt = e.touches ? e.touches[0] : e;
+    startX = pt.clientX - curX;
+    startY = pt.clientY - curY;
+    e.preventDefault();
+  }
+  function onMove(e) {
+    if (!dragging) return;
+    const pt = e.touches ? e.touches[0] : e;
+    curX = pt.clientX - startX;
+    curY = pt.clientY - startY;
+    const m = document.querySelector('#journalModal .modal');
+    if (m) m.style.transform = `translate(${curX}px, ${curY}px)`;
+  }
+  function onUp() { dragging = false; }
+  document.addEventListener('mousedown', onDown);
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+  document.addEventListener('touchstart', onDown, {passive: false});
+  document.addEventListener('touchmove', onMove, {passive: false});
+  document.addEventListener('touchend', onUp);
+  // 열 때마다 위치 초기화
+  window._resetModalPos = () => { curX = 0; curY = 0;
+    const m = document.querySelector('#journalModal .modal');
+    if (m) m.style.transform = ''; };
+})();
 function saveJournal() {
   const s = pendingStock; if (!s) return;
   const entry = parseFloat(document.getElementById('jmEntry').value) || null;
