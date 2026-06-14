@@ -308,3 +308,30 @@ print("Case24 거래량 없는 돌파 제외:", "탈락 ✓ (가짜 의심)" if 
 # ── Case 25: RS 낮으면 제외 ──
 r25 = analyze_breakout(df22, rs_rank=60)
 print("Case25 RS60 제외:", "탈락 ✓" if r25 is None else "오탐 ✗")
+
+# ── Case 26: 급등 감지 — 당일 +7%↑ & 거래량 4배↑ (원익IPS 패턴) ──
+from scanner import analyze_surge
+rng26 = np.random.default_rng(202)
+base26 = list(100 * np.cumprod(1 + rng26.normal(0.004, 0.012, 250)))  # 200일선 위 유지
+today26 = base26[-1] * 1.24   # +24% 급등 (원익IPS 6/12)
+closes26 = base26 + [today26]
+vols26 = [1_000_000.0]*250 + [5_000_000.0]   # 거래량 5배
+df26 = pd.DataFrame({"Open": closes26, "High":[c*1.01 for c in closes26],
+                     "Low":[c*0.98 for c in closes26], "Close": closes26,
+                     "Volume": vols26})
+r26 = analyze_surge(df26, rs_rank=None)  # RS 무관 확인
+print("Case26 급등감지:", 
+      (f"탐지 ✓ (+{r26['change_pct']}%, 거래량 {r26['vol_mult']}×, RS={r26['rs']})" if r26 else "미탐지 ✗"))
+
+# ── Case 27: 거래량만 크고 등락 약하면(+3%) 제외 ──
+weak = base26 + [base26[-1] * 1.03]
+df27 = pd.DataFrame({"Open": weak, "High":[c*1.01 for c in weak], "Low":[c*0.98 for c in weak],
+                     "Close": weak, "Volume": [1e6]*250 + [5e6]})
+r27 = analyze_surge(df27)
+print("Case27 약한등락(+3%) 제외:", "탈락 ✓" if r27 is None else "오탐 ✗")
+
+# ── Case 28: 등락 크지만 거래량 부족(2배)이면 제외 ──
+df28 = pd.DataFrame({"Open": closes26, "High":[c*1.01 for c in closes26], "Low":[c*0.98 for c in closes26],
+                     "Close": closes26, "Volume": [1e6]*250 + [2e6]})
+r28 = analyze_surge(df28)
+print("Case28 거래량부족(2배) 제외:", "탈락 ✓" if r28 is None else "오탐 ✗")

@@ -82,6 +82,11 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .jtable input.result{width:70px;background:var(--bg);border:1px solid var(--line);
   color:var(--text);padding:4px 6px;border-radius:6px;font-size:12px;font-family:var(--mono)}
 .jrnl-empty{color:var(--muted);text-align:center;padding:60px 20px;line-height:1.7}
+.tab-exp{position:relative}
+.exp-tag{font-size:8px;background:rgba(168,85,247,.25);color:#c084fc;
+  padding:1px 4px;border-radius:4px;margin-left:4px;vertical-align:middle;font-weight:700}
+.surge-warn{background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.3);
+  border-radius:8px;padding:8px 11px;font-size:11px;color:#c084fc;margin-top:8px;line-height:1.5}
 .legend{display:flex;gap:18px;flex-wrap:wrap;padding:0 24px 10px;font-size:12px}
 .legend .lg{color:var(--muted);cursor:help;display:inline-flex;align-items:center;gap:5px}
 .legend .lg-h{color:var(--text);opacity:.7}
@@ -162,7 +167,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.1.1</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.2</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -171,6 +176,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
     <button class="tab" data-mode="turnaround">추세전환</button>
     <button class="tab" data-mode="leader">대장후보</button>
     <button class="tab" data-mode="super">⭐슈퍼대장</button>
+    <button class="tab tab-exp" data-mode="surge">⚡급등<span class="exp-tag">실험</span></button>
     <button class="tab" data-mode="journal">📒 내 일지</button>
   </div>
   <div class="tabs" role="tablist">
@@ -275,7 +281,14 @@ function card(s) {
       <span class="chg ${chgCls}">${chgSign}${s.change_pct}%</span>
     </div>
     ${sparkSVG(s.spark, s.spark_ma20)}
-    ${s.mode === 'breakout' ? `
+    ${s.mode === 'surge' ? `
+    <div class="metrics mono">
+      <div class="metric"><div class="k">당일</div><div class="v" style="color:var(--up)">+${s.change_pct}%</div></div>
+      <div class="metric"><div class="k">거래량</div><div class="v">${s.vol_mult}×</div></div>
+      <div class="metric"><div class="k">위꼬리</div><div class="v" style="${s.upper_wick_pct > 3 ? 'color:var(--up)' : ''}">${s.upper_wick_pct}%</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v" style="${s.rsi > 80 ? 'color:var(--up)' : ''}">${s.rsi}</div></div>
+    </div>
+    <div class="surge-warn">⚡ 단타 신호 · 추세 아님 — 거래량 급증으로 잡힌 종목. 하루이틀 모멘텀일 수 있고 다음날 꺼질 수 있어요. RS 무관.</div>` : s.mode === 'breakout' ? `
     <div class="metrics mono">
       <div class="metric"><div class="k">연장도</div><div class="v" style="${s.in_valid_zone ? 'color:var(--green)' : 'color:var(--up)'}">+${s.ext_pct}%${s.in_valid_zone ? ' ✓' : ' ⚠️'}</div></div>
       <div class="metric"><div class="k">거래량</div><div class="v">${s.vol_mult}×</div></div>
@@ -312,7 +325,13 @@ function card(s) {
       <div class="metric"><div class="k">거래량비</div><div class="v">${s.vol_ratio}×</div></div>
       <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
     </div>`}
-    ${s.mode === 'breakout' ? `
+    ${s.mode === 'surge' ? `
+    <div class="badges">
+      <span class="badge on">⚡ 거래량 ${s.vol_mult}×</span>
+      ${s.new_high ? '<span class="badge on">신고가</span>' : ''}
+      ${s.upper_wick_pct > 3 ? '<span class="badge">윗꼬리 ⚠️</span>' : ''}
+      ${s.rsi > 80 ? '<span class="badge">과열 ⚠️</span>' : ''}
+    </div>` : s.mode === 'breakout' ? `
     <div class="badges">
       <span class="badge on">🚀 돌파</span>
       <span class="badge ${s.in_valid_zone ? 'on' : ''}">${s.in_valid_zone ? '매수 유효구간' : '연장 ⚠️ 추격주의'}</span>
@@ -342,7 +361,7 @@ function card(s) {
       <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
       <div class="metric"><div class="k">리스크</div><div class="v" style="${s.risk_warn ? 'color:var(--up)' : ''}">${s.risk_pct}%${s.risk_warn ? ' ⚠️' : ''}</div></div>
     </div>`}
-    ${(s.mode === 'leader' || s.mode === 'super' || s.mode === 'breakout') ? '' : s.mode === 'turnaround' ? `
+    ${(s.mode === 'leader' || s.mode === 'super' || s.mode === 'breakout' || s.mode === 'surge') ? '' : s.mode === 'turnaround' ? `
     <div class="badges">
       <span class="badge on">정배열 전환</span>
       <span class="badge ${s.rs_mom >= 10 ? 'on' : ''}">RS 개선</span>
@@ -353,7 +372,7 @@ function card(s) {
       <span class="badge ${s.tightening ? 'on' : ''}">변동폭 축소</span>
       <span class="badge ${s.recent_high_ok ? 'on' : ''}">고점 유지</span>${s.tl_break ? '<span class="badge on">추세선 돌파</span>' : ''}
     </div>`}
-    ${(s.mode === 'pullback' || s.mode === 'turnaround' || s.mode === 'breakout') ? `
+    ${(s.mode === 'pullback' || s.mode === 'turnaround' || s.mode === 'breakout' || s.mode === 'surge') ? `
     <button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button>` : ''}
   </div>`;
 }
@@ -367,7 +386,8 @@ const DESC = {
   turnaround: '역배열→정배열 첫 전환(1개월 내) · RS 개선 중 · 200일선 +25% 이내',
   leader: 'RS 88+ · 신고가 8% 이내 · 아직 눌림 전 — 지금은 못 사도 눌림 오면 1순위',
   super: 'RS 95+ — 지금 시장에서 가장 강한 종목들 (위치 불문). 상태 라벨로 담을곳/대기 판단',
-  breakout: 'RS 80+ · 베이스 천장을 거래량 동반 돌파 · 피벗 +5% 이내=유효 / +5~12%=연장 추격주의'
+  breakout: 'RS 80+ · 베이스 천장을 거래량 동반 돌파 · 피벗 +5% 이내=유효 / +5~12%=연장 추격주의',
+  surge: '⚠️ 단타 신호(추세 아님) · 당일 +7%↑ & 거래량 4배↑ · RS 무관 · 하루이틀 모멘텀, 안 이어질 수 있음'
 };
 
 async function load(refresh = false) {
@@ -480,7 +500,7 @@ function openJournal(ticker) {
   if (!s) return;
   pendingStock = s;
   document.getElementById('jmSub').textContent = `${s.name} (${s.ticker}) · ${s.market}`;
-  const tab = s.mode === 'breakout' ? '돌파' : s.mode === 'turnaround' ? '추세전환' : '눌림목';
+  const tab = s.mode === 'surge' ? '급등' : s.mode === 'breakout' ? '돌파' : s.mode === 'turnaround' ? '추세전환' : '눌림목';
   const sig = (s.triggered ? '🔥 트리거 ' : '') + (s.leader ? '👑 ' : '');
   document.getElementById('jmAuto').innerHTML =
     `<b>${tab}</b> 탭 · 섹터 <b>${s.sector || '-'}</b> · RS <b>${s.rs}</b>` +
@@ -542,7 +562,7 @@ function saveJournal() {
     id: Date.now(),
     date: new Date().toISOString().slice(0, 10),
     ticker: s.ticker, name: s.name, market: s.market, sector: s.sector || '',
-    tab: s.mode === 'breakout' ? '돌파' : s.mode === 'turnaround' ? '추세전환' : '눌림목',
+    tab: s.mode === 'surge' ? '급등' : s.mode === 'breakout' ? '돌파' : s.mode === 'turnaround' ? '추세전환' : '눌림목',
     signal: (s.triggered ? '🔥' : '') + (s.leader ? '👑' : ''),
     pivot_type: s.pivot_type || '', setup_score: s.setup_score != null ? Math.round(s.setup_score) : '',
     rs: s.rs, entry, stop,

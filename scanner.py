@@ -750,3 +750,89 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
             for x in c.rolling(20).mean().iloc[-60:].tolist()
         ],
     }
+
+
+# ══════════════════════════════════════════════════════
+# ⚡급등 감지 (실험) — 단타용. 추세추종 아님, RS 무관.
+# "오늘 거래량+가격이 터진 것"만 포착. 신호일 뿐 지속 보장 없음.
+# ══════════════════════════════════════════════════════
+SURGE_CONFIG = {
+    "min_bars": 60,          # 급등은 긴 데이터 불필요(단타)
+    "vol_mult": 4.0,         # ★조정 포인트: 거래량 20일평균 N배 (안 나오면 3.0으로)
+    "change_min": 7.0,       # ★조정 포인트: 당일 등락률 % 하한 (안 나오면 5.0으로)
+    "above_ma200": True,     # 200일선 위만(완전 잡주 제외). False로 풀 수 있음
+}
+
+
+def analyze_surge(df: pd.DataFrame, rs_rank: int | None = None,
+                  rs_mom: int | None = None, cfg: dict = SURGE_CONFIG) -> dict | None:
+    """당일 거래량 급증 + 강한 양봉 포착. RS 무관(단타 신호).
+    ⚠️ 추세 신호 아님 — 하루이틀 모멘텀, 안 이어질 수 있음."""
+    if df is None or len(df) < cfg["min_bars"]:
+        return None
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if len(df) < cfg["min_bars"]:
+        return None
+
+    c, h, lo, v, o = df["Close"], df["High"], df["Low"], df["Volume"], df["Open"]
+    close = float(c.iloc[-1])
+    prev_close = float(c.iloc[-2])
+    change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
+
+    # ── 1) 당일 강한 양봉 ──
+    if change_pct < cfg["change_min"]:
+        return None
+
+    # ── 2) 거래량 급증 (20일 평균 대비) ──
+    vol_today = float(v.iloc[-1])
+    vol_avg = float(v.iloc[-21:-1].mean())   # 직전 20봉 평균(오늘 제외)
+    vol_mult = vol_today / vol_avg if vol_avg > 0 else 0.0
+    if vol_mult < cfg["vol_mult"]:
+        return None
+
+    # ── 3) 최소 필터: 200일선 위 (완전 잡주 제외, 옵션) ──
+    ma200 = c.rolling(200).mean()
+    m200 = float(ma200.iloc[-1]) if len(c) >= 200 else None
+    above_ma200 = (m200 is not None and close > m200)
+    if cfg["above_ma200"] and m200 is not None and not above_ma200:
+        return None
+
+    r = rsi(c)
+    cur_rsi = float(r.iloc[-1])
+
+    # 단타 판단 보조 정보
+    high60 = float(c.iloc[-60:].max())
+    # 위꼬리: 오늘 고가 대비 종가가 얼마나 밀렸나 (고점에서 밀리면 약함)
+    today_high = float(h.iloc[-1])
+    today_open = float(o.iloc[-1])
+    upper_wick = (today_high - close) / today_high * 100 if today_high > 0 else 0.0
+    # 신고가 경신 여부
+    high_all = float(h.iloc[:-1].max())
+    new_high = close > high_all
+
+    # 점수 = 거래량 강도 + 양봉 강도 (RS 무관)
+    score = round(min(vol_mult / 6.0, 1.0) * 50 + min(change_pct / 15.0, 1.0) * 50, 1)
+
+    return {
+        "mode": "surge",
+        "close": round(close, 2),
+        "change_pct": round(change_pct, 2),
+        "score": score,
+        "triggered": new_high,           # 신고가면 강조
+        "setup_score": None,
+        "rs": rs_rank if rs_rank is not None else "-",
+        "rs_mom": rs_mom,
+        "leader": False,
+        "vol_mult": round(vol_mult, 1),
+        "upper_wick_pct": round(upper_wick, 1),
+        "new_high": new_high,
+        "above_ma200": above_ma200,
+        "dist_from_high_pct": round((high60 - close) / high60 * 100, 1) if high60 > 0 else 0.0,
+        "rsi": round(cur_rsi, 1),
+        "vol_dry": False,
+        "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
+        "spark_ma20": [
+            None if math.isnan(x) else round(float(x), 4)
+            for x in c.rolling(20).mean().iloc[-60:].tolist()
+        ],
+    }
