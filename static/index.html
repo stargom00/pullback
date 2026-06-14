@@ -314,7 +314,7 @@ function card(s) {
       <span class="badge ${s.recent_high_ok ? 'on' : ''}">고점 유지</span>${s.tl_break ? '<span class="badge on">추세선 돌파</span>' : ''}
     </div>`}
     ${(s.mode === 'pullback' || s.mode === 'turnaround') ? `
-    <button class="journal-btn" onclick='openJournal(this)' data-stock='${JSON.stringify(s).replace(/'/g, "&#39;")}'>+ 일지에 추가</button>` : ''}
+    <button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button>` : ''}
   </div>`;
 }
 
@@ -406,56 +406,7 @@ function renderCards() {
 }
 
 document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('click', () => {
-  async function loadAlertList() {
-  try {
-    const r = await fetch('/api/alerts'); const data = await r.json();
-    const list = document.getElementById('alertList');
-    const keys = Object.keys(data);
-    list.innerHTML = keys.length
-      ? keys.map(t => `<span class="chip" data-t="${t}" title="클릭하면 삭제">${t} ${data[t]} ✕</span>`).join('')
-      : '<span style="color:var(--muted);font-size:12px">등록된 경보 종목 없음</span>';
-    list.querySelectorAll('.chip').forEach(c => c.addEventListener('click', async () => {
-      await fetch('/api/alerts', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ticker: c.dataset.t, remove: true})});
-      loadAlertList(); load(true);
-    }));
-  } catch(e) {}
-}
-
-document.getElementById('alertAdd').addEventListener('click', async () => {
-  const t = document.getElementById('alertTicker').value.trim();
-  const k = document.getElementById('alertKind').value;
-  if (!t) return;
-  await fetch('/api/alerts', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ticker: t, kind: k})});
-  document.getElementById('alertTicker').value = '';
-  loadAlertList(); load(true);
-});
-
-function renderSectors(summary) {
-  const bar = document.getElementById('sectorbar');
-  if (!summary.length) { bar.innerHTML = ''; return; }
-  const chips = summary.map(s =>
-    `<span class="schip" data-sec="${s.sector}">${s.sector}<b>${s.count}</b></span>`
-  ).join('');
-  bar.innerHTML = chips;
-  bar.querySelectorAll('.schip').forEach(ch => ch.addEventListener('click', () => {
-    const sec = ch.dataset.sec;
-    sectorFilter = (sectorFilter === sec) ? null : sec;
-    bar.querySelectorAll('.schip').forEach(x => x.classList.toggle('on', x.dataset.sec === sectorFilter));
-    renderCards();
-  }));
-}
-
-function renderCards() {
-  const content = document.getElementById('content');
-  const list = sectorFilter ? lastHits.filter(h => h.sector === sectorFilter) : lastHits;
-  content.innerHTML = list.length
-    ? `<div class="grid">${list.map(card).join('')}</div>`
-    : `<div class="empty">${sectorFilter ? `'${sectorFilter}' 섹터에 해당 종목이 없습니다.` : `현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : '눌림목'} 종목이 없습니다.<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.`}</div>`;
-}
-
-document.querySelectorAll('[data-market]').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('[data-market]').forEach(x => x.classList.remove('active'));
   t.classList.add('active');
   market = t.dataset.market;
   load();
@@ -483,8 +434,9 @@ function getJournal() {
 function setJournal(arr) { localStorage.setItem(JKEY, JSON.stringify(arr)); }
 
 let pendingStock = null;
-function openJournal(btn) {
-  const s = JSON.parse(btn.dataset.stock.replace(/&#39;/g, "'"));
+function openJournal(ticker) {
+  const s = lastHits.find(h => h.ticker === ticker);
+  if (!s) return;
   pendingStock = s;
   document.getElementById('jmSub').textContent = `${s.name} (${s.ticker}) · ${s.market}`;
   const tab = s.mode === 'turnaround' ? '추세전환' : '눌림목';
@@ -592,8 +544,8 @@ function exportCSV() {
   const head = ['날짜','티커','종목','시장','섹터','탭','신호','피벗종류','전일점수','RS',
     '진입가','손절','리스크%','경보','진입근거','청산가','결과R','보유일','복기'];
   const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const csv = [head.join(','), ...j.map(r => cols.map(c => esc(r[c])).join(','))].join('\\r\\n');
-  const blob = new Blob(['\\uFEFF' + csv], {type: 'text/csv;charset=utf-8'});
+  const csv = [head.join(','), ...j.map(r => cols.map(c => esc(r[c])).join(','))].join('\r\n');
+  const blob = new Blob(['\uFEFF' + csv], {type: 'text/csv;charset=utf-8'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `눌림목일지_${new Date().toISOString().slice(0,10)}.csv`;
