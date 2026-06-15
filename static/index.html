@@ -91,6 +91,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .fbtn.on{background:var(--amber);color:#000;border-color:var(--amber);font-weight:600}
 .ein{background:#0d1420;border:1px solid var(--line);border-radius:6px;color:var(--text);
   padding:5px 7px;font-size:12px;font-family:inherit;width:64px}
+textarea.ein{line-height:1.5;resize:vertical}
 .edit-btn,.save-btn{cursor:pointer;font-size:13px;margin-right:6px}
 tr.editing{background:rgba(242,179,61,.06)}
 .tab-exp{position:relative}
@@ -178,7 +179,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.4.1</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.4.2</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -699,8 +700,8 @@ function editRow(r) {
     <td class="mono">${r.risk_pct || '-'}</td>
     <td><input id="e_result" class="ein" value="${r.result_r || ''}" placeholder="R" style="width:48px"></td>
     <td><input id="e_held" class="ein" value="${r.held_days || ''}" placeholder="일" style="width:40px"></td>
-    <td><textarea id="e_note" class="ein" style="width:170px;height:48px" placeholder="근거">${r.note || ''}</textarea>
-        <textarea id="e_review" class="ein" style="width:170px;height:48px;margin-top:4px" placeholder="복기">${r.review || ''}</textarea></td>
+    <td><textarea id="e_note" class="ein" style="width:240px;height:90px" placeholder="진입 근거">${r.note || ''}</textarea>
+        <textarea id="e_review" class="ein" style="width:240px;height:90px;margin-top:6px" placeholder="복기 (왜 잘됐나/못됐나)">${r.review || ''}</textarea></td>
     <td style="white-space:nowrap">
       <span class="save-btn" onclick="saveEdit(${r.id})" title="저장">💾</span>
       <span class="del" onclick="editingId=null;renderJournal()" title="취소">↩</span>
