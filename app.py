@@ -1,8 +1,14 @@
 """
-눌림목 스캐너 v3 — 웹 서버
-모드: pullback(눌림목) / turnaround(추세전환)
+눌림목 스캐너 — 웹 서버
+모드: pullback(눌림목) / turnaround(추세전환) / leader / super / breakout / surge
 RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장별)
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
+
+[변경 이력]
+v4.5.0  한국 종목(.KS/.KQ) 데이터 소스를 yfinance → 네이버(naver_kr)로 전환.
+        yfinance 일봉의 한국 장중 지연(전일 종가 고정) 문제 해결.
+        과거 일봉 + 장중 현재가 보정. 미국 종목은 yfinance 유지.
+v4.4.2  (이전 버전)
 """
 import asyncio
 import os
@@ -17,16 +23,26 @@ from fastapi.staticfiles import StaticFiles
 from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, rs_raw_score, to_rs_rank
 from sectors import get_sector
 from universe import get_universe, load_alerts
+import naver_kr
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.4.2"
+VERSION = "v4.5.0"
 CACHE_TTL = 600
 _cache: dict[str, dict] = {}
 _executor = ThreadPoolExecutor(max_workers=12)
 
 
 def _fetch(ticker: str):
+    # 한국 종목(.KS/.KQ)은 네이버, 그 외는 yfinance
+    if naver_kr.is_kr(ticker):
+        try:
+            df = naver_kr.fetch(ticker)
+            if df is None or df.empty:
+                return None
+            return df
+        except Exception:
+            return None
     try:
         df = yf.Ticker(ticker).history(period="1y", interval="1d", auto_adjust=True)
         if df is None or df.empty:

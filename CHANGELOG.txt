@@ -1,0 +1,12 @@
+눌림목 스캐너 변경 이력
+========================
+
+v4.5.0  한국 종목(.KS/.KQ) 데이터 소스를 yfinance → 네이버로 전환
+        - 새 파일: naver_kr.py (네이버 과거 일봉 + 장중 현재가)
+        - 수정: app.py (_fetch 한국/미국 분기), requirements.txt (requests 추가)
+        - 목적: yfinance 한국 장중 지연(전일 종가 고정) 문제 해결
+
+이 폴더의 파일을 프로젝트에 덮어쓴 뒤:
+  git add app.py naver_kr.py requirements.txt
+  git commit -m "v4.5.0 한국 데이터 네이버 전환"
+  git push
