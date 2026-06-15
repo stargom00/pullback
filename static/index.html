@@ -178,7 +178,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.4</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.4.1</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -500,8 +500,16 @@ document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click'
 const JKEY = 'pullback_journal_v1';
 
 function getJournal() {
-  try { return JSON.parse(localStorage.getItem(JKEY) || '[]'); }
-  catch(e) { return []; }
+  try {
+    const arr = JSON.parse(localStorage.getItem(JKEY) || '[]');
+    // 구버전 기록 보정: 새 필드가 없으면 기본값 채움 (편집 가능하도록)
+    return arr.map(r => ({
+      category: (r.tab === '급등') ? '단타' : '추세추종',
+      held_days: '', review: '', exit: '', result_r: '',
+      note: '', signal: '', sector: '', pivot_type: '',
+      ...r  // 기존 값이 있으면 덮어씀 (없는 필드만 위 기본값 유지)
+    }));
+  } catch(e) { return []; }
 }
 function setJournal(arr) { localStorage.setItem(JKEY, JSON.stringify(arr)); }
 

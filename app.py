@@ -20,7 +20,7 @@ from universe import get_universe, load_alerts
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.4"
+VERSION = "v4.4.1"
 CACHE_TTL = 600
 _cache: dict[str, dict] = {}
 _executor = ThreadPoolExecutor(max_workers=12)
