@@ -82,6 +82,17 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .jtable input.result{width:70px;background:var(--bg);border:1px solid var(--line);
   color:var(--text);padding:4px 6px;border-radius:6px;font-size:12px;font-family:var(--mono)}
 .jrnl-empty{color:var(--muted);text-align:center;padding:60px 20px;line-height:1.7}
+.jrnl-stats{display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+.statcard{flex:1;min-width:240px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px}
+.statcard-t{font-size:13px;font-weight:700;margin-bottom:4px}
+.statcard-v{font-size:12px;color:var(--muted)}
+.jrnl-filter{display:flex;gap:8px;margin-bottom:14px}
+.fbtn{padding:6px 14px;border-radius:20px;font-size:12px;cursor:pointer;background:var(--surface);border:1px solid var(--line);color:var(--muted)}
+.fbtn.on{background:var(--amber);color:#000;border-color:var(--amber);font-weight:600}
+.ein{background:#0d1420;border:1px solid var(--line);border-radius:6px;color:var(--text);
+  padding:5px 7px;font-size:12px;font-family:inherit;width:64px}
+.edit-btn,.save-btn{cursor:pointer;font-size:13px;margin-right:6px}
+tr.editing{background:rgba(242,179,61,.06)}
 .tab-exp{position:relative}
 .exp-tag{font-size:8px;background:rgba(168,85,247,.25);color:#c084fc;
   padding:1px 4px;border-radius:4px;margin-left:4px;vertical-align:middle;font-weight:700}
@@ -167,7 +178,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.3.1</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.4</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -563,6 +574,7 @@ function saveJournal() {
     date: new Date().toISOString().slice(0, 10),
     ticker: s.ticker, name: s.name, market: s.market, sector: s.sector || '',
     tab: s.mode === 'surge' ? '급등' : s.mode === 'breakout' ? '돌파' : s.mode === 'turnaround' ? '추세전환' : '눌림목',
+    category: s.mode === 'surge' ? '단타' : '추세추종',
     signal: (s.triggered ? '🔥' : '') + (s.leader ? '👑' : ''),
     pivot_type: s.pivot_type || '', setup_score: s.setup_score != null ? Math.round(s.setup_score) : '',
     rs: s.rs, entry, stop,
@@ -574,52 +586,137 @@ function saveJournal() {
   closeJournal();
 }
 
+function journalStats(list) {
+  const openCount = list.filter(r => r.result_r === '').length;
+  const closed = list.filter(r => r.result_r !== '' && !isNaN(parseFloat(r.result_r)));
+  const avgR = closed.length ? (closed.reduce((a, r) => a + parseFloat(r.result_r), 0) / closed.length).toFixed(2) : '–';
+  const winRate = closed.length ? Math.round(closed.filter(r => parseFloat(r.result_r) > 0).length / closed.length * 100) : '–';
+  return { openCount, closedCount: closed.length, avgR, winRate, total: list.length };
+}
+
+let journalFilter = 'all';  // all | 추세추종 | 단타
+let editingId = null;
+
 function renderJournal() {
   const wrap = document.getElementById('journalView');
-  const j = getJournal();
-  if (!j.length) {
+  const all = getJournal();
+  if (!all.length) {
     wrap.innerHTML = `<div class="jrnl-empty">아직 기록이 없어요.<br>
-      눌림목·추세전환 탭의 카드에서 <b>"+ 일지에 추가"</b>를 눌러 신호를 기록하세요.<br>
+      카드에서 <b>"+ 일지에 추가"</b>를 눌러 신호를 기록하세요.<br>
       진입가·손절·근거만 적으면 나머지는 자동으로 채워집니다.</div>`;
     return;
   }
-  const openCount = j.filter(r => r.result_r === '').length;
-  const closed = j.filter(r => r.result_r !== '' && !isNaN(parseFloat(r.result_r)));
-  const avgR = closed.length ? (closed.reduce((a, r) => a + parseFloat(r.result_r), 0) / closed.length).toFixed(2) : '–';
-  const winRate = closed.length ? Math.round(closed.filter(r => parseFloat(r.result_r) > 0).length / closed.length * 100) : '–';
+  // 카테고리 필터
+  const j = journalFilter === 'all' ? all : all.filter(r => (r.category || '추세추종') === journalFilter);
+  // 카테고리별 통계 (추세추종 / 단타 분리)
+  const trend = journalStats(all.filter(r => (r.category || '추세추종') === '추세추종'));
+  const scalp = journalStats(all.filter(r => (r.category || '추세추종') === '단타'));
+
+  const fbtn = (key, label) => `<button class="fbtn ${journalFilter===key?'on':''}" onclick="journalFilter='${key}';renderJournal()">${label}</button>`;
+
   wrap.innerHTML = `
     <div class="jrnl-tools">
       <button class="exp" onclick="exportCSV()">⬇ CSV 내보내기</button>
       <button onclick="if(confirm('일지를 모두 지울까요? 되돌릴 수 없어요.')){setJournal([]);renderJournal();}">전체 삭제</button>
-      <span class="stat">총 ${j.length}건 · 진행 ${openCount} · 종료 ${closed.length} · 승률 ${winRate}${winRate!=='–'?'%':''} · 평균 ${avgR}R</span>
+    </div>
+    <div class="jrnl-stats">
+      <div class="statcard">
+        <div class="statcard-t">📈 추세추종</div>
+        <div class="statcard-v">총 ${trend.total} · 종료 ${trend.closedCount} · 승률 ${trend.winRate}${trend.winRate!=='–'?'%':''} · 평균 ${trend.avgR}R</div>
+      </div>
+      <div class="statcard">
+        <div class="statcard-t">⚡ 단타</div>
+        <div class="statcard-v">총 ${scalp.total} · 종료 ${scalp.closedCount} · 승률 ${scalp.winRate}${scalp.winRate!=='–'?'%':''} · 평균 ${scalp.avgR}R</div>
+      </div>
+    </div>
+    <div class="jrnl-filter">
+      ${fbtn('all','전체')} ${fbtn('추세추종','📈 추세추종')} ${fbtn('단타','⚡ 단타')}
     </div>
     <div style="overflow-x:auto">
     <table class="jtable">
       <thead><tr>
-        <th>날짜</th><th>종목</th><th>탭</th><th>신호</th><th>섹터</th><th>피벗</th>
+        <th>날짜</th><th>종목</th><th>구분</th><th>탭</th><th>신호</th><th>섹터</th><th>피벗</th>
         <th>전일점수</th><th>RS</th><th>진입가</th><th>손절</th><th>리스크%</th>
-        <th>결과R</th><th>근거/복기</th><th></th>
+        <th>결과R</th><th>보유일</th><th>근거/복기</th><th></th>
       </tr></thead>
       <tbody>
-        ${j.map(r => `<tr class="${r.result_r===''?'open-pos':''}">
-          <td class="mono">${r.date}</td>
-          <td>${r.name}<div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div></td>
-          <td>${r.tab}</td>
-          <td>${r.signal || '-'}</td>
-          <td style="font-size:11px;color:var(--muted)">${r.sector || '-'}</td>
-          <td style="font-size:11px">${r.pivot_type || '-'}</td>
-          <td class="mono">${r.setup_score || '-'}</td>
-          <td class="mono">${r.rs ?? '-'}</td>
-          <td class="mono">${r.entry ?? '-'}</td>
-          <td class="mono">${r.stop ?? '-'}</td>
-          <td class="mono">${r.risk_pct || '-'}</td>
-          <td><input class="result" value="${r.result_r}" placeholder="R"
-              onchange="updateResult(${r.id}, this.value)"></td>
-          <td style="white-space:normal;max-width:200px;font-size:11px;color:var(--muted)">${r.note || ''}</td>
-          <td><span class="del" onclick="delJournal(${r.id})">✕</span></td>
-        </tr>`).join('')}
+        ${j.map(r => r.id === editingId ? editRow(r) : viewRow(r)).join('')}
       </tbody>
     </table></div>`;
+}
+
+function viewRow(r) {
+  const cat = r.category || '추세추종';
+  const catColor = cat === '단타' ? 'color:#c084fc' : 'color:var(--green)';
+  return `<tr class="${r.result_r===''?'open-pos':''}">
+    <td class="mono">${r.date}</td>
+    <td>${r.name}<div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div></td>
+    <td style="font-size:11px;font-weight:600;${catColor}">${cat}</td>
+    <td>${r.tab}</td>
+    <td>${r.signal || '-'}</td>
+    <td style="font-size:11px;color:var(--muted)">${r.sector || '-'}</td>
+    <td style="font-size:11px">${r.pivot_type || '-'}</td>
+    <td class="mono">${r.setup_score || '-'}</td>
+    <td class="mono">${r.rs ?? '-'}</td>
+    <td class="mono">${r.entry ?? '-'}</td>
+    <td class="mono">${r.stop ?? '-'}</td>
+    <td class="mono">${r.risk_pct || '-'}</td>
+    <td class="mono" style="${r.result_r&&parseFloat(r.result_r)>0?'color:var(--up)':r.result_r?'color:var(--down)':''}">${r.result_r || '-'}</td>
+    <td class="mono">${r.held_days || '-'}</td>
+    <td style="white-space:normal;max-width:180px;font-size:11px;color:var(--muted)">${r.note || ''}${r.review?`<br><i style="color:var(--amber)">복기: ${r.review}</i>`:''}</td>
+    <td style="white-space:nowrap">
+      <span class="edit-btn" onclick="editingId=${r.id};renderJournal()" title="수정">✏️</span>
+      <span class="del" onclick="delJournal(${r.id})" title="삭제">✕</span>
+    </td>
+  </tr>`;
+}
+
+function editRow(r) {
+  const cat = r.category || '추세추종';
+  return `<tr class="editing">
+    <td class="mono">${r.date}</td>
+    <td>${r.name}<div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div></td>
+    <td><select id="e_cat" class="ein">
+      <option value="추세추종" ${cat==='추세추종'?'selected':''}>📈 추세추종</option>
+      <option value="단타" ${cat==='단타'?'selected':''}>⚡ 단타</option>
+    </select></td>
+    <td>${r.tab}</td>
+    <td>${r.signal || '-'}</td>
+    <td style="font-size:11px;color:var(--muted)">${r.sector || '-'}</td>
+    <td style="font-size:11px">${r.pivot_type || '-'}</td>
+    <td class="mono">${r.setup_score || '-'}</td>
+    <td class="mono">${r.rs ?? '-'}</td>
+    <td><input id="e_entry" class="ein" value="${r.entry ?? ''}" inputmode="decimal"></td>
+    <td><input id="e_stop" class="ein" value="${r.stop ?? ''}" inputmode="decimal"></td>
+    <td class="mono">${r.risk_pct || '-'}</td>
+    <td><input id="e_result" class="ein" value="${r.result_r || ''}" placeholder="R" style="width:48px"></td>
+    <td><input id="e_held" class="ein" value="${r.held_days || ''}" placeholder="일" style="width:40px"></td>
+    <td><textarea id="e_note" class="ein" style="width:170px;height:48px" placeholder="근거">${r.note || ''}</textarea>
+        <textarea id="e_review" class="ein" style="width:170px;height:48px;margin-top:4px" placeholder="복기">${r.review || ''}</textarea></td>
+    <td style="white-space:nowrap">
+      <span class="save-btn" onclick="saveEdit(${r.id})" title="저장">💾</span>
+      <span class="del" onclick="editingId=null;renderJournal()" title="취소">↩</span>
+    </td>
+  </tr>`;
+}
+
+function saveEdit(id) {
+  const j = getJournal();
+  const r = j.find(x => x.id === id);
+  if (!r) return;
+  r.category = document.getElementById('e_cat').value;
+  const entry = parseFloat(document.getElementById('e_entry').value) || null;
+  const stop = parseFloat(document.getElementById('e_stop').value) || null;
+  r.entry = entry; r.stop = stop;
+  // 진입가·손절 바뀌면 리스크% 재계산
+  if (entry && stop && entry > stop) r.risk_pct = Math.round((entry - stop) / entry * 1000) / 10;
+  r.result_r = document.getElementById('e_result').value.trim();
+  r.held_days = document.getElementById('e_held').value.trim();
+  r.note = document.getElementById('e_note').value.trim();
+  r.review = document.getElementById('e_review').value.trim();
+  setJournal(j);
+  editingId = null;
+  renderJournal();
 }
 
 function updateResult(id, val) {
@@ -628,15 +725,17 @@ function updateResult(id, val) {
   if (r) { r.result_r = val.trim(); setJournal(j); renderJournal(); }
 }
 function delJournal(id) {
+  if (!confirm('이 기록을 삭제할까요?')) return;
   setJournal(getJournal().filter(x => x.id !== id));
+  if (editingId === id) editingId = null;
   renderJournal();
 }
 function exportCSV() {
   const j = getJournal();
   if (!j.length) return;
-  const cols = ['date','ticker','name','market','sector','tab','signal','pivot_type',
+  const cols = ['date','ticker','name','market','sector','tab','category','signal','pivot_type',
     'setup_score','rs','entry','stop','risk_pct','alert','note','exit','result_r','held_days','review'];
-  const head = ['날짜','티커','종목','시장','섹터','탭','신호','피벗종류','전일점수','RS',
+  const head = ['날짜','티커','종목','시장','섹터','탭','구분','신호','피벗종류','전일점수','RS',
     '진입가','손절','리스크%','경보','진입근거','청산가','결과R','보유일','복기'];
   const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const csv = [head.join(','), ...j.map(r => cols.map(c => esc(r[c])).join(','))].join('\r\n');
