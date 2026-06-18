@@ -181,13 +181,11 @@ def _kr_fundamentals(ticker: str) -> dict | None:
                 close_kr = cp
     except Exception:
         pass
-    # 목표주가(TP): 네이버 integration엔 보통 없음. 있으면 사용(없으면 None).
+    # 목표주가(TP): consensusInfo.priceTargetMean (컨센 평균 목표주가)
     tp_kr = None
-    for k in ("targetPrice", "consensusTargetPrice", "tp"):
-        if data.get(k):
-            tp_kr = _num(data.get(k))
-            if tp_kr:
-                break
+    cons = data.get("consensusInfo")
+    if isinstance(cons, dict):
+        tp_kr = _num(cons.get("priceTargetMean"))
 
     # 한국주 과거 PER밴드: 네이버 일봉 + 현재 EPS 근사로 역산 시도
     per_series = None
