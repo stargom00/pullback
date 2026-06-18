@@ -38,6 +38,24 @@ def _sane_per(per: float | None) -> tuple[float | None, str | None]:
     return per, None
 
 
+def _safety_margin(tp: float | None, close: float | None) -> dict:
+    """안전마진 진입가 판정 (유튜브 영상식).
+    컨센 목표주가(TP)에 안전마진 20~30% 적용 → TP×0.7 ~ TP×0.8 구간.
+    현재가가 이 구간 상단(TP×0.8) 이하면 '진입 가능'.
+    반환: {tp, sm_low(×0.7), sm_high(×0.8), sm_enter(bool), sm_upside%}"""
+    if not (isinstance(tp, (int, float)) and tp > 0 and isinstance(close, (int, float)) and close > 0):
+        return {"tp": None, "sm_low": None, "sm_high": None, "sm_enter": None, "sm_upside": None}
+    sm_low = tp * 0.7    # 안전마진 30%
+    sm_high = tp * 0.8   # 안전마진 20%
+    return {
+        "tp": round(tp, 2),
+        "sm_low": round(sm_low, 2),
+        "sm_high": round(sm_high, 2),
+        "sm_enter": close <= sm_high,          # 안전마진 20% 가격 이하면 진입권
+        "sm_upside": round((tp / close - 1) * 100, 1),   # 목표가까지 상승여력 %
+    }
+
+
 def _band_verdict(cur_per: float | None, per_series: pd.Series | None) -> dict:
     """현재 PER을 과거 PER 분포에 대입해 싸다/적정/비싸다 판정."""
     if cur_per is None or cur_per <= 0:
@@ -81,6 +99,8 @@ def _us_fundamentals(ticker: str) -> dict | None:
     fwd_pe = info.get("forwardPE")
     trail_pe = info.get("trailingPE")
     fwd_eps = info.get("forwardEps")
+    tp = info.get("targetMeanPrice")      # 컨센 평균 목표주가
+    close = info.get("currentPrice") or info.get("regularMarketPrice")
 
     # 과거 PER 시계열 = 일별 종가 ÷ EPS(TTM)
     per_series = None
@@ -109,6 +129,9 @@ def _us_fundamentals(ticker: str) -> dict | None:
         "per_flag": trail_flag or fwd_flag,
         "growing": (isinstance(fwd_disp, (int, float)) and isinstance(trail_disp, (int, float))
                     and fwd_disp < trail_disp),   # Fwd<Trail → 이익 성장 예상
+        # 선행 PER 8배 미만이면 '싸다'(영상 기준, 메모리/시클리컬에 특히 유효)
+        "per_cheap": (isinstance(fwd_disp, (int, float)) and fwd_disp < 8),
+        **_safety_margin(tp, close),
         **band,
     }
 
@@ -131,6 +154,7 @@ def _kr_fundamentals(ticker: str) -> dict | None:
         return None
 
     per = pbr = eps = cns_per = cns_eps = None
+    close_kr = None
     # totalInfos value엔 단위가 붙음: "62.63배", "20,484원", "4.99배" → _num()로 제거
     for item in (data.get("totalInfos") or []):
         c = str(item.get("code", ""))
@@ -145,7 +169,25 @@ def _kr_fundamentals(ticker: str) -> dict | None:
             cns_per = v
         elif c == "cnsEps" and cns_eps is None:    # 추정(선행) EPS
             cns_eps = v
+        elif c in ("lastClosePrice", "closePrice") and close_kr is None:
+            close_kr = v
     # ※ 네이버 integration API엔 ROE 필드가 없음 → 미표시.
+    # 현재가: dealTrendInfos(최근 거래일) 우선
+    try:
+        dti = data.get("dealTrendInfos") or []
+        if dti:
+            cp = _num(dti[0].get("closePrice"))
+            if cp:
+                close_kr = cp
+    except Exception:
+        pass
+    # 목표주가(TP): 네이버 integration엔 보통 없음. 있으면 사용(없으면 None).
+    tp_kr = None
+    for k in ("targetPrice", "consensusTargetPrice", "tp"):
+        if data.get(k):
+            tp_kr = _num(data.get(k))
+            if tp_kr:
+                break
 
     # 한국주 과거 PER밴드: 네이버 일봉 + 현재 EPS 근사로 역산 시도
     per_series = None
@@ -175,6 +217,9 @@ def _kr_fundamentals(ticker: str) -> dict | None:
         # 추정PER < 현재PER → 이익 성장 예상 (둘 다 정상 PER일 때만)
         "growing": (isinstance(cns_disp, (int, float)) and isinstance(per_disp, (int, float))
                     and 0 < cns_disp < per_disp),
+        # 추정PER 8배 미만이면 '싸다'(영상 기준)
+        "per_cheap": (isinstance(cns_disp, (int, float)) and cns_disp < 8),
+        **_safety_margin(tp_kr, close_kr),
         **band,
     }
 

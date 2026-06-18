@@ -213,7 +213,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.22.2</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.23.0</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -672,18 +672,30 @@ function renderFund(d) {
   if (d.fwd_pe != null) chips.push(`<span class="fchip">Fwd PER <b>${d.fwd_pe}</b></span>`);
   if (d.pbr != null) chips.push(`<span class="fchip">PBR <b>${d.pbr}</b></span>`);
   if (d.growing === true) chips.push(`<span class="fchip" title="선행 PER<후행 PER → 이익 성장 예상">이익성장 ↑</span>`);
+  if (d.per_cheap === true) chips.push(`<span class="fchip" title="선행(추정) PER 8배 미만 = 이익 대비 저평가. 메모리·시클리컬에 특히 유효">PER 8배↓ 싸다</span>`);
   let vd = '';
   if (d.verdict) {
     const cls = d.verdict === '싸다' ? 'cheap' : (d.verdict === '비싸다' ? 'exp' : 'fair');
     const pos = d.pct_in_band != null ? ` (밴드 ${d.pct_in_band}%)` : '';
     vd = `<span class="vd ${cls}">${d.verdict}${pos}</span>`;
   }
+  // 안전마진 진입가 (목표주가 × 0.7~0.8)
+  let smRow = '';
+  if (d.tp != null && d.sm_high != null) {
+    const fmt = (n) => Math.round(n).toLocaleString('ko-KR');
+    const enterCls = d.sm_enter ? 'cheap' : 'exp';
+    const enterTxt = d.sm_enter ? '진입 가능구간 ✓' : '아직 비쌈';
+    const upTxt = d.sm_upside != null ? ` · 목표가까지 ${d.sm_upside > 0 ? '+' : ''}${d.sm_upside}%` : '';
+    smRow = `<span class="note" style="margin-top:6px">안전마진가 (목표 ${fmt(d.tp)} × 0.7~0.8): `
+      + `<b style="color:var(--text)">${fmt(d.sm_low)} ~ ${fmt(d.sm_high)}</b> `
+      + `<span class="vd ${enterCls}" style="font-size:11px;padding:1px 7px">${enterTxt}</span>${upTxt}</span>`;
+  }
   const bandNote = (d.band_low != null && d.band_high != null)
     ? `<span class="note">PER밴드 25~75%: ${d.band_low} ~ ${d.band_high}</span>` : '';
   const krNote = (d.market === 'KR')
-    ? '<span class="note">한국주는 네이버 기준 ROE 미제공 · PER밴드는 최근 1년 근사예요.</span>' : '';
+    ? '<span class="note">한국주는 네이버 기준 ROE·목표주가 미제공 · PER밴드는 최근 1년 근사예요.</span>' : '';
   const disclaim = '<span class="note">⚠️ 참고용. 진입 판단은 가격·거래량·추세 기준이에요.</span>';
-  return `<div class="row">${chips.join('')}${vd}</div>${bandNote}${krNote}${disclaim}`;
+  return `<div class="row">${chips.join('')}${vd}</div>${smRow}${bandNote}${krNote}${disclaim}`;
 }
 
 document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('click', () => {
