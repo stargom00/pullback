@@ -178,3 +178,48 @@ def fetch(ticker: str) -> pd.DataFrame | None:
                 "Volume": float(df.iloc[-1]["Volume"]),
             }
     return df
+
+
+# ── 지수 (코스피/코스닥) ──────────────────────────────
+# 종목과 경로가 다름: m.stock.naver.com/api/index/{CODE}/basic
+# CODE: KOSPI, KOSDAQ
+_INDEX_CODES = {"KOSPI": "코스피", "KOSDAQ": "코스닥"}
+
+
+def fetch_index(code: str) -> dict | None:
+    """한국 지수 현재값 + 등락. code: 'KOSPI' | 'KOSDAQ'.
+    반환: {"name", "value", "change", "change_pct"} 또는 실패 시 None."""
+    code = code.upper()
+    url = f"https://m.stock.naver.com/api/index/{code}/basic"
+    try:
+        resp = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, dict):
+            return None
+        # 네이버 응답: closePrice(현재값), compareToPreviousClosePrice(등락폭),
+        #              fluctuationsRatio(등락률). 부호는 compareToPreviousPrice.code 등.
+        val = _to_num(data.get("closePrice"))
+        chg = _to_num(data.get("compareToPreviousClosePrice"))
+        pct = _to_num(data.get("fluctuationsRatio"))
+        if val is None:
+            return None
+        # 하락이면 부호 보정 (compareToPreviousPrice.code: '2'=상승 '5'=하락 통상)
+        sign = 1.0
+        cmp = data.get("compareToPreviousPrice")
+        if isinstance(cmp, dict):
+            c = str(cmp.get("code", ""))
+            if c in ("3", "4", "5"):   # 보합/하락 계열
+                sign = -1.0
+        if chg is not None and sign < 0:
+            chg = -abs(chg)
+        if pct is not None and sign < 0:
+            pct = -abs(pct)
+        return {
+            "name": _INDEX_CODES.get(code, code),
+            "value": val,
+            "change": chg,
+            "change_pct": pct,
+        }
+    except (requests.RequestException, ValueError, KeyError):
+        return None

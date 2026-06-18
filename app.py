@@ -5,6 +5,17 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.20.0 (1) R 손익비를 실제 진입가 기준으로 수정 (2) 상단 지수 바 추가.
+        [문제1] 돌파/박스돌파 카드의 손익비 R이 '피벗 진입' 가정이라,
+                이미 피벗 위로 연장된 자리에서 사면 1R(=pivot-stop)이 실제보다
+                작아 손익비가 부풀려짐. 리스크%는 현재가 기준인데 R은 피벗 기준
+                → 한 카드 안에서 분모가 두 개.
+        [해결1] rr_info(entry=) 인자 추가. 이미 돌파한 돌파/박스돌파는
+                entry=close(현재가)로 통일. 눌림목/돌파임박은 피벗 진입이 맞아
+                기존대로 pivot 폴백 유지. 박스돌파 risk_pct도 현재가 기준으로.
+                [검증] MS 예: 옛 1R=$6.67(3%)→ 새 1R=$9.33(4.2%), 실전 2R 정직.
+        [추가2] /api/indices: 코스피·코스닥(네이버 fetch_index) + 나스닥(yf ^IXIC).
+                상단 지수 바, 60초 캐시/갱신. 한국식 색(상승 빨강/하락 파랑).
 v4.19.0 U/D Volume(매집/분산 비율) 추가 — 오닐 지표.
         [추가] up_down_volume(): 최근 50일 상승일거래량÷하락일거래량.
                1.0↑ 매집(기관 매수), 1.0↓ 분산(기관 매도).
@@ -215,7 +226,7 @@ import naver_kr
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.19.0"
+VERSION = "v4.20.0"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -530,6 +541,46 @@ async def debug_ticker(ticker: str):
         },
         "atr_median_pct": round(float(tr.iloc[-14:].median()) / close * 100, 2),
     })
+
+
+_indices_cache: dict = {}
+_INDICES_TTL = 60   # 지수 캐시 60초
+
+
+def _fetch_nasdaq() -> dict | None:
+    """나스닥 종합(^IXIC) 현재값 + 등락. yfinance."""
+    try:
+        df = yf.Ticker("^IXIC").history(period="5d", interval="1d", auto_adjust=False)
+        if df is None or len(df) < 2:
+            return None
+        last = float(df["Close"].iloc[-1])
+        prev = float(df["Close"].iloc[-2])
+        chg = last - prev
+        pct = (last / prev - 1) * 100 if prev > 0 else 0.0
+        return {"name": "나스닥", "value": round(last, 2),
+                "change": round(chg, 2), "change_pct": round(pct, 2)}
+    except Exception:
+        return None
+
+
+@app.get("/api/indices")
+async def indices():
+    """상단 지수 바: 나스닥 / 코스피 / 코스닥. 60초 캐시."""
+    now = time.time()
+    if _indices_cache and now - _indices_cache.get("ts", 0) < _INDICES_TTL:
+        return JSONResponse(_indices_cache["data"])
+
+    loop = asyncio.get_event_loop()
+    nasdaq, kospi, kosdaq = await asyncio.gather(
+        loop.run_in_executor(_executor, _fetch_nasdaq),
+        loop.run_in_executor(_executor, naver_kr.fetch_index, "KOSPI"),
+        loop.run_in_executor(_executor, naver_kr.fetch_index, "KOSDAQ"),
+    )
+    # 순서: 코스피, 코스닥, 나스닥 (국내 먼저)
+    data = {"indices": [x for x in (kospi, kosdaq, nasdaq) if x]}
+    _indices_cache["ts"] = now
+    _indices_cache["data"] = data
+    return JSONResponse(data)
 
 
 @app.get("/")

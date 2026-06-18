@@ -38,6 +38,14 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .statusbar{padding:12px 24px;font-size:12px;color:var(--muted);
   display:flex;gap:16px;flex-wrap:wrap}
 .statusbar b{color:var(--text)}
+.idxbar{display:flex;gap:10px;flex-wrap:wrap;padding:10px 24px;
+  border-bottom:1px solid var(--line);background:var(--surface)}
+.idx{display:flex;align-items:baseline;gap:8px;padding:6px 14px;
+  background:var(--bg);border:1px solid var(--line);border-radius:10px;font-size:13px}
+.idx .nm{color:var(--muted);font-weight:500}
+.idx .vl{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+.idx .ch{font-size:12px;font-variant-numeric:tabular-nums}
+.idx .ch.up{color:var(--up)} .idx .ch.down{color:var(--down)} .idx .ch.flat{color:var(--muted)}
 .journal-btn{width:100%;margin-top:10px;padding:7px;background:transparent;
   border:1px dashed var(--line);color:var(--muted);border-radius:8px;font-size:12px;
   cursor:pointer;font-family:inherit;transition:all .12s}
@@ -190,7 +198,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.19.0</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.20.0</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -211,6 +219,8 @@ tr.editing{background:rgba(242,179,61,.06)}
   </div>
   <button class="refresh" id="refresh">다시 스캔</button>
 </header>
+
+<div class="idxbar" id="idxbar"></div>
 
 <div class="statusbar" id="status"></div>
 <div class="legend" id="legend">
@@ -887,6 +897,36 @@ function exportCSV() {
   a.click();
 }
 document.getElementById('refresh').addEventListener('click', () => load(true));
+
+async function loadIndices() {
+  const bar = document.getElementById('idxbar');
+  try {
+    const res = await fetch('/api/indices');
+    const data = await res.json();
+    const list = (data.indices || []);
+    if (!list.length) { bar.style.display = 'none'; return; }
+    bar.style.display = 'flex';
+    bar.innerHTML = list.map(ix => {
+      const pct = ix.change_pct;
+      const chg = ix.change;
+      // 한국식 색: 상승=빨강(up), 하락=파랑(down)
+      const dir = pct == null ? 'flat' : (pct > 0 ? 'up' : (pct < 0 ? 'down' : 'flat'));
+      const arrow = dir === 'up' ? '▲' : (dir === 'down' ? '▼' : '·');
+      const val = ix.value != null ? Number(ix.value).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}) : '–';
+      const chgStr = (chg != null && pct != null)
+        ? `${arrow} ${Math.abs(chg).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} (${pct > 0 ? '+' : ''}${pct.toFixed(2)}%)`
+        : '–';
+      return `<div class="idx"><span class="nm">${ix.name}</span>`
+        + `<span class="vl">${val}</span>`
+        + `<span class="ch ${dir}">${chgStr}</span></div>`;
+    }).join('');
+  } catch (e) {
+    bar.style.display = 'none';
+  }
+}
+loadIndices();
+setInterval(loadIndices, 60000);   // 60초마다 갱신
+
 load();
 </script>
 </body>

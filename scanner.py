@@ -85,24 +85,28 @@ def volume_info(close: float, v: pd.Series) -> dict:
     }
 
 
-def rr_info(pivot: float, stop: float, h: pd.Series) -> dict:
-    """손익비(R) 계산. '피벗에서 진입' 가정.
-    - 1R(리스크) = 피벗 - 손절
-    - 목표 = 장기 고점(250봉) 우선, 없거나 가까우면 최소 2R로 대체
+def rr_info(pivot: float, stop: float, h: pd.Series, entry: float | None = None) -> dict:
+    """손익비(R) 계산. 실제 진입가 기준.
+    - entry: 실제 매수가. 생략 시 pivot(피벗 진입 가정)으로 폴백.
+      이미 피벗 위로 연장된 자리에서 사면 진짜 리스크는 entry-stop이라
+      pivot 기준 R은 손익비를 부풀린다. → entry 기준으로 통일.
+    - 1R(리스크) = entry - 손절
+    - 목표 = 장기 고점(250봉) 우선, 없거나 가까우면 entry +2R로 대체
     - rr = 목표까지 거리 / 1R
     """
-    risk = pivot - stop
+    entry = entry if (entry and entry > 0) else pivot
+    risk = entry - stop
     if risk <= 0:
         return {"target": None, "rr": None, "target_basis": None}
-    # 장기 고점 (피벗보다 충분히 위면 목표로 사용)
+    # 장기 고점 (진입가보다 충분히 위면 목표로 사용)
     longterm_high = float(h.iloc[-250:].max()) if len(h) >= 20 else float(h.max())
-    if longterm_high > pivot * 1.03:   # 전고가 피벗보다 3%+ 위 → 전고 목표
+    if longterm_high > entry * 1.03:   # 전고가 진입가보다 3%+ 위 → 전고 목표
         target = longterm_high
         basis = "전고"
     else:                               # 신고가 등 → 2R 목표로 대체
-        target = pivot + risk * 2
+        target = entry + risk * 2
         basis = "2R"
-    rr = (target - pivot) / risk
+    rr = (target - entry) / risk
     return {
         "target": round(target, 2),
         "rr": round(rr, 1),
@@ -989,7 +993,7 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
         "base_range_pct": round(base_range * 100, 1),
         "stop": stop,
         "risk_pct": round(risk_pct, 2),
-        **rr_info(pivot, stop, h),
+        **rr_info(pivot, stop, h, entry=close),   # 이미 돌파 → 현재가 진입 기준 R
         "rsi": round(cur_rsi, 1),
         "vol_dry": False,
         "ud_vol": up_down_volume(c, v, 50),
@@ -1102,7 +1106,8 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
 
     # 손절: 박스 상단(피벗) 살짝 아래 = 돌파 실패 기준
     stop = round(pivot * 0.97, 2)
-    risk_pct = (pivot - stop) / pivot * 100 if pivot > 0 else 0.0
+    # 이미 돌파한 상태 → 실제 진입은 현재가. 리스크/손익비 모두 현재가 기준으로 통일.
+    risk_pct = (close - stop) / close * 100 if close > 0 else 0.0
 
     score = round(best["quality"] * 100 * (0.7 + 0.3 * rs_rank / 99), 1)
 
@@ -1125,7 +1130,7 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
         "tl_break_intraday": intraday_unconfirmed,
         "stop": stop,
         "risk_pct": round(risk_pct, 2),
-        **rr_info(pivot, stop, h),
+        **rr_info(pivot, stop, h, entry=close),   # 이미 돌파 → 현재가 진입 기준 R
         "rsi": round(cur_rsi, 1),
         "vol_dry": False,
         "ud_vol": up_down_volume(c, v, 50),
