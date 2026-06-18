@@ -108,6 +108,10 @@ tr.editing{background:rgba(242,179,61,.06)}
 .sectorbar:empty{padding:0}
 .alert-tag{font-size:11px;color:#FF6B6B;background:rgba(255,107,107,.12);
   padding:2px 7px;border-radius:6px;font-weight:600;vertical-align:middle}
+.climax-tag{font-size:11px;padding:2px 7px;border-radius:6px;font-weight:600;
+  vertical-align:middle;margin-left:4px}
+.climax-tag.danger{color:#FF6B6B;background:rgba(255,107,107,.15)}
+.climax-tag.caution{color:#f5c451;background:rgba(245,196,81,.12)}
 .alert-mgr{margin-left:12px;font-size:12px;color:var(--muted);cursor:pointer;
   text-decoration:underline;text-underline-offset:3px}
 .alert-mgr:hover{color:var(--amber)}
@@ -138,6 +142,11 @@ tr.editing{background:rgba(242,179,61,.06)}
   padding:16px;display:flex;flex-direction:column;gap:12px}
 .card:hover{border-color:#33455F}
 .card.fired{border-color:rgba(242,179,61,.55)}
+.card.fav{border-color:rgba(245,196,81,.5);box-shadow:0 0 0 1px rgba(245,196,81,.25)}
+.fav-btn{background:none;border:none;cursor:pointer;font-size:20px;line-height:1;
+  color:var(--muted);padding:0;margin-top:1px;transition:color .15s;flex-shrink:0}
+.fav-btn:hover{color:#f5c451}
+.fav-btn.on{color:#f5c451}
 .card-top{display:flex;align-items:flex-start;gap:12px}
 .name{font-size:15px;font-weight:700;line-height:1.2}
 .tick{font-size:11px;color:var(--muted);margin-top:2px}
@@ -165,6 +174,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 .badge{font-size:10px;padding:3px 8px;border-radius:99px;
   background:var(--surface2);color:var(--muted);border:1px solid var(--line)}
 .badge.on{color:var(--green);border-color:rgba(61,214,140,.35)}
+.badge.warn{color:#f5c451;border-color:rgba(245,196,81,.45);background:rgba(245,196,81,.08)}
 
 .empty{padding:80px 24px;text-align:center;color:var(--muted);font-size:14px}
 .loading{padding:80px 24px;text-align:center;color:var(--muted)}
@@ -173,18 +183,21 @@ tr.editing{background:rgba(242,179,61,.06)}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spinner{animation:none}}
 @media (max-width:600px){header{padding:16px}.grid{padding:0 16px 32px;grid-template-columns:1fr}}
+@media (max-width:600px){#searchBar{padding:0 16px}}
 </style>
 </head>
 <body>
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.4.2</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.18.0</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
-    <button class="tab active" data-mode="pullback">눌림목</button>
+    <button class="tab active" data-mode="imminent">🎯 돌파임박</button>
+    <button class="tab" data-mode="pullback">눌림목</button>
     <button class="tab" data-mode="breakout">🚀 돌파</button>
+    <button class="tab" data-mode="boxbreak">📦 박스돌파</button>
     <button class="tab" data-mode="turnaround">추세전환</button>
     <button class="tab" data-mode="leader">대장후보</button>
     <button class="tab" data-mode="super">⭐슈퍼대장</button>
@@ -215,6 +228,11 @@ tr.editing{background:rgba(242,179,61,.06)}
   <button id="alertAdd">추가</button>
   <div class="alert-list" id="alertList"></div>
 </div>
+<div id="searchBar" style="display:none;padding:0 24px;margin:0 0 14px">
+  <input id="cardSearch" type="text" placeholder="🔍 종목명 또는 코드로 찾기 (예: 삼성, 005930)"
+    style="width:100%;box-sizing:border-box;padding:10px 14px;border-radius:10px;
+    background:var(--surface);border:1px solid var(--line);color:var(--text);font-size:14px;outline:none">
+</div>
 <div id="content"><div class="loading"><div class="spinner"></div>스캔 중…</div></div>
 <div class="jrnl-wrap" id="journalView" style="display:none"></div>
 
@@ -240,6 +258,40 @@ tr.editing{background:rgba(242,179,61,.06)}
 const fmtPrice = (p, mkt) => mkt === 'KR'
   ? Math.round(p).toLocaleString('ko-KR') + '원'
   : '$' + p.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+// 손익비 R 표시: 2R 이상이면 좋음(초록), 1.5 미만이면 나쁨(빨강)
+const fmtRR = (rr) => {
+  if (rr == null) return '<span class="v">-</span>';
+  const color = rr >= 2 ? 'var(--green)' : (rr < 1.5 ? 'var(--up)' : '');
+  const warn = rr < 1.5 ? ' ⚠️' : '';
+  return `<span class="v" style="${color ? 'color:'+color : ''}">${rr}R${warn}</span>`;
+};
+
+// 거래량: 한국은 만/억 주, 미국은 K/M
+const fmtVolume = (vol, mkt) => {
+  if (!vol) return '-';
+  if (mkt === 'KR') {
+    if (vol >= 1e8) return (vol/1e8).toFixed(1) + '억주';
+    if (vol >= 1e4) return (vol/1e4).toFixed(0) + '만주';
+    return Math.round(vol).toLocaleString('ko-KR') + '주';
+  }
+  if (vol >= 1e6) return (vol/1e6).toFixed(1) + 'M';
+  if (vol >= 1e3) return (vol/1e3).toFixed(0) + 'K';
+  return Math.round(vol).toString();
+};
+
+// 거래대금: 한국은 억/조 원, 미국은 $M/$B
+const fmtTurnover = (t, mkt) => {
+  if (!t) return '-';
+  if (mkt === 'KR') {
+    if (t >= 1e12) return (t/1e12).toFixed(2) + '조원';
+    if (t >= 1e8) return (t/1e8).toFixed(0) + '억원';
+    return Math.round(t/1e4).toLocaleString('ko-KR') + '만원';
+  }
+  if (t >= 1e9) return '$' + (t/1e9).toFixed(2) + 'B';
+  if (t >= 1e6) return '$' + (t/1e6).toFixed(1) + 'M';
+  return '$' + Math.round(t).toLocaleString('en-US');
+};
 
 function sparkSVG(closes, ma20) {
   const W = 300, H = 64, PAD = 4;
@@ -277,10 +329,12 @@ function scoreRing(score) {
 function card(s) {
   const chgCls = s.change_pct >= 0 ? 'up' : 'down';
   const chgSign = s.change_pct >= 0 ? '+' : '';
-  return `<div class="card${s.triggered ? ' fired' : ''}">
+  const fav = favorites.includes((s.ticker || '').toUpperCase());
+  return `<div class="card${s.triggered ? ' fired' : ''}${fav ? ' fav' : ''}">
     <div class="card-top">
+      <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기 (최상단 고정)'}">${fav ? '★' : '☆'}</button>
       <div>
-        <div class="name">${s.triggered ? '🔥 ' : ''}${s.leader ? '👑 ' : ''}${s.name}${s.alert ? ` <span class="alert-tag" title="시장경보">⚠️ ${s.alert}</span>` : ''}<span class="mkt">${s.market}</span></div>
+        <div class="name">${s.triggered ? '🔥 ' : ''}${s.leader ? '👑 ' : ''}${s.name}${s.alert ? ` <span class="alert-tag" title="시장경보">⚠️ ${s.alert}</span>` : ''}${s.climax ? ` <span class="climax-tag ${s.climax_level}" title="미너비니 클라이맥스/과열 신호: ${(s.climax_reasons||[]).join(', ')}. 매수보다 매도·경계 구간일 수 있음.">${s.climax_level === 'danger' ? '🛑' : '🔆'} 과열</span>` : ''}<span class="mkt">${s.market}</span></div>
         <div class="tick mono">${s.ticker}${s.sector && s.sector !== '기타' ? ` · ${s.sector}` : ''}</div>
       </div>
       <div style="margin-left:auto;display:flex;flex-direction:column;align-items:center;gap:2px">
@@ -293,6 +347,11 @@ function card(s) {
       <span class="chg ${chgCls}">${chgSign}${s.change_pct}%</span>
     </div>
     ${sparkSVG(s.spark, s.spark_ma20)}
+    ${(s.mode === 'pullback' || s.mode === 'turnaround' || s.mode === 'breakout' || s.mode === 'imminent' || s.mode === 'boxbreak') && (s.volume || s.turnover) ? `
+    <div class="metrics mono" style="padding-bottom:0;border-bottom:none">
+      <div class="metric"><div class="k">거래량</div><div class="v">${fmtVolume(s.volume, s.market)}</div></div>
+      <div class="metric"><div class="k">거래대금</div><div class="v">${fmtTurnover(s.turnover, s.market)}</div></div>
+    </div>` : ''}
     ${s.mode === 'surge' ? `
     <div class="metrics mono">
       <div class="metric"><div class="k">당일</div><div class="v" style="color:var(--up)">+${s.change_pct}%</div></div>
@@ -300,7 +359,19 @@ function card(s) {
       <div class="metric"><div class="k">위꼬리</div><div class="v" style="${s.upper_wick_pct > 3 ? 'color:var(--up)' : ''}">${s.upper_wick_pct}%</div></div>
       <div class="metric"><div class="k">RSI</div><div class="v" style="${s.rsi > 80 ? 'color:var(--up)' : ''}">${s.rsi}</div></div>
     </div>
-    <div class="surge-warn">⚡ 단타 신호 · 추세 아님 — 오늘 막 터진 급등 첫날. 하루이틀 모멘텀일 수 있고 다음날 꺼질 수 있어요. RS 무관.</div>` : s.mode === 'breakout' ? `
+    <div class="surge-warn">⚡ 단타 신호 · 추세 아님 — 오늘 막 터진 급등 첫날. 하루이틀 모멘텀일 수 있고 다음날 꺼질 수 있어요. RS 무관.</div>` : s.mode === 'imminent' ? `
+    <div class="metrics mono">
+      <div class="metric"><div class="k">피벗까지</div><div class="v" style="color:${s.pivot_dist_pct <= 2 ? 'var(--up)' : 'var(--amber)'}">+${s.pivot_dist_pct}%</div></div>
+      <div class="metric"><div class="k">거래량비</div><div class="v" style="${s.vol_dry ? 'color:var(--green)' : ''}">${s.vol_ratio}×</div></div>
+      <div class="metric"><div class="k">RS</div><div class="v" style="color:var(--rs)">${s.rs}</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
+    </div>
+    <div class="metrics mono" style="border-top:none;padding-top:0">
+      <div class="metric"><div class="k">피벗 (${s.pivot_type ?? '천장'})</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
+      <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
+      <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(피벗진입)</span></div><div class="v" style="${s.risk_warn ? 'color:var(--up)' : ''}">${s.risk_pct}%${s.risk_warn ? ' ⚠️' : ''}</div></div>
+      <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
+    </div>` : s.mode === 'breakout' ? `
     <div class="metrics mono">
       <div class="metric"><div class="k">연장도</div><div class="v" style="${s.in_valid_zone ? 'color:var(--green)' : 'color:var(--up)'}">+${s.ext_pct}%${s.in_valid_zone ? ' ✓' : ' ⚠️'}</div></div>
       <div class="metric"><div class="k">거래량</div><div class="v">${s.vol_mult}×</div></div>
@@ -310,8 +381,20 @@ function card(s) {
     <div class="metrics mono" style="border-top:none;padding-top:0">
       <div class="metric"><div class="k">피벗 (베이스 천장)</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
       <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
-      <div class="metric"><div class="k">리스크</div><div class="v" style="${s.risk_pct > 8 ? 'color:var(--up)' : ''}">${s.risk_pct}%${s.risk_pct > 8 ? ' ⚠️' : ''}</div></div>
-      <div class="metric"><div class="k">RS</div><div class="v" style="color:var(--rs)">${s.rs}</div></div>
+      <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(피벗진입)</span></div><div class="v" style="${s.risk_pct > 8 ? 'color:var(--up)' : ''}">${s.risk_pct}%${s.risk_pct > 8 ? ' ⚠️' : ''}</div></div>
+      <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
+    </div>` : s.mode === 'boxbreak' ? `
+    <div class="metrics mono">
+      <div class="metric"><div class="k">연장도</div><div class="v" style="${s.ext_pct <= 5 ? 'color:var(--green)' : 'color:var(--up)'}">+${s.ext_pct}%${s.ext_pct <= 5 ? ' ✓' : ' ⚠️'}</div></div>
+      <div class="metric"><div class="k">거래량</div><div class="v">${s.vol_mult}×</div></div>
+      <div class="metric"><div class="k">박스폭</div><div class="v">${s.box_range_pct}%</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
+    </div>
+    <div class="metrics mono" style="border-top:none;padding-top:0">
+      <div class="metric"><div class="k">피벗 (${s.pivot_type})</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
+      <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
+      <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(피벗진입)</span></div><div class="v" style="${s.risk_pct > 8 ? 'color:var(--up)' : ''}">${s.risk_pct}%${s.risk_pct > 8 ? ' ⚠️' : ''}</div></div>
+      <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
     </div>` : s.mode === 'super' ? `
     <div class="metrics mono">
       <div class="metric"><div class="k">상태</div><div class="v" style="font-size:12px">${s.status}</div></div>
@@ -348,6 +431,17 @@ function card(s) {
       <span class="badge on">🚀 돌파</span>
       <span class="badge ${s.in_valid_zone ? 'on' : ''}">${s.in_valid_zone ? '매수 유효구간' : '연장 ⚠️ 추격주의'}</span>
       <span class="badge ${s.vol_mult >= 2 ? 'on' : ''}">거래량 ${s.vol_mult}×</span>
+    </div>` : s.mode === 'boxbreak' ? `
+    <div class="badges">
+      <span class="badge on">📦 박스돌파 ${s.box_days}일</span>
+      <span class="badge ${s.ext_pct <= 5 ? 'on' : ''}">${s.ext_pct <= 5 ? '매수 유효구간' : '연장 ⚠️ 추격주의'}</span>
+      <span class="badge ${s.vol_mult >= 2 ? 'on' : ''}">거래량 ${s.vol_mult}×</span>${s.tl_break_intraday ? '<span class="badge warn" title="장중에 박스를 넘었지만 종가 확정 전. 마감까지 확인하세요.">장중 돌파 ⚠️</span>' : ''}
+    </div>` : s.mode === 'imminent' ? `
+    <div class="badges">
+      <span class="badge ${s.pivot_dist_pct <= 2 ? 'warn' : 'on'}">🎯 돌파 임박 (피벗 +${s.pivot_dist_pct}%)</span>
+      ${s.touch_count >= 2 ? `<span class="badge on" title="박스 상단(피벗)을 ${s.touch_count}번 두드림 — 매물벽이 약해져 돌파 확률↑">👊 ${s.touch_count}번 두드림</span>` : ''}
+      <span class="badge ${s.vol_dry ? 'on' : ''}">거래량 수축</span>
+      <span class="badge ${s.tightening ? 'on' : ''}">변동폭 축소</span>${s.tl_break_intraday ? '<span class="badge warn" title="장중에 추세선을 넘었지만 종가 확정 전. 마감까지 확인하세요.">장중 돌파 ⚠️</span>' : ''}
     </div>` : s.mode === 'super' ? `
     <div class="badges">
       <span class="badge on">RS ${s.rs}</span>
@@ -371,35 +465,40 @@ function card(s) {
       <div class="metric"><div class="k">RS</div><div class="v" style="color:${s.rs >= 80 ? 'var(--green)' : s.rs >= 65 ? 'var(--amber)' : 'var(--text)'}">${s.rs ?? '-'}${s.rs_mom >= 10 ? ' <span style="color:var(--green)" title="상대강도 개선 중">↗</span>' : ''}</div></div>
       <div class="metric"><div class="k">피벗 (${s.pivot_type ?? '돌파가'})</div><div class="v">${fmtPrice(s.pivot, s.market)} <span style="color:${s.pivot_dist_pct >= 15 ? 'var(--up)' : 'var(--muted)'};font-size:11px">+${s.pivot_dist_pct}%${s.pivot_dist_pct >= 15 ? ' 관찰' : ''}</span></div></div>
       <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
-      <div class="metric"><div class="k">리스크</div><div class="v" style="${s.risk_warn ? 'color:var(--up)' : ''}">${s.risk_pct}%${s.risk_warn ? ' ⚠️' : ''}</div></div>
+      <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(피벗진입)</span></div><div class="v" style="${s.risk_warn ? 'color:var(--up)' : ''}">${s.risk_pct}%${s.risk_warn ? ' ⚠️' : ''}</div></div>
+      <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
     </div>`}
-    ${(s.mode === 'leader' || s.mode === 'super' || s.mode === 'breakout' || s.mode === 'surge') ? '' : s.mode === 'turnaround' ? `
+    ${(s.mode === 'leader' || s.mode === 'super' || s.mode === 'breakout' || s.mode === 'surge' || s.mode === 'imminent' || s.mode === 'boxbreak') ? '' : s.mode === 'turnaround' ? `
     <div class="badges">
       <span class="badge on">정배열 전환</span>
       <span class="badge ${s.rs_mom >= 10 ? 'on' : ''}">RS 개선</span>
-      <span class="badge ${s.vol_ratio >= 1.2 && s.ud >= 1 ? 'on' : ''}">거래량 확장</span>${s.tl_break ? '<span class="badge on">추세선 돌파</span>' : ''}
+      <span class="badge ${s.vol_ratio >= 1.2 && s.ud >= 1 ? 'on' : ''}">거래량 확장</span>${s.tl_break ? '<span class="badge on">추세선 돌파</span>' : (s.tl_break_intraday ? '<span class="badge warn" title="장중에 추세선을 넘었지만 아직 종가 확정 전. 마감까지 위를 지키는지 + 거래량을 확인하세요.">장중 돌파 ⚠️ 미확정</span>' : '')}
     </div>` : `
     <div class="badges">
       <span class="badge ${s.vol_dry ? 'on' : ''}">거래량 수축</span>
       <span class="badge ${s.tightening ? 'on' : ''}">변동폭 축소</span>
-      <span class="badge ${s.recent_high_ok ? 'on' : ''}">고점 유지</span>${s.tl_break ? '<span class="badge on">추세선 돌파</span>' : ''}
+      <span class="badge ${s.recent_high_ok ? 'on' : ''}">고점 유지</span>${s.tl_break ? '<span class="badge on">추세선 돌파</span>' : (s.tl_break_intraday ? '<span class="badge warn" title="장중에 추세선을 넘었지만 아직 종가 확정 전. 마감까지 위를 지키는지 + 거래량을 확인하세요.">장중 돌파 ⚠️ 미확정</span>' : '')}
     </div>`}
-    ${(s.mode === 'pullback' || s.mode === 'turnaround' || s.mode === 'breakout' || s.mode === 'surge') ? `
+    ${(s.mode === 'pullback' || s.mode === 'turnaround' || s.mode === 'breakout' || s.mode === 'surge' || s.mode === 'imminent' || s.mode === 'boxbreak') ? `
     <button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button>` : ''}
   </div>`;
 }
 
 let market = 'all';
-let mode = 'pullback';
+let mode = 'imminent';
 let sectorFilter = null;
+let searchQuery = '';
 let lastHits = [];
+let favorites = [];
 const DESC = {
   pullback: '우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+',
   turnaround: '역배열→정배열 첫 전환(1개월 내) · RS 개선 중 · 200일선 +25% 이내',
   leader: 'RS 88+ · 신고가 8% 이내 · 아직 눌림 전 — 지금은 못 사도 눌림 오면 1순위',
   super: 'RS 95+ — 지금 시장에서 가장 강한 종목들 (위치 불문). 상태 라벨로 담을곳/대기 판단',
   breakout: 'RS 80+ · 베이스 천장을 거래량 동반 돌파 · 피벗 +5% 이내=유효 / +5~12%=연장 추격주의',
-  surge: '⚠️ 단타 신호(추세 아님) · 급등 첫날 포착: 당일 +7%↑ & 거래량 4배↑ & 직전 며칠은 조용 · RS 무관'
+  imminent: '🎯 돌파 직전 · 천장(피벗) 바로 아래(-5%~0%)까지 올라왔지만 아직 안 뚫음 · 거래량 수축=가점 · RS 50+ — 돌파 전날 미리 포착',
+  surge: '⚠️ 단타 신호(추세 아님) · 급등 첫날 포착: 당일 +7%↑ & 거래량 4배↑ & 직전 며칠은 조용 · RS 무관',
+  boxbreak: '📦 박스/하락추세 상단을 거래량(1.5배+) 동반 돌파 · 20/40/60일 박스 모두 확인 · 120일선 위 · RS 70+ — 국장 박스탈출/삼각수렴 돌파'
 };
 
 async function load(refresh = false) {
@@ -421,7 +520,11 @@ async function load(refresh = false) {
       loadAlertList();
     });
     lastHits = data.hits;
+    favorites = data.favorites || [];
     sectorFilter = null;
+    searchQuery = '';
+    const sb = document.getElementById('cardSearch'); if (sb) sb.value = '';
+    document.getElementById('searchBar').style.display = '';
     renderSectors(data.sector_summary || []);
     renderCards();
   } catch (e) {
@@ -444,6 +547,11 @@ async function loadAlertList() {
     }));
   } catch(e) {}
 }
+
+document.getElementById('cardSearch').addEventListener('input', (e) => {
+  searchQuery = e.target.value.trim();
+  renderCards();
+});
 
 document.getElementById('alertAdd').addEventListener('click', async () => {
   const t = document.getElementById('alertTicker').value.trim();
@@ -472,10 +580,33 @@ function renderSectors(summary) {
 
 function renderCards() {
   const content = document.getElementById('content');
-  const list = sectorFilter ? lastHits.filter(h => h.sector === sectorFilter) : lastHits;
+  let list = sectorFilter ? lastHits.filter(h => h.sector === sectorFilter) : lastHits.slice();
+  // 종목명/코드 검색 필터
+  if (searchQuery) {
+    const q = searchQuery.toLowerCase().replace(/\s/g, '');
+    list = list.filter(h =>
+      (h.name || '').toLowerCase().replace(/\s/g, '').includes(q) ||
+      (h.ticker || '').toLowerCase().includes(q)
+    );
+  }
+  // 즐겨찾기를 최상단으로 (원래 순서는 유지하면서 favorite만 위로)
+  const isFav = h => favorites.includes((h.ticker || '').toUpperCase());
+  list.sort((a, b) => (isFav(b) ? 1 : 0) - (isFav(a) ? 1 : 0));
   content.innerHTML = list.length
     ? `<div class="grid">${list.map(card).join('')}</div>`
-    : `<div class="empty">${sectorFilter ? `'${sectorFilter}' 섹터에 해당 종목이 없습니다.` : `현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : '눌림목'} 종목이 없습니다.<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.`}</div>`;
+    : `<div class="empty">${searchQuery ? `'${searchQuery}'(으)로 검색된 종목이 없습니다.<br>이 탭의 스캔 결과 중에서만 검색돼요.` : sectorFilter ? `'${sectorFilter}' 섹터에 해당 종목이 없습니다.` : `현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : '눌림목'} 종목이 없습니다.<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.`}</div>`;
+  // 별 버튼 이벤트 바인딩
+  content.querySelectorAll('.fav-btn').forEach(b => b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const t = b.dataset.ticker;
+    await fetch('/api/favorites', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ticker: t})});
+    // 로컬 즉시 반영 후 재정렬
+    const up = t.toUpperCase();
+    if (favorites.includes(up)) favorites = favorites.filter(f => f !== up);
+    else favorites.push(up);
+    renderCards();
+  }));
 }
 
 document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('click', () => {
@@ -491,6 +622,7 @@ document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click'
   const isJournal = mode === 'journal';
   document.getElementById('content').style.display = isJournal ? 'none' : '';
   document.getElementById('journalView').style.display = isJournal ? 'block' : 'none';
+  document.getElementById('searchBar').style.display = isJournal ? 'none' : '';
   document.getElementById('subDesc').textContent = isJournal
     ? '🔥/추세전환 신호를 기록하고 결과(R)를 추적 — 주말에 CSV로 내보내 구글시트에 백업'
     : DESC[mode];
@@ -520,7 +652,7 @@ function openJournal(ticker) {
   if (!s) return;
   pendingStock = s;
   document.getElementById('jmSub').textContent = `${s.name} (${s.ticker}) · ${s.market}`;
-  const tab = s.mode === 'surge' ? '급등' : s.mode === 'breakout' ? '돌파' : s.mode === 'turnaround' ? '추세전환' : '눌림목';
+  const tab = s.mode === 'surge' ? '급등' : s.mode === 'boxbreak' ? '박스돌파' : s.mode === 'breakout' ? '돌파' : s.mode === 'turnaround' ? '추세전환' : '눌림목';
   const sig = (s.triggered ? '🔥 트리거 ' : '') + (s.leader ? '👑 ' : '');
   document.getElementById('jmAuto').innerHTML =
     `<b>${tab}</b> 탭 · 섹터 <b>${s.sector || '-'}</b> · RS <b>${s.rs}</b>` +
@@ -582,7 +714,7 @@ function saveJournal() {
     id: Date.now(),
     date: new Date().toISOString().slice(0, 10),
     ticker: s.ticker, name: s.name, market: s.market, sector: s.sector || '',
-    tab: s.mode === 'surge' ? '급등' : s.mode === 'breakout' ? '돌파' : s.mode === 'turnaround' ? '추세전환' : '눌림목',
+    tab: s.mode === 'surge' ? '급등' : s.mode === 'boxbreak' ? '박스돌파' : s.mode === 'breakout' ? '돌파' : s.mode === 'turnaround' ? '추세전환' : '눌림목',
     category: s.mode === 'surge' ? '단타' : '추세추종',
     signal: (s.triggered ? '🔥' : '') + (s.leader ? '👑' : ''),
     pivot_type: s.pivot_type || '', setup_score: s.setup_score != null ? Math.round(s.setup_score) : '',

@@ -5,8 +5,109 @@
 추가: 피벗(돌파가) / 손절가 / 리스크 % 계산
 """
 import math
+from datetime import datetime, timezone, timedelta
 
 import pandas as pd
+
+
+# 한국 장중 여부 (KST 09:00~15:30, 평일). 장중 돌파 미확정 배지 판정용.
+_KST = timezone(timedelta(hours=9))
+
+
+def is_kr_market_open(now: datetime | None = None) -> bool:
+    now = now or datetime.now(_KST)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=_KST)
+    now = now.astimezone(_KST)
+    if now.weekday() >= 5:  # 토/일
+        return False
+    minutes = now.hour * 60 + now.minute
+    return 9 * 60 <= minutes <= 15 * 60 + 30
+
+
+def climax_warning(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series) -> dict:
+    """미너비니식 클라이맥스(과열/소진) 경고 감지.
+    급등은 매수가 아니라 '매도/경계' 신호 — 포물선·최대하락일·소진갭·과도이격.
+    반환: {climax: bool, reasons: [..], level: 'none'|'caution'|'danger'}
+    """
+    reasons = []
+    if len(c) < 60:
+        return {"climax": False, "reasons": [], "level": "none"}
+    close = float(c.iloc[-1])
+
+    # 1) 포물선 급등: 최근 10봉 상승률이 과도 (예: +30% 이상)
+    ret10 = close / float(c.iloc[-11]) - 1 if len(c) >= 11 else 0.0
+    if ret10 >= 0.30:
+        reasons.append("포물선급등")
+
+    # 2) 20일선에서 과도 이격 (extended) — 미너비니 '너무 멀면 매수 금지/매도 고려'
+    ma20 = float(c.rolling(20).mean().iloc[-1])
+    ext = (close - ma20) / ma20 if ma20 > 0 else 0.0
+    if ext >= 0.25:
+        reasons.append("이평과열")
+
+    # 3) 최대 하락일: 최근 봉의 일간 하락이 지난 60봉 중 최대급
+    daily_ret = c.pct_change()
+    recent_drop = float(daily_ret.iloc[-1])
+    min_60 = float(daily_ret.iloc[-60:].min())
+    if recent_drop <= min_60 and recent_drop < -0.05:
+        reasons.append("최대급락일")
+
+    # 4) 소진성 거래량: 오늘 거래량이 최근 60봉 최대 + 음봉
+    vol_today = float(v.iloc[-1])
+    vol_max60 = float(v.iloc[-60:].max())
+    if vol_today >= vol_max60 and recent_drop < 0:
+        reasons.append("소진성거래량")
+
+    # 5) RSI 과열 (보조)
+    cur_rsi = float(rsi(c).iloc[-1])
+    if cur_rsi >= 80:
+        reasons.append("RSI과열")
+
+    if not reasons:
+        return {"climax": False, "reasons": [], "level": "none"}
+    # 위험도: 매도 직접 신호(최대급락/소진거래량)가 있으면 danger, 아니면 caution
+    danger = any(r in ("최대급락일", "소진성거래량") for r in reasons)
+    return {
+        "climax": True,
+        "reasons": reasons,
+        "level": "danger" if danger else "caution",
+    }
+
+
+def volume_info(close: float, v: pd.Series) -> dict:
+    """오늘 거래량 + 거래대금(종가×거래량 근사). 카드 표시용."""
+    vol_today = float(v.iloc[-1]) if len(v) else 0.0
+    turnover = close * vol_today   # 거래대금 근사 (종가 기준)
+    return {
+        "volume": round(vol_today),
+        "turnover": round(turnover),
+    }
+
+
+def rr_info(pivot: float, stop: float, h: pd.Series) -> dict:
+    """손익비(R) 계산. '피벗에서 진입' 가정.
+    - 1R(리스크) = 피벗 - 손절
+    - 목표 = 장기 고점(250봉) 우선, 없거나 가까우면 최소 2R로 대체
+    - rr = 목표까지 거리 / 1R
+    """
+    risk = pivot - stop
+    if risk <= 0:
+        return {"target": None, "rr": None, "target_basis": None}
+    # 장기 고점 (피벗보다 충분히 위면 목표로 사용)
+    longterm_high = float(h.iloc[-250:].max()) if len(h) >= 20 else float(h.max())
+    if longterm_high > pivot * 1.03:   # 전고가 피벗보다 3%+ 위 → 전고 목표
+        target = longterm_high
+        basis = "전고"
+    else:                               # 신고가 등 → 2R 목표로 대체
+        target = pivot + risk * 2
+        basis = "2R"
+    rr = (target - pivot) / risk
+    return {
+        "target": round(target, 2),
+        "rr": round(rr, 1),
+        "target_basis": basis,
+    }
 
 
 # ── 설정 ──────────────────────────────────────────────
@@ -38,6 +139,22 @@ def rsi(close: pd.Series, period: int = 14) -> pd.Series:
     loss = (-delta.clip(upper=0)).ewm(alpha=1 / period, adjust=False).mean()
     rs = gain / loss.replace(0, math.nan)
     return 100 - (100 / (1 + rs))
+
+
+def atr(h: pd.Series, lo: pd.Series, c: pd.Series, period: int = 14) -> float:
+    """변동성(하루 변동폭) — 손절폭 산정용.
+    True Range = max(고-저, |고-전일종가|, |저-전일종가|).
+    급등/급락 며칠에 평균이 통째로 끌려가는 문제를 막기 위해
+    평균(mean)이 아니라 중앙값(median)을 사용한다 (이상치에 강건).
+    """
+    prev_c = c.shift(1)
+    tr = pd.concat([
+        h - lo,
+        (h - prev_c).abs(),
+        (lo - prev_c).abs(),
+    ], axis=1).max(axis=1)
+    val = tr.iloc[-period:].median()
+    return float(val) if not math.isnan(val) else 0.0
 
 
 
@@ -75,25 +192,77 @@ def trendline_level(h: pd.Series, lookback: int = 40, order: int = 2):
     return level if level > 0 else None
 
 
-def select_pivot(h, lo, c, close, recent_high_window: int):
+def significant_resistance(h: pd.Series, window: int, min_touches: int = 2,
+                           band: float = 0.02, exclude: int = 2):
+    """'여러 번 부딪힌' 의미있는 저항 가격을 찾는다.
+    단순 최고가(=긴 꼬리 하나=오버슈팅)를 천장으로 잡는 문제를 막기 위함.
+
+    방법: 구간 내 각 봉의 고가를 후보로, 그 가격 ±band 안에 고가가
+    들어온 봉이 min_touches개 이상이면 '진짜 저항'으로 인정.
+    그런 저항 중 가장 높은 값을 반환. 없으면 None (호출부에서 max로 폴백).
+    exclude: 최근 N봉(신고가 갱신 중일 수 있는 봉) 제외.
     """
-    피벗 후보 3종 중 현재가 위에서 가장 가까운 것 선택.
-    - 타이트존: 최근 5봉 고가 (VCP 마지막 수축 상단)
-    - 전고: 최근 N봉 고가
+    if exclude > 0 and len(h) > window + exclude:
+        seg = h.iloc[-(window + exclude):-exclude]
+    elif exclude > 0 and len(h) > exclude:
+        seg = h.iloc[:-exclude]
+    else:
+        seg = h.iloc[-window:]
+    seg = seg.dropna()
+    if len(seg) < min_touches:
+        return None
+    highs = seg.tolist()
+    for level in sorted(highs, reverse=True):   # 높은 가격부터
+        if level <= 0:
+            continue
+        touches = sum(1 for x in highs if abs(x - level) / level <= band)
+        if touches >= min_touches:
+            return level    # 가장 높은 '유효 저항'(2번+ 닿음)
+    return None
+
+
+def select_pivot(h, lo, c, close, recent_high_window: int, is_kr: bool = False):
+    """
+    피벗 후보 중 현재가 위에서 가장 가까운 것 선택.
+    ★ 핵심: 피벗은 '베이스(횡보 구간)의 저항선'이라 고정돼야 한다.
+       그래서 '오늘 포함 최근 며칠'(신고가 갱신 중인 봉)을 제외하고,
+       그 이전 구간의 고점을 피벗으로 삼는다. → 주가가 신고가를 만들어도
+       피벗(과거 천장)이 따라 움직이지 않음.
+    - 베이스 천장(단기): 최근 5봉 고가, 단 직전 2봉(오늘·어제 신고가) 제외
+    - 전고(중기): 최근 N봉 고가, 단 직전 2봉 제외
     - 추세선: 하락 추세선의 오늘 값
-    반환: (pivot, pivot_type, tl_break)
-    tl_break = 최근 3봉 내 추세선 상향 돌파 여부 (미너비니 조기 신호)
+    반환: (pivot, pivot_type, tl_break, tl_break_intraday)
     """
+    EXCLUDE = 2   # 오늘·어제(신고가 갱신 중일 수 있는 봉) 제외
+
     cands = []
-    hi5 = float(h.iloc[-5:].max())
-    cands.append((hi5, "타이트존"))
-    hiN = float(h.iloc[-recent_high_window:].max())
-    cands.append((hiN, "전고"))
+    # 베이스 천장 — 직전 2봉 빼고 그 앞 5봉의 고가 (고정된 단기 저항)
+    if len(h) > EXCLUDE + 5:
+        base_short = float(h.iloc[-(5 + EXCLUDE):-EXCLUDE].max())
+        cands.append((base_short, "베이스천장"))
+    # 전고(중기) — '여러 번 닿은 의미있는 저항' 우선. 긴 꼬리(오버슈팅) 하나는
+    # 천장으로 안 침. 그런 저항이 없으면(진짜 신고가 추세) 단순 최고가로 폴백.
+    if len(h) > EXCLUDE + recent_high_window:
+        sig = significant_resistance(h, recent_high_window, min_touches=2,
+                                     band=0.02, exclude=EXCLUDE)
+        if sig is not None:
+            cands.append((float(sig), "전고"))
+        else:
+            base_long = float(h.iloc[-(recent_high_window + EXCLUDE):-EXCLUDE].max())
+            cands.append((base_long, "전고"))
+    # 안전장치: 후보가 비면(데이터 짧음) 기존 방식으로
+    if not cands:
+        cands.append((float(h.iloc[-5:].max()), "베이스천장"))
+
     tl = trendline_level(h)
     tl_break = False
+    tl_break_intraday = False
     if tl is not None:
         if close > tl and float(c.iloc[-3]) <= tl:
-            tl_break = True          # 갓 돌파 → 배지
+            tl_break = True          # 갓 돌파 (종가 확정) → 배지
+        elif close > tl:
+            if is_kr and is_kr_market_open():
+                tl_break_intraday = True
         elif close <= tl:
             cands.append((tl, "추세선"))
     above = [(p, t) for p, t in cands if p > close * 1.001]
@@ -101,7 +270,7 @@ def select_pivot(h, lo, c, close, recent_high_window: int):
         pivot, ptype = min(above, key=lambda x: x[0])
     else:
         pivot, ptype = max(cands, key=lambda x: x[0])
-    return pivot, ptype, tl_break
+    return pivot, ptype, tl_break, tl_break_intraday
 
 
 def ud_volume_ratio(c: pd.Series, v: pd.Series, days: int = 10) -> float:
@@ -117,29 +286,41 @@ def ud_volume_ratio(c: pd.Series, v: pd.Series, days: int = 10) -> float:
 
 def rs_raw_score(close: pd.Series) -> float | None:
     """
-    MarketSmith식에 근접한 상대강도 원점수.
-    최근일수록 무겁게: 1개월 ×0.4 + 3개월 ×0.4(=2개 합쳐 최근분기 강조)
-                      + 6개월 ×0.2 + 9개월 ×0.1 + 12개월 ×0.1.
-    (21/63/126/189/252 거래일 기준)
-    최근 1개월 모멘텀을 별도 반영해, 급등 초입 종목의 RS가 트뷰처럼 빠르게 오름.
+    IBD / MarketSmith 공식 RS Rating에 맞춘 상대강도 원점수.
+    12개월을 3개월씩 4분기로 나눠, 최근 분기에 2배 가중:
+        RS = 0.4 × Q1수익률 + 0.2 × Q2 + 0.2 × Q3 + 0.2 × Q4
+        (Q1=최근 3개월, Q4=가장 오래된 3개월)
+    이는 IBD가 공개한 RS Rating 가중 공식과 동일하다.
     유니버스 전체에서 백분위로 환산해 RS 등급(1~99)이 됨.
+    (트레이딩뷰 RS Rating과 같은 공식. 단 모집단이 유니버스라 숫자는 다를 수 있음)
     """
     c = close.dropna()
     if len(c) < 200:
         return None
     now = float(c.iloc[-1])
 
-    def ret(days):
+    def price_ago(days):
         idx = -min(days, len(c) - 1) - 1
-        past = float(c.iloc[idx])
-        return now / past - 1 if past > 0 else 0.0
+        return float(c.iloc[idx])
 
-    # 최근 가중을 강화 (MarketSmith는 최근 분기에 ~40% 비중)
-    return (0.4 * ret(21)     # 1개월 — 급등 초입 민감도
-            + 0.4 * ret(63)   # 3개월
-            + 0.2 * ret(126)  # 6개월
-            + 0.1 * ret(189)  # 9개월
-            + 0.1 * ret(252)) # 12개월
+    # 분기 경계 가격 (63거래일 ≈ 3개월)
+    p0 = now                 # 현재
+    p3 = price_ago(63)       # 3개월 전
+    p6 = price_ago(126)      # 6개월 전
+    p9 = price_ago(189)      # 9개월 전
+    p12 = price_ago(252)     # 12개월 전
+
+    if min(p3, p6, p9, p12) <= 0:
+        return None
+
+    # 각 분기 수익률
+    q1 = p0 / p3 - 1    # 최근 3개월
+    q2 = p3 / p6 - 1    # 직전 3개월
+    q3 = p6 / p9 - 1
+    q4 = p9 / p12 - 1   # 가장 오래된 3개월
+
+    # IBD 가중: 최근 분기 2배 (0.4 + 0.2 + 0.2 + 0.2 = 1.0)
+    return 0.4 * q1 + 0.2 * q2 + 0.2 * q3 + 0.2 * q4
 
 
 def to_rs_rank(raw_scores: dict[str, float]) -> dict[str, int]:
@@ -155,7 +336,7 @@ def to_rs_rank(raw_scores: dict[str, float]) -> dict[str, int]:
     return ranks
 
 
-def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = None, cfg: dict = CONFIG, _setup_eval: bool = False) -> dict | None:
+def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = None, cfg: dict = CONFIG, _setup_eval: bool = False, is_kr: bool = False) -> dict | None:
     """
     일봉 DataFrame(Open/High/Low/Close/Volume)을 받아
     눌림목 조건 충족 여부와 점수를 반환. 미충족이면 None.
@@ -259,7 +440,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
 
     # ── 8) 피벗 / 손절 / 리스크 ──
     pw = cfg["pivot_window"]
-    pivot, pivot_type, tl_break = select_pivot(h, lo, c, close, pw)
+    pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, pw, is_kr=is_kr)
     pullback_low = float(lo.iloc[-pw:].min())  # 눌림 저점
     # 손절 = 눌림 저점과 지지 이평선(1% 이탈 허용) 중 더 높은 쪽
     # 단, 현재가보다 위에 있는 후보는 제외 (가격이 지지선 살짝 아래일 때 방지)
@@ -290,7 +471,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     # 전날 셋업 점수: 오늘 봉을 빼고 재평가 (🔥 카드 표시용, 재귀 1회 제한)
     setup_score = None
     if triggered and not _setup_eval:
-        prev = analyze(df.iloc[:-1], rs_rank=rs_rank, rs_mom=rs_mom, cfg=cfg, _setup_eval=True)
+        prev = analyze(df.iloc[:-1], rs_rank=rs_rank, rs_mom=rs_mom, cfg=cfg, _setup_eval=True, is_kr=is_kr)
         if prev:
             setup_score = prev["score"]
 
@@ -315,11 +496,14 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "pivot": round(pivot, 2),
         "pivot_type": pivot_type,
         "tl_break": tl_break,
+        "tl_break_intraday": tl_break_intraday,
         "ud": ud_volume_ratio(c, v),
         "pivot_dist_pct": round(pivot_dist_pct, 2),
         "stop": round(stop, 2),
         "risk_pct": round(risk_pct, 2),
+        **rr_info(pivot, stop, h),
         "risk_warn": risk_pct > 8.0,
+        **volume_info(close, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
             None if math.isnan(x) else round(float(x), 4)
@@ -340,7 +524,7 @@ TURN_CONFIG = {
 
 
 def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
-                       rs_mom: int | None = None, cfg: dict = TURN_CONFIG, _setup_eval: bool = False) -> dict | None:
+                       rs_mom: int | None = None, cfg: dict = TURN_CONFIG, _setup_eval: bool = False, is_kr: bool = False) -> dict | None:
     """역배열에서 정배열(20>60>200, 종가>200일선)로 갓 전환한 종목 탐지"""
     if df is None or len(df) < cfg["min_bars"]:
         return None
@@ -391,7 +575,7 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
     vol_ratio = vol10 / vol50 if vol50 > 0 else 0.0
 
     # 피벗: 20봉 고가/타이트존/하락추세선 중 가장 가까운 트리거, 손절은 60일선 -2%
-    pivot, pivot_type, tl_break = select_pivot(h, lo, c, close, 20)
+    pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, 20, is_kr=is_kr)
     ud = ud_volume_ratio(c, v)
     stop = m60 * 0.98
     candidates = [x for x in (stop, float(lo.iloc[-10:].min())) if x < close]
@@ -414,7 +598,7 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
     triggered = change_pct >= 4.0 and (tl_break or pivot_dist_pct <= 2.0)
     setup_score = None
     if triggered and not _setup_eval:
-        prev = analyze_turnaround(df.iloc[:-1], rs_rank=rs_rank, rs_mom=rs_mom, cfg=cfg, _setup_eval=True)
+        prev = analyze_turnaround(df.iloc[:-1], rs_rank=rs_rank, rs_mom=rs_mom, cfg=cfg, _setup_eval=True, is_kr=is_kr)
         if prev:
             setup_score = prev["score"]
 
@@ -436,11 +620,14 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
         "pivot": round(pivot, 2),
         "pivot_type": pivot_type,
         "tl_break": tl_break,
+        "tl_break_intraday": tl_break_intraday,
         "ud": ud,
         "pivot_dist_pct": round(pivot_dist_pct, 2),
         "stop": round(stop, 2),
         "risk_pct": round(risk_pct, 2),
+        **rr_info(pivot, stop, h),
         "risk_warn": risk_pct > 15.0,
+        **volume_info(close, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
             None if math.isnan(x) else round(float(x), 4)
@@ -750,8 +937,10 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
         "base_range_pct": round(base_range * 100, 1),
         "stop": stop,
         "risk_pct": round(risk_pct, 2),
+        **rr_info(pivot, stop, h),
         "rsi": round(cur_rsi, 1),
         "vol_dry": False,
+        **volume_info(close, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
             None if math.isnan(x) else round(float(x), 4)
@@ -761,7 +950,276 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
 
 
 # ══════════════════════════════════════════════════════
-# ⚡급등 감지 (실험) — 단타용. 추세추종 아님, RS 무관.
+# 📦 박스 돌파 (box breakout) — 횡보 박스/하락추세 상단을 거래량 동반 돌파
+# 국장에서 자주 나오는 패턴: 일정 기간 눌려있다 거래량 터지며 위로 탈출.
+# 짧/중/장(20/40/60봉) 박스를 모두 보고, 하나라도 돌파면 포착.
+# 돌파임박(돌파 전)과 달리 '이미 박스 상단을 뚫은' 상태.
+# 급등(가온전선 +29%)도 돌파면 포함. 장중 돌파도 표시(미확정 배지).
+# ══════════════════════════════════════════════════════
+BOXBREAK_CONFIG = {
+    "min_bars": 140,         # 120일선 + 여유
+    "rs_min": 70,            # 박스 탈출은 강한 종목이 크게 감 (미너비니 기준)
+    "box_windows": [20, 40, 60],   # 짧/중/장 박스 동시 확인
+    "box_max_range": 0.30,   # 박스 고저폭 ≤30% (국장 변동성 고려, 너무 넓으면 박스 아님)
+    "vol_mult": 1.5,         # 돌파일 거래량 ≥ 평균 1.5배 (박스돌파의 핵심)
+    "ma_long": 120,          # 장기선(120일) 위 — "장기선 위 박스탈출은 크게 간다"
+}
+
+
+def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
+                     rs_mom: int | None = None, cfg: dict = BOXBREAK_CONFIG,
+                     is_kr: bool = False) -> dict | None:
+    """횡보 박스(또는 하락 후 횡보)의 상단을 거래량 동반 돌파한 종목.
+    20/40/60봉 박스를 모두 검사해 '가장 의미있는(좁고 긴) 박스'의 돌파를 잡는다."""
+    if df is None or len(df) < cfg["min_bars"]:
+        return None
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if len(df) < cfg["min_bars"]:
+        return None
+    if rs_rank is None or rs_rank < cfg["rs_min"]:
+        return None
+
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+    close = float(c.iloc[-1])
+    ma_long = c.rolling(cfg["ma_long"]).mean()
+    m_long = float(ma_long.iloc[-1])
+    if math.isnan(m_long):
+        return None
+
+    # 장기선(120일) 위에서의 돌파만 — 추세 살아있는 박스 탈출
+    if close < m_long:
+        return None
+
+    # ── 거래량 동반 (박스돌파의 생명) ──
+    vol_today = float(v.iloc[-1])
+    vol_avg = float(v.iloc[-51:-1].mean())   # 직전 50봉 평균(오늘 제외)
+    vol_mult = vol_today / vol_avg if vol_avg > 0 else 0.0
+    if vol_mult < cfg["vol_mult"]:
+        return None
+
+    # ── 20/40/60봉 박스를 각각 검사, 돌파한 것 중 최선을 선택 ──
+    # "최선" = 박스가 좁고(타이트) 길수록 의미있는 탈출
+    best = None
+    for win in cfg["box_windows"]:
+        if len(c) < win + 2:
+            continue
+        # 박스 상단은 '여러 번 닿은 의미있는 저항'으로 (긴 꼬리=오버슈팅 제외).
+        # 그런 저항이 없으면 단순 고가 최고치로 폴백.
+        box_h = h.iloc[-(win + 1):-1]        # 오늘 직전 win봉 (고가)
+        box_l = lo.iloc[-(win + 1):-1]       # (저가)
+        sig_high = significant_resistance(h, win, min_touches=2, band=0.02, exclude=1)
+        box_high = float(sig_high) if sig_high is not None else float(box_h.max())
+        box_low = float(box_l.min())
+        if box_high <= 0:
+            continue
+        box_range = (box_high - box_low) / box_high
+        if box_range > cfg["box_max_range"]:
+            continue                          # 박스가 너무 넓음 → 박스 아님
+        # 돌파 판정: 현재가가 박스 상단(의미있는 저항)을 +0.5% 이상 확실히 넘어야.
+        if close <= box_high * 1.005:
+            continue
+        ext = (close - box_high) / box_high   # 박스 상단 대비 얼마나 위
+        tightness = 1 - min(box_range / cfg["box_max_range"], 1.0)
+        quality = tightness * 0.5 + min(win / 60, 1.0) * 0.3 + min(vol_mult / 3, 1.0) * 0.2
+        cand = {
+            "win": win, "box_high": box_high, "box_low": box_low,
+            "box_range": box_range, "ext": ext, "quality": quality,
+        }
+        if best is None or cand["quality"] > best["quality"]:
+            best = cand
+
+    if best is None:
+        return None   # 어떤 박스도 돌파 안 함
+
+    pivot = best["box_high"]   # 돌파한 박스 상단 = 피벗
+    ext = best["ext"]
+
+    # 장중 돌파 미확정 여부 (한국 장중 + 종가 아직 안 굳음)
+    intraday_unconfirmed = False
+    if is_kr and is_kr_market_open():
+        # 오늘 종가가 아직 확정 전이고 현재가로 막 넘었으면 미확정
+        prev_high = float(h.iloc[-2]) if len(h) >= 2 else pivot
+        if close > pivot and prev_high <= pivot:
+            intraday_unconfirmed = True
+
+    r = rsi(c)
+    cur_rsi = float(r.iloc[-1])
+    prev_close = float(c.iloc[-2])
+    change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
+
+    # 손절: 박스 상단(피벗) 살짝 아래 = 돌파 실패 기준
+    stop = round(pivot * 0.97, 2)
+    risk_pct = (pivot - stop) / pivot * 100 if pivot > 0 else 0.0
+
+    score = round(best["quality"] * 100 * (0.7 + 0.3 * rs_rank / 99), 1)
+
+    return {
+        "mode": "boxbreak",
+        "close": round(close, 2),
+        "change_pct": round(change_pct, 2),
+        "score": score,
+        "triggered": ext <= 0.05,    # 박스 상단 +5% 이내면 매수 유효구간 강조
+        "setup_score": None,
+        "rs": rs_rank,
+        "rs_mom": rs_mom,
+        "leader": True,
+        "pivot": round(pivot, 2),
+        "pivot_type": f"박스상단 {best['win']}일",
+        "ext_pct": round(ext * 100, 1),
+        "vol_mult": round(vol_mult, 1),
+        "box_days": best["win"],
+        "box_range_pct": round(best["box_range"] * 100, 1),
+        "tl_break_intraday": intraday_unconfirmed,
+        "stop": stop,
+        "risk_pct": round(risk_pct, 2),
+        **rr_info(pivot, stop, h),
+        "rsi": round(cur_rsi, 1),
+        "vol_dry": False,
+        **volume_info(close, v),
+        "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
+        "spark_ma20": [
+            None if math.isnan(x) else round(float(x), 4)
+            for x in c.rolling(20).mean().iloc[-60:].tolist()
+        ],
+    }
+
+
+# ══════════════════════════════════════════════════════
+# 🎯 돌파 임박 (pre-breakout) — 천장 코앞 + 거래량 수축
+# 박스 천장/전고/추세선 바로 아래(-5%~0%)까지 올라왔지만 아직 안 뚫은,
+# "돌파 직전 대기" 종목. 돌파 전날 미리 잡으려는 용도.
+# ══════════════════════════════════════════════════════
+IMMINENT_CONFIG = {
+    "min_bars": 210,
+    "rs_min": 50,            # 돌파 직전 대기 — 폭넓게 보여줌 (주도주 여부는 RS 표시로 판단)
+    "near_min": -0.05,   # 피벗 대비 현재가 하한 (-5%: 천장 5% 아래까지)
+    "near_max": 0.0,     # 상한 0%: 아직 안 뚫음 (피벗 이하)
+    "pivot_window": 20,
+    "vol_contraction": 0.8,  # 거래량 3일/20일 비율이 이 이하면 '수축' 가점
+}
+
+
+def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
+                     rs_mom: int | None = None, cfg: dict = IMMINENT_CONFIG,
+                     is_kr: bool = False) -> dict | None:
+    """천장(피벗) 바로 아래까지 올라왔지만 아직 안 뚫은 '돌파 직전' 종목.
+    피벗 대비 -5%~0% 구간 + 우상향 추세. 거래량 수축은 가점(필수 아님)."""
+    if df is None or len(df) < cfg["min_bars"]:
+        return None
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if len(df) < cfg["min_bars"]:
+        return None
+    if rs_rank is None or rs_rank < cfg["rs_min"]:
+        return None
+
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+    ma20 = c.rolling(20).mean()
+    ma60 = c.rolling(60).mean()
+    ma200 = c.rolling(200).mean()
+    r = rsi(c)
+
+    close = float(c.iloc[-1])
+    m20, m60, m200 = float(ma20.iloc[-1]), float(ma60.iloc[-1]), float(ma200.iloc[-1])
+    cur_rsi = float(r.iloc[-1])
+    if any(math.isnan(x) for x in (m20, m60, m200, cur_rsi)):
+        return None
+
+    # ── 1) 우상향 추세 (정배열 기반) ──
+    if close < m200:
+        return None
+    if not (m20 > m60):
+        return None
+
+    # ── 2) 피벗 근접 (천장 코앞이지만 아직 안 뚫음) ──
+    pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, cfg["pivot_window"], is_kr=is_kr)
+    near = (close - pivot) / pivot if pivot > 0 else -1.0   # 음수면 피벗 아래
+    if not (cfg["near_min"] <= near <= cfg["near_max"]):
+        return None   # -5%~0% 밖이면 탈락 (멀거나 이미 돌파)
+
+    # ── 2-b) 박스 상단(피벗) 두드림 횟수 ──
+    # 최근 20봉 중 고가가 피벗 ±2% 안에 들어온(=천장을 찔러본) 봉의 수.
+    # 여러 번 두드릴수록 매물벽이 약해져 돌파 확률↑ (미너비니/오닐).
+    # 연속된 두드림은 1회로 묶어 과다 집계 방지.
+    touch_band = pivot * 0.02
+    touched = (h.iloc[-20:] >= pivot - touch_band)   # 피벗 -2% 위로 고가가 닿음
+    touch_count = 0
+    prev = False
+    for t in touched.tolist():
+        if t and not prev:
+            touch_count += 1   # 새로 닿기 시작한 구간마다 +1
+        prev = t
+
+    # ── 3) 거래량 수축 여부 (가점용, 필수 아님) ──
+    vol3 = float(v.iloc[-3:].mean())
+    vol20 = float(v.iloc[-20:].mean())
+    vol_ratio = vol3 / vol20 if vol20 > 0 else 9.9
+    vol_dry = vol_ratio <= cfg["vol_contraction"]
+
+    # ── 4) 변동폭 축소(VCP): 최근 5봉 변동폭이 그 전 5봉보다 작은가 ──
+    rng_recent = float((h.iloc[-5:] - lo.iloc[-5:]).mean())
+    rng_prev = float((h.iloc[-10:-5] - lo.iloc[-10:-5]).mean())
+    tightening = rng_recent < rng_prev if rng_prev > 0 else False
+
+    # ── 손절 / 리스크 ──
+    # 단순 방식(손절 정교화 이전): 최근 저점 / 20일선 -2% 중 현재가 아래 가장 높은 것.
+    # 손절폭은 참고용 — 실제 진입/거름 판단은 사용자가 차트로.
+    pullback_low = float(lo.iloc[-cfg["pivot_window"]:].min())
+    candidates = [x for x in (pullback_low, m20 * 0.98) if x < close]
+    stop = max(candidates) if candidates else pullback_low
+    pivot_dist_pct = (pivot - close) / close * 100   # 현재가→피벗 남은 거리(양수)
+    risk_pct = (pivot - stop) / pivot * 100 if pivot > 0 else 0.0   # 피벗 진입 기준
+
+    # ── 점수 (100점) ──
+    # 피벗 근접도 35 (가까울수록↑) + 거래량수축 20 + VCP 20 + RS 15 + 200일선위 10
+    near_score = 35 * (1 - min(abs(near) / 0.05, 1.0))   # 0%면 35, -5%면 0
+    score = (
+        near_score
+        + (20 if vol_dry else 20 * max(0.0, min((1.1 - vol_ratio) / 0.5, 1.0)))
+        + (20 if tightening else 0)
+        + 15 * max(0.0, (rs_rank - 50) / 49)
+        + 10
+    )
+    if rs_rank is not None:
+        score *= 0.7 + 0.3 * rs_rank / 99
+
+    # 두드림 가점: 2회 이상 두드린 종목은 돌파 확률↑ → 점수 보너스 (최대 +10)
+    if touch_count >= 2:
+        score += min((touch_count - 1) * 4, 10)
+
+    prev_close = float(c.iloc[-2])
+    change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
+
+    return {
+        "mode": "imminent",
+        "close": round(close, 2),
+        "change_pct": round(change_pct, 2),
+        "score": round(score, 1),
+        "triggered": near >= -0.02,   # 피벗 2% 이내면 카드 강조(임박 임박)
+        "setup_score": None,
+        "rs": rs_rank,
+        "rs_mom": rs_mom,
+        "leader": rs_rank >= 90,
+        "pivot": round(pivot, 2),
+        "pivot_type": pivot_type,
+        "tl_break": tl_break,
+        "tl_break_intraday": tl_break_intraday,
+        "pivot_dist_pct": round(pivot_dist_pct, 2),
+        "touch_count": touch_count,
+        "vol_ratio": round(vol_ratio, 2),
+        "vol_dry": vol_dry,
+        "tightening": tightening,
+        "rsi": round(cur_rsi, 1),
+        "stop": round(stop, 2),
+        "risk_pct": round(risk_pct, 2),
+        **rr_info(pivot, stop, h),
+        "risk_warn": risk_pct > 8.0,
+        **volume_info(close, v),
+        "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
+        "spark_ma20": [
+            None if math.isnan(x) else round(float(x), 4)
+            for x in c.rolling(20).mean().iloc[-60:].tolist()
+        ],
+    }
 # "오늘 거래량+가격이 터진 것"만 포착. 신호일 뿐 지속 보장 없음.
 # ══════════════════════════════════════════════════════
 SURGE_CONFIG = {
