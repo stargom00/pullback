@@ -111,19 +111,22 @@ def _kr_fundamentals(ticker: str) -> dict | None:
     if not isinstance(data, dict):
         return None
 
-    per = pbr = roe = eps = None
-    # totalInfos: [{"code":"per","value":"12.34"}, {"code":"roe", ...}, ...]
+    per = pbr = eps = cns_per = cns_eps = None
+    # totalInfos value엔 단위가 붙음: "62.63배", "20,484원", "4.99배" → _num()로 제거
     for item in (data.get("totalInfos") or []):
-        c = str(item.get("code", "")).lower()
-        v = naver_kr._to_num(item.get("value"))
-        if c in ("per",) and per is None:
+        c = str(item.get("code", ""))
+        v = _num(item.get("value"))
+        if c == "per" and per is None:
             per = v
-        elif c in ("pbr",) and pbr is None:
+        elif c == "pbr" and pbr is None:
             pbr = v
-        elif c in ("roe",) and roe is None:
-            roe = v
-        elif c in ("eps",) and eps is None:
+        elif c == "eps" and eps is None:
             eps = v
+        elif c == "cnsPer" and cns_per is None:    # 추정(선행) PER
+            cns_per = v
+        elif c == "cnsEps" and cns_eps is None:    # 추정(선행) EPS
+            cns_eps = v
+    # ※ 네이버 integration API엔 ROE 필드가 없음 → 미표시.
 
     # 한국주 과거 PER밴드: 네이버 일봉 + 현재 EPS 근사로 역산 시도
     per_series = None
@@ -139,14 +142,32 @@ def _kr_fundamentals(ticker: str) -> dict | None:
 
     return {
         "market": "KR",
-        "roe": round(roe, 0) if isinstance(roe, (int, float)) else None,
-        "fwd_pe": None,            # 네이버 통합 API엔 Fwd PER 없음
+        "roe": None,                 # 네이버 integration API엔 ROE 없음
+        "fwd_pe": round(cns_per, 1) if isinstance(cns_per, (int, float)) else None,  # 추정PER
         "trail_pe": round(per, 1) if isinstance(per, (int, float)) else None,
         "pbr": round(pbr, 2) if isinstance(pbr, (int, float)) else None,
-        "fwd_eps": None,
-        "growing": None,
+        "fwd_eps": round(cns_eps, 0) if isinstance(cns_eps, (int, float)) else None,
+        # 추정PER < 현재PER → 이익 성장 예상 (미국주와 동일 로직)
+        "growing": (isinstance(cns_per, (int, float)) and isinstance(per, (int, float))
+                    and 0 < cns_per < per),
         **band,
     }
+
+
+def _num(v) -> float | None:
+    """단위 붙은 네이버 value 파싱: '62.63배'·'20,484원'·'4.99%'·'1,754,851백만' → float."""
+    if v is None:
+        return None
+    s = str(v).strip()
+    # 숫자/소수점/마이너스만 남기고 제거 (콤마·단위·공백 모두)
+    import re as _re
+    m = _re.search(r"-?[\d,]+\.?\d*", s)
+    if not m:
+        return None
+    try:
+        return float(m.group(0).replace(",", ""))
+    except ValueError:
+        return None
 
 
 # ── 진입점 ─────────────────────────────────────

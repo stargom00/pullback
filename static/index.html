@@ -213,7 +213,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.22.0</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.22.1</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -679,8 +679,8 @@ function renderFund(d) {
   }
   const bandNote = (d.band_low != null && d.band_high != null)
     ? `<span class="note">PER밴드 25~75%: ${d.band_low} ~ ${d.band_high}</span>` : '';
-  const krNote = (d.market === 'KR' && !d.verdict)
-    ? '<span class="note">한국주는 과거 PER밴드 데이터 한계로 현재 지표만 표시돼요.</span>' : '';
+  const krNote = (d.market === 'KR')
+    ? '<span class="note">한국주는 네이버 기준 ROE 미제공 · PER밴드는 최근 1년 근사예요.</span>' : '';
   const disclaim = '<span class="note">⚠️ 참고용. 진입 판단은 가격·거래량·추세 기준이에요.</span>';
   return `<div class="row">${chips.join('')}${vd}</div>${bandNote}${krNote}${disclaim}`;
 }
