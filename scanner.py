@@ -521,6 +521,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     # RS 곱셈 반영: 힘(RS) × 모양 — 둘 다 좋아야 고득점
     if rs_rank is not None:
         score *= 0.7 + 0.3 * rs_rank / 99
+    score = min(score, 100.0)   # 0~100 만점 캡
 
     # 🔥 트리거 발동: 당일 강한 양봉 + (추세선 돌파 or 피벗 코앞/돌파)
     triggered = change_pct >= 4.0 and (tl_break or pivot_dist_pct <= 2.0)
@@ -1253,6 +1254,7 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
     # 두드림 가점: 2회 이상 두드린 종목은 돌파 확률↑ → 점수 보너스 (최대 +10)
     if touch_count >= 2:
         score += min((touch_count - 1) * 4, 10)
+    score = min(score, 100.0)   # 점수는 0~100 만점으로 캡 (가점 포함 100 초과 방지)
 
     prev_close = float(c.iloc[-2])
     change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
