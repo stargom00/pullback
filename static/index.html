@@ -46,6 +46,21 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .idx .vl{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
 .idx .ch{font-size:12px;font-variant-numeric:tabular-nums}
 .idx .ch.up{color:var(--up)} .idx .ch.down{color:var(--down)} .idx .ch.flat{color:var(--muted)}
+.fund-btn{width:100%;margin-top:10px;padding:7px;background:transparent;
+  border:1px solid var(--line);color:var(--muted);border-radius:8px;font-size:12px;
+  cursor:pointer;font-family:inherit;transition:all .12s}
+.fund-btn:hover{border-color:var(--accent,#4D8DFF);color:var(--text)}
+.fund-btn:disabled{opacity:.6;cursor:default}
+.fund-box{margin-top:8px;font-size:12px;color:var(--muted);line-height:1.7}
+.fund-box .row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.fund-box .fchip{padding:3px 9px;border-radius:7px;background:var(--bg);
+  border:1px solid var(--line);font-variant-numeric:tabular-nums}
+.fund-box .fchip b{color:var(--text);font-weight:600}
+.fund-box .vd{font-weight:700;padding:3px 10px;border-radius:7px}
+.fund-box .vd.cheap{color:var(--up);border:1px solid var(--up)}
+.fund-box .vd.fair{color:var(--muted);border:1px solid var(--line)}
+.fund-box .vd.exp{color:var(--down);border:1px solid var(--down)}
+.fund-box .note{display:block;margin-top:4px;font-size:11px;opacity:.75}
 .journal-btn{width:100%;margin-top:10px;padding:7px;background:transparent;
   border:1px dashed var(--line);color:var(--muted);border-radius:8px;font-size:12px;
   cursor:pointer;font-family:inherit;transition:all .12s}
@@ -198,7 +213,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.20.0</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.22.0</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -490,6 +505,8 @@ function card(s) {
       <span class="badge ${s.recent_high_ok ? 'on' : ''}">고점 유지</span>${s.tl_break ? '<span class="badge on">추세선 돌파</span>' : (s.tl_break_intraday ? '<span class="badge warn" title="장중에 추세선을 넘었지만 아직 종가 확정 전. 마감까지 위를 지키는지 + 거래량을 확인하세요.">장중 돌파 ⚠️ 미확정</span>' : '')}
     </div>`}
     ${(s.mode === 'pullback' || s.mode === 'turnaround' || s.mode === 'breakout' || s.mode === 'surge' || s.mode === 'imminent' || s.mode === 'boxbreak') ? `
+    <button class="fund-btn" data-ticker="${s.ticker}" data-mkt="${s.market}">📊 밸류 보기</button>
+    <div class="fund-box" id="fund-${s.ticker}"></div>
     <button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button>` : ''}
   </div>`;
 }
@@ -617,6 +634,55 @@ function renderCards() {
     else favorites.push(up);
     renderCards();
   }));
+  // 밸류 보기 버튼 바인딩
+  content.querySelectorAll('.fund-btn').forEach(b => b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const t = b.dataset.ticker;
+    const box = document.getElementById('fund-' + t);
+    if (!box) return;
+    // 이미 로드된 종목이면 토글
+    if (fundCache[t]) {
+      if (box.dataset.shown === '1') { box.innerHTML=''; box.dataset.shown='0'; b.textContent='📊 밸류 보기'; }
+      else { box.innerHTML = renderFund(fundCache[t]); box.dataset.shown='1'; b.textContent='📊 밸류 접기'; }
+      return;
+    }
+    b.disabled = true; b.textContent = '불러오는 중…';
+    try {
+      const res = await fetch('/api/fundamentals/' + encodeURIComponent(t));
+      const data = await res.json();
+      fundCache[t] = data;
+      box.innerHTML = renderFund(data);
+      box.dataset.shown = '1';
+      b.textContent = '📊 밸류 접기';
+    } catch (err) {
+      box.innerHTML = '<span class="note">밸류 데이터를 불러오지 못했어요.</span>';
+    } finally {
+      b.disabled = false;
+    }
+  }));
+}
+
+const fundCache = {};
+function renderFund(d) {
+  if (!d || d.error) return '<span class="note">밸류 데이터 없음 (해당 종목 미지원).</span>';
+  const chips = [];
+  if (d.roe != null) chips.push(`<span class="fchip">ROE <b>${d.roe}</b></span>`);
+  if (d.trail_pe != null) chips.push(`<span class="fchip">PER <b>${d.trail_pe}</b></span>`);
+  if (d.fwd_pe != null) chips.push(`<span class="fchip">Fwd PER <b>${d.fwd_pe}</b></span>`);
+  if (d.pbr != null) chips.push(`<span class="fchip">PBR <b>${d.pbr}</b></span>`);
+  if (d.growing === true) chips.push(`<span class="fchip" title="선행 PER<후행 PER → 이익 성장 예상">이익성장 ↑</span>`);
+  let vd = '';
+  if (d.verdict) {
+    const cls = d.verdict === '싸다' ? 'cheap' : (d.verdict === '비싸다' ? 'exp' : 'fair');
+    const pos = d.pct_in_band != null ? ` (밴드 ${d.pct_in_band}%)` : '';
+    vd = `<span class="vd ${cls}">${d.verdict}${pos}</span>`;
+  }
+  const bandNote = (d.band_low != null && d.band_high != null)
+    ? `<span class="note">PER밴드 25~75%: ${d.band_low} ~ ${d.band_high}</span>` : '';
+  const krNote = (d.market === 'KR' && !d.verdict)
+    ? '<span class="note">한국주는 과거 PER밴드 데이터 한계로 현재 지표만 표시돼요.</span>' : '';
+  const disclaim = '<span class="note">⚠️ 참고용. 진입 판단은 가격·거래량·추세 기준이에요.</span>';
+  return `<div class="row">${chips.join('')}${vd}</div>${bandNote}${krNote}${disclaim}`;
 }
 
 document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('click', () => {
