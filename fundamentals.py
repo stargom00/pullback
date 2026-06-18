@@ -23,6 +23,21 @@ import naver_kr
 
 
 # ── 공통 판정 ─────────────────────────────────────
+_PER_MAX = 200   # 이보다 크면 '이익 미미/적자 근접'으로 간주, 숫자 무의미
+
+
+def _sane_per(per: float | None) -> tuple[float | None, str | None]:
+    """PER 위생 처리. 적자(≤0)·이익 미미(과대 PER)는 숫자 대신 사유 플래그.
+    반환: (표시용 PER 또는 None, 사유 라벨 또는 None)."""
+    if per is None:
+        return None, None
+    if per <= 0:
+        return None, "적자"          # 음수 PER = 순이익 적자
+    if per > _PER_MAX:
+        return None, "이익 미미"      # PER 수백~수만 = EPS 거의 0 → 무의미
+    return per, None
+
+
 def _band_verdict(cur_per: float | None, per_series: pd.Series | None) -> dict:
     """현재 PER을 과거 PER 분포에 대입해 싸다/적정/비싸다 판정."""
     if cur_per is None or cur_per <= 0:
@@ -79,17 +94,21 @@ def _us_fundamentals(ticker: str) -> dict | None:
     except Exception:
         per_series = None
 
-    cur_per = trail_pe if isinstance(trail_pe, (int, float)) else None
-    band = _band_verdict(cur_per, per_series)
+    # PER 위생 처리: 적자/이익 미미면 숫자 대신 사유 플래그
+    trail_disp, trail_flag = _sane_per(trail_pe if isinstance(trail_pe, (int, float)) else None)
+    fwd_disp, fwd_flag = _sane_per(fwd_pe if isinstance(fwd_pe, (int, float)) else None)
+    band = _band_verdict(trail_disp, per_series) if trail_disp else \
+           {"verdict": None, "pct_in_band": None, "band_low": None, "band_high": None}
 
     return {
         "market": "US",
         "roe": roe_pct,
-        "fwd_pe": round(fwd_pe, 1) if isinstance(fwd_pe, (int, float)) else None,
-        "trail_pe": round(trail_pe, 1) if isinstance(trail_pe, (int, float)) else None,
+        "fwd_pe": round(fwd_disp, 1) if isinstance(fwd_disp, (int, float)) else None,
+        "trail_pe": round(trail_disp, 1) if isinstance(trail_disp, (int, float)) else None,
         "fwd_eps": round(fwd_eps, 2) if isinstance(fwd_eps, (int, float)) else None,
-        "growing": (isinstance(fwd_pe, (int, float)) and isinstance(trail_pe, (int, float))
-                    and fwd_pe < trail_pe),   # Fwd<Trail → 이익 성장 예상
+        "per_flag": trail_flag or fwd_flag,
+        "growing": (isinstance(fwd_disp, (int, float)) and isinstance(trail_disp, (int, float))
+                    and fwd_disp < trail_disp),   # Fwd<Trail → 이익 성장 예상
         **band,
     }
 
@@ -138,18 +157,24 @@ def _kr_fundamentals(ticker: str) -> dict | None:
     except Exception:
         per_series = None
 
-    band = _band_verdict(per, per_series)
+    # PER 위생 처리: 적자/이익 미미면 숫자 대신 사유 플래그
+    per_disp, per_flag = _sane_per(per)
+    cns_disp, cns_flag = _sane_per(cns_per)
+    # 밴드는 정상 PER일 때만 의미 있음
+    band = _band_verdict(per_disp, per_series) if per_disp else \
+           {"verdict": None, "pct_in_band": None, "band_low": None, "band_high": None}
 
     return {
         "market": "KR",
         "roe": None,                 # 네이버 integration API엔 ROE 없음
-        "fwd_pe": round(cns_per, 1) if isinstance(cns_per, (int, float)) else None,  # 추정PER
-        "trail_pe": round(per, 1) if isinstance(per, (int, float)) else None,
+        "fwd_pe": round(cns_disp, 1) if isinstance(cns_disp, (int, float)) else None,  # 추정PER
+        "trail_pe": round(per_disp, 1) if isinstance(per_disp, (int, float)) else None,
         "pbr": round(pbr, 2) if isinstance(pbr, (int, float)) else None,
         "fwd_eps": round(cns_eps, 0) if isinstance(cns_eps, (int, float)) else None,
-        # 추정PER < 현재PER → 이익 성장 예상 (미국주와 동일 로직)
-        "growing": (isinstance(cns_per, (int, float)) and isinstance(per, (int, float))
-                    and 0 < cns_per < per),
+        "per_flag": per_flag or cns_flag,   # '적자' / '이익 미미' / None
+        # 추정PER < 현재PER → 이익 성장 예상 (둘 다 정상 PER일 때만)
+        "growing": (isinstance(cns_disp, (int, float)) and isinstance(per_disp, (int, float))
+                    and 0 < cns_disp < per_disp),
         **band,
     }
 
