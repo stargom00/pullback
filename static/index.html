@@ -190,7 +190,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.18.1</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.19.0</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -364,7 +364,7 @@ function card(s) {
       <div class="metric"><div class="k">피벗까지</div><div class="v" style="color:${s.pivot_dist_pct <= 2 ? 'var(--up)' : 'var(--amber)'}">+${s.pivot_dist_pct}%</div></div>
       <div class="metric"><div class="k">거래량비</div><div class="v" style="${s.vol_dry ? 'color:var(--green)' : ''}">${s.vol_ratio}×</div></div>
       <div class="metric"><div class="k">RS</div><div class="v" style="color:var(--rs)">${s.rs}</div></div>
-      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}${s.ud_vol != null ? ` <span style="color:${s.ud_vol >= 1 ? 'var(--green)' : '#e0a030'};font-size:11px" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집, 1.0↓ 분산">U/D ${s.ud_vol}</span>` : ''}</div></div>
     </div>
     <div class="metrics mono" style="border-top:none;padding-top:0">
       <div class="metric"><div class="k">피벗 (${s.pivot_type ?? '천장'})</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
@@ -376,7 +376,7 @@ function card(s) {
       <div class="metric"><div class="k">연장도</div><div class="v" style="${s.in_valid_zone ? 'color:var(--green)' : 'color:var(--up)'}">+${s.ext_pct}%${s.in_valid_zone ? ' ✓' : ' ⚠️'}</div></div>
       <div class="metric"><div class="k">거래량</div><div class="v">${s.vol_mult}×</div></div>
       <div class="metric"><div class="k">베이스</div><div class="v">${s.base_days}일</div></div>
-      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}${s.ud_vol != null ? ` <span style="color:${s.ud_vol >= 1 ? 'var(--green)' : '#e0a030'};font-size:11px" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집, 1.0↓ 분산">U/D ${s.ud_vol}</span>` : ''}</div></div>
     </div>
     <div class="metrics mono" style="border-top:none;padding-top:0">
       <div class="metric"><div class="k">피벗 (베이스 천장)</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
@@ -388,7 +388,7 @@ function card(s) {
       <div class="metric"><div class="k">연장도</div><div class="v" style="${s.ext_pct <= 5 ? 'color:var(--green)' : 'color:var(--up)'}">+${s.ext_pct}%${s.ext_pct <= 5 ? ' ✓' : ' ⚠️'}</div></div>
       <div class="metric"><div class="k">거래량</div><div class="v">${s.vol_mult}×</div></div>
       <div class="metric"><div class="k">박스폭</div><div class="v">${s.box_range_pct}%</div></div>
-      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}${s.ud_vol != null ? ` <span style="color:${s.ud_vol >= 1 ? 'var(--green)' : '#e0a030'};font-size:11px" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집, 1.0↓ 분산">U/D ${s.ud_vol}</span>` : ''}</div></div>
     </div>
     <div class="metrics mono" style="border-top:none;padding-top:0">
       <div class="metric"><div class="k">피벗 (${s.pivot_type})</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>

@@ -192,6 +192,32 @@ def trendline_level(h: pd.Series, lookback: int = 40, order: int = 2):
     return level if level > 0 else None
 
 
+def up_down_volume(c: pd.Series, v: pd.Series, window: int = 50):
+    """U/D Volume Ratio (매집/분산 비율) — 오닐 지표.
+    최근 window일 중 '오른 날 거래량 합' ÷ '내린 날 거래량 합'.
+    >1.0 = 매집(상승일에 거래량 더 실림, 기관 매수)
+    <1.0 = 분산(하락일에 거래량 더 실림, 기관 매도)
+    1.0 = 중립. 보통 1.0 이상이면 건강, 1.25+면 강한 매집.
+    """
+    if len(c) < window + 1:
+        window = len(c) - 1
+    if window < 5:
+        return None
+    cc = c.iloc[-window:]
+    vv = v.iloc[-window:]
+    prev = c.iloc[-(window + 1):-1].values
+    up_vol = 0.0
+    down_vol = 0.0
+    for i in range(len(cc)):
+        if cc.iloc[i] > prev[i]:
+            up_vol += float(vv.iloc[i])
+        elif cc.iloc[i] < prev[i]:
+            down_vol += float(vv.iloc[i])
+    if down_vol <= 0:
+        return 9.99 if up_vol > 0 else None
+    return round(up_vol / down_vol, 2)
+
+
 def significant_support(lo: pd.Series, window: int, min_touches: int = 2,
                         band: float = 0.02, exclude: int = 1):
     """'여러 번 지지받은' 의미있는 지지 가격을 찾는다 (저항의 거울 버전).
@@ -966,6 +992,7 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
         **rr_info(pivot, stop, h),
         "rsi": round(cur_rsi, 1),
         "vol_dry": False,
+        "ud_vol": up_down_volume(c, v, 50),
         **volume_info(close, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
@@ -1101,6 +1128,7 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
         **rr_info(pivot, stop, h),
         "rsi": round(cur_rsi, 1),
         "vol_dry": False,
+        "ud_vol": up_down_volume(c, v, 50),
         **volume_info(close, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
@@ -1241,6 +1269,7 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
         "pivot_dist_pct": round(pivot_dist_pct, 2),
         "touch_count": touch_count,
         "vol_ratio": round(vol_ratio, 2),
+        "ud_vol": up_down_volume(c, v, 50),
         "vol_dry": vol_dry,
         "tightening": tightening,
         "rsi": round(cur_rsi, 1),
