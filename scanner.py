@@ -192,6 +192,32 @@ def trendline_level(h: pd.Series, lookback: int = 40, order: int = 2):
     return level if level > 0 else None
 
 
+def significant_support(lo: pd.Series, window: int, min_touches: int = 2,
+                        band: float = 0.02, exclude: int = 1):
+    """'여러 번 지지받은' 의미있는 지지 가격을 찾는다 (저항의 거울 버전).
+    단순 최저가(=폭락 바닥 꼬리 하나)를 손절로 잡는 문제를 막기 위함.
+    구간 저가 중 ±band 안에 저가가 min_touches개 이상 닿은 가격을
+    '진짜 지지'로 인정, 그 중 가장 낮은(=가장 안전한) 값을 반환. 없으면 None.
+    """
+    if exclude > 0 and len(lo) > window + exclude:
+        seg = lo.iloc[-(window + exclude):-exclude]
+    elif exclude > 0 and len(lo) > exclude:
+        seg = lo.iloc[:-exclude]
+    else:
+        seg = lo.iloc[-window:]
+    seg = seg.dropna()
+    if len(seg) < min_touches:
+        return None
+    lows = seg.tolist()
+    for level in sorted(lows):   # 낮은 가격부터
+        if level <= 0:
+            continue
+        touches = sum(1 for x in lows if abs(x - level) / level <= band)
+        if touches >= min_touches:
+            return level    # 가장 낮은 '유효 지지'(2번+ 지지받음)
+    return None
+
+
 def significant_resistance(h: pd.Series, window: int, min_touches: int = 2,
                            band: float = 0.02, exclude: int = 2):
     """'여러 번 부딪힌' 의미있는 저항 가격을 찾는다.
@@ -1161,11 +1187,20 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
     tightening = rng_recent < rng_prev if rng_prev > 0 else False
 
     # ── 손절 / 리스크 ──
-    # 단순 방식(손절 정교화 이전): 최근 저점 / 20일선 -2% 중 현재가 아래 가장 높은 것.
-    # 손절폭은 참고용 — 실제 진입/거름 판단은 사용자가 차트로.
-    pullback_low = float(lo.iloc[-cfg["pivot_window"]:].min())
-    candidates = [x for x in (pullback_low, m20 * 0.98) if x < close]
-    stop = max(candidates) if candidates else pullback_low
+    # 손절은 '여러 번 지지받은 의미있는 바닥' 기준. 폭락 바닥 꼬리 하나를
+    # 손절로 잡으면 리스크가 비현실적으로 커지므로(예: 30%) 그걸 방지.
+    # 우선순위: 의미있는 지지 → 20일선 -2% → (폴백) 단순 저점.
+    # 단 현재가 아래 후보만. 손절폭은 참고용 — 진입/거름 판단은 사용자가 차트로.
+    sig_sup = significant_support(lo, cfg["pivot_window"], min_touches=2, band=0.02, exclude=1)
+    cand = []
+    if sig_sup is not None and sig_sup < close:
+        cand.append(sig_sup)
+    if m20 * 0.98 < close:
+        cand.append(m20 * 0.98)
+    if cand:
+        stop = max(cand)   # 현재가 아래 후보 중 가장 가까운(=타이트한) 것
+    else:
+        stop = float(lo.iloc[-cfg["pivot_window"]:].min())   # 폴백
     pivot_dist_pct = (pivot - close) / close * 100   # 현재가→피벗 남은 거리(양수)
     risk_pct = (pivot - stop) / pivot * 100 if pivot > 0 else 0.0   # 피벗 진입 기준
 
