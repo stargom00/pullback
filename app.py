@@ -5,6 +5,9 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.21.0 밸류에이션 배지(ROE·PER밴드) — 참고용/온디맨드. fundamentals.py +
+        /api/fundamentals/{ticker}. 카드 '밸류 보기' 클릭 시만 호출.
+        진입조건엔 미반영. 미국주 yfinance(PER밴드), 한국주 네이버(PER/PBR/ROE).
 v4.20.0 (1) R 손익비를 실제 진입가 기준으로 수정 (2) 상단 지수 바 추가.
         [문제1] 돌파/박스돌파 카드의 손익비 R이 '피벗 진입' 가정이라,
                 이미 피벗 위로 연장된 자리에서 사면 1R(=pivot-stop)이 실제보다
@@ -223,10 +226,11 @@ from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, 
 from sectors import get_sector
 from universe import get_universe, load_alerts
 import naver_kr
+import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.20.0"
+VERSION = "v4.21.0"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -545,6 +549,8 @@ async def debug_ticker(ticker: str):
 
 _indices_cache: dict = {}
 _INDICES_TTL = 60   # 지수 캐시 60초
+_fund_cache: dict = {}
+_FUND_TTL = 3600    # 펀더멘털 캐시 1시간
 
 
 def _fetch_nasdaq() -> dict | None:
@@ -581,6 +587,20 @@ async def indices():
     _indices_cache["ts"] = now
     _indices_cache["data"] = data
     return JSONResponse(data)
+
+
+@app.get("/api/fundamentals/{ticker}")
+async def fundamentals(ticker: str):
+    """카드 '밸류 보기' 클릭 시 온디맨드. 종목 1개 펀더멘털. 캐시 1시간."""
+    now = time.time()
+    cached = _fund_cache.get(ticker)
+    if cached and now - cached["ts"] < _FUND_TTL:
+        return JSONResponse(cached["data"])
+    loop = asyncio.get_event_loop()
+    data = await loop.run_in_executor(_executor, fundamentals_mod.get_fundamentals, ticker)
+    result = data or {"error": "데이터 없음"}
+    _fund_cache[ticker] = {"ts": now, "data": result}
+    return JSONResponse(result)
 
 
 @app.get("/")
