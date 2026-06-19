@@ -46,6 +46,19 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .idx .vl{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
 .idx .ch{font-size:12px;font-variant-numeric:tabular-nums}
 .idx .ch.up{color:var(--up)} .idx .ch.down{color:var(--down)} .idx .ch.flat{color:var(--muted)}
+.entry-sig{margin-top:10px;padding:9px 11px;border-radius:9px;border:1px solid var(--line)}
+.entry-sig.sig-ok{background:rgba(40,180,120,.08);border-color:rgba(40,180,120,.4)}
+.entry-sig.sig-warn{background:rgba(230,170,40,.08);border-color:rgba(230,170,40,.4)}
+.entry-sig.sig-danger{background:rgba(255,90,110,.08);border-color:rgba(255,90,110,.4)}
+.entry-sig .sig-head{font-size:13px;font-weight:700;margin-bottom:6px}
+.entry-sig.sig-ok .sig-head{color:#28b478}
+.entry-sig.sig-warn .sig-head{color:#e6aa28}
+.entry-sig.sig-danger .sig-head{color:var(--up)}
+.entry-sig .sig-list{display:flex;flex-direction:column;gap:3px}
+.entry-sig .chk{font-size:11.5px;color:var(--muted)}
+.entry-sig .chk-ok{color:var(--muted)}
+.entry-sig .chk-warn{color:#e6aa28}
+.entry-sig .chk-danger{color:var(--up)}
 .fund-btn{width:100%;margin-top:10px;padding:7px;background:transparent;
   border:1px solid var(--line);color:var(--muted);border-radius:8px;font-size:12px;
   cursor:pointer;font-family:inherit;transition:all .12s}
@@ -213,7 +226,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.24.0</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.25.0</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -231,6 +244,7 @@ tr.editing{background:rgba(242,179,61,.06)}
     <button class="tab active" data-market="all">전체</button>
     <button class="tab" data-market="kr">한국</button>
     <button class="tab" data-market="us">미국</button>
+    <button class="tab" id="strictToggle" title="RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓ 만 표시 (주도주 엄선)">🎯 주도주만</button>
   </div>
   <button class="refresh" id="refresh">다시 스캔</button>
 </header>
@@ -349,6 +363,48 @@ function scoreRing(score) {
     <circle cx="23" cy="23" r="${r}" fill="none" stroke="${color}" stroke-width="4"
       stroke-dasharray="${c}" stroke-dashoffset="${off}" stroke-linecap="round"/></svg>
     <div class="score-num mono">${Math.round(score)}</div></div>`;
+}
+
+// 진입 신호등: 거래량·RS·손익비·리스크 종합 → 진입 양호/주의/자제 + 체크리스트
+function entrySignal(s) {
+  // 돌파류는 vol_mult, 눌림/임박은 vol_ratio 사용
+  const volBreakout = s.vol_mult != null ? s.vol_mult : null;
+  const volPullback = s.vol_ratio != null ? s.vol_ratio : null;
+  const checks = [];
+  let warn = 0, danger = 0;
+
+  // 1) 거래량 동반 (한올 교훈: 거래량 없는 돌파임박은 가짜 위험)
+  if (volBreakout != null) {
+    if (volBreakout >= 1.5) checks.push(['ok', `거래량 ${volBreakout}× 동반`]);
+    else { checks.push(['warn', `거래량 ${volBreakout}× — 동력 부족`]); warn++; }
+  } else if (volPullback != null) {
+    if (volPullback <= 0.8) checks.push(['ok', `거래량 ${volPullback}× 수축(눌림 양호)`]);
+    else if (volPullback < 1.5) checks.push(['warn', `거래량 ${volPullback}× — 애매`]);
+    else { checks.push(['ok', `거래량 ${volPullback}× 증가`]); }
+  }
+  // 2) RS (주도주 여부)
+  if (s.rs != null) {
+    if (s.rs >= 90) checks.push(['ok', `RS ${s.rs} 주도주급`]);
+    else if (s.rs >= 70) checks.push(['warn', `RS ${s.rs} — 주도주는 아님`]);
+    else { checks.push(['danger', `RS ${s.rs} 약함`]); danger++; }
+  }
+  // 3) 손익비
+  if (s.rr != null) {
+    if (s.rr >= 2) checks.push(['ok', `손익비 ${s.rr}R`]);
+    else { checks.push(['danger', `손익비 ${s.rr}R — 가성비 낮음`]); danger++; }
+  }
+  // 4) 리스크(손절폭)
+  if (s.risk_pct != null) {
+    if (s.risk_pct <= 8) checks.push(['ok', `리스크 ${s.risk_pct}%`]);
+    else { checks.push(['warn', `리스크 ${s.risk_pct}% — 손절폭 넓음`]); warn++; }
+  }
+
+  let level, label;
+  if (danger > 0) { level = 'danger'; label = '🔴 진입 자제'; }
+  else if (warn >= 2) { level = 'danger'; label = '🔴 진입 자제'; }
+  else if (warn === 1) { level = 'warn'; label = '🟡 주의'; }
+  else { level = 'ok'; label = '🟢 진입 양호'; }
+  return { level, label, checks };
 }
 
 function card(s) {
@@ -504,6 +560,14 @@ function card(s) {
       <span class="badge ${s.tightening ? 'on' : ''}">변동폭 축소</span>
       <span class="badge ${s.recent_high_ok ? 'on' : ''}">고점 유지</span>${s.tl_break ? '<span class="badge on">추세선 돌파</span>' : (s.tl_break_intraday ? '<span class="badge warn" title="장중에 추세선을 넘었지만 아직 종가 확정 전. 마감까지 위를 지키는지 + 거래량을 확인하세요.">장중 돌파 ⚠️ 미확정</span>' : '')}
     </div>`}
+    ${(s.mode === 'pullback' || s.mode === 'turnaround' || s.mode === 'breakout' || s.mode === 'imminent' || s.mode === 'boxbreak') ? (() => {
+      const sig = entrySignal(s);
+      const items = sig.checks.map(([lv, txt]) => `<span class="chk chk-${lv}">${lv==='ok'?'✓':lv==='warn'?'△':'✕'} ${txt}</span>`).join('');
+      return `<div class="entry-sig sig-${sig.level}">
+        <div class="sig-head">${sig.label}</div>
+        <div class="sig-list">${items}</div>
+      </div>`;
+    })() : ''}
     ${(s.mode === 'pullback' || s.mode === 'turnaround' || s.mode === 'breakout' || s.mode === 'surge' || s.mode === 'imminent' || s.mode === 'boxbreak') ? `
     <button class="fund-btn" data-ticker="${s.ticker}" data-mkt="${s.market}">📊 밸류 보기</button>
     <div class="fund-box" id="fund-${s.ticker}"></div>
@@ -516,6 +580,12 @@ let mode = 'imminent';
 let sectorFilter = null;
 let searchQuery = '';
 let lastHits = [];
+let strictMode = false;
+document.getElementById('strictToggle').addEventListener('click', (e) => {
+  strictMode = !strictMode;
+  e.target.classList.toggle('active', strictMode);
+  renderCards();
+});
 let favorites = [];
 const DESC = {
   pullback: '우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+',
@@ -616,12 +686,22 @@ function renderCards() {
       (h.ticker || '').toLowerCase().includes(q)
     );
   }
+  // 주도주 엄격모드 필터: RS90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓
+  if (strictMode) {
+    list = list.filter(h => {
+      const rsOk = (h.rs ?? 0) >= 90;
+      const volOk = (h.vol_mult ?? 0) >= 1.5 || (h.vol_ratio ?? 0) >= 1.0;
+      const rrOk = (h.rr ?? 0) >= 2;
+      const riskOk = (h.risk_pct ?? 99) <= 8;
+      return rsOk && volOk && rrOk && riskOk;
+    });
+  }
   // 즐겨찾기를 최상단으로 (원래 순서는 유지하면서 favorite만 위로)
   const isFav = h => favorites.includes((h.ticker || '').toUpperCase());
   list.sort((a, b) => (isFav(b) ? 1 : 0) - (isFav(a) ? 1 : 0));
   content.innerHTML = list.length
     ? `<div class="grid">${list.map(card).join('')}</div>`
-    : `<div class="empty">${searchQuery ? `'${searchQuery}'(으)로 검색된 종목이 없습니다.<br>이 탭의 스캔 결과 중에서만 검색돼요.` : sectorFilter ? `'${sectorFilter}' 섹터에 해당 종목이 없습니다.` : `현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : '눌림목'} 종목이 없습니다.<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.`}</div>`;
+    : `<div class="empty">${strictMode ? `🎯 주도주 조건(RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓)을 모두 충족하는 종목이 없습니다.<br>엄선 필터라 비어있는 게 정상이에요. 해제하려면 '🎯 주도주만'을 다시 누르세요.` : searchQuery ? `'${searchQuery}'(으)로 검색된 종목이 없습니다.<br>이 탭의 스캔 결과 중에서만 검색돼요.` : sectorFilter ? `'${sectorFilter}' 섹터에 해당 종목이 없습니다.` : `현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : '눌림목'} 종목이 없습니다.<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.`}</div>`;
   // 별 버튼 이벤트 바인딩
   content.querySelectorAll('.fav-btn').forEach(b => b.addEventListener('click', async (e) => {
     e.stopPropagation();
