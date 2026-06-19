@@ -85,32 +85,86 @@ def volume_info(close: float, v: pd.Series) -> dict:
     }
 
 
-def rr_info(pivot: float, stop: float, h: pd.Series, entry: float | None = None) -> dict:
-    """손익비(R) 계산. 실제 진입가 기준.
-    - entry: 실제 매수가. 생략 시 pivot(피벗 진입 가정)으로 폴백.
-      이미 피벗 위로 연장된 자리에서 사면 진짜 리스크는 entry-stop이라
-      pivot 기준 R은 손익비를 부풀린다. → entry 기준으로 통일.
-    - 1R(리스크) = entry - 손절
-    - 목표 = 장기 고점(250봉) 우선, 없거나 가까우면 entry +2R로 대체
-    - rr = 목표까지 거리 / 1R
+def rr_info(pivot: float, stop: float, h: pd.Series, entry: float | None = None,
+            lo: pd.Series | None = None, c: pd.Series | None = None,
+            base_low: float | None = None) -> dict:
+    """손익비(R) 계산. 실제 진입가 기준 + 손절 현실화 + 측정이동 목표.
+
+    손절 현실화: 넘어온 stop(베이스 기반)과 ATR 기반 손절 중 진입가에
+      더 가까운 것을 사용. 연장된 종목(베이스에서 멀어진)은 ATR 손절이
+      자동 적용돼 1R이 비현실적으로 커지는 것을 막는다. 손절폭 상한 12%.
+    목표(측정이동): 베이스 높이(천장-바닥)를 돌파점에 더한 값.
+      신고가라 전고가 의미없을 때 정석적 목표 산정(오닐/미너비니).
+      전고가 측정이동보다 더 위면 전고 사용. 최소 2R 보장.
     """
     entry = entry if (entry and entry > 0) else pivot
-    risk = entry - stop
+
+    # ── 손절 현실화 ──
+    stop_eff = stop
+    if lo is not None and c is not None and len(c) >= 15:
+        atr_val = atr(h, lo, c, 14)
+        atr_stop = entry - atr_val * 2.5      # ATR 2.5배 손절
+        # 베이스 손절과 ATR 손절 중 진입가에 더 가까운(=손절폭 작은) 것
+        if atr_stop > stop_eff:
+            stop_eff = atr_stop
+    # 손절폭 상한 12% (이보다 넓으면 12%로 조임)
+    max_stop = entry * 0.88
+    if stop_eff < max_stop:
+        stop_eff = max_stop
+    stop_eff = round(stop_eff, 2)
+
+    risk = entry - stop_eff
     if risk <= 0:
-        return {"target": None, "rr": None, "target_basis": None}
-    # 장기 고점 (진입가보다 충분히 위면 목표로 사용)
+        return {"target": None, "rr": None, "target_basis": None, "stop_eff": stop_eff}
+
+    # ── 목표 산정 ──
     longterm_high = float(h.iloc[-250:].max()) if len(h) >= 20 else float(h.max())
-    if longterm_high > entry * 1.03:   # 전고가 진입가보다 3%+ 위 → 전고 목표
-        target = longterm_high
-        basis = "전고"
-    else:                               # 신고가 등 → 2R 목표로 대체
-        target = entry + risk * 2
-        basis = "2R"
+    # 측정이동: 베이스 높이를 돌파점(피벗)에 더함
+    mm_target = None
+    if base_low is not None and base_low > 0 and pivot > base_low:
+        base_height = pivot - base_low
+        mm_target = pivot + base_height
+
+    if longterm_high > entry * 1.08:
+        # 전고가 진입가보다 8%+ 위 → 전고 목표 (충분히 의미있음)
+        target, basis = longterm_high, "전고"
+    elif mm_target and mm_target > entry * 1.03:
+        # 신고가 등 → 측정이동 목표
+        target, basis = mm_target, "측정이동"
+    else:
+        # 베이스 정보 없거나 측정이동도 가까우면 → 2R 폴백
+        target, basis = entry + risk * 2, "2R"
+
+    # 최소 2R 보장: 측정이동/전고가 2R보다 가까우면 2R로 끌어올림
+    if target < entry + risk * 2:
+        target, basis = entry + risk * 2, "2R"
+
     rr = (target - entry) / risk
     return {
         "target": round(target, 2),
         "rr": round(rr, 1),
         "target_basis": basis,
+        "stop_eff": stop_eff,   # 현실화된 손절 (카드 표시용)
+    }
+
+
+def _rr_block(pivot: float, stop: float, h: pd.Series, lo: pd.Series, c: pd.Series,
+              base_low: float | None = None, entry: float | None = None,
+              warn_pct: float = 8.0) -> dict:
+    """카드용 손절/리스크/손익비 블록. rr_info로 손절을 현실화한 뒤
+    stop·risk_pct·손익비를 모두 '현실화된 손절(stop_eff)' 기준으로 통일.
+    표시 손절과 R 계산이 어긋나지 않도록 한 곳에서 처리."""
+    info = rr_info(pivot, stop, h, entry=entry, lo=lo, c=c, base_low=base_low)
+    eff = info.get("stop_eff") or stop
+    base = entry if (entry and entry > 0) else pivot
+    risk_pct = (base - eff) / base * 100 if base > 0 else 0.0
+    return {
+        "stop": round(eff, 2),
+        "risk_pct": round(risk_pct, 2),
+        "target": info["target"],
+        "rr": info["rr"],
+        "target_basis": info["target_basis"],
+        "risk_warn": risk_pct > warn_pct,
     }
 
 
@@ -556,10 +610,9 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "tl_break_intraday": tl_break_intraday,
         "ud": ud_volume_ratio(c, v),
         "pivot_dist_pct": round(pivot_dist_pct, 2),
-        "stop": round(stop, 2),
-        "risk_pct": round(risk_pct, 2),
-        **rr_info(pivot, stop, h),
-        "risk_warn": risk_pct > 8.0,
+        **_rr_block(pivot, stop, h, lo, c,
+                    base_low=float(lo.iloc[-cfg["recent_high_window"]:].min()),
+                    entry=None, warn_pct=8.0),
         **volume_info(close, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
@@ -680,10 +733,9 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
         "tl_break_intraday": tl_break_intraday,
         "ud": ud,
         "pivot_dist_pct": round(pivot_dist_pct, 2),
-        "stop": round(stop, 2),
-        "risk_pct": round(risk_pct, 2),
-        **rr_info(pivot, stop, h),
-        "risk_warn": risk_pct > 15.0,
+        **_rr_block(pivot, stop, h, lo, c,
+                    base_low=float(lo.iloc[-30:].min()),
+                    entry=None, warn_pct=15.0),
         **volume_info(close, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
@@ -992,9 +1044,8 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
         "vol_mult": round(vol_mult, 1),
         "base_days": base_days,
         "base_range_pct": round(base_range * 100, 1),
-        "stop": stop,
-        "risk_pct": round(risk_pct, 2),
-        **rr_info(pivot, stop, h, entry=close),   # 이미 돌파 → 현재가 진입 기준 R
+        **_rr_block(pivot, stop, h, lo, c, base_low=base_low,
+                    entry=close, warn_pct=8.0),   # 이미 돌파 → 현재가 진입 기준
         "rsi": round(cur_rsi, 1),
         "vol_dry": False,
         "ud_vol": up_down_volume(c, v, 50),
@@ -1129,9 +1180,8 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
         "box_days": best["win"],
         "box_range_pct": round(best["box_range"] * 100, 1),
         "tl_break_intraday": intraday_unconfirmed,
-        "stop": stop,
-        "risk_pct": round(risk_pct, 2),
-        **rr_info(pivot, stop, h, entry=close),   # 이미 돌파 → 현재가 진입 기준 R
+        **_rr_block(pivot, stop, h, lo, c, base_low=best["box_low"],
+                    entry=close, warn_pct=8.0),   # 이미 돌파 → 현재가 진입 기준
         "rsi": round(cur_rsi, 1),
         "vol_dry": False,
         "ud_vol": up_down_volume(c, v, 50),
@@ -1280,10 +1330,9 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
         "vol_dry": vol_dry,
         "tightening": tightening,
         "rsi": round(cur_rsi, 1),
-        "stop": round(stop, 2),
-        "risk_pct": round(risk_pct, 2),
-        **rr_info(pivot, stop, h),
-        "risk_warn": risk_pct > 8.0,
+        **_rr_block(pivot, stop, h, lo, c,
+                    base_low=float(lo.iloc[-cfg["pivot_window"]:].min()),
+                    entry=None, warn_pct=8.0),
         **volume_info(close, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
