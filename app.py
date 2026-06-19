@@ -230,7 +230,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.25.0"
+VERSION = "v4.26.0"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -548,7 +548,7 @@ async def debug_ticker(ticker: str):
 
 
 _indices_cache: dict = {}
-_INDICES_TTL = 60   # 지수 캐시 60초
+_INDICES_TTL = 300  # 지수+레짐 캐시 5분 (레짐 계산이 무거워 길게)
 _fund_cache: dict = {}
 _FUND_TTL = 3600    # 펀더멘털 캐시 1시간
 
@@ -569,6 +569,40 @@ def _fetch_nasdaq() -> dict | None:
         return None
 
 
+def _index_regime(code: str) -> dict | None:
+    """지수 일봉으로 시장 레짐 판정. code: 'KOSPI'|'KOSDAQ'.
+    - 20일선 위 + 20일선 우상향 → 'good'
+    - 60일선 아래 → 'bad'
+    - 그 외 → 'neutral'
+    나스닥(^IXIC)은 yfinance로 별도 처리."""
+    try:
+        if code == "^IXIC":
+            df = yf.Ticker("^IXIC").history(period="6mo", interval="1d", auto_adjust=False)
+            close = df["Close"] if df is not None and not df.empty else None
+        else:
+            hist = naver_kr.fetch_index_history(code, days=160)
+            close = hist["Close"] if hist is not None and not hist.empty else None
+        if close is None or len(close) < 60:
+            return None
+        ma20 = close.rolling(20).mean()
+        ma60 = close.rolling(60).mean()
+        cur = float(close.iloc[-1])
+        m20 = float(ma20.iloc[-1])
+        m60 = float(ma60.iloc[-1])
+        m20_prev = float(ma20.iloc[-6])   # 5일 전 20일선 (기울기)
+        rising20 = m20 > m20_prev
+        if cur < m60:
+            regime, txt = "bad", "비우호 (신규진입 자제)"
+        elif cur > m20 and rising20:
+            regime, txt = "good", "우호 (진입 환경 양호)"
+        else:
+            regime, txt = "neutral", "중립 (선별 진입)"
+        return {"regime": regime, "regime_txt": txt,
+                "above_ma20": cur > m20, "above_ma60": cur > m60}
+    except Exception:
+        return None
+
+
 @app.get("/api/indices")
 async def indices():
     """상단 지수 바: 나스닥 / 코스피 / 코스닥. 60초 캐시."""
@@ -577,11 +611,18 @@ async def indices():
         return JSONResponse(_indices_cache["data"])
 
     loop = asyncio.get_event_loop()
-    nasdaq, kospi, kosdaq = await asyncio.gather(
+    nasdaq, kospi, kosdaq, r_kospi, r_kosdaq, r_nasdaq = await asyncio.gather(
         loop.run_in_executor(_executor, _fetch_nasdaq),
         loop.run_in_executor(_executor, naver_kr.fetch_index, "KOSPI"),
         loop.run_in_executor(_executor, naver_kr.fetch_index, "KOSDAQ"),
+        loop.run_in_executor(_executor, _index_regime, "KOSPI"),
+        loop.run_in_executor(_executor, _index_regime, "KOSDAQ"),
+        loop.run_in_executor(_executor, _index_regime, "^IXIC"),
     )
+    # 레짐 정보 병합
+    if kospi and r_kospi: kospi.update(r_kospi)
+    if kosdaq and r_kosdaq: kosdaq.update(r_kosdaq)
+    if nasdaq and r_nasdaq: nasdaq.update(r_nasdaq)
     # 순서: 코스피, 코스닥, 나스닥 (국내 먼저)
     data = {"indices": [x for x in (kospi, kosdaq, nasdaq) if x]}
     _indices_cache["ts"] = now

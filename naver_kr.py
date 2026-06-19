@@ -90,10 +90,20 @@ def _parse_sise(text: str) -> pd.DataFrame | None:
 def fetch_history(ticker: str, days: int = 400) -> pd.DataFrame | None:
     """한국 종목 과거 일봉 (수정주가). 기본 400일 → 1년치 확보."""
     code = to_code(ticker)
+    return _fetch_sise_history(code, days)
+
+
+def fetch_index_history(code: str, days: int = 200) -> pd.DataFrame | None:
+    """지수 일봉. code: 'KOSPI' | 'KOSDAQ' (siseJson이 지수도 동일 형식 제공)."""
+    return _fetch_sise_history(code.upper(), days)
+
+
+def _fetch_sise_history(symbol: str, days: int) -> pd.DataFrame | None:
+    """siseJson 일봉 공통 fetch. symbol은 종목코드(6자리) 또는 지수명(KOSPI 등)."""
     end = datetime.now()
     start = end - timedelta(days=days)
     params = {
-        "symbol": code,
+        "symbol": symbol,
         "requestType": 1,
         "startTime": start.strftime("%Y%m%d"),
         "endTime": end.strftime("%Y%m%d"),

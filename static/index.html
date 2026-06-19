@@ -39,7 +39,11 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
   display:flex;gap:16px;flex-wrap:wrap}
 .statusbar b{color:var(--text)}
 .idxbar{display:flex;gap:10px;flex-wrap:wrap;padding:10px 24px;
-  border-bottom:1px solid var(--line);background:var(--surface)}
+  border-bottom:1px solid var(--line);background:var(--surface);align-items:center}
+.mkt-banner{padding:6px 14px;border-radius:10px;font-size:13px;font-weight:700;border:1px solid var(--line)}
+.mkt-banner.mkt-good{background:rgba(40,180,120,.1);border-color:rgba(40,180,120,.45);color:#28b478}
+.mkt-banner.mkt-neutral{background:rgba(230,170,40,.1);border-color:rgba(230,170,40,.45);color:#e6aa28}
+.mkt-banner.mkt-bad{background:rgba(255,90,110,.1);border-color:rgba(255,90,110,.45);color:#FF5A6E}
 .idx{display:flex;align-items:baseline;gap:8px;padding:6px 14px;
   background:var(--bg);border:1px solid var(--line);border-radius:10px;font-size:13px}
 .idx .nm{color:var(--muted);font-weight:500}
@@ -226,7 +230,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.25.0</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.26.0</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1101,7 +1105,26 @@ async function loadIndices() {
     const list = (data.indices || []);
     if (!list.length) { bar.style.display = 'none'; return; }
     bar.style.display = 'flex';
-    bar.innerHTML = list.map(ix => {
+    const regimeDot = (rg) => {
+      if (!rg) return '';
+      const map = {good:['🟢','#28b478'], neutral:['🟡','#e6aa28'], bad:['🔴','#FF5A6E']};
+      const [emoji] = map[rg] || ['',''];
+      return emoji;
+    };
+    // 국내(코스피/코스닥) 레짐으로 전체 시장 판정 배너
+    const kr = list.filter(ix => ix.name === '코스피' || ix.name === '코스닥');
+    const regimes = kr.map(ix => ix.regime).filter(Boolean);
+    let banner = '';
+    if (regimes.length) {
+      const bad = regimes.filter(r => r === 'bad').length;
+      const good = regimes.filter(r => r === 'good').length;
+      let lv, txt;
+      if (bad >= 1) { lv = 'bad'; txt = '🔴 시장 비우호 — 신규 진입 자제'; }
+      else if (good === regimes.length) { lv = 'good'; txt = '🟢 시장 우호 — 진입 환경 양호'; }
+      else { lv = 'neutral'; txt = '🟡 시장 중립 — 선별 진입'; }
+      banner = `<div class="mkt-banner mkt-${lv}" title="국내 지수의 20·60일선 위치로 판정. 빠지는 장에선 돌파 성공률이 낮아요.">${txt}</div>`;
+    }
+    bar.innerHTML = banner + list.map(ix => {
       const pct = ix.change_pct;
       const chg = ix.change;
       // 한국식 색: 상승=빨강(up), 하락=파랑(down)
@@ -1111,7 +1134,8 @@ async function loadIndices() {
       const chgStr = (chg != null && pct != null)
         ? `${arrow} ${Math.abs(chg).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} (${pct > 0 ? '+' : ''}${pct.toFixed(2)}%)`
         : '–';
-      return `<div class="idx"><span class="nm">${ix.name}</span>`
+      const dot = regimeDot(ix.regime);
+      return `<div class="idx" title="${ix.regime_txt || ''}"><span class="nm">${dot} ${ix.name}</span>`
         + `<span class="vl">${val}</span>`
         + `<span class="ch ${dir}">${chgStr}</span></div>`;
     }).join('');
@@ -1120,7 +1144,7 @@ async function loadIndices() {
   }
 }
 loadIndices();
-setInterval(loadIndices, 60000);   // 60초마다 갱신
+setInterval(loadIndices, 300000);   // 5분마다 갱신 (레짐 포함)
 
 loadJournalFromServer();   // 서버에서 일지 로드 + 구 localStorage 이전
 load();
