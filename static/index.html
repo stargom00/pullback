@@ -213,7 +213,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.23.1</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.24.0</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -718,22 +718,58 @@ document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click'
   if (isJournal) { renderJournal(); } else { load(); }
 }));
 
-// ════════════════ 매매 일지 (localStorage 기반) ════════════════
-const JKEY = 'pullback_journal_v1';
+// ════════════════ 매매 일지 (서버 저장, 기기 간 동기화) ════════════════
+const JKEY = 'pullback_journal_v1';   // 구 localStorage 키 (마이그레이션용)
+let journalCache = [];                 // 메모리 캐시 (서버와 동기화)
 
-function getJournal() {
-  try {
-    const arr = JSON.parse(localStorage.getItem(JKEY) || '[]');
-    // 구버전 기록 보정: 새 필드가 없으면 기본값 채움 (편집 가능하도록)
-    return arr.map(r => ({
-      category: (r.tab === '급등') ? '단타' : '추세추종',
-      held_days: '', review: '', exit: '', result_r: '',
-      note: '', signal: '', sector: '', pivot_type: '',
-      ...r  // 기존 값이 있으면 덮어씀 (없는 필드만 위 기본값 유지)
-    }));
-  } catch(e) { return []; }
+function _normalize(arr) {
+  // 구버전 기록 보정: 새 필드가 없으면 기본값 채움
+  return (arr || []).map(r => ({
+    category: (r.tab === '급등') ? '단타' : '추세추종',
+    held_days: '', review: '', exit: '', result_r: '',
+    note: '', signal: '', sector: '', pivot_type: '',
+    ...r
+  }));
 }
-function setJournal(arr) { localStorage.setItem(JKEY, JSON.stringify(arr)); }
+
+function getJournal() { return journalCache; }
+
+function setJournal(arr) {
+  journalCache = arr;
+  // 서버에 통째로 저장 (실패해도 화면은 유지)
+  fetch('/api/journal', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(arr)
+  }).catch(e => console.error('일지 저장 실패:', e));
+}
+
+// 앱 시작 시 서버에서 일지 로드 + 구 localStorage 데이터 마이그레이션
+async function loadJournalFromServer() {
+  let serverData = [];
+  try {
+    const res = await fetch('/api/journal');
+    serverData = await res.json();
+  } catch(e) { serverData = []; }
+
+  // 마이그레이션: 서버가 비었고 localStorage에 옛 일지가 있으면 한 번 올림
+  let localData = [];
+  try { localData = JSON.parse(localStorage.getItem(JKEY) || '[]'); } catch(e) {}
+  if ((!serverData || serverData.length === 0) && localData.length > 0) {
+    journalCache = _normalize(localData);
+    await fetch('/api/journal', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(journalCache)
+    }).catch(()=>{});
+    console.log('localStorage 일지 ' + localData.length + '건을 서버로 이전했어요.');
+  } else {
+    journalCache = _normalize(serverData);
+  }
+  // 일지 탭이 열려있으면 갱신
+  if (typeof renderJournal === 'function' && document.getElementById('journalView').style.display !== 'none') {
+    renderJournal();
+  }
+}
 
 let pendingStock = null;
 function openJournal(ticker) {
@@ -1006,6 +1042,7 @@ async function loadIndices() {
 loadIndices();
 setInterval(loadIndices, 60000);   // 60초마다 갱신
 
+loadJournalFromServer();   // 서버에서 일지 로드 + 구 localStorage 이전
 load();
 </script>
 </body>

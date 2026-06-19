@@ -230,7 +230,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.23.1"
+VERSION = "v4.24.0"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -601,6 +601,42 @@ async def fundamentals(ticker: str):
     result = data or {"error": "데이터 없음"}
     _fund_cache[ticker] = {"ts": now, "data": result}
     return JSONResponse(result)
+
+
+# ── 매매 일지 (서버 저장, 기기 간 동기화) ──
+import json as _json
+JOURNAL_PATH = os.path.join(os.path.dirname(__file__), "journal_user.json")
+
+
+def load_journal() -> list:
+    """매매 일지 전체 (객체 배열)."""
+    if os.path.exists(JOURNAL_PATH):
+        try:
+            with open(JOURNAL_PATH, encoding="utf-8") as f:
+                data = _json.load(f)
+                return data if isinstance(data, list) else []
+        except (ValueError, OSError):
+            return []
+    return []
+
+
+@app.get("/api/journal")
+async def get_journal():
+    return JSONResponse(load_journal())
+
+
+@app.post("/api/journal")
+async def save_journal(request: Request):
+    """일지 전체를 통째로 저장(덮어쓰기). body = 일지 객체 배열."""
+    body = await request.json()
+    if not isinstance(body, list):
+        return JSONResponse({"ok": False, "error": "배열 필요"}, status_code=400)
+    try:
+        with open(JOURNAL_PATH, "w", encoding="utf-8") as f:
+            _json.dump(body, f, ensure_ascii=False, indent=1)
+    except OSError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "count": len(body)})
 
 
 @app.get("/")
