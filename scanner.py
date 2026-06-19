@@ -128,7 +128,7 @@ CONFIG = {
     "rsi_min": 35,
     "rsi_max": 62,
     "recent_high_window": 40,  # 60일 고점이 최근 N봉 안에 있어야 함
-    "rs_min": 50,              # RS 등급 최소치 (유니버스 내 백분위)
+    "rs_min": 80,              # RS 등급 최소치 (눌림목=조정 중이라 80, 약간 여유)
     "pivot_window": 10,        # 피벗(돌파가) = 직전 N봉 고가
     # 주도주(RS 90+) 완화 기준: 얕고 짧은 눌림도 인정
     "leader_rs": 90,
@@ -576,7 +576,7 @@ TURN_CONFIG = {
     "min_bars": 210,
     "align_window": 22,      # 정배열 형성이 최근 N봉 이내여야 함
     "max_ma200_dist": 0.25,  # 200일선에서 25% 이상 떨어졌으면 이미 늦음
-    "rs_min": 30,            # 전환 초입은 RS가 낮은 게 정상 → 완화
+    "rs_min": 80,            # 추세전환도 주도주 위주로 (기존 30→80)
 }
 
 
@@ -892,7 +892,7 @@ def analyze_super(df: pd.DataFrame, rs_rank: int | None = None,
 # ══════════════════════════════════════════════════════
 BREAKOUT_CONFIG = {
     "min_bars": 210,
-    "rs_min": 80,            # 돌파는 강한 종목만 의미 있음
+    "rs_min": 85,            # 돌파는 강한 종목만 의미 있음 (주도주 위주 85)
     "base_min_len": 20,      # 베이스(횡보) 최소 길이
     "base_max_range": 0.25,  # 베이스 고저 폭이 25% 이내여야 "타이트한 베이스"
     "vol_mult": 1.5,         # 돌파일 거래량 ≥ 평균의 1.5배
@@ -1016,7 +1016,7 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
 # ══════════════════════════════════════════════════════
 BOXBREAK_CONFIG = {
     "min_bars": 140,         # 120일선 + 여유
-    "rs_min": 70,            # 박스 탈출은 강한 종목이 크게 감 (미너비니 기준)
+    "rs_min": 85,            # 박스 탈출은 강한 종목이 크게 감 (주도주 위주 85)
     "box_windows": [20, 40, 60],   # 짧/중/장 박스 동시 확인
     "box_max_range": 0.30,   # 박스 고저폭 ≤30% (국장 변동성 고려, 너무 넓으면 박스 아님)
     "vol_mult": 1.5,         # 돌파일 거래량 ≥ 평균 1.5배 (박스돌파의 핵심)
@@ -1151,7 +1151,7 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
 # ══════════════════════════════════════════════════════
 IMMINENT_CONFIG = {
     "min_bars": 210,
-    "rs_min": 50,            # 돌파 직전 대기 — 폭넓게 보여줌 (주도주 여부는 RS 표시로 판단)
+    "rs_min": 85,            # 돌파 직전 대기 — 주도주만 (기존 50→85)
     "near_min": -0.05,   # 피벗 대비 현재가 하한 (-5%: 천장 5% 아래까지)
     "near_max": 0.0,     # 상한 0%: 아직 안 뚫음 (피벗 이하)
     "pivot_window": 20,
