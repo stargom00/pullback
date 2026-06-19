@@ -199,6 +199,46 @@ def rsi(close: pd.Series, period: int = 14) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 
+def anchored_vwap(h: pd.Series, lo: pd.Series, c: pd.Series, v: pd.Series,
+                  lookback: int = 120) -> dict:
+    """거래량 최대 봉을 앵커로 한 Anchored VWAP.
+    앵커 = 최근 lookback봉 중 거래량이 가장 큰 봉(가장 의미있는 사건).
+    그 봉부터 현재까지 거래량 가중평균가(typical price 기준)를 계산.
+    반환: {avwap, above(현재가>avwap), dist_pct(현재가-avwap 이격%), anchor_ago(며칠 전)}
+    """
+    n = len(c)
+    if n < 20:
+        return {"avwap": None, "above": None, "dist_pct": None, "anchor_ago": None}
+    win = min(lookback, n)
+    vol_win = v.iloc[-win:]
+    # 앵커: 거래량 최대 봉의 위치 (오늘 봉은 제외 — 진행 중이라)
+    if win >= 2:
+        anchor_pos_in_win = int(vol_win.iloc[:-1].values.argmax())
+    else:
+        anchor_pos_in_win = 0
+    anchor_idx = n - win + anchor_pos_in_win
+    # 앵커부터 현재까지 VWAP
+    seg_h = h.iloc[anchor_idx:]
+    seg_lo = lo.iloc[anchor_idx:]
+    seg_c = c.iloc[anchor_idx:]
+    seg_v = v.iloc[anchor_idx:]
+    typical = (seg_h + seg_lo + seg_c) / 3.0
+    vsum = float(seg_v.sum())
+    if vsum <= 0:
+        return {"avwap": None, "above": None, "dist_pct": None, "anchor_ago": None}
+    avwap = float((typical * seg_v).sum() / vsum)
+    cur = float(c.iloc[-1])
+    if avwap <= 0:
+        return {"avwap": None, "above": None, "dist_pct": None, "anchor_ago": None}
+    dist_pct = (cur - avwap) / avwap * 100
+    return {
+        "avwap": round(avwap, 2),
+        "above": cur > avwap,
+        "dist_pct": round(dist_pct, 1),
+        "anchor_ago": n - 1 - anchor_idx,   # 며칠 전 봉이 앵커인지
+    }
+
+
 def atr(h: pd.Series, lo: pd.Series, c: pd.Series, period: int = 14) -> float:
     """변동성(하루 변동폭) — 손절폭 산정용.
     True Range = max(고-저, |고-전일종가|, |저-전일종가|).
@@ -614,6 +654,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
                     base_low=float(lo.iloc[-cfg["recent_high_window"]:].min()),
                     entry=None, warn_pct=8.0),
         **volume_info(close, v),
+        "avwap": anchored_vwap(h, lo, c, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
             None if math.isnan(x) else round(float(x), 4)
@@ -737,6 +778,7 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
                     base_low=float(lo.iloc[-30:].min()),
                     entry=None, warn_pct=15.0),
         **volume_info(close, v),
+        "avwap": anchored_vwap(h, lo, c, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
             None if math.isnan(x) else round(float(x), 4)
@@ -1050,6 +1092,7 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
         "vol_dry": False,
         "ud_vol": up_down_volume(c, v, 50),
         **volume_info(close, v),
+        "avwap": anchored_vwap(h, lo, c, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
             None if math.isnan(x) else round(float(x), 4)
@@ -1186,6 +1229,7 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
         "vol_dry": False,
         "ud_vol": up_down_volume(c, v, 50),
         **volume_info(close, v),
+        "avwap": anchored_vwap(h, lo, c, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
             None if math.isnan(x) else round(float(x), 4)
@@ -1334,6 +1378,7 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
                     base_low=float(lo.iloc[-cfg["pivot_window"]:].min()),
                     entry=None, warn_pct=8.0),
         **volume_info(close, v),
+        "avwap": anchored_vwap(h, lo, c, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
             None if math.isnan(x) else round(float(x), 4)

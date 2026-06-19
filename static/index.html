@@ -230,7 +230,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.28.0</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.29.0</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -401,6 +401,11 @@ function entrySignal(s) {
   if (s.risk_pct != null) {
     if (s.risk_pct <= 8) checks.push(['ok', `리스크 ${s.risk_pct}%`]);
     else { checks.push(['warn', `리스크 ${s.risk_pct}% — 손절폭 넓음`]); warn++; }
+  }
+  // 5) Anchored VWAP (거래량 최대 봉 이후 평균 매입가 대비 위치)
+  if (s.avwap && s.avwap.above != null) {
+    if (s.avwap.above) checks.push(['ok', `AVWAP 위 +${s.avwap.dist_pct}% — 매수세 우위`]);
+    else { checks.push(['warn', `AVWAP 아래 ${s.avwap.dist_pct}% — 매물 부담`]); warn++; }
   }
 
   let level, label;
