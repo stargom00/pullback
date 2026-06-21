@@ -238,7 +238,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.31.0</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.31.1</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -451,7 +451,7 @@ function card(s) {
     ${sparkSVG(s.spark, s.spark_ma20)}
     ${(s.mode === 'pullback' || s.mode === 'turnaround' || s.mode === 'breakout' || s.mode === 'imminent' || s.mode === 'boxbreak') && (s.volume || s.turnover) ? `
     <div class="metrics mono" style="padding-bottom:0;border-bottom:none">
-      <div class="metric"><div class="k">거래량</div><div class="v">${fmtVolume(s.volume, s.market)}</div></div>
+      <div class="metric"><div class="k">거래량 ${s.vol_vs_avg != null ? `<span style="font-size:9px;opacity:.6">(평균 ${s.vol_vs_avg}×)</span>` : ''}</div><div class="v">${fmtVolume(s.volume, s.market)}</div></div>
       <div class="metric"><div class="k">거래대금</div><div class="v">${fmtTurnover(s.turnover, s.market)}</div></div>
     </div>` : ''}
     ${s.mode === 'surge' ? `

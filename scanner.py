@@ -76,12 +76,18 @@ def climax_warning(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series) -> d
 
 
 def volume_info(close: float, v: pd.Series) -> dict:
-    """오늘 거래량 + 거래대금(종가×거래량 근사). 카드 표시용."""
+    """오늘 거래량 + 거래대금 + 평균 대비 배수. 카드 표시용.
+    vol_vs_avg: 오늘 거래량 ÷ 최근 50일 평균. 1.0=평소, 0.4=평소의 40%, 2.0=2배.
+    """
     vol_today = float(v.iloc[-1]) if len(v) else 0.0
     turnover = close * vol_today   # 거래대금 근사 (종가 기준)
+    avg50 = float(v.iloc[-50:].mean()) if len(v) >= 5 else 0.0
+    vol_vs_avg = round(vol_today / avg50, 2) if avg50 > 0 else None
     return {
         "volume": round(vol_today),
         "turnover": round(turnover),
+        "avg_volume": round(avg50),
+        "vol_vs_avg": vol_vs_avg,   # 오늘/평균 (1.0=평소)
     }
 
 
