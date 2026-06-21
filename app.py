@@ -230,7 +230,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.30.0"
+VERSION = "v4.31.0"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -678,6 +678,46 @@ async def save_journal(request: Request):
     except OSError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
     return JSONResponse({"ok": True, "count": len(body)})
+
+
+@app.post("/api/prices")
+async def batch_prices(request: Request):
+    """추적용 현재가 일괄 조회. body: {"tickers": ["AAPL", "005930.KS", ...]}
+    반환: {"prices": {"AAPL": 123.4, ...}} (실패 종목은 생략)."""
+    body = await request.json()
+    tickers = body.get("tickers", []) if isinstance(body, dict) else []
+    if not tickers or not isinstance(tickers, list):
+        return JSONResponse({"prices": {}})
+    tickers = tickers[:50]   # 안전 상한
+
+    def _one_price(tk: str):
+        try:
+            if naver_kr.is_kr(tk):
+                p = naver_kr.fetch_live_price(tk)
+                if p and p > 0:
+                    return tk, float(p)
+                # 폴백: 일봉 마지막 종가
+                df = naver_kr.fetch_history(tk, days=10)
+                if df is not None and not df.empty:
+                    return tk, float(df["Close"].iloc[-1])
+            else:
+                info = yf.Ticker(tk).fast_info
+                p = getattr(info, "last_price", None)
+                if p and p > 0:
+                    return tk, float(p)
+                df = yf.Ticker(tk).history(period="5d", interval="1d")
+                if df is not None and not df.empty:
+                    return tk, float(df["Close"].iloc[-1])
+        except Exception:
+            pass
+        return tk, None
+
+    loop = asyncio.get_event_loop()
+    results = await asyncio.gather(*[
+        loop.run_in_executor(_executor, _one_price, tk) for tk in tickers
+    ])
+    prices = {tk: p for tk, p in results if p is not None}
+    return JSONResponse({"prices": prices})
 
 
 @app.get("/")
