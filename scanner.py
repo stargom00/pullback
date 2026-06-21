@@ -161,6 +161,7 @@ def _rr_block(pivot: float, stop: float, h: pd.Series, lo: pd.Series, c: pd.Seri
     return {
         "stop": round(eff, 2),
         "risk_pct": round(risk_pct, 2),
+        "entry_basis": "현재가" if (entry and entry > 0) else "피벗",   # 리스크/R 계산 기준
         "target": info["target"],
         "rr": info["rr"],
         "target_basis": info["target_basis"],
@@ -200,24 +201,26 @@ def rsi(close: pd.Series, period: int = 14) -> pd.Series:
 
 
 def anchored_vwap(h: pd.Series, lo: pd.Series, c: pd.Series, v: pd.Series,
-                  lookback: int = 120) -> dict:
+                  lookback: int = 60) -> dict:
     """거래량 최대 봉을 앵커로 한 Anchored VWAP.
-    앵커 = 최근 lookback봉 중 거래량이 가장 큰 봉(가장 의미있는 사건).
+    앵커 = 최근 lookback봉(약 3개월) 중 거래량이 가장 큰 봉.
+      너무 길면 옛날 폭등 봉이 잡혀 AVWAP이 현재가와 멀어지고 신호가 무뎌짐.
+      최근 구간으로 좁혀 '최근의 의미있는 사건' 기준으로 한다.
     그 봉부터 현재까지 거래량 가중평균가(typical price 기준)를 계산.
-    반환: {avwap, above(현재가>avwap), dist_pct(현재가-avwap 이격%), anchor_ago(며칠 전)}
+    반환: {avwap, above, dist_pct, anchor_ago, zone}
+      zone: 이격도 등급 — healthy(0~+10%) / extended(+10~+20%) /
+            overheated(+20%+) / near(0~-5%) / below(-5%↓)
     """
     n = len(c)
     if n < 20:
-        return {"avwap": None, "above": None, "dist_pct": None, "anchor_ago": None}
+        return {"avwap": None, "above": None, "dist_pct": None, "anchor_ago": None, "zone": None}
     win = min(lookback, n)
     vol_win = v.iloc[-win:]
-    # 앵커: 거래량 최대 봉의 위치 (오늘 봉은 제외 — 진행 중이라)
     if win >= 2:
         anchor_pos_in_win = int(vol_win.iloc[:-1].values.argmax())
     else:
         anchor_pos_in_win = 0
     anchor_idx = n - win + anchor_pos_in_win
-    # 앵커부터 현재까지 VWAP
     seg_h = h.iloc[anchor_idx:]
     seg_lo = lo.iloc[anchor_idx:]
     seg_c = c.iloc[anchor_idx:]
@@ -225,17 +228,29 @@ def anchored_vwap(h: pd.Series, lo: pd.Series, c: pd.Series, v: pd.Series,
     typical = (seg_h + seg_lo + seg_c) / 3.0
     vsum = float(seg_v.sum())
     if vsum <= 0:
-        return {"avwap": None, "above": None, "dist_pct": None, "anchor_ago": None}
+        return {"avwap": None, "above": None, "dist_pct": None, "anchor_ago": None, "zone": None}
     avwap = float((typical * seg_v).sum() / vsum)
     cur = float(c.iloc[-1])
     if avwap <= 0:
-        return {"avwap": None, "above": None, "dist_pct": None, "anchor_ago": None}
+        return {"avwap": None, "above": None, "dist_pct": None, "anchor_ago": None, "zone": None}
     dist_pct = (cur - avwap) / avwap * 100
+    # 이격도 등급
+    if dist_pct >= 20:
+        zone = "overheated"     # 과열 — 평균가에서 너무 멀어짐
+    elif dist_pct >= 10:
+        zone = "extended"       # 연장 — 추격 주의
+    elif dist_pct >= 0:
+        zone = "healthy"        # 건강한 우위 (지지 유효)
+    elif dist_pct >= -5:
+        zone = "near"           # AVWAP 살짝 아래 (애매)
+    else:
+        zone = "below"          # 매물 부담
     return {
         "avwap": round(avwap, 2),
         "above": cur > avwap,
         "dist_pct": round(dist_pct, 1),
-        "anchor_ago": n - 1 - anchor_idx,   # 며칠 전 봉이 앵커인지
+        "anchor_ago": n - 1 - anchor_idx,
+        "zone": zone,
     }
 
 

@@ -123,6 +123,14 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
   color:var(--text);padding:4px 6px;border-radius:6px;font-size:12px;font-family:var(--mono)}
 .jrnl-empty{color:var(--muted);text-align:center;padding:60px 20px;line-height:1.7}
 .jrnl-stats{display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+.sigval{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.sigval-head{font-size:14px;font-weight:700;color:var(--text);margin-bottom:10px}
+.sigval-tables{display:flex;gap:16px;flex-wrap:wrap}
+.sigval-t{flex:1;min-width:260px;border-collapse:collapse;font-size:12px}
+.sigval-t th{text-align:left;padding:5px 8px;color:var(--muted);border-bottom:1px solid var(--line);font-weight:600}
+.sigval-t td{padding:5px 8px;border-bottom:1px solid var(--line);color:var(--text);font-variant-numeric:tabular-nums}
+.sigval-note{margin-top:10px;font-size:11px;color:var(--muted);line-height:1.5}
+.sigval-hint{background:var(--surface);border:1px dashed var(--line);border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:12px;color:var(--muted)}
 .statcard{flex:1;min-width:240px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px}
 .statcard-t{font-size:13px;font-weight:700;margin-bottom:4px}
 .statcard-v{font-size:12px;color:var(--muted)}
@@ -230,7 +238,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.29.0</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.30.0</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -403,9 +411,13 @@ function entrySignal(s) {
     else { checks.push(['warn', `리스크 ${s.risk_pct}% — 손절폭 넓음`]); warn++; }
   }
   // 5) Anchored VWAP (거래량 최대 봉 이후 평균 매입가 대비 위치)
-  if (s.avwap && s.avwap.above != null) {
-    if (s.avwap.above) checks.push(['ok', `AVWAP 위 +${s.avwap.dist_pct}% — 매수세 우위`]);
-    else { checks.push(['warn', `AVWAP 아래 ${s.avwap.dist_pct}% — 매물 부담`]); warn++; }
+  if (s.avwap && s.avwap.zone) {
+    const z = s.avwap.zone, d = s.avwap.dist_pct;
+    if (z === 'healthy') checks.push(['ok', `AVWAP 위 +${d}% — 건강한 우위`]);
+    else if (z === 'extended') { checks.push(['warn', `AVWAP +${d}% — 연장(추격주의)`]); warn++; }
+    else if (z === 'overheated') { checks.push(['warn', `AVWAP +${d}% — 과열(평균가서 멀어짐)`]); warn++; }
+    else if (z === 'near') { checks.push(['warn', `AVWAP ${d}% — 살짝 아래(애매)`]); warn++; }
+    else if (z === 'below') { checks.push(['danger', `AVWAP ${d}% — 매물 부담 큼`]); danger++; }
   }
 
   let level, label;
@@ -459,11 +471,11 @@ function card(s) {
     <div class="metrics mono" style="border-top:none;padding-top:0">
       <div class="metric"><div class="k">피벗 (${s.pivot_type ?? '천장'})</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
       <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
-      <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(피벗진입)</span></div><div class="v" style="${s.risk_warn ? 'color:var(--up)' : ''}">${s.risk_pct}%${s.risk_warn ? ' ⚠️' : ''}</div></div>
+      <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(${s.entry_basis ?? '피벗'}진입)</span></div><div class="v">${s.risk_pct}%</div></div>
       <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
     </div>` : s.mode === 'breakout' ? `
     <div class="metrics mono">
-      <div class="metric"><div class="k">연장도</div><div class="v" style="${s.in_valid_zone ? 'color:var(--green)' : 'color:var(--up)'}">+${s.ext_pct}%${s.in_valid_zone ? ' ✓' : ' ⚠️'}</div></div>
+      <div class="metric"><div class="k">연장도</div><div class="v" style="${s.in_valid_zone ? 'color:var(--green)' : 'color:var(--up)'}">+${s.ext_pct}%</div></div>
       <div class="metric"><div class="k">거래량</div><div class="v">${s.vol_mult}×</div></div>
       <div class="metric"><div class="k">베이스</div><div class="v">${s.base_days}일</div></div>
       <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}${s.ud_vol != null ? ` <span style="color:${s.ud_vol >= 1 ? 'var(--green)' : '#e0a030'};font-size:11px" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집, 1.0↓ 분산">U/D ${s.ud_vol}</span>` : ''}</div></div>
@@ -471,11 +483,11 @@ function card(s) {
     <div class="metrics mono" style="border-top:none;padding-top:0">
       <div class="metric"><div class="k">피벗 (베이스 천장)</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
       <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
-      <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(피벗진입)</span></div><div class="v" style="${s.risk_pct > 8 ? 'color:var(--up)' : ''}">${s.risk_pct}%${s.risk_pct > 8 ? ' ⚠️' : ''}</div></div>
+      <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(${s.entry_basis ?? '피벗'}진입)</span></div><div class="v">${s.risk_pct}%</div></div>
       <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
     </div>` : s.mode === 'boxbreak' ? `
     <div class="metrics mono">
-      <div class="metric"><div class="k">연장도</div><div class="v" style="${s.ext_pct <= 5 ? 'color:var(--green)' : 'color:var(--up)'}">+${s.ext_pct}%${s.ext_pct <= 5 ? ' ✓' : ' ⚠️'}</div></div>
+      <div class="metric"><div class="k">연장도</div><div class="v" style="${s.ext_pct <= 5 ? 'color:var(--green)' : 'color:var(--up)'}">+${s.ext_pct}%</div></div>
       <div class="metric"><div class="k">거래량</div><div class="v">${s.vol_mult}×</div></div>
       <div class="metric"><div class="k">박스폭</div><div class="v">${s.box_range_pct}%</div></div>
       <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}${s.ud_vol != null ? ` <span style="color:${s.ud_vol >= 1 ? 'var(--green)' : '#e0a030'};font-size:11px" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집, 1.0↓ 분산">U/D ${s.ud_vol}</span>` : ''}</div></div>
@@ -483,7 +495,7 @@ function card(s) {
     <div class="metrics mono" style="border-top:none;padding-top:0">
       <div class="metric"><div class="k">피벗 (${s.pivot_type})</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
       <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
-      <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(피벗진입)</span></div><div class="v" style="${s.risk_pct > 8 ? 'color:var(--up)' : ''}">${s.risk_pct}%${s.risk_pct > 8 ? ' ⚠️' : ''}</div></div>
+      <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(${s.entry_basis ?? '피벗'}진입)</span></div><div class="v">${s.risk_pct}%</div></div>
       <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
     </div>` : s.mode === 'super' ? `
     <div class="metrics mono">
@@ -555,7 +567,7 @@ function card(s) {
       <div class="metric"><div class="k">RS</div><div class="v" style="color:${s.rs >= 80 ? 'var(--green)' : s.rs >= 65 ? 'var(--amber)' : 'var(--text)'}">${s.rs ?? '-'}${s.rs_mom >= 10 ? ' <span style="color:var(--green)" title="상대강도 개선 중">↗</span>' : ''}</div></div>
       <div class="metric"><div class="k">피벗 (${s.pivot_type ?? '돌파가'})</div><div class="v">${fmtPrice(s.pivot, s.market)} <span style="color:${s.pivot_dist_pct >= 15 ? 'var(--up)' : 'var(--muted)'};font-size:11px">+${s.pivot_dist_pct}%${s.pivot_dist_pct >= 15 ? ' 관찰' : ''}</span></div></div>
       <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
-      <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(피벗진입)</span></div><div class="v" style="${s.risk_warn ? 'color:var(--up)' : ''}">${s.risk_pct}%${s.risk_warn ? ' ⚠️' : ''}</div></div>
+      <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(${s.entry_basis ?? '피벗'}진입)</span></div><div class="v">${s.risk_pct}%</div></div>
       <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
     </div>`}
     ${(s.mode === 'leader' || s.mode === 'super' || s.mode === 'breakout' || s.mode === 'surge' || s.mode === 'imminent' || s.mode === 'boxbreak') ? '' : s.mode === 'turnaround' ? `
@@ -924,6 +936,8 @@ function saveJournal() {
   const stop = parseFloat(document.getElementById('jmStop').value) || null;
   const note = document.getElementById('jmNote').value.trim();
   const riskAmt = (entry && stop && entry > stop) ? ((entry - stop) / entry * 100) : (s.risk_pct ?? null);
+  // 진입 시점 신호 스냅샷 (나중에 신호별 승률 검증용)
+  const sig = (typeof entrySignal === 'function') ? entrySignal(s) : null;
   const rec = {
     id: Date.now(),
     date: new Date().toISOString().slice(0, 10),
@@ -934,6 +948,10 @@ function saveJournal() {
     pivot_type: s.pivot_type || '', setup_score: s.setup_score != null ? Math.round(s.setup_score) : '',
     rs: s.rs, entry, stop,
     risk_pct: riskAmt != null ? Math.round(riskAmt * 10) / 10 : '',
+    // ── 진입 시점 신호 스냅샷 (검증용) ──
+    sig_level: sig ? sig.level : '',          // ok | warn | danger
+    avwap_zone: s.avwap ? (s.avwap.zone || '') : '',
+    rr_at_entry: s.rr ?? '',
     alert: s.alert || '', note,
     exit: '', result_r: '', held_days: '', review: ''
   };
@@ -949,8 +967,49 @@ function journalStats(list) {
   return { openCount, closedCount: closed.length, avgR, winRate, total: list.length };
 }
 
+// 신호별 성과 검증: 진입 시점 신호등/AVWAP존별 승률·평균R 집계
+function signalValidation(list) {
+  const closed = list.filter(r => r.result_r !== '' && !isNaN(parseFloat(r.result_r)));
+  if (closed.length < 3) return null;   // 표본 3건 미만이면 의미 없음
+  const group = (keyFn, labels) => {
+    const out = {};
+    for (const key of Object.keys(labels)) {
+      const rows = closed.filter(r => keyFn(r) === key);
+      if (rows.length === 0) continue;
+      const wins = rows.filter(r => parseFloat(r.result_r) > 0).length;
+      const avgR = (rows.reduce((a, r) => a + parseFloat(r.result_r), 0) / rows.length);
+      out[key] = { label: labels[key], n: rows.length, win: Math.round(wins/rows.length*100), avgR: avgR.toFixed(2) };
+    }
+    return out;
+  };
+  return {
+    byLevel: group(r => r.sig_level, {ok:'🟢 진입양호', warn:'🟡 주의', danger:'🔴 자제'}),
+    byZone: group(r => r.avwap_zone, {healthy:'AVWAP 건강', extended:'AVWAP 연장', overheated:'AVWAP 과열', near:'AVWAP 근처', below:'AVWAP 아래'}),
+    total: closed.length
+  };
+}
+
 let journalFilter = 'all';  // all | 추세추종 | 단타
 let editingId = null;
+
+function renderSignalValidation(all) {
+  const v = signalValidation(all);
+  if (!v) return `<div class="sigval-hint">📊 신호 검증: 종료된 매매가 3건 이상 쌓이면 신호별 승률이 여기 표시돼요. (진입 시 신호등·AVWAP 상태가 자동 기록됩니다)</div>`;
+  const rowsOf = (obj) => Object.values(obj).map(g =>
+    `<tr><td>${g.label}</td><td>${g.n}건</td><td>${g.win}%</td><td style="color:${parseFloat(g.avgR)>=0?'var(--green)':'var(--up)'}">${g.avgR}R</td></tr>`
+  ).join('');
+  const lvlRows = rowsOf(v.byLevel);
+  const zoneRows = rowsOf(v.byZone);
+  return `
+    <div class="sigval">
+      <div class="sigval-head">🔬 신호 검증 <span style="opacity:.6;font-size:11px">— 종료 ${v.total}건 기준. 신호가 실제로 맞는지 데이터로 확인</span></div>
+      <div class="sigval-tables">
+        <table class="sigval-t"><thead><tr><th>진입 신호등</th><th>건수</th><th>승률</th><th>평균</th></tr></thead><tbody>${lvlRows || '<tr><td colspan=4>데이터 없음</td></tr>'}</tbody></table>
+        <table class="sigval-t"><thead><tr><th>AVWAP 존</th><th>건수</th><th>승률</th><th>평균</th></tr></thead><tbody>${zoneRows || '<tr><td colspan=4>데이터 없음</td></tr>'}</tbody></table>
+      </div>
+      <div class="sigval-note">💡 🟢 진입의 승률·평균R이 🔴보다 확실히 높으면 신호등이 잘 작동하는 거예요. 비슷하거나 역전되면 기준을 재검토하세요.</div>
+    </div>`;
+}
 
 function renderJournal() {
   const wrap = document.getElementById('journalView');
@@ -984,6 +1043,7 @@ function renderJournal() {
         <div class="statcard-v">총 ${scalp.total} · 종료 ${scalp.closedCount} · 승률 ${scalp.winRate}${scalp.winRate!=='–'?'%':''} · 평균 ${scalp.avgR}R</div>
       </div>
     </div>
+    ${renderSignalValidation(all)}
     <div class="jrnl-filter">
       ${fbtn('all','전체')} ${fbtn('추세추종','📈 추세추종')} ${fbtn('단타','⚡ 단타')}
     </div>
@@ -1089,9 +1149,9 @@ function exportCSV() {
   const j = getJournal();
   if (!j.length) return;
   const cols = ['date','ticker','name','market','sector','tab','category','signal','pivot_type',
-    'setup_score','rs','entry','stop','risk_pct','alert','note','exit','result_r','held_days','review'];
+    'setup_score','rs','entry','stop','risk_pct','sig_level','avwap_zone','rr_at_entry','alert','note','exit','result_r','held_days','review'];
   const head = ['날짜','티커','종목','시장','섹터','탭','구분','신호','피벗종류','전일점수','RS',
-    '진입가','손절','리스크%','경보','진입근거','청산가','결과R','보유일','복기'];
+    '진입가','손절','리스크%','진입신호등','AVWAP존','진입시손익비','경보','진입근거','청산가','결과R','보유일','복기'];
   const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const csv = [head.join(','), ...j.map(r => cols.map(c => esc(r[c])).join(','))].join('\r\n');
   const blob = new Blob(['\uFEFF' + csv], {type: 'text/csv;charset=utf-8'});
