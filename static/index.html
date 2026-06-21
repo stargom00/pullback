@@ -239,7 +239,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.32.0</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.32.1</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -840,12 +840,40 @@ function getJournal() { return journalCache; }
 
 function setJournal(arr) {
   journalCache = arr;
-  // 서버에 통째로 저장 (실패해도 화면은 유지)
-  fetch('/api/journal', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(arr)
-  }).catch(e => console.error('일지 저장 실패:', e));
+  return _saveJournalToServer(arr);
+}
+
+// 서버 저장 (성공 확인 + 1회 재시도 + 실패 시 알림)
+async function _saveJournalToServer(arr, _retry = true) {
+  try {
+    const res = await fetch('/api/journal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(arr)
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return true;
+  } catch (e) {
+    if (_retry) {   // 1회 재시도
+      await new Promise(r => setTimeout(r, 800));
+      return _saveJournalToServer(arr, false);
+    }
+    console.error('일지 저장 실패:', e);
+    if (typeof showSaveError === 'function') showSaveError();
+    return false;
+  }
+}
+
+function showSaveError() {
+  let bar = document.getElementById('saveErrorBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'saveErrorBar';
+    bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:var(--up);color:#fff;padding:10px;text-align:center;z-index:9999;font-size:13px';
+    bar.textContent = '⚠️ 일지 저장에 실패했어요. 네트워크 확인 후 다시 시도하세요. (화면 데이터는 유지됨)';
+    document.body.appendChild(bar);
+    setTimeout(() => bar.remove(), 6000);
+  }
 }
 
 // 앱 시작 시 서버에서 일지 로드 + 구 localStorage 데이터 마이그레이션
@@ -983,7 +1011,7 @@ function closeJournal() {
     const m = document.querySelector('#journalModal .modal');
     if (m) m.style.transform = ''; };
 })();
-function saveJournal() {
+async function saveJournal() {
   const s = pendingStock; if (!s) return;
   const entry = parseFloat(document.getElementById('jmEntry').value) || null;
   const stop = parseFloat(document.getElementById('jmStop').value) || null;
@@ -1015,8 +1043,15 @@ function saveJournal() {
     alert: s.alert || '', note,
     exit: '', result_r: '', held_days: '', review: ''
   };
-  const j = getJournal(); j.unshift(rec); setJournal(j);
+  const j = getJournal(); j.unshift(rec);
+  journalCache = j;
   closeJournal();
+  // 저장 완료를 기다려 누락 방지 (실패 시 알림은 _saveJournalToServer가 처리)
+  const ok = await _saveJournalToServer(j);
+  if (ok && typeof renderJournal === 'function' &&
+      document.getElementById('journalView').style.display !== 'none') {
+    renderJournal();
+  }
 }
 
 function journalStats(list) {
@@ -1140,7 +1175,7 @@ function renderJournal() {
     <table class="jtable">
       <thead><tr>
         <th>날짜</th><th>종목</th><th>구분</th><th>탭</th><th>신호</th><th>섹터</th><th>피벗</th>
-        <th>전일점수</th><th>RS</th><th>진입가</th><th>손절</th><th>리스크%</th>
+        <th>전일점수</th><th>RS</th><th>진입가</th><th>손절</th><th>리스크%</th><th>진입신호등</th>
         <th>결과R</th><th>보유일</th><th>근거/복기</th><th></th>
       </tr></thead>
       <tbody>
@@ -1165,6 +1200,7 @@ function viewRow(r) {
     <td class="mono">${r.entry ?? '-'}</td>
     <td class="mono">${r.stop ?? '-'}</td>
     <td class="mono">${r.risk_pct || '-'}</td>
+    <td>${r.sig_level ? (r.sig_level==='ok'?'🟢':r.sig_level==='warn'?'🟡':'🔴') : '-'}</td>
     <td class="mono" style="${r.result_r&&parseFloat(r.result_r)>0?'color:var(--up)':r.result_r?'color:var(--down)':''}">${
       r.result_r
         ? `${r.result_r}R${r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:''}`
@@ -1204,6 +1240,7 @@ function editRow(r) {
     <td><input id="e_entry" class="ein" value="${r.entry ?? ''}" inputmode="decimal"></td>
     <td><input id="e_stop" class="ein" value="${r.stop ?? ''}" inputmode="decimal"></td>
     <td class="mono">${r.risk_pct || '-'}</td>
+    <td>${r.sig_level ? (r.sig_level==='ok'?'🟢':r.sig_level==='warn'?'🟡':'🔴') : '-'}</td>
     <td><input id="e_exit" class="ein" value="${r.exit || ''}" placeholder="청산가" style="width:60px" inputmode="decimal" title="청산가를 넣으면 결과R 자동 계산">
         <input id="e_result" class="ein" value="${r.result_r || ''}" placeholder="또는 R 직접" style="width:60px;margin-top:4px"></td>
     <td><input id="e_held" class="ein" value="${r.held_days || ''}" placeholder="일" style="width:40px"></td>
