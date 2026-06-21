@@ -125,6 +125,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .jrnl-stats{display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap}
 .sigval{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
 .sigval-head{font-size:14px;font-weight:700;color:var(--text);margin-bottom:10px}
+.sigval-subhead{font-size:13px;font-weight:700;color:var(--text);margin:14px 0 8px}
 .sigval-tables{display:flex;gap:16px;flex-wrap:wrap}
 .sigval-t{flex:1;min-width:260px;border-collapse:collapse;font-size:12px}
 .sigval-t th{text-align:left;padding:5px 8px;color:var(--muted);border-bottom:1px solid var(--line);font-weight:600}
@@ -238,7 +239,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.31.1</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.32.0</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -387,37 +388,37 @@ function entrySignal(s) {
 
   // 1) 거래량 동반 (한올 교훈: 거래량 없는 돌파임박은 가짜 위험)
   if (volBreakout != null) {
-    if (volBreakout >= 1.5) checks.push(['ok', `거래량 ${volBreakout}× 동반`]);
-    else { checks.push(['warn', `거래량 ${volBreakout}× — 동력 부족`]); warn++; }
+    if (volBreakout >= 1.5) checks.push(['ok', `거래량 ${volBreakout}× 동반`, 'vol']);
+    else { checks.push(['warn', `거래량 ${volBreakout}× — 동력 부족`, 'vol_weak']); warn++; }
   } else if (volPullback != null) {
-    if (volPullback <= 0.8) checks.push(['ok', `거래량 ${volPullback}× 수축(눌림 양호)`]);
-    else if (volPullback < 1.5) checks.push(['warn', `거래량 ${volPullback}× — 애매`]);
-    else { checks.push(['ok', `거래량 ${volPullback}× 증가`]); }
+    if (volPullback <= 0.8) checks.push(['ok', `거래량 ${volPullback}× 수축(눌림 양호)`, 'vol']);
+    else if (volPullback < 1.5) checks.push(['warn', `거래량 ${volPullback}× — 애매`, 'vol_mid']);
+    else { checks.push(['ok', `거래량 ${volPullback}× 증가`, 'vol']); }
   }
   // 2) RS (주도주 여부)
   if (s.rs != null) {
-    if (s.rs >= 90) checks.push(['ok', `RS ${s.rs} 주도주급`]);
-    else if (s.rs >= 70) checks.push(['warn', `RS ${s.rs} — 주도주는 아님`]);
-    else { checks.push(['danger', `RS ${s.rs} 약함`]); danger++; }
+    if (s.rs >= 90) checks.push(['ok', `RS ${s.rs} 주도주급`, 'rs']);
+    else if (s.rs >= 70) checks.push(['warn', `RS ${s.rs} — 주도주는 아님`, 'rs_mid']);
+    else { checks.push(['danger', `RS ${s.rs} 약함`, 'rs_weak']); danger++; }
   }
   // 3) 손익비
   if (s.rr != null) {
-    if (s.rr >= 2) checks.push(['ok', `손익비 ${s.rr}R`]);
-    else { checks.push(['danger', `손익비 ${s.rr}R — 가성비 낮음`]); danger++; }
+    if (s.rr >= 2) checks.push(['ok', `손익비 ${s.rr}R`, 'rr']);
+    else { checks.push(['danger', `손익비 ${s.rr}R — 가성비 낮음`, 'rr_low']); danger++; }
   }
   // 4) 리스크(손절폭)
   if (s.risk_pct != null) {
-    if (s.risk_pct <= 8) checks.push(['ok', `리스크 ${s.risk_pct}%`]);
-    else { checks.push(['warn', `리스크 ${s.risk_pct}% — 손절폭 넓음`]); warn++; }
+    if (s.risk_pct <= 8) checks.push(['ok', `리스크 ${s.risk_pct}%`, 'risk']);
+    else { checks.push(['warn', `리스크 ${s.risk_pct}% — 손절폭 넓음`, 'risk_wide']); warn++; }
   }
   // 5) Anchored VWAP (거래량 최대 봉 이후 평균 매입가 대비 위치)
   if (s.avwap && s.avwap.zone) {
     const z = s.avwap.zone, d = s.avwap.dist_pct;
-    if (z === 'healthy') checks.push(['ok', `AVWAP 위 +${d}% — 건강한 우위`]);
-    else if (z === 'extended') { checks.push(['warn', `AVWAP +${d}% — 연장(추격주의)`]); warn++; }
-    else if (z === 'overheated') { checks.push(['warn', `AVWAP +${d}% — 과열(평균가서 멀어짐)`]); warn++; }
-    else if (z === 'near') { checks.push(['warn', `AVWAP ${d}% — 살짝 아래(애매)`]); warn++; }
-    else if (z === 'below') { checks.push(['danger', `AVWAP ${d}% — 매물 부담 큼`]); danger++; }
+    if (z === 'healthy') checks.push(['ok', `AVWAP 위 +${d}% — 건강한 우위`, 'avwap']);
+    else if (z === 'extended') { checks.push(['warn', `AVWAP +${d}% — 연장(추격주의)`, 'avwap_ext']); warn++; }
+    else if (z === 'overheated') { checks.push(['warn', `AVWAP +${d}% — 과열(평균가서 멀어짐)`, 'avwap_hot']); warn++; }
+    else if (z === 'near') { checks.push(['warn', `AVWAP ${d}% — 살짝 아래(애매)`, 'avwap_near']); warn++; }
+    else if (z === 'below') { checks.push(['danger', `AVWAP ${d}% — 매물 부담 큼`, 'avwap_below']); danger++; }
   }
 
   let level, label;
@@ -425,7 +426,9 @@ function entrySignal(s) {
   else if (warn >= 2) { level = 'danger'; label = '🔴 진입 자제'; }
   else if (warn === 1) { level = 'warn'; label = '🟡 주의'; }
   else { level = 'ok'; label = '🟢 진입 양호'; }
-  return { level, label, checks };
+  // 경고/위험이었던 항목 태그만 추출 (검증용 — 어떤 경고가 과했는지 집계)
+  const flags = checks.filter(c => c[0] === 'warn' || c[0] === 'danger').map(c => c[2]).filter(Boolean);
+  return { level, label, checks, flags };
 }
 
 function card(s) {
@@ -1000,6 +1003,7 @@ function saveJournal() {
     risk_pct: riskAmt != null ? Math.round(riskAmt * 10) / 10 : '',
     // ── 진입 시점 신호 스냅샷 (검증용) ──
     sig_level: sig ? sig.level : '',          // ok | warn | danger
+    sig_flags: sig && sig.flags ? sig.flags.join(',') : '',  // 경고 항목 태그 (검증용)
     avwap_zone: s.avwap ? (s.avwap.zone || '') : '',
     rr_at_entry: s.rr ?? '',
     // ── 페이퍼 추적 (진입 후 자동 가격 추적) ──
@@ -1041,8 +1045,30 @@ function signalValidation(list) {
   return {
     byLevel: group(r => r.sig_level, {ok:'🟢 진입양호', warn:'🟡 주의', danger:'🔴 자제'}),
     byZone: group(r => r.avwap_zone, {healthy:'AVWAP 건강', extended:'AVWAP 연장', overheated:'AVWAP 과열', near:'AVWAP 근처', below:'AVWAP 아래'}),
+    byFlag: flagStats(closed),
     total: closed.length
   };
+}
+
+// 경고 항목별 성과: 각 경고가 켜졌던 매매들의 승률·평균R.
+// "이 경고가 떴는데도 실제로 잘 됐나"를 보고 기준 보정에 활용.
+function flagStats(closed) {
+  const labels = {
+    vol_weak: '거래량 부족', vol_mid: '거래량 애매', rs_mid: 'RS 중간', rs_weak: 'RS 약함',
+    rr_low: '손익비 낮음', risk_wide: '리스크 넓음',
+    avwap_ext: 'AVWAP 연장', avwap_hot: 'AVWAP 과열', avwap_near: 'AVWAP 근처', avwap_below: 'AVWAP 아래'
+  };
+  const out = [];
+  for (const tag of Object.keys(labels)) {
+    const rows = closed.filter(r => (r.sig_flags || '').split(',').includes(tag));
+    if (rows.length === 0) continue;
+    const wins = rows.filter(r => parseFloat(r.result_r) > 0).length;
+    const avgR = rows.reduce((a, r) => a + parseFloat(r.result_r), 0) / rows.length;
+    out.push({ tag, label: labels[tag], n: rows.length, win: Math.round(wins/rows.length*100), avgR: avgR.toFixed(2) });
+  }
+  // 표본 많은 순 정렬
+  out.sort((a, b) => b.n - a.n);
+  return out;
 }
 
 let journalFilter = 'all';  // all | 추세추종 | 단타
@@ -1056,6 +1082,9 @@ function renderSignalValidation(all) {
   ).join('');
   const lvlRows = rowsOf(v.byLevel);
   const zoneRows = rowsOf(v.byZone);
+  const flagRows = (v.byFlag || []).map(g =>
+    `<tr><td>${g.label}</td><td>${g.n}건</td><td>${g.win}%</td><td style="color:${parseFloat(g.avgR)>=0?'var(--green)':'var(--up)'}">${g.avgR}R</td></tr>`
+  ).join('');
   return `
     <div class="sigval">
       <div class="sigval-head">🔬 신호 검증 <span style="opacity:.6;font-size:11px">— 종료 ${v.total}건 기준. 신호가 실제로 맞는지 데이터로 확인</span></div>
@@ -1063,7 +1092,11 @@ function renderSignalValidation(all) {
         <table class="sigval-t"><thead><tr><th>진입 신호등</th><th>건수</th><th>승률</th><th>평균</th></tr></thead><tbody>${lvlRows || '<tr><td colspan=4>데이터 없음</td></tr>'}</tbody></table>
         <table class="sigval-t"><thead><tr><th>AVWAP 존</th><th>건수</th><th>승률</th><th>평균</th></tr></thead><tbody>${zoneRows || '<tr><td colspan=4>데이터 없음</td></tr>'}</tbody></table>
       </div>
-      <div class="sigval-note">💡 🟢 진입의 승률·평균R이 🔴보다 확실히 높으면 신호등이 잘 작동하는 거예요. 비슷하거나 역전되면 기준을 재검토하세요.</div>
+      ${flagRows ? `
+      <div class="sigval-subhead">⚠️ 경고 항목별 성과 <span style="opacity:.6;font-size:11px">— 이 경고가 떴는데도 잘 됐다면 그 기준이 과한 것</span></div>
+      <table class="sigval-t" style="width:100%"><thead><tr><th>경고 항목</th><th>건수</th><th>승률</th><th>평균R</th></tr></thead><tbody>${flagRows}</tbody></table>
+      ` : ''}
+      <div class="sigval-note">💡 🟢 진입이 🔴보다 성과 좋으면 신호등이 잘 작동하는 거예요. 경고 항목 중 승률·평균R이 높은 게 있으면(예: AVWAP 근처가 +1R) 그 경고는 너무 엄격한 거라 기준을 풀어도 됩니다.</div>
     </div>`;
 }
 
@@ -1229,9 +1262,9 @@ function exportCSV() {
   const j = getJournal();
   if (!j.length) return;
   const cols = ['date','ticker','name','market','sector','tab','category','signal','pivot_type',
-    'setup_score','rs','entry','stop','risk_pct','sig_level','avwap_zone','rr_at_entry','alert','note','exit','result_r','held_days','review'];
+    'setup_score','rs','entry','stop','risk_pct','sig_level','sig_flags','avwap_zone','rr_at_entry','alert','note','exit','result_r','held_days','review'];
   const head = ['날짜','티커','종목','시장','섹터','탭','구분','신호','피벗종류','전일점수','RS',
-    '진입가','손절','리스크%','진입신호등','AVWAP존','진입시손익비','경보','진입근거','청산가','결과R','보유일','복기'];
+    '진입가','손절','리스크%','진입신호등','경고항목','AVWAP존','진입시손익비','경보','진입근거','청산가','결과R','보유일','복기'];
   const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const csv = [head.join(','), ...j.map(r => cols.map(c => esc(r[c])).join(','))].join('\r\n');
   const blob = new Blob(['\uFEFF' + csv], {type: 'text/csv;charset=utf-8'});
