@@ -239,7 +239,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.33.1</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.33.2</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -909,6 +909,17 @@ async function loadJournalFromServer() {
 
 // ── 페이퍼 추적: 앱 열 때 추적 종목 현재가 갱신 + 자동 종료 판정 ──
 const TRACK_DAYS = 14;   // 추적 기간 2주
+// 트레이딩뷰 차트 URL — 한국주는 KRX, 미국주는 거래소 자동판별 대신 심볼만
+function tvUrl(ticker, market) {
+  if (!ticker) return '#';
+  if (market === 'kr' || /\.(KS|KQ)$/.test(ticker)) {
+    const code = ticker.replace(/\.(KS|KQ)$/, '');
+    return `https://www.tradingview.com/chart/?symbol=KRX:${code}`;
+  }
+  // 미국주: 거래소 접두어 없이 심볼만 줘도 트레이딩뷰가 자동 해석
+  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(ticker)}`;
+}
+
 async function updateTracking() {
   const j = getJournal();
   const active = j.filter(r => r.tracking && r.result_r === '' && r.entry && r.stop);
@@ -1191,7 +1202,7 @@ function viewRow(r) {
   const catColor = cat === '단타' ? 'color:#c084fc' : 'color:var(--green)';
   return `<tr class="${r.result_r===''?'open-pos':''}">
     <td class="mono">${r.date}</td>
-    <td>${r.name}<div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div></td>
+    <td><a href="${tvUrl(r.ticker, r.market)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${r.name} <span style="font-size:9px;opacity:.5">↗</span><div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div></a></td>
     <td style="font-size:11px;font-weight:600;${catColor}">${cat}</td>
     <td>${r.tab}</td>
     <td>${r.signal || '-'}</td>
