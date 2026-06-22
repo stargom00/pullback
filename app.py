@@ -230,7 +230,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.32.1"
+VERSION = "v4.33.0"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -321,7 +321,7 @@ async def run_scan(market: str, mode: str) -> dict:
     rs_moms = bundle["rs_moms"]
 
     fn = {"turnaround": analyze_turnaround, "leader": analyze_leader, "super": analyze_super, "breakout": analyze_breakout, "surge": analyze_surge, "imminent": analyze_imminent, "boxbreak": analyze_boxbreak}.get(mode, analyze)
-    supports_intraday = mode in ("pullback", "turnaround", "imminent", "boxbreak")  # is_kr 인자를 받는 모드
+    supports_intraday = mode in ("pullback", "turnaround", "imminent", "boxbreak", "breakout")  # is_kr 인자를 받는 모드
     alerts = load_alerts()
     hits = []
     for t, df in data.items():

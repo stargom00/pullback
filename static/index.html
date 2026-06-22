@@ -239,7 +239,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.32.1</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.33.0</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -406,9 +406,11 @@ function entrySignal(s) {
     if (s.rr >= 2) checks.push(['ok', `손익비 ${s.rr}R`, 'rr']);
     else { checks.push(['danger', `손익비 ${s.rr}R — 가성비 낮음`, 'rr_low']); danger++; }
   }
-  // 4) 리스크(손절폭)
+  // 4) 리스크(손절폭) — 한국 중소형주는 변동성이 커서 손절폭이 넓은 게 정상.
+  //    시장별 기준 분리: 한국 12%, 미국 8%.
   if (s.risk_pct != null) {
-    if (s.risk_pct <= 8) checks.push(['ok', `리스크 ${s.risk_pct}%`, 'risk']);
+    const riskLimit = (s.market === 'kr') ? 12 : 8;
+    if (s.risk_pct <= riskLimit) checks.push(['ok', `리스크 ${s.risk_pct}%`, 'risk']);
     else { checks.push(['warn', `리스크 ${s.risk_pct}% — 손절폭 넓음`, 'risk_wide']); warn++; }
   }
   // 5) Anchored VWAP (거래량 최대 봉 이후 평균 매입가 대비 위치)

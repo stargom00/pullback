@@ -156,10 +156,12 @@ def rr_info(pivot: float, stop: float, h: pd.Series, entry: float | None = None,
 
 def _rr_block(pivot: float, stop: float, h: pd.Series, lo: pd.Series, c: pd.Series,
               base_low: float | None = None, entry: float | None = None,
-              warn_pct: float = 8.0) -> dict:
+              warn_pct: float = 8.0, is_kr: bool = False) -> dict:
     """카드용 손절/리스크/손익비 블록. rr_info로 손절을 현실화한 뒤
     stop·risk_pct·손익비를 모두 '현실화된 손절(stop_eff)' 기준으로 통일.
-    표시 손절과 R 계산이 어긋나지 않도록 한 곳에서 처리."""
+    한국 중소형주는 변동성이 커서 손절폭 경고 기준을 완화(12%)한다."""
+    if is_kr and warn_pct < 12.0:
+        warn_pct = 12.0
     info = rr_info(pivot, stop, h, entry=entry, lo=lo, c=c, base_low=base_low)
     eff = info.get("stop_eff") or stop
     base = entry if (entry and entry > 0) else pivot
@@ -673,7 +675,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "pivot_dist_pct": round(pivot_dist_pct, 2),
         **_rr_block(pivot, stop, h, lo, c,
                     base_low=float(lo.iloc[-cfg["recent_high_window"]:].min()),
-                    entry=None, warn_pct=8.0),
+                    entry=None, warn_pct=8.0, is_kr=is_kr),
         **volume_info(close, v),
         "avwap": anchored_vwap(h, lo, c, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
@@ -797,7 +799,7 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
         "pivot_dist_pct": round(pivot_dist_pct, 2),
         **_rr_block(pivot, stop, h, lo, c,
                     base_low=float(lo.iloc[-30:].min()),
-                    entry=None, warn_pct=15.0),
+                    entry=None, warn_pct=15.0, is_kr=is_kr),
         **volume_info(close, v),
         "avwap": anchored_vwap(h, lo, c, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
@@ -1017,7 +1019,7 @@ BREAKOUT_CONFIG = {
 
 
 def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
-                     rs_mom: int | None = None, cfg: dict = BREAKOUT_CONFIG) -> dict | None:
+                     rs_mom: int | None = None, cfg: dict = BREAKOUT_CONFIG, is_kr: bool = False) -> dict | None:
     """베이스 천장을 거래량 동반 상향 돌파한 종목 포착.
     돌파 후 +5% 이내=매수 유효, +5~12%=연장(추격주의), +12% 초과=제외."""
     if df is None or len(df) < cfg["min_bars"]:
@@ -1108,7 +1110,7 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
         "base_days": base_days,
         "base_range_pct": round(base_range * 100, 1),
         **_rr_block(pivot, stop, h, lo, c, base_low=base_low,
-                    entry=close, warn_pct=8.0),   # 이미 돌파 → 현재가 진입 기준
+                    entry=close, warn_pct=8.0, is_kr=is_kr),   # 이미 돌파 → 현재가 진입 기준
         "rsi": round(cur_rsi, 1),
         "vol_dry": False,
         "ud_vol": up_down_volume(c, v, 50),
@@ -1245,7 +1247,7 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
         "box_range_pct": round(best["box_range"] * 100, 1),
         "tl_break_intraday": intraday_unconfirmed,
         **_rr_block(pivot, stop, h, lo, c, base_low=best["box_low"],
-                    entry=close, warn_pct=8.0),   # 이미 돌파 → 현재가 진입 기준
+                    entry=close, warn_pct=8.0, is_kr=is_kr),   # 이미 돌파 → 현재가 진입 기준
         "rsi": round(cur_rsi, 1),
         "vol_dry": False,
         "ud_vol": up_down_volume(c, v, 50),
@@ -1397,7 +1399,7 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
         "rsi": round(cur_rsi, 1),
         **_rr_block(pivot, stop, h, lo, c,
                     base_low=float(lo.iloc[-cfg["pivot_window"]:].min()),
-                    entry=None, warn_pct=8.0),
+                    entry=None, warn_pct=8.0, is_kr=is_kr),
         **volume_info(close, v),
         "avwap": anchored_vwap(h, lo, c, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
