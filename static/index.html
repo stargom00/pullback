@@ -239,7 +239,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.34.0</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.34.1</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -628,7 +628,8 @@ async function load(refresh = false) {
   content.innerHTML = '<div class="loading"><div class="spinner"></div>스캔 중… (첫 스캔은 1~2분 걸릴 수 있어요)</div>';
   status.innerHTML = '';
   try {
-    const res = await fetch(`/api/scan?market=${market}&mode=${mode}${refresh ? '&refresh=true' : ''}`);
+    // 시장 구분 없이 항상 전체를 받아옴 → 한국/미국 탭은 클라이언트에서 필터(재스캔 0초)
+    const res = await fetch(`/api/scan?market=all&mode=${mode}${refresh ? '&refresh=true' : ''}`);
     const data = await res.json();
     status.innerHTML = `<span><b>${data.fetched ?? data.scanned}</b>/${data.scanned}개 종목 스캔</span>
       <span>${mode === 'turnaround' ? '추세전환' : '눌림목'} 후보 <b>${data.hits.length}</b>개</span>
@@ -702,6 +703,9 @@ function renderSectors(summary) {
 function renderCards() {
   const content = document.getElementById('content');
   let list = sectorFilter ? lastHits.filter(h => h.sector === sectorFilter) : lastHits.slice();
+  // 시장 필터 (클라이언트에서 거름 — 재스캔 없음)
+  if (market === 'kr') list = list.filter(h => h.market === 'KR');
+  else if (market === 'us') list = list.filter(h => h.market === 'US');
   // 종목명/코드 검색 필터
   if (searchQuery) {
     const q = searchQuery.toLowerCase().replace(/\s/g, '');
@@ -720,7 +724,19 @@ function renderCards() {
       return rsOk && volOk && rrOk && riskOk;
     });
   }
-  // 즐겨찾기를 최상단으로 (원래 순서는 유지하면서 favorite만 위로)
+  // 시간대별 시장 우선 정렬 (전체 탭에서만):
+  // 사용자 요청: 한국시간 오전 6시~오후 8시는 한국주 먼저(미국장 끝나자마자~한국장),
+  //            그 외(오후 8시~오전 6시)는 미국주 먼저(미국장 진행 시간대)
+  if (market === 'all') {
+    const krHour = (new Date().getUTCHours() + 9) % 24;  // 한국시간 (UTC+9)
+    const krFirst = (krHour >= 6 && krHour < 20);  // 06~20시: 한국주 먼저, 그 외: 미국주 먼저
+    const rank = h => {
+      const isKr = h.market === 'KR';
+      return krFirst ? (isKr ? 0 : 1) : (isKr ? 1 : 0);
+    };
+    list.sort((a, b) => rank(a) - rank(b));  // 안정 정렬: 시장 내 원래 순서 유지
+  }
+  // 즐겨찾기를 최상단으로 (시장 정렬 위에 얹음)
   const isFav = h => favorites.includes((h.ticker || '').toUpperCase());
   list.sort((a, b) => (isFav(b) ? 1 : 0) - (isFav(a) ? 1 : 0));
   content.innerHTML = list.length
@@ -806,7 +822,7 @@ document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('clic
   document.querySelectorAll('[data-market]').forEach(x => x.classList.remove('active'));
   t.classList.add('active');
   market = t.dataset.market;
-  load();
+  renderCards();  // 재스캔 없이 화면만 다시 그림 (lastHits는 전체 보유)
 }));
 document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click', () => {
   document.querySelectorAll('[data-mode]').forEach(x => x.classList.remove('active'));
