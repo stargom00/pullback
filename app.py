@@ -230,7 +230,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.33.0"
+VERSION = "v4.33.1"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -646,7 +646,33 @@ async def fundamentals(ticker: str):
 
 # ── 매매 일지 (서버 저장, 기기 간 동기화) ──
 import json as _json
-JOURNAL_PATH = os.path.join(os.path.dirname(__file__), "journal_user.json")
+def _resolve_journal_path() -> str:
+    """일지 저장 경로. 배포(railway up) 때 안 지워지도록 영구 볼륨 우선.
+    우선순위: 1) 환경변수 JOURNAL_DIR  2) /data (Railway 볼륨 마운트 기본)
+              3) 코드 폴더 (로컬 개발 폴백 — 배포 시엔 휘발됨)
+    """
+    candidates = []
+    env_dir = os.environ.get("JOURNAL_DIR")
+    if env_dir:
+        candidates.append(env_dir)
+    candidates.append("/data")                       # Railway 영구 볼륨 표준 마운트
+    candidates.append(os.path.dirname(__file__))     # 폴백(로컬)
+    for d in candidates:
+        try:
+            os.makedirs(d, exist_ok=True)
+            # 쓰기 가능 여부 확인
+            test = os.path.join(d, ".write_test")
+            with open(test, "w") as f:
+                f.write("ok")
+            os.remove(test)
+            return os.path.join(d, "journal_user.json")
+        except OSError:
+            continue
+    # 최후 폴백
+    return os.path.join(os.path.dirname(__file__), "journal_user.json")
+
+
+JOURNAL_PATH = _resolve_journal_path()
 
 
 def load_journal() -> list:
@@ -668,16 +694,28 @@ async def get_journal():
 
 @app.post("/api/journal")
 async def save_journal(request: Request):
-    """일지 전체를 통째로 저장(덮어쓰기). body = 일지 객체 배열."""
+    """일지 전체를 통째로 저장(덮어쓰기). body = 일지 객체 배열.
+    원자적 쓰기(temp→rename) + 직전 백업으로 손상/유실 방지."""
     body = await request.json()
     if not isinstance(body, list):
         return JSONResponse({"ok": False, "error": "배열 필요"}, status_code=400)
     try:
-        with open(JOURNAL_PATH, "w", encoding="utf-8") as f:
+        d = os.path.dirname(JOURNAL_PATH)
+        # 직전 파일을 .bak으로 백업 (덮어쓰기 전)
+        if os.path.exists(JOURNAL_PATH):
+            try:
+                import shutil
+                shutil.copy2(JOURNAL_PATH, JOURNAL_PATH + ".bak")
+            except OSError:
+                pass
+        # 원자적 쓰기: 임시파일에 쓰고 rename (중간에 죽어도 원본 보존)
+        tmp = JOURNAL_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             _json.dump(body, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, JOURNAL_PATH)
     except OSError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-    return JSONResponse({"ok": True, "count": len(body)})
+    return JSONResponse({"ok": True, "count": len(body), "path": JOURNAL_PATH})
 
 
 @app.post("/api/prices")
