@@ -221,6 +221,13 @@ SECTOR_MAP = {
     "066570.KS": "전기전자", "034220.KS": "디스플레이",
 }
 
+# us_universe_ext.py 신규 종목 섹터 머지 (있으면)
+try:
+    from sectors_ext import SECTOR_MAP_EXT
+    SECTOR_MAP.update(SECTOR_MAP_EXT)
+except Exception:
+    pass
+
 
 def get_sector(ticker: str) -> str:
     return SECTOR_MAP.get(ticker.upper(), "기타")

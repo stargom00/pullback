@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.36.1 [버그수정] 신규 확장 종목(v4.36.0)의 섹터 미표시.
+        us_universe_ext.py 225종목이 sectors.py 매핑에 없어 전부 '기타'로
+        떠 섹터가 안 보였음. sectors_ext.py 추가로 225개 100% 매핑.
+        신규 섹터: 광통신/양자컴퓨팅/원자력/우주항공/코인채굴/핀테크.
+        (VECO=반도체-장비, IONQ=양자컴퓨팅, ALAB=반도체-설계 등)
 v4.36.0 [대규모] universe 확장 + 배치 fetch + 마감후 자동 스캔.
         목적: 추세전환 초입(중소형 성장주)을 놓치던 한계 해소. universe가
               대형주 위주라 VECO 같은 RS98 종목도 안 잡히던 문제.
@@ -287,7 +292,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.36.0"
+VERSION = "v4.36.1"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
