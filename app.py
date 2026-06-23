@@ -5,6 +5,22 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.36.0 [대규모] universe 확장 + 배치 fetch + 마감후 자동 스캔.
+        목적: 추세전환 초입(중소형 성장주)을 놓치던 한계 해소. universe가
+              대형주 위주라 VECO 같은 RS98 종목도 안 잡히던 문제.
+        (1) 미국 fetch를 yf.Ticker 개별 → yf.download 배치(100개씩)로 전환.
+            요청수 1/100로 축소 → 야후 차단 위험 제거, 종목 확대 가능.
+            한국은 네이버 개별 유지(배치 API 없음), 동시성 6.
+        (2) universe 확장: 미국 239→359(us_universe_ext.py, S&P500+나스닥100+
+            반도체장비/광통신/SaaS/양자/원자력 등 중소형 성장주, VECO 포함).
+            한국은 pykrx로 거래대금 상위 KR_TOP_N(기본600) 동적 구성
+            (하루1회 KRX조회, 파일캐시, 실패시 정적 폴백). requirements에 pykrx.
+        (3) 마감후 자동 스캔 스케줄러: 한국15:40·미국06:00(KST) 마감 직후
+            백그라운드로 데이터+주요모드 미리 빌드→디스크캐시. 접속 전 준비완료.
+            5분 폴링, 거래일당 시장별 1회만 워밍(_warmed 중복방지).
+            동적 universe도 이때 갱신. 장중엔 기존 캐시 재사용(외부호출 0).
+        [주의] pykrx는 KRX 접속 필요 — Railway 네트워크 허용 확인.
+               배포 후 첫 마감 워밍까지 동적KR은 정적 폴백으로 동작.
 v4.35.3 [기능] 일지 진입상태(status) 추가 — 추적관찰 시 R통계 오염 방지.
         [문제] 돌파 안 온 추적관찰 종목도 손절가 닿으면 자동 -1R 손절로
                기록돼 승률/R 통계가 망가짐(실제론 안 샀는데).
@@ -271,10 +287,12 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.35.3"
+VERSION = "v4.36.0"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
+US_BATCH_SIZE = 100         # 미국 종목 yf.download 배치 크기 (요청 수 1/N로 축소)
+KR_MAX_CONCURRENT = 6       # 한국 네이버 동시 호출 (배치 API 없어 개별 호출)
 _cache: dict[str, dict] = {}
 _data_cache: dict[str, dict] = {}
 _executor = ThreadPoolExecutor(max_workers=8)
@@ -297,6 +315,46 @@ def _fetch(ticker: str):
         return df
     except Exception:
         return None
+
+
+def _fetch_us_batch(tickers: list[str]) -> dict:
+    """미국 종목을 yf.download로 한 번에 받아 {ticker: df}로 분해.
+    종목당 1요청 → 배치당 1요청으로 줄여 야후 부하/차단을 크게 낮춤.
+    개별 history()와 동일하게 auto_adjust=True, 1년치 일봉."""
+    out: dict = {}
+    if not tickers:
+        return out
+    try:
+        raw = yf.download(
+            tickers, period="1y", interval="1d",
+            auto_adjust=True, group_by="ticker",
+            threads=True, progress=False,
+        )
+    except Exception:
+        return out
+    if raw is None or len(raw) == 0:
+        return out
+
+    # 단일 종목이면 컬럼이 평면(Open/High/...), 복수면 멀티인덱스(ticker, field)
+    single = len(tickers) == 1
+    for t in tickers:
+        try:
+            if single:
+                df = raw.copy()
+            else:
+                if t not in raw.columns.get_level_values(0):
+                    continue
+                df = raw[t].copy()
+            df = df.dropna(how="all")
+            if df is None or df.empty or "Close" not in df.columns:
+                continue
+            # 전부 NaN인 종목(상장폐지/데이터없음) 제외
+            if df["Close"].dropna().empty:
+                continue
+            out[t] = df
+        except Exception:
+            continue
+    return out
 
 
 def _ret_pct(close, days):
@@ -417,16 +475,38 @@ async def _fetch_market_data(market: str) -> dict:
     universe = get_universe(market)
     loop = asyncio.get_event_loop()
     tickers = list(universe.keys())
+    kr_tickers = [t for t in tickers if naver_kr.is_kr(t)]
+    us_tickers = [t for t in tickers if not naver_kr.is_kr(t)]
 
-    # 동시 호출 수를 제한해 데이터 소스에 부담을 덜 줌 (차단 방지)
-    sem = asyncio.Semaphore(MAX_CONCURRENT_FETCH)
+    data: dict = {}
 
-    async def fetch_one(t):
-        async with sem:
-            return await loop.run_in_executor(_executor, _fetch, t)
+    # ── 한국: 네이버 개별 호출 (배치 API 없음), 동시성 제한 ──
+    if kr_tickers:
+        sem = asyncio.Semaphore(KR_MAX_CONCURRENT)
 
-    dfs = await asyncio.gather(*[fetch_one(t) for t in tickers])
-    data = {t: df for t, df in zip(tickers, dfs) if df is not None}
+        async def fetch_kr(t):
+            async with sem:
+                return await loop.run_in_executor(_executor, _fetch, t)
+
+        kr_dfs = await asyncio.gather(*[fetch_kr(t) for t in kr_tickers])
+        for t, df in zip(kr_tickers, kr_dfs):
+            if df is not None:
+                data[t] = df
+
+    # ── 미국: yf.download 배치 (100개씩) → 요청 수 1/100로 축소 ──
+    if us_tickers:
+        batches = [us_tickers[i:i + US_BATCH_SIZE]
+                   for i in range(0, len(us_tickers), US_BATCH_SIZE)]
+
+        async def fetch_us_batch(batch):
+            return await loop.run_in_executor(_executor, _fetch_us_batch, batch)
+
+        # 배치는 동시에 너무 많이 띄우지 않게 2개씩 (각 배치가 내부 threads=True)
+        for i in range(0, len(batches), 2):
+            chunk = batches[i:i + 2]
+            results = await asyncio.gather(*[fetch_us_batch(b) for b in chunk])
+            for r in results:
+                data.update(r)
 
     # RS 등급 + RS 모멘텀 (시장별 백분위)
     kr, us = {}, {}
@@ -527,6 +607,50 @@ async def scan(market: str = "all", mode: str = "imminent", refresh: bool = Fals
     result["daykey"] = _market_session_key(market)
     _cache[key] = result
     return JSONResponse({**result, "favorites": favs, "cached": False})
+
+
+# ── 마감 후 자동 스캔 스케줄러 ──
+# 한국 마감(15:40 KST)·미국 마감(06:00 KST) 직후, 해당 시장 데이터를 미리
+# 받아 디스크 캐시를 채워둠. 사용자가 접속하기 전에 준비 완료 → 첫 로딩도 즉시.
+# 동적 universe(거래대금 상위)도 이때 갱신됨.
+_warmed: dict = {}  # {"kr:daykey": True} 중복 워밍 방지
+
+
+async def _warm_market(market: str):
+    """해당 시장 데이터+주요 모드 결과를 미리 빌드(디스크 캐시 저장)."""
+    daykey = _market_session_key(market)
+    if not daykey:
+        return  # 아직 마감 전
+    wkey = f"{market}:{daykey}"
+    if _warmed.get(wkey):
+        return
+    try:
+        await _fetch_market_data(market)               # 원본 데이터 + 디스크 저장
+        for mode in ("imminent", "pullback", "turnaround", "breakout"):
+            res = await run_scan(market, mode)
+            res["daykey"] = daykey
+            _cache[f"{market}:{mode}"] = res
+        _warmed[wkey] = True
+        print(f"[scheduler] warmed {market} for {daykey}")
+    except Exception as e:
+        print(f"[scheduler] warm {market} failed: {e}")
+
+
+async def _scheduler_loop():
+    """5분마다 깨어나 각 시장이 마감했는데 아직 안 데운 상태면 워밍."""
+    await asyncio.sleep(20)  # 부팅 직후 잠깐 대기
+    while True:
+        try:
+            for market in ("kr", "us"):
+                await _warm_market(market)
+        except Exception as e:
+            print(f"[scheduler] loop error: {e}")
+        await asyncio.sleep(300)  # 5분
+
+
+@app.on_event("startup")
+async def _start_scheduler():
+    asyncio.create_task(_scheduler_loop())
 
 
 ALERTS_USER_PATH = os.path.join(os.path.dirname(__file__), "alerts_user.txt")

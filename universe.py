@@ -7,6 +7,76 @@
 """
 import os
 
+try:
+    from us_universe_ext import US_UNIVERSE_EXT
+except Exception:
+    US_UNIVERSE_EXT = {}
+
+# ── 한국 거래대금 상위 동적 구성 (pykrx) ──
+# 매 거래일 1회 KRX에서 거래대금 상위 N개를 받아 파일 캐시.
+# pykrx 미설치/조회 실패 시 정적 KR_UNIVERSE로 폴백.
+_KR_DYNAMIC_CACHE: dict = {}
+KR_TOP_N = int(os.environ.get("KR_TOP_N", "600"))  # 코스피+코스닥 거래대금 상위
+
+
+def load_kr_dynamic(top_n: int = KR_TOP_N) -> dict:
+    """KRX 거래대금 상위 top_n 종목을 {티커.KS/.KQ: 이름}으로 반환.
+    하루 1회만 실제 조회(파일 캐시), 실패 시 빈 dict."""
+    import json
+    from datetime import datetime
+    daykey = datetime.now().strftime("%Y%m%d")
+    # 메모리 캐시
+    if _KR_DYNAMIC_CACHE.get("daykey") == daykey and _KR_DYNAMIC_CACHE.get("data"):
+        return _KR_DYNAMIC_CACHE["data"]
+    # 파일 캐시 (/data 우선)
+    cache_dir = os.environ.get("JOURNAL_DIR") or ("/data" if os.path.isdir("/data") else os.path.dirname(__file__))
+    cache_path = os.path.join(cache_dir, f"kr_universe_{daykey}.json")
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, encoding="utf-8") as f:
+                data = json.load(f)
+            _KR_DYNAMIC_CACHE.update({"daykey": daykey, "data": data})
+            return data
+        except Exception:
+            pass
+    # 실제 조회
+    try:
+        from pykrx import stock
+        import pandas as pd
+        d = datetime.now().strftime("%Y%m%d")
+        frames = []
+        for mkt, suffix in (("KOSPI", ".KS"), ("KOSDAQ", ".KQ")):
+            df = stock.get_market_ohlcv(d, market=mkt)  # 당일 OHLCV+거래대금
+            if df is None or df.empty:
+                continue
+            df = df.copy()
+            df["suffix"] = suffix
+            frames.append(df)
+        if not frames:
+            return {}
+        alldf = pd.concat(frames)
+        # 거래대금 컬럼명은 '거래대금'
+        col = "거래대금" if "거래대금" in alldf.columns else alldf.columns[-2]
+        alldf = alldf.sort_values(col, ascending=False).head(top_n)
+        out = {}
+        for code, row in alldf.iterrows():
+            try:
+                name = stock.get_market_ticker_name(code)
+            except Exception:
+                name = code
+            out[f"{code}{row['suffix']}"] = name
+        if out:
+            try:
+                with open(cache_path, "w", encoding="utf-8") as f:
+                    json.dump(out, f, ensure_ascii=False)
+            except Exception:
+                pass
+            _KR_DYNAMIC_CACHE.update({"daykey": daykey, "data": out})
+        return out
+    except Exception:
+        return {}
+
+
 KR_UNIVERSE = {
     # ══ 코스피 대형 ══
     "005930.KS": "삼성전자", "000660.KS": "SK하이닉스", "373220.KS": "LG에너지솔루션",
@@ -233,12 +303,18 @@ def load_alerts() -> dict:
 
 def get_universe(market: str) -> dict:
     wl = load_watchlist()
+    # 미국: 정적 대형(US_UNIVERSE) + 확장(EXT) 머지
+    us_full = {**US_UNIVERSE, **US_UNIVERSE_EXT}
+    # 한국: 거래대금 상위 동적(있으면) + 정적 베이스 (동적 실패 시 폴백)
+    kr_dyn = load_kr_dynamic()
+    kr_full = {**KR_UNIVERSE, **kr_dyn} if kr_dyn else dict(KR_UNIVERSE)
+
     if market == "kr":
-        base = dict(KR_UNIVERSE)
+        base = kr_full
         base.update({t: n for t, n in wl.items() if t.endswith((".KS", ".KQ"))})
     elif market == "us":
-        base = dict(US_UNIVERSE)
+        base = us_full
         base.update({t: n for t, n in wl.items() if not t.endswith((".KS", ".KQ"))})
     else:
-        base = {**KR_UNIVERSE, **US_UNIVERSE, **wl}
+        base = {**kr_full, **us_full, **wl}
     return base
