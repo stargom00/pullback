@@ -461,12 +461,14 @@ def rs_raw_score(close: pd.Series) -> float | None:
     """
     IBD / MarketSmith 공식 RS Rating에 맞춘 상대강도 원점수.
     12개월을 3개월씩 4분기로 나눠, 최근 분기에 2배 가중:
-        RS = 0.4 × Q1수익률 + 0.2 × Q2 + 0.2 × Q3 + 0.2 × Q4
-        (Q1=최근 3개월, Q4=가장 오래된 3개월)
-    이는 IBD가 공개한 RS Rating 가중 공식과 동일하다.
-    유니버스 전체에서 백분위로 환산해 RS 등급(1~99)이 됨.
-    (트레이딩뷰 RS Rating과 같은 공식. 단 모집단이 유니버스라 숫자는 다를 수 있음)
+        RS = 0.4 × Q1 + 0.2 × Q2 + 0.2 × Q3 + 0.2 × Q4
+    v4.37.1: 분기 수익률을 '로그수익률 + 클리핑'으로 계산.
+      - 단순 비율(p0/p3-1)은 저가주 폭등($1→$15 = +1400%)이 한 분기 점수를
+        폭발시켜, 현재 추락 중인 종목도 RS 99로 잡히는 버그가 있었음.
+      - 로그수익률 ln(p0/p3)은 극단 폭등을 압축하고, ±0.7(±약100%)로 클립해
+        저가주 왜곡을 막는다. 정상 추세주의 순위는 거의 보존.
     """
+    import math
     c = close.dropna()
     if len(c) < 200:
         return None
@@ -476,21 +478,25 @@ def rs_raw_score(close: pd.Series) -> float | None:
         idx = -min(days, len(c) - 1) - 1
         return float(c.iloc[idx])
 
-    # 분기 경계 가격 (63거래일 ≈ 3개월)
-    p0 = now                 # 현재
-    p3 = price_ago(63)       # 3개월 전
-    p6 = price_ago(126)      # 6개월 전
-    p9 = price_ago(189)      # 9개월 전
-    p12 = price_ago(252)     # 12개월 전
+    p0 = now
+    p3 = price_ago(63)
+    p6 = price_ago(126)
+    p9 = price_ago(189)
+    p12 = price_ago(252)
 
-    if min(p3, p6, p9, p12) <= 0:
+    if min(p0, p3, p6, p9, p12) <= 0:
         return None
 
-    # 각 분기 수익률
-    q1 = p0 / p3 - 1    # 최근 3개월
-    q2 = p3 / p6 - 1    # 직전 3개월
-    q3 = p6 / p9 - 1
-    q4 = p9 / p12 - 1   # 가장 오래된 3개월
+    CLIP = 0.7  # 분기 로그수익률 상·하한 (≈ ±100%) — 저가주 폭등 왜곡 차단
+
+    def logret(a, b):
+        r = math.log(a / b)
+        return max(-CLIP, min(CLIP, r))
+
+    q1 = logret(p0, p3)    # 최근 3개월
+    q2 = logret(p3, p6)
+    q3 = logret(p6, p9)
+    q4 = logret(p9, p12)   # 가장 오래된 3개월
 
     # IBD 가중: 최근 분기 2배 (0.4 + 0.2 + 0.2 + 0.2 = 1.0)
     return 0.4 * q1 + 0.2 * q2 + 0.2 * q3 + 0.2 * q4

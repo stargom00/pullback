@@ -5,6 +5,14 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.37.1 [버그수정] 저가주 폭등 종목의 RS 과대평가(예: BMNR RS99인데 실제 추락중).
+        [원인] rs_raw_score의 분기수익률이 단순비율(p0/p3-1)이라, 1년전 저가
+               ($1)→폭등($35)→현재하락($15) 종목이 분기수익률 수백%로 점수폭발.
+               현재 추세가 하락이어도 과거 폭등이 RS를 지배 → 지수 빼도 RS99.
+        [해결] 분기수익률을 로그수익률 ln(p0/p3) + ±0.7클립으로 변경.
+               극단폭등을 압축해 저가주 왜곡 차단. 정상/강한 추세주 순위는 보존.
+               (BMNR류 raw 1.601→0.027, 지수보다 낮아져 RS 하위권으로 정상화)
+        디스크캐시 네임스페이스 rs2→rs3로 옛 캐시 무시.
 v4.37.0 [핵심개선] RS를 '지수 대비 상대강도'로 전환.
         [문제] 기존 RS는 universe 내 절대수익률 백분위라, 종목을 늘리면
                (v4.36) 같은 종목 RS가 출렁이고, '시장 대비 강함' 변별력이 약했음.
@@ -13,7 +21,7 @@ v4.37.0 [핵심개선] RS를 '지수 대비 상대강도'로 전환.
                raw score를 빼 '지수 대비 초과성과'를 만들고 그걸 백분위로.
                → universe 편향 완화, '지수를 이긴 정도' 순위로 의미 명확화.
                지수 일봉은 RS 계산 직전 1회 fetch(_benchmark_rs_scores).
-        [캐시] 디스크 캐시 네임스페이스 datacache_→datacache_rs2_ 로 분리해
+        [캐시] 디스크 캐시 네임스페이스 datacache_→datacache_rs3_ 로 분리해
                옛 절대RS 캐시는 자동 무시(배포 후 첫 스캔에서 새 RS로 재빌드).
         [주의] RS 분포가 바뀌므로 같은 종목의 RS 숫자가 이전과 다를 수 있음.
                필터 임계값(80/90 등)은 유지 — 분포 보고 다음에 재조정 가능.
@@ -304,7 +312,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.37.0"
+VERSION = "v4.37.1"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -433,7 +441,7 @@ def _disk_cache_dir() -> str:
 
 def _disk_cache_path(market: str, daykey: str) -> str:
     # rs2 = 지수대비 상대강도 스키마 (v4.37). 옛 절대RS 캐시와 분리.
-    return os.path.join(_disk_cache_dir(), f"datacache_rs2_{market}_{daykey}.pkl")
+    return os.path.join(_disk_cache_dir(), f"datacache_rs3_{market}_{daykey}.pkl")
 
 
 def _load_disk_cache(market: str, daykey: str):
@@ -459,7 +467,7 @@ def _save_disk_cache(market: str, daykey: str, bundle: dict):
         # 오래된 캐시 정리(해당 시장의 다른 날짜 파일 삭제)
         d = _disk_cache_dir()
         for fn in os.listdir(d):
-            if fn.startswith(f"datacache_rs2_{market}_") and daykey not in fn:
+            if fn.startswith(f"datacache_rs3_{market}_") and daykey not in fn:
                 try:
                     os.remove(os.path.join(d, fn))
                 except OSError:
