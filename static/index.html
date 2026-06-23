@@ -239,7 +239,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.35.1</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.35.2</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -294,7 +294,7 @@ tr.editing{background:rgba(242,179,61,.06)}
     <div class="sub" id="jmSub"></div>
     <div class="auto" id="jmAuto"></div>
     <div class="row">
-      <div><label>진입 가정가</label><input id="jmEntry" inputmode="decimal" placeholder="예: 167000"></div>
+      <div><label id="jmEntryLabel">진입 가정가</label><input id="jmEntry" inputmode="decimal" placeholder="예: 167000"></div>
       <div><label>손절가</label><input id="jmStop" inputmode="decimal"></div>
     </div>
     <label>진입 근거 (한 줄)</label>
@@ -1008,9 +1008,21 @@ function openJournal(ticker) {
     `${sig ? `신호 <b>${sig}</b> · ` : ''}피벗종류 <b>${s.pivot_type || '-'}</b> · ` +
     `현재가 <b>${fmtPrice(s.close, s.market)}</b> · 리스크 <b>${s.risk_pct != null ? s.risk_pct + '%' : '-'}</b>` +
     `${s.alert ? ` · ⚠️ <b>${s.alert}</b>` : ''}`;
-  // 손절 기본값 = 스캐너 손절가
-  document.getElementById('jmEntry').value = s.pivot != null ? Math.round(s.close) : '';
+  // 진입가 기본값:
+  //  돌파 계열(돌파/돌파임박/박스돌파)은 피벗 돌파 시 진입이므로 entry = 피벗
+  //  눌림목/추세전환 등은 현재가 근처 진입이므로 entry = 현재가
+  //  (실제 매매한 종목이면 사용자가 직접 수정)
+  const breakoutModes = ['breakout', 'imminent', 'boxbreak'];
+  const entryDefault = (breakoutModes.includes(s.mode) && s.pivot != null)
+    ? s.pivot
+    : s.close;
+  document.getElementById('jmEntry').value = entryDefault != null ? Math.round(entryDefault) : '';
   document.getElementById('jmStop').value = s.stop != null ? Math.round(s.stop) : '';
+  // 진입가 라벨 힌트 — 돌파 계열이면 피벗 돌파가 기준임을 표시
+  const elLabel = document.getElementById('jmEntryLabel');
+  if (elLabel) elLabel.textContent = breakoutModes.includes(s.mode)
+    ? '진입 가정가 (피벗 돌파가)'
+    : '진입 가정가 (현재가 근처)';
   document.getElementById('jmNote').value = '';
   if (window._resetModalPos) window._resetModalPos();
   document.getElementById('journalModal').classList.add('open');
