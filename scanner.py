@@ -497,7 +497,9 @@ def rs_raw_score(close: pd.Series) -> float | None:
 
 
 def to_rs_rank(raw_scores: dict[str, float]) -> dict[str, int]:
-    """원점수 dict → 백분위(1~99) dict"""
+    """원점수 dict → 백분위(1~99) dict.
+    v4.37+: 원점수는 '지수 대비 초과성과'(종목RS - 지수RS)를 받는다.
+    즉 백분위는 '지수를 이긴 정도'의 순위 → universe 편향 완화."""
     valid = {t: s for t, s in raw_scores.items() if s is not None}
     n = len(valid)
     if n == 0:

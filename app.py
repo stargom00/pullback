@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.37.0 [핵심개선] RS를 '지수 대비 상대강도'로 전환.
+        [문제] 기존 RS는 universe 내 절대수익률 백분위라, 종목을 늘리면
+               (v4.36) 같은 종목 RS가 출렁이고, '시장 대비 강함' 변별력이 약했음.
+               (강한 종목끼리 모인 풀 안에서 순위 → 편향)
+        [해결] 각 종목 raw score에서 해당 지수(미국=^IXIC, 한국=코스피/코스닥)의
+               raw score를 빼 '지수 대비 초과성과'를 만들고 그걸 백분위로.
+               → universe 편향 완화, '지수를 이긴 정도' 순위로 의미 명확화.
+               지수 일봉은 RS 계산 직전 1회 fetch(_benchmark_rs_scores).
+        [캐시] 디스크 캐시 네임스페이스 datacache_→datacache_rs2_ 로 분리해
+               옛 절대RS 캐시는 자동 무시(배포 후 첫 스캔에서 새 RS로 재빌드).
+        [주의] RS 분포가 바뀌므로 같은 종목의 RS 숫자가 이전과 다를 수 있음.
+               필터 임계값(80/90 등)은 유지 — 분포 보고 다음에 재조정 가능.
 v4.36.1 [버그수정] 신규 확장 종목(v4.36.0)의 섹터 미표시.
         us_universe_ext.py 225종목이 sectors.py 매핑에 없어 전부 '기타'로
         떠 섹터가 안 보였음. sectors_ext.py 추가로 225개 100% 매핑.
@@ -292,7 +304,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.36.1"
+VERSION = "v4.37.0"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -420,7 +432,8 @@ def _disk_cache_dir() -> str:
 
 
 def _disk_cache_path(market: str, daykey: str) -> str:
-    return os.path.join(_disk_cache_dir(), f"datacache_{market}_{daykey}.pkl")
+    # rs2 = 지수대비 상대강도 스키마 (v4.37). 옛 절대RS 캐시와 분리.
+    return os.path.join(_disk_cache_dir(), f"datacache_rs2_{market}_{daykey}.pkl")
 
 
 def _load_disk_cache(market: str, daykey: str):
@@ -446,7 +459,7 @@ def _save_disk_cache(market: str, daykey: str, bundle: dict):
         # 오래된 캐시 정리(해당 시장의 다른 날짜 파일 삭제)
         d = _disk_cache_dir()
         for fn in os.listdir(d):
-            if fn.startswith(f"datacache_{market}_") and daykey not in fn:
+            if fn.startswith(f"datacache_rs2_{market}_") and daykey not in fn:
                 try:
                     os.remove(os.path.join(d, fn))
                 except OSError:
@@ -454,6 +467,41 @@ def _save_disk_cache(market: str, daykey: str, bundle: dict):
     except Exception:
         pass
 # ────────────────────────────────────────────────────────────
+
+
+# RS 벤치마크 지수 일봉 종가 (상대강도 계산용)
+# 미국=나스닥종합(^IXIC), 한국=코스피/코스닥. 종목 RS에서 지수 RS를 빼
+# "지수 대비 초과성과"를 만들어 universe 편향을 제거한다.
+def _benchmark_close(market_kind: str):
+    """market_kind: 'us'|'kospi'|'kosdaq' → 지수 일봉 Close 시리즈(약 1년) 반환."""
+    try:
+        if market_kind == "us":
+            df = yf.Ticker("^IXIC").history(period="1y", interval="1d", auto_adjust=False)
+            return df["Close"].dropna() if df is not None and not df.empty else None
+        # 한국 지수: 네이버
+        code = "KOSPI" if market_kind == "kospi" else "KOSDAQ"
+        hist = naver_kr.fetch_index_history(code, days=400)
+        if hist is None:
+            return None
+        # fetch_index_history 반환형이 DataFrame(Close 포함)이라고 가정, 아니면 Series
+        try:
+            return hist["Close"].dropna()
+        except Exception:
+            import pandas as pd
+            return pd.Series(hist).dropna()
+    except Exception:
+        return None
+
+
+def _benchmark_rs_scores() -> dict:
+    """벤치마크 지수들의 rs_raw_score를 미리 계산해 dict로.
+    {'us': float, 'kospi': float, 'kosdaq': float} (실패한 건 0.0)."""
+    out = {}
+    for kind in ("us", "kospi", "kosdaq"):
+        c = _benchmark_close(kind)
+        s = rs_raw_score(c) if c is not None else None
+        out[kind] = s if s is not None else 0.0
+    return out
 
 
 async def _fetch_market_data(market: str) -> dict:
@@ -513,12 +561,27 @@ async def _fetch_market_data(market: str) -> dict:
             for r in results:
                 data.update(r)
 
-    # RS 등급 + RS 모멘텀 (시장별 백분위)
+    # ── RS 등급: "지수 대비 초과성과" 기반 ──
+    # 각 종목 raw score에서 해당 시장 지수의 raw score를 빼서 universe 편향 제거.
+    # (지수를 이긴 정도 → 백분위). 지수 fetch는 블로킹이라 executor에서.
+    bench = await loop.run_in_executor(_executor, _benchmark_rs_scores)
+    b_us = bench.get("us", 0.0)
+    b_kospi = bench.get("kospi", 0.0)
+    b_kosdaq = bench.get("kosdaq", 0.0)
+
     kr, us = {}, {}
     kr3, us3, kr12, us12 = {}, {}, {}, {}
     for t, df in data.items():
         is_kr = t.endswith((".KS", ".KQ"))
-        (kr if is_kr else us)[t] = rs_raw_score(df["Close"])
+        raw = rs_raw_score(df["Close"])
+        if raw is not None:
+            # 한국은 코스피/코스닥 구분, 미국은 나스닥 기준 초과성과
+            if is_kr:
+                bench_score = b_kospi if t.endswith(".KS") else b_kosdaq
+            else:
+                bench_score = b_us
+            rel = raw - bench_score   # 지수 대비 초과성과
+            (kr if is_kr else us)[t] = rel
         (kr3 if is_kr else us3)[t] = _ret_pct(df["Close"], 63)
         (kr12 if is_kr else us12)[t] = _ret_pct(df["Close"], 252)
     rs_ranks = {**to_rs_rank(kr), **to_rs_rank(us)}
