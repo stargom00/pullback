@@ -516,8 +516,9 @@ function card(s) {
       <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
     </div>` : s.mode === 'turnaround' ? `
     <div class="metrics mono">
-      <div class="metric"><div class="k">정배열</div><div class="v">D+${s.align_days}</div></div>
+      <div class="metric"><div class="k">정배열</div><div class="v">D+${s.align_days}${s.ma200_rising ? ' <span style="color:var(--green);font-size:11px">📈장기선↑</span>' : ''}</div></div>
       <div class="metric"><div class="k">200일선 위</div><div class="v">+${s.ma200_dist_pct}%</div></div>
+      <div class="metric"><div class="k">돌파일 거래량</div><div class="v" style="color:${s.breakout_vol ? 'var(--up)' : 'inherit'}">${s.vol_mult_5d}× ${s.breakout_vol ? '🚀' : ''}</div></div>
       <div class="metric"><div class="k">거래량비</div><div class="v">${s.vol_ratio}× <span style="color:${s.ud >= 1 ? 'var(--green)' : 'var(--up)'};font-size:11px">U/D ${s.ud}</span></div></div>
       <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
     </div>` : `
@@ -613,7 +614,7 @@ document.getElementById('strictToggle').addEventListener('click', (e) => {
 let favorites = [];
 const DESC = {
   pullback: '우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+',
-  turnaround: '역배열→정배열 첫 전환(1개월 내) · RS 개선 중 · 200일선 +25% 이내',
+  turnaround: '1→2단계 첫 돌파 · 역배열→정배열 첫 전환(1개월 내) · 200일선 바닥 상향전환 · 돌파일 거래량 1.5배↑ · RS 개선 중',
   leader: 'RS 88+ · 신고가 8% 이내 · 아직 눌림 전 — 지금은 못 사도 눌림 오면 1순위',
   super: 'RS 95+ — 지금 시장에서 가장 강한 종목들 (위치 불문). 상태 라벨로 담을곳/대기 판단',
   breakout: 'RS 80+ · 베이스 천장을 거래량 동반 돌파 · 피벗 +5% 이내=유효 / +5~12%=연장 추격주의',

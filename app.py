@@ -5,6 +5,20 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.35.0 (1) 장 마감 후 디스크 캐시 — 로딩 속도 개선.
+        [문제] 마감 후에도 일봉이 안 바뀌는데 10분 TTL이라 야후/네이버를
+               계속 재호출 → 로딩 점점 느려짐.
+        [해결] _market_session_key(): 한국장(평일 15:40↑)·미국장(KST 06:00↑)
+               둘 다 마감하면 '거래일 키' 반환. 그 키로 데이터를 /data 디스크에
+               pickle 저장하고, 다음 거래일 전까지 TTL 무시하고 재사용.
+               → 마감 후 첫 스캔 1회만 fetch, 이후 외부호출 0(즉시 로딩).
+               서버 재시작/재배포돼도 볼륨에서 복원. 모드결과 캐시도 동일 적용.
+               장중엔 기존 10분 TTL 유지(실시간성).
+        (2) 추세전환(turnaround) = '1→2단계 첫 돌파'로 강화.
+        [추가] 200일선 바닥 상향전환 게이트(20봉 전보다 높아야 통과) +
+               돌파일 거래량 폭증(최근5일 최대 ≥50일평균×1.5 → 🚀 가산).
+               카드에 📈장기선↑ / 돌파일 거래량 배수 / 🚀 배지. 기가비스式
+               1단계 졸업 신호 포착.
 v4.21.0 밸류에이션 배지(ROE·PER밴드) — 참고용/온디맨드. fundamentals.py +
         /api/fundamentals/{ticker}. 카드 '밸류 보기' 클릭 시만 호출.
         진입조건엔 미반영. 미국주 yfinance(PER밴드), 한국주 네이버(PER/PBR/ROE).
@@ -215,6 +229,7 @@ v4.4.2  (이전 버전)
 import asyncio
 import os
 import time
+from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
 import yfinance as yf
@@ -230,7 +245,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.34.1"
+VERSION = "v4.35.0"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -266,12 +281,111 @@ def _ret_pct(close, days):
     return float(c.iloc[-1]) / past - 1 if past > 0 else None
 
 
+# ── 장 마감 후 디스크 캐시 ──────────────────────────────────
+# 한국장·미국장 둘 다 마감하면 그날 일봉은 더 안 바뀜.
+# 그날 데이터를 디스크(/data)에 저장하고, 다음 거래일 장 시작 전까지
+# TTL 무시하고 재사용 → 마감 후 로딩이 즉시(야후/네이버 재호출 0).
+KST = timezone(timedelta(hours=9))
+
+
+def _market_session_key(market: str) -> str | None:
+    """둘 다 마감했으면 '확정된 거래일 키'(YYYY-MM-DD)를 반환, 아니면 None.
+    None이면 장중/애매한 시간 → 기존 10분 메모리 TTL로 동작.
+    - 한국장 마감: 평일 KST 15:40 이후
+    - 미국장 마감: KST 06:00 이후(서머타임 포함 안전)~ 한국장 시작(09:00) 전 종일
+    market=all 은 둘 다 마감해야 확정. kr/us 단독은 해당 장만 따짐.
+    """
+    now = datetime.now(KST)
+    wd = now.weekday()  # 월0 ~ 일6
+    hm = now.hour * 60 + now.minute
+
+    # 주말은 항상 '마감 확정'(데이터 안 바뀜) — 직전 거래일 날짜로 키 고정
+    weekend = wd >= 5
+
+    kr_closed = weekend or (wd <= 4 and hm >= 15 * 60 + 40)
+    # 미국장 데이터는 KST 새벽에 확정. 06:00~다음 한국장 데이터 갱신 전까지 안정.
+    us_closed = weekend or (hm >= 6 * 60)
+
+    def needed():
+        if market == "kr":
+            return kr_closed
+        if market == "us":
+            return us_closed
+        return kr_closed and us_closed
+
+    if not needed():
+        return None
+    return now.strftime("%Y-%m-%d")
+
+
+def _disk_cache_dir() -> str:
+    for d in (os.environ.get("JOURNAL_DIR"), "/data", os.path.dirname(__file__)):
+        if not d:
+            continue
+        try:
+            os.makedirs(d, exist_ok=True)
+            return d
+        except OSError:
+            continue
+    return os.path.dirname(__file__)
+
+
+def _disk_cache_path(market: str, daykey: str) -> str:
+    return os.path.join(_disk_cache_dir(), f"datacache_{market}_{daykey}.pkl")
+
+
+def _load_disk_cache(market: str, daykey: str):
+    import pickle
+    path = _disk_cache_path(market, daykey)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
+
+
+def _save_disk_cache(market: str, daykey: str, bundle: dict):
+    import pickle
+    path = _disk_cache_path(market, daykey)
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "wb") as f:
+            pickle.dump(bundle, f)
+        os.replace(tmp, path)
+        # 오래된 캐시 정리(해당 시장의 다른 날짜 파일 삭제)
+        d = _disk_cache_dir()
+        for fn in os.listdir(d):
+            if fn.startswith(f"datacache_{market}_") and daykey not in fn:
+                try:
+                    os.remove(os.path.join(d, fn))
+                except OSError:
+                    pass
+    except Exception:
+        pass
+# ────────────────────────────────────────────────────────────
+
+
 async def _fetch_market_data(market: str) -> dict:
     """시장 단위로 종목 일봉 + RS 계산. 모드와 무관하므로 시장별로 캐시해 재사용.
     여기서만 네이버/야후를 호출한다 (모드 전환 시 재호출 안 함)."""
     cache_key = f"data:{market}"
+
+    # 1) 장 마감 후면 디스크 캐시 우선 — 다음 거래일까지 재호출 0
+    daykey = _market_session_key(market)
+    if daykey:
+        mem = _data_cache.get(cache_key)
+        if mem and mem.get("daykey") == daykey:
+            return mem  # 메모리에 이미 그날치 있음
+        disk = _load_disk_cache(market, daykey)
+        if disk:
+            _data_cache[cache_key] = disk  # 메모리로 승격
+            return disk
+
+    # 2) 장중/애매한 시간 → 기존 10분 메모리 TTL
     cached = _data_cache.get(cache_key)
-    if cached and time.time() - cached["ts"] < DATA_TTL:
+    if cached and not daykey and time.time() - cached["ts"] < DATA_TTL:
         return cached
 
     universe = get_universe(market)
@@ -307,8 +421,12 @@ async def _fetch_market_data(market: str) -> dict:
         "rs_ranks": rs_ranks,
         "rs_moms": rs_moms,
         "ts": time.time(),
+        "daykey": daykey,
     }
     _data_cache[cache_key] = bundle
+    # 장 마감 후 fetch였다면 디스크에 저장 → 다음 거래일까지 재사용
+    if daykey:
+        _save_disk_cache(market, daykey, bundle)
     return bundle
 
 
@@ -373,9 +491,14 @@ async def scan(market: str = "all", mode: str = "imminent", refresh: bool = Fals
     key = f"{market}:{mode}"
     favs = load_favorites()
     cached = _cache.get(key)
-    if cached and not refresh and time.time() - cached["ts"] < CACHE_TTL:
-        return JSONResponse({**cached, "favorites": favs, "cached": True})
+    if cached and not refresh:
+        # 장 마감 후면 TTL 무시(데이터 안 바뀜), 장중이면 10분 TTL
+        daykey = _market_session_key(market)
+        fresh = (cached.get("daykey") == daykey) if daykey else (time.time() - cached["ts"] < CACHE_TTL)
+        if fresh:
+            return JSONResponse({**cached, "favorites": favs, "cached": True})
     result = await run_scan(market, mode)
+    result["daykey"] = _market_session_key(market)
     _cache[key] = result
     return JSONResponse({**result, "favorites": favs, "cached": False})
 

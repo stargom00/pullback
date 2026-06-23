@@ -694,6 +694,10 @@ TURN_CONFIG = {
     "align_window": 22,      # 정배열 형성이 최근 N봉 이내여야 함
     "max_ma200_dist": 0.25,  # 200일선에서 25% 이상 떨어졌으면 이미 늦음
     "rs_min": 80,            # 추세전환도 주도주 위주로 (기존 30→80)
+    # ── 1→2단계 첫 돌파 신호 ──
+    "ma200_slope_lookback": 20,   # 200일선 기울기 판정 구간(봉)
+    "ma200_rising_min": 0.0,      # 200일선이 N봉 전보다 높아야(바닥 상향전환)
+    "breakout_vol_mult": 1.5,     # 돌파일 거래량이 50일 평균의 N배↑ = 진짜 돌파
 }
 
 
@@ -743,10 +747,29 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
     if ma200_dist > cfg["max_ma200_dist"]:
         return None
 
+    # ── 1→2단계 핵심: 200일선(장기선)이 바닥에서 우상향 전환했는가 ──
+    # 역배열 바닥은 200일선이 우하향/평탄. 진짜 전환은 200일선이 막 들리기 시작.
+    lb = cfg["ma200_slope_lookback"]
+    ma200_rising = False
+    if len(ma200.dropna()) > lb:
+        m200_prev = float(ma200.iloc[-1 - lb])
+        if not math.isnan(m200_prev) and m200_prev > 0:
+            ma200_slope = (m200 - m200_prev) / m200_prev
+            ma200_rising = ma200_slope > cfg["ma200_rising_min"]
+    if not ma200_rising:
+        return None  # 장기선이 아직 안 들렸으면 1단계 미졸업 → 전환 아님
+
     # 거래량: 전환 구간(최근 10일)이 평소(50일)보다 늘었는가 (확장이 좋음)
     vol10 = float(v.iloc[-10:].mean())
     vol50 = float(v.iloc[-50:].mean())
     vol_ratio = vol10 / vol50 if vol50 > 0 else 0.0
+
+    # ── 1→2단계 핵심: 돌파일 거래량 폭증(50일 평균 대비) ──
+    # 베이스 첫 돌파는 당일 거래량이 터져야 진짜. 최근 5일 중 최대 거래일 배수.
+    vol_today = float(v.iloc[-1])
+    vol_mult_today = vol_today / vol50 if vol50 > 0 else 0.0
+    vol_mult_5d = float(v.iloc[-5:].max()) / vol50 if vol50 > 0 else 0.0
+    breakout_vol = vol_mult_5d >= cfg["breakout_vol_mult"]
 
     # 피벗: 20봉 고가/타이트존/하락추세선 중 가장 가까운 트리거, 손절은 60일선 -2%
     pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, 20, is_kr=is_kr)
@@ -759,13 +782,16 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
 
     # ── 점수 (100점) ──
     score = 0.0
-    score += 30 * (cfg["align_window"] + 1 - align_days) / cfg["align_window"]  # 신선도
+    score += 25 * (cfg["align_window"] + 1 - align_days) / cfg["align_window"]  # 신선도
     if rs_mom is not None:
-        score += 25 * max(0.0, min(rs_mom, 40)) / 40                            # RS 개선 폭
+        score += 20 * max(0.0, min(rs_mom, 40)) / 40                            # RS 개선 폭
     if rs_rank is not None:
-        score += 15 * rs_rank / 99                                              # 현재 RS
-    score += 15 * max(0.0, min((vol_ratio - 0.9) / 0.9, 1.0))                   # 거래량 확장
-    score += 15 * (1 - min(ma200_dist, 0.25) / 0.25)                            # 200일선 근접
+        score += 10 * rs_rank / 99                                              # 현재 RS
+    score += 10 * max(0.0, min((vol_ratio - 0.9) / 0.9, 1.0))                   # 거래량 확장
+    score += 10 * (1 - min(ma200_dist, 0.25) / 0.25)                            # 200일선 근접
+    score += 15 * min(vol_mult_5d / 3.0, 1.0)                                   # 돌파일 거래량 폭증
+    if breakout_vol:
+        score += 10                                                            # 진짜 돌파 보너스
 
     prev_close = float(c.iloc[-2])
     change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
@@ -788,6 +814,10 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
         "leader": False,
         "align_days": align_days,
         "ma200_dist_pct": round(ma200_dist * 100, 1),
+        "ma200_rising": ma200_rising,
+        "breakout_vol": breakout_vol,
+        "vol_mult_today": round(vol_mult_today, 1),
+        "vol_mult_5d": round(vol_mult_5d, 1),
         "vol_ratio": round(vol_ratio, 2),
         "vol_dry": False,
         "rsi": round(cur_rsi, 1),
