@@ -5,6 +5,14 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.35.1 (1) [버그수정] 일지 탭 라벨 오류. 일지 추가 시 탭이름 매핑에
+        imminent(돌파임박)·leader(대장후보)·super(슈퍼대장)가 빠져서
+        해당 탭에서 추가한 종목이 전부 '눌림목'으로 잘못 저장됨.
+        → MODE_TAB_LABEL 매핑 한 곳으로 통일(modeTab/modeCategory 헬퍼),
+          전 모드 커버. 저장 레코드에 mode_raw 원본도 함께 남김(추후 디버깅).
+        주의: 이미 잘못 저장된 기존 일지 항목은 수동 수정 필요.
+        (2) [버그수정] /api/debug 한글 깨짐(모바일). ensure_ascii=False +
+        charset=utf-8 명시로 정배열/거래량배수 등 한글 정상 표시.
 v4.35.0 (1) 장 마감 후 디스크 캐시 — 로딩 속도 개선.
         [문제] 마감 후에도 일봉이 안 바뀌는데 10분 TTL이라 야후/네이버를
                계속 재호출 → 로딩 점점 느려짐.
@@ -229,12 +237,13 @@ v4.4.2  (이전 버전)
 import asyncio
 import os
 import time
+import json as _json
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
 import yfinance as yf
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, rs_raw_score, to_rs_rank, climax_warning
@@ -245,7 +254,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.35.0"
+VERSION = "v4.35.1"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -649,7 +658,7 @@ async def debug_ticker(ticker: str):
             box_info[f"박스{win}_상단"] = round(bh)
             box_info[f"박스{win}_돌파여부"] = close > bh * 1.005
 
-    return JSONResponse({
+    payload = {
         "ticker": ticker,
         "close": round(close),
         "modes": modes,
@@ -667,7 +676,12 @@ async def debug_ticker(ticker: str):
             **box_info,
         },
         "atr_median_pct": round(float(tr.iloc[-14:].median()) / close * 100, 2),
-    })
+    }
+    # ensure_ascii=False + charset 명시 → 모바일에서 한글 안 깨짐
+    return Response(
+        content=_json.dumps(payload, ensure_ascii=False, indent=2),
+        media_type="application/json; charset=utf-8",
+    )
 
 
 _indices_cache: dict = {}
@@ -768,7 +782,6 @@ async def fundamentals(ticker: str):
 
 
 # ── 매매 일지 (서버 저장, 기기 간 동기화) ──
-import json as _json
 def _resolve_journal_path() -> str:
     """일지 저장 경로. 배포(railway up) 때 안 지워지도록 영구 볼륨 우선.
     우선순위: 1) 환경변수 JOURNAL_DIR  2) /data (Railway 볼륨 마운트 기본)

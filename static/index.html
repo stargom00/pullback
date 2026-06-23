@@ -239,7 +239,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.35.0</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.35.1</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -982,12 +982,25 @@ async function updateTracking() {
 }
 
 let pendingStock = null;
+// 모드→탭이름 매핑 (한 곳에서만 관리 — 새 모드 추가시 여기만 수정)
+const MODE_TAB_LABEL = {
+  imminent: '돌파임박',
+  pullback: '눌림목',
+  breakout: '돌파',
+  boxbreak: '박스돌파',
+  turnaround: '추세전환',
+  leader: '대장후보',
+  super: '슈퍼대장',
+  surge: '급등',
+};
+function modeTab(mode) { return MODE_TAB_LABEL[mode] || mode || '-'; }
+function modeCategory(mode) { return mode === 'surge' ? '단타' : '추세추종'; }
 function openJournal(ticker) {
   const s = lastHits.find(h => h.ticker === ticker);
   if (!s) return;
   pendingStock = s;
   document.getElementById('jmSub').textContent = `${s.name} (${s.ticker}) · ${s.market}`;
-  const tab = s.mode === 'surge' ? '급등' : s.mode === 'boxbreak' ? '박스돌파' : s.mode === 'breakout' ? '돌파' : s.mode === 'turnaround' ? '추세전환' : '눌림목';
+  const tab = modeTab(s.mode);
   const sig = (s.triggered ? '🔥 트리거 ' : '') + (s.leader ? '👑 ' : '');
   document.getElementById('jmAuto').innerHTML =
     `<b>${tab}</b> 탭 · 섹터 <b>${s.sector || '-'}</b> · RS <b>${s.rs}</b>` +
@@ -1057,8 +1070,9 @@ async function saveJournal() {
     id: Date.now(),
     date: new Date().toISOString().slice(0, 10),
     ticker: s.ticker, name: s.name, market: s.market, sector: s.sector || '',
-    tab: s.mode === 'surge' ? '급등' : s.mode === 'boxbreak' ? '박스돌파' : s.mode === 'breakout' ? '돌파' : s.mode === 'turnaround' ? '추세전환' : '눌림목',
-    category: s.mode === 'surge' ? '단타' : '추세추종',
+    tab: modeTab(s.mode),
+    mode_raw: s.mode || '',
+    category: modeCategory(s.mode),
     signal: (s.triggered ? '🔥' : '') + (s.leader ? '👑' : ''),
     pivot_type: s.pivot_type || '', setup_score: s.setup_score != null ? Math.round(s.setup_score) : '',
     rs: s.rs, entry, stop,
