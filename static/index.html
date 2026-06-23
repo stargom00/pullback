@@ -119,6 +119,9 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .jtable td.mono{font-family:var(--mono)}
 .jtable .del{color:#FF6B6B;cursor:pointer}
 .jtable tr.open-pos{background:rgba(242,179,61,.04)}
+.st-badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px;white-space:nowrap}
+.st-act{display:inline-block;font-size:9px;padding:2px 5px;border-radius:5px;cursor:pointer;background:#222;color:#bbb;border:1px solid #333}
+.st-act:hover{background:#2e2e2e;color:#fff}
 .jtable input.result{width:70px;background:var(--bg);border:1px solid var(--line);
   color:var(--text);padding:4px 6px;border-radius:6px;font-size:12px;font-family:var(--mono)}
 .jrnl-empty{color:var(--muted);text-align:center;padding:60px 20px;line-height:1.7}
@@ -239,7 +242,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.35.2</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.35.3</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -937,7 +940,11 @@ function tvUrl(ticker, market) {
 
 async function updateTracking() {
   const j = getJournal();
-  const active = j.filter(r => r.tracking && r.result_r === '' && r.entry && r.stop);
+  // 추적 대상: 미종료 + entry/stop 있음 (status가 pending/entered 둘 다 가격 갱신은 함)
+  // 단 status==='missed'는 제외 (무산)
+  const active = j.filter(r => r.result_r === '' && r.status !== 'missed'
+                            && r.entry && r.stop
+                            && (r.tracking || r.status === 'pending'));
   if (active.length === 0) return;
   let prices = {};
   try {
@@ -959,8 +966,23 @@ async function updateTracking() {
     const target = parseFloat(r.target);
     const oneR = entry - stop;
     if (oneR <= 0) { changed = true; continue; }
-    const daysHeld = Math.floor((today - new Date(r.date)) / 86400000);
 
+    // ── 대기(pending): 아직 안 산 추적관찰 ──
+    // 진입가(피벗) 도달 → 자동 '진입'으로 전환, 진입일 갱신.
+    // 손절가 닿아도 손절 처리 안 함(안 샀으니 손익 0). 그냥 관찰 지속.
+    if ((r.status || 'entered') === 'pending') {
+      if (px >= entry) {
+        r.status = 'entered';
+        r.tracking = true;
+        r.date = today.toISOString().slice(0, 10);  // 실제 진입일로 갱신
+        r.closed_reason = '';
+      }
+      changed = true;
+      continue;  // pending인 동안은 손절/목표/만료 판정 안 함
+    }
+
+    // ── 진입(entered): 실제 매수 → 손절/목표/만료 자동추적 ──
+    const daysHeld = Math.floor((today - new Date(r.date)) / 86400000);
     let closed = false, reason = '', resultR = null;
     if (px <= stop) { closed = true; reason = '손절'; resultR = -1; }
     else if (target && px >= target) { closed = true; reason = '목표'; resultR = (target - entry) / oneR; }
@@ -968,6 +990,7 @@ async function updateTracking() {
 
     if (closed) {
       r.tracking = false;
+      r.status = 'closed';
       r.result_r = (Math.round(resultR * 100) / 100).toString();
       r.exit = Math.round(px * 100) / 100;
       r.closed_reason = reason;
@@ -1100,6 +1123,13 @@ async function saveJournal() {
     last_price: entry,                         // 마지막 확인 가격
     last_checked: new Date().toISOString().slice(0, 10),
     closed_reason: '',                         // 손절 | 목표 | 만료 | 수동
+    // ── 진입 상태 ──
+    //  pending(대기): 추적관찰, 아직 진입가 미도달 → 손익통계 제외, 손절가 닿아도 손절 아님
+    //  entered(진입): 실제 매수 → 여기서부터 손절/목표 자동추적
+    //  missed(무산): 셋업 깨짐 → 손익 0, 통계 제외
+    //  closed(종료): result_r 확정
+    // 돌파 계열은 '아직 안 산 추적관찰'로 보고 기본 pending, 그 외는 즉시 entered
+    status: ['breakout', 'imminent', 'boxbreak'].includes(s.mode) ? 'pending' : 'entered',
     alert: s.alert || '', note,
     exit: '', result_r: '', held_days: '', review: ''
   };
@@ -1115,11 +1145,15 @@ async function saveJournal() {
 }
 
 function journalStats(list) {
-  const openCount = list.filter(r => r.result_r === '').length;
-  const closed = list.filter(r => r.result_r !== '' && !isNaN(parseFloat(r.result_r)));
+  // 무산(missed)은 손익통계에서 완전 제외
+  const live = list.filter(r => r.status !== 'missed');
+  const pendingCount = live.filter(r => r.result_r === '' && (r.status || 'entered') === 'pending').length;
+  const enteredCount = live.filter(r => r.result_r === '' && (r.status || 'entered') === 'entered').length;
+  const closed = live.filter(r => r.result_r !== '' && !isNaN(parseFloat(r.result_r)));
   const avgR = closed.length ? (closed.reduce((a, r) => a + parseFloat(r.result_r), 0) / closed.length).toFixed(2) : '–';
   const winRate = closed.length ? Math.round(closed.filter(r => parseFloat(r.result_r) > 0).length / closed.length * 100) : '–';
-  return { openCount, closedCount: closed.length, avgR, winRate, total: list.length };
+  return { openCount: pendingCount + enteredCount, pendingCount, enteredCount,
+           closedCount: closed.length, avgR, winRate, total: live.length };
 }
 
 // 신호별 성과 검증: 진입 시점 신호등/AVWAP존별 승률·평균R 집계
@@ -1220,7 +1254,7 @@ function renderJournal() {
     <div class="jrnl-stats">
       <div class="statcard">
         <div class="statcard-t">📈 추세추종</div>
-        <div class="statcard-v">총 ${trend.total} · 종료 ${trend.closedCount} · 승률 ${trend.winRate}${trend.winRate!=='–'?'%':''} · 평균 ${trend.avgR}R</div>
+        <div class="statcard-v">진입 ${trend.enteredCount} · 대기 ${trend.pendingCount} · 종료 ${trend.closedCount} · 승률 ${trend.winRate}${trend.winRate!=='–'?'%':''} · 평균 ${trend.avgR}R</div>
       </div>
       <div class="statcard">
         <div class="statcard-t">⚡ 단타</div>
@@ -1234,7 +1268,7 @@ function renderJournal() {
     <div style="overflow-x:auto">
     <table class="jtable">
       <thead><tr>
-        <th>날짜</th><th>종목</th><th>구분</th><th>탭</th><th>신호</th><th>섹터</th><th>피벗</th>
+        <th>날짜</th><th>상태</th><th>종목</th><th>구분</th><th>탭</th><th>신호</th><th>섹터</th><th>피벗</th>
         <th>전일점수</th><th>RS</th><th>진입가</th><th>손절</th><th>리스크%</th><th>진입신호등</th>
         <th>결과R</th><th>보유일</th><th>근거/복기</th><th></th>
       </tr></thead>
@@ -1247,8 +1281,24 @@ function renderJournal() {
 function viewRow(r) {
   const cat = r.category || '추세추종';
   const catColor = cat === '단타' ? 'color:#c084fc' : 'color:var(--green)';
-  return `<tr class="${r.result_r===''?'open-pos':''}">
+  const st = r.status || (r.result_r ? 'closed' : 'entered');
+  const stBadge = st === 'pending'
+      ? `<span class="st-badge" style="background:#3b3a2a;color:var(--amber)">⏳대기</span>`
+    : st === 'entered'
+      ? `<span class="st-badge" style="background:#1e3a2a;color:var(--green)">▶진입</span>`
+    : st === 'missed'
+      ? `<span class="st-badge" style="background:#3a2a2a;color:var(--muted)">✖무산</span>`
+      : `<span class="st-badge" style="background:#2a2a3a;color:var(--muted)">✔종료</span>`;
+  // 대기 중이면 진입/무산 빠른 전환 버튼
+  const stActions = st === 'pending'
+      ? `<div style="margin-top:3px;display:flex;gap:3px">
+           <span class="st-act" onclick="markEntered(${r.id})" title="실제 진입함">▶진입</span>
+           <span class="st-act" onclick="markMissed(${r.id})" title="돌파 안 옴 · 무산">✖무산</span>
+         </div>`
+      : '';
+  return `<tr class="${r.result_r===''&&st!=='missed'?'open-pos':''}" style="${st==='missed'?'opacity:.5':''}">
     <td class="mono">${r.date}</td>
+    <td style="white-space:nowrap">${stBadge}${stActions}</td>
     <td><a href="${tvUrl(r.ticker, r.market)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${r.name} <span style="font-size:9px;opacity:.5">↗</span><div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div></a></td>
     <td style="font-size:11px;font-weight:600;${catColor}">${cat}</td>
     <td>${r.tab}</td>
@@ -1264,6 +1314,10 @@ function viewRow(r) {
     <td class="mono" style="${r.result_r&&parseFloat(r.result_r)>0?'color:var(--up)':r.result_r?'color:var(--down)':''}">${
       r.result_r
         ? `${r.result_r}R${r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:''}`
+        : st === 'pending'
+            ? `<span style="color:var(--amber);font-size:11px">피벗 대기</span><div style="font-size:9px;color:var(--muted)">${r.last_price?'현재 '+r.last_price:'미진입'}</div>`
+        : st === 'missed'
+            ? `<span style="color:var(--muted);font-size:11px">무산</span>`
         : (r.tracking && r.last_price && r.entry && r.stop
             ? (() => {
                 const liveR = (parseFloat(r.last_price) - parseFloat(r.entry)) / (parseFloat(r.entry) - parseFloat(r.stop));
@@ -1282,10 +1336,31 @@ function viewRow(r) {
   </tr>`;
 }
 
+// 대기 → 진입: 실제 매수했음. 진입일을 오늘로, 추적 시작.
+async function markEntered(id) {
+  const j = getJournal();
+  const r = j.find(x => x.id === id); if (!r) return;
+  r.status = 'entered';
+  r.tracking = true;
+  r.date = new Date().toISOString().slice(0, 10);
+  r.closed_reason = '';
+  setJournal(j); await _saveJournalToServer(j); renderJournal();
+}
+
+// 대기 → 무산: 돌파 안 오고 셋업 깨짐. 손익 0, 통계 제외.
+async function markMissed(id) {
+  const j = getJournal();
+  const r = j.find(x => x.id === id); if (!r) return;
+  r.status = 'missed';
+  r.tracking = false;
+  setJournal(j); await _saveJournalToServer(j); renderJournal();
+}
+
 function editRow(r) {
   const cat = r.category || '추세추종';
   return `<tr class="editing">
     <td class="mono">${r.date}</td>
+    <td style="font-size:11px;color:var(--muted)">${r.status||'entered'}</td>
     <td>${r.name}<div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div></td>
     <td><select id="e_cat" class="ein">
       <option value="추세추종" ${cat==='추세추종'?'selected':''}>📈 추세추종</option>
@@ -1358,9 +1433,9 @@ function delJournal(id) {
 function exportCSV() {
   const j = getJournal();
   if (!j.length) return;
-  const cols = ['date','ticker','name','market','sector','tab','category','signal','pivot_type',
+  const cols = ['date','status','ticker','name','market','sector','tab','mode_raw','category','signal','pivot_type',
     'setup_score','rs','entry','stop','risk_pct','sig_level','sig_flags','avwap_zone','rr_at_entry','alert','note','exit','result_r','held_days','review'];
-  const head = ['날짜','티커','종목','시장','섹터','탭','구분','신호','피벗종류','전일점수','RS',
+  const head = ['날짜','상태','티커','종목','시장','섹터','탭','모드','구분','신호','피벗종류','전일점수','RS',
     '진입가','손절','리스크%','진입신호등','경고항목','AVWAP존','진입시손익비','경보','진입근거','청산가','결과R','보유일','복기'];
   const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const csv = [head.join(','), ...j.map(r => cols.map(c => esc(r[c])).join(','))].join('\r\n');
