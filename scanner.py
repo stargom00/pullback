@@ -683,7 +683,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "pivot_dist_pct": round(pivot_dist_pct, 2),
         **_rr_block(pivot, stop, h, lo, c,
                     base_low=float(lo.iloc[-cfg["recent_high_window"]:].min()),
-                    entry=None, warn_pct=8.0, is_kr=is_kr),
+                    entry=close, warn_pct=8.0, is_kr=is_kr),
         **volume_info(close, v),
         "avwap": anchored_vwap(h, lo, c, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
