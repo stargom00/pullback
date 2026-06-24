@@ -94,30 +94,19 @@ def volume_info(close: float, v: pd.Series) -> dict:
 def rr_info(pivot: float, stop: float, h: pd.Series, entry: float | None = None,
             lo: pd.Series | None = None, c: pd.Series | None = None,
             base_low: float | None = None) -> dict:
-    """손익비(R) 계산. 실제 진입가 기준 + 손절 현실화 + 측정이동 목표.
+    """손익비(R) 계산. 진입가 기준 + 측정이동 목표.
 
-    손절 현실화: 넘어온 stop(베이스 기반)과 ATR 기반 손절 중 진입가에
-      더 가까운 것을 사용. 연장된 종목(베이스에서 멀어진)은 ATR 손절이
-      자동 적용돼 1R이 비현실적으로 커지는 것을 막는다. 손절폭 상한 12%.
-    목표(측정이동): 베이스 높이(천장-바닥)를 돌파점에 더한 값.
-      신고가라 전고가 의미없을 때 정석적 목표 산정(오닐/미너비니).
+    v4.37.4: 손절은 호출부(탭별 analyze)에서 구조(지지/저점/베이스하단)로
+      계산해 넘긴 값을 '그대로' 사용한다. 과거의 ATR손절·12%상한 보정은
+      손절을 현재가에 연동시켜 자꾸 움직이게 만드는 버그라 제거.
+      → 손절은 가격 구조에 고정, 현재가가 변해도 안 흔들림.
+      목표(측정이동): 베이스 높이(천장-바닥)를 돌파점에 더한 값.
       전고가 측정이동보다 더 위면 전고 사용. 최소 2R 보장.
     """
     entry = entry if (entry and entry > 0) else pivot
 
-    # ── 손절 현실화 ──
-    stop_eff = stop
-    if lo is not None and c is not None and len(c) >= 15:
-        atr_val = atr(h, lo, c, 14)
-        atr_stop = entry - atr_val * 2.5      # ATR 2.5배 손절
-        # 베이스 손절과 ATR 손절 중 진입가에 더 가까운(=손절폭 작은) 것
-        if atr_stop > stop_eff:
-            stop_eff = atr_stop
-    # 손절폭 상한 12% (이보다 넓으면 12%로 조임)
-    max_stop = entry * 0.88
-    if stop_eff < max_stop:
-        stop_eff = max_stop
-    stop_eff = round(stop_eff, 2)
+    # 손절은 넘어온 구조 기반 값을 그대로 사용 (보정 없음)
+    stop_eff = round(stop, 2)
 
     risk = entry - stop_eff
     if risk <= 0:
@@ -837,7 +826,7 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
         "pivot_dist_pct": round(pivot_dist_pct, 2),
         **_rr_block(pivot, stop, h, lo, c,
                     base_low=float(lo.iloc[-30:].min()),
-                    entry=None, warn_pct=15.0, is_kr=is_kr),
+                    entry=close, warn_pct=15.0, is_kr=is_kr),
         **volume_info(close, v),
         "avwap": anchored_vwap(h, lo, c, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
