@@ -198,25 +198,25 @@ def rsi(close: pd.Series, period: int = 14) -> pd.Series:
 
 
 def anchored_vwap(h: pd.Series, lo: pd.Series, c: pd.Series, v: pd.Series,
-                  lookback: int = 60) -> dict:
-    """거래량 최대 봉을 앵커로 한 Anchored VWAP.
-    앵커 = 최근 lookback봉(약 3개월) 중 거래량이 가장 큰 봉.
-      너무 길면 옛날 폭등 봉이 잡혀 AVWAP이 현재가와 멀어지고 신호가 무뎌짐.
-      최근 구간으로 좁혀 '최근의 의미있는 사건' 기준으로 한다.
-    그 봉부터 현재까지 거래량 가중평균가(typical price 기준)를 계산.
-    반환: {avwap, above, dist_pct, anchor_ago, zone}
-      zone: 이격도 등급 — healthy(0~+10%) / extended(+10~+20%) /
-            overheated(+20%+) / near(0~-5%) / below(-5%↓)
+                  lookback: int = 25) -> dict:
+    """미너비니/오닐식 Anchored VWAP.
+    앵커 = 최근 lookback봉(약 5주) 중 '최저가 봉'(=최근 베이스/눌림의 시작).
+      미너비니의 extension 판단은 단기(10/20일선) 기준이므로, AVWAP도 최근
+      베이스 구간을 반영해야 한다. 옛날 폭등일을 앵커로 잡으면 강세주가
+      건강한 눌림인데도 '과열'로 오진된다(기가비스 사례). 최근 저점을
+      앵커로 삼으면 '최근 매수자들의 평균가' 기준이 되어 정확하다.
+    그 봉부터 현재까지 거래량 가중평균가(typical price)를 계산.
+    zone: 단기 이격도 등급 (미너비니 extension 기준).
+      healthy(0~+8%) / extended(+8~+15%) / overheated(+15%+) /
+      near(0~-4%) / below(-4%↓)
     """
     n = len(c)
     if n < 20:
         return {"avwap": None, "above": None, "dist_pct": None, "anchor_ago": None, "zone": None}
     win = min(lookback, n)
-    vol_win = v.iloc[-win:]
-    if win >= 2:
-        anchor_pos_in_win = int(vol_win.iloc[:-1].values.argmax())
-    else:
-        anchor_pos_in_win = 0
+    # 앵커 = 최근 win봉 중 최저가 봉 (= 최근 베이스/눌림의 바닥, 의미있는 시작점)
+    lo_win = lo.iloc[-win:]
+    anchor_pos_in_win = int(lo_win.values.argmin())
     anchor_idx = n - win + anchor_pos_in_win
     seg_h = h.iloc[anchor_idx:]
     seg_lo = lo.iloc[anchor_idx:]
@@ -231,14 +231,14 @@ def anchored_vwap(h: pd.Series, lo: pd.Series, c: pd.Series, v: pd.Series,
     if avwap <= 0:
         return {"avwap": None, "above": None, "dist_pct": None, "anchor_ago": None, "zone": None}
     dist_pct = (cur - avwap) / avwap * 100
-    # 이격도 등급
-    if dist_pct >= 20:
-        zone = "overheated"     # 과열 — 평균가에서 너무 멀어짐
-    elif dist_pct >= 10:
+    # 이격도 등급 (미너비니 extension: 단기 이평 기준이라 임계 낮춤)
+    if dist_pct >= 15:
+        zone = "overheated"     # 과열 — 추격 금지 (10/20일선서 과도 이격)
+    elif dist_pct >= 8:
         zone = "extended"       # 연장 — 추격 주의
     elif dist_pct >= 0:
         zone = "healthy"        # 건강한 우위 (지지 유효)
-    elif dist_pct >= -5:
+    elif dist_pct >= -4:
         zone = "near"           # AVWAP 살짝 아래 (애매)
     else:
         zone = "below"          # 매물 부담
