@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.37.2 [버그수정] 대장후보(leader)·슈퍼대장(super) 탭에 '일지에 추가' 버튼
+        누락. 버튼 렌더 조건에서 두 모드가 빠져있어 RS강한 종목(CORZ/RIOT 등)을
+        추적관찰 담을 수 없었음. 조건을 s.ticker 있으면 전 모드 표시로 단순화.
+        leader/super는 pivot/stop 없어 진입가=현재가 기본, 손절은 사용자 입력
+        (null 체크로 안전). 추적관찰이면 일지에서 '대기'로 전환해 쓰면 됨.
 v4.37.1 [버그수정] 저가주 폭등 종목의 RS 과대평가(예: BMNR RS99인데 실제 추락중).
         [원인] rs_raw_score의 분기수익률이 단순비율(p0/p3-1)이라, 1년전 저가
                ($1)→폭등($35)→현재하락($15) 종목이 분기수익률 수백%로 점수폭발.
@@ -312,7 +317,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.37.1"
+VERSION = "v4.37.2"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
