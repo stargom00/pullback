@@ -242,7 +242,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.37.9</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.37.11</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1120,6 +1120,7 @@ async function saveJournal() {
     signal: (s.triggered ? '🔥' : '') + (s.leader ? '👑' : ''),
     pivot_type: s.pivot_type || '', setup_score: s.setup_score != null ? Math.round(s.setup_score) : '',
     rs: s.rs, entry, stop,
+    pivot: s.pivot ?? null,                    // 피벗가 (대기 종목 돌파 알림용)
     risk_pct: riskAmt != null ? Math.round(riskAmt * 10) / 10 : '',
     // ── 진입 시점 신호 스냅샷 (검증용) ──
     sig_level: sig ? sig.level : '',          // ok | warn | danger

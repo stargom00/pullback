@@ -5,6 +5,22 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.37.11 [신규] 대기종목 피벗 돌파 알림 (텔레그램 봇 연동).
+        일지 ⏳대기 종목이 피벗을 돌파하는 순간 텔레그램으로 알림받기 위함.
+        - 일지에 pivot(피벗가) 저장 추가.
+        - /api/watch/pending: status=pending + 피벗 있는 종목을
+          {ticker,name,market,pivot,entry,stop,tab}로 노출.
+        - 텔레그램 봇(stock-alert)이 이 API를 1분마다 읽어 현재가가 피벗
+          이상이면 '🚀 피벗 돌파' 알림 (봇 레포 별도 배포 필요).
+        역할 분리: 스캐너=분석/대기목록, 봇=가격감시/알림.
+v4.37.10 [확장] ATR 손절 버퍼를 손절 쓰는 전 탭으로 확대 (탭별 배수 차등).
+        v4.37.9는 눌림목만 적용했었음. 이제 모든 손절 탭에 적용:
+          - 눌림목·추세전환: ATR×0.3 (현재가 근처 진입 → 변동성 여유)
+          - 돌파·박스돌파·돌파임박: ATR×0.15 (피벗 돌파 진입 →
+            타이트 유지가 정석. 피벗 깨지면 빠른 손절)
+        공통 헬퍼 apply_atr_buffer()로 통일. _rr_block이 stop_struct(버퍼전
+        구조손절)·atr_buf(버퍼값)를 함께 반환 → 전 탭에서 추적 가능.
+        ※ leader/super/surge는 손절을 다루지 않아 대상 외.
 v4.37.9 [개선] 손절에 ATR 버퍼 추가 — 종목 변동성 반영(노이즈 손절 방지).
         [배경] 구조 손절(지지선)을 정확히 밑에 두면, 지지선 살짝 깨고 반등하는
                노이즈에 털림. 종목마다 변동성이 다르니 그만큼 여유가 필요.
@@ -395,7 +411,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.37.9"
+VERSION = "v4.37.11"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -1167,6 +1183,31 @@ def load_journal() -> list:
 @app.get("/api/journal")
 async def get_journal():
     return JSONResponse(load_journal())
+
+
+@app.get("/api/watch/pending")
+async def watch_pending():
+    """대기(pending) 상태 + 피벗가 있는 종목만 노출 — 텔레그램 봇이 읽어
+    피벗 돌파를 감시/알림하기 위한 엔드포인트.
+    반환: [{ticker, name, market, pivot, entry, stop, tab}, ...]"""
+    out = []
+    for r in load_journal():
+        if r.get("status") != "pending":
+            continue
+        pivot = r.get("pivot")
+        if not pivot:
+            continue
+        out.append({
+            "id": r.get("id"),
+            "ticker": r.get("ticker"),
+            "name": r.get("name"),
+            "market": r.get("market"),
+            "pivot": pivot,
+            "entry": r.get("entry"),
+            "stop": r.get("stop"),
+            "tab": r.get("tab", ""),
+        })
+    return JSONResponse({"pending": out, "count": len(out)})
 
 
 @app.post("/api/journal")
