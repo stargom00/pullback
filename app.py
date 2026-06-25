@@ -5,6 +5,17 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.37.8 [신규] 시장 타이밍(오닐 M factor) — 분산일 카운트로 진입 자제 판정.
+        [배경] 장 나쁠 때 진입하면 좋은 종목도 시장 동반 하락에 털림.
+               반복 손절의 주요 원인 중 하나(요 며칠 한국장 -10% 폭락).
+        [추가] _index_regime을 오닐식으로 강화: 분산일(전일대비 -0.2%↓ +
+               거래량 증가 = 기관 매도일) 최근 25거래일 카운트.
+               - 분산일 5개+ 또는 60일선 아래 → 🔴 비우호(신규진입 자제)
+               - 분산일 3~4개 → 🟡 주의(선별 진입)
+               - FTD(하락후 반등 +1.5% & 거래량증가) → 바닥 신호 표시
+        [표시] 상단 시장 배너에 분산일 개수·FTD 표시.
+               "🔴 시장 비우호 — 신규 진입 자제 · 분산일 N개"
+        → 빠지는 장에서 진입을 막아 반복 손절 방지.
 v4.37.7 [신규] 변동성(ATR%) 경고 — 반복 손절 방지 (미너비니: 손절폭은 변동성에 맞춰라).
         [배경] 고변동 종목(티에스이 ATR 12%)을 타이트한 손절로 진입하면
                하루 정상 변동(노이즈)에 털리고, 추세는 맞아서 손절 후 급등이
@@ -374,7 +385,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.37.7"
+VERSION = "v4.37.8"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -986,35 +997,76 @@ def _fetch_nasdaq() -> dict | None:
 
 
 def _index_regime(code: str) -> dict | None:
-    """지수 일봉으로 시장 레짐 판정. code: 'KOSPI'|'KOSDAQ'.
-    - 20일선 위 + 20일선 우상향 → 'good'
-    - 60일선 아래 → 'bad'
-    - 그 외 → 'neutral'
-    나스닥(^IXIC)은 yfinance로 별도 처리."""
+    """지수 일봉으로 시장 레짐 판정 (오닐/미너비니 M factor).
+    code: 'KOSPI'|'KOSDAQ'|'^IXIC'.
+
+    핵심 = 분산일(Distribution Day) 카운트:
+      분산일 = 지수가 전일 대비 -0.2%↓ 하락 + 거래량이 전일보다 증가한 날
+              (기관이 파는 날). 최근 25거래일 내:
+        - 분산일 5개+ → 'bad'  (하락 압력 큼, 신규진입 자제)
+        - 분산일 3~4개 → 'neutral' (주의, 선별 진입)
+        - 분산일 0~2개 → 추세 보고 good/neutral
+    추세 필터: 20/60일선 위치도 함께 본다 (분산일 적어도 60일선 아래면 bad).
+    FTD(Follow-Through Day): 하락 후 반등 4일+에 +1.5%↑ & 거래량 증가 →
+      바닥 신호(보너스, 표시용).
+    """
     try:
         if code == "^IXIC":
             df = yf.Ticker("^IXIC").history(period="6mo", interval="1d", auto_adjust=False)
-            close = df["Close"] if df is not None and not df.empty else None
+            if df is None or df.empty:
+                return None
+            close = df["Close"]
+            vol = df["Volume"]
         else:
             hist = naver_kr.fetch_index_history(code, days=160)
-            close = hist["Close"] if hist is not None and not hist.empty else None
+            if hist is None or hist.empty:
+                return None
+            close = hist["Close"]
+            vol = hist["Volume"] if "Volume" in hist.columns else None
         if close is None or len(close) < 60:
             return None
+
         ma20 = close.rolling(20).mean()
         ma60 = close.rolling(60).mean()
         cur = float(close.iloc[-1])
         m20 = float(ma20.iloc[-1])
         m60 = float(ma60.iloc[-1])
-        m20_prev = float(ma20.iloc[-6])   # 5일 전 20일선 (기울기)
+        m20_prev = float(ma20.iloc[-6])
         rising20 = m20 > m20_prev
-        if cur < m60:
+
+        # ── 분산일 카운트 (최근 25거래일) ──
+        dist_days = 0
+        if vol is not None and len(close) >= 26:
+            ret = close.pct_change()
+            vol_up = vol > vol.shift(1)
+            down = ret <= -0.002          # -0.2%↓ 하락
+            dist_mask = down & vol_up
+            dist_days = int(dist_mask.iloc[-25:].sum())
+
+        # ── FTD (하락 후 반등 신호, 표시용 보너스) ──
+        ftd = False
+        if vol is not None and len(close) >= 5:
+            ret = close.pct_change()
+            up15 = ret.iloc[-1] >= 0.015
+            vol_up_today = bool(vol.iloc[-1] > vol.iloc[-2])
+            recent_low_pos = int(close.iloc[-10:].values.argmin())
+            ftd = bool(up15 and vol_up_today and recent_low_pos <= 6)
+
+        # ── 종합 판정 ──
+        if cur < m60 or dist_days >= 5:
             regime, txt = "bad", "비우호 (신규진입 자제)"
+        elif dist_days >= 3:
+            regime, txt = "neutral", f"주의 (분산일 {dist_days}개 — 선별 진입)"
         elif cur > m20 and rising20:
             regime, txt = "good", "우호 (진입 환경 양호)"
         else:
             regime, txt = "neutral", "중립 (선별 진입)"
+        if ftd and regime != "good":
+            txt += " · FTD 발생(바닥 신호)"
+
         return {"regime": regime, "regime_txt": txt,
-                "above_ma20": cur > m20, "above_ma60": cur > m60}
+                "above_ma20": cur > m20, "above_ma60": cur > m60,
+                "dist_days": dist_days, "ftd": ftd}
     except Exception:
         return None
 

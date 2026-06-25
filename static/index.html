@@ -242,7 +242,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.37.7</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.37.8</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1477,11 +1477,16 @@ async function loadIndices() {
     if (regimes.length) {
       const bad = regimes.filter(r => r === 'bad').length;
       const good = regimes.filter(r => r === 'good').length;
+      // 분산일 최댓값 (국내 지수 중) + FTD 여부
+      const maxDist = Math.max(...kr.map(ix => ix.dist_days || 0), 0);
+      const anyFtd = kr.some(ix => ix.ftd);
+      const distTxt = maxDist >= 3 ? ` · 분산일 ${maxDist}개` : '';
+      const ftdTxt = anyFtd ? ' · FTD 발생(바닥 신호)' : '';
       let lv, txt;
       if (bad >= 1) { lv = 'bad'; txt = '🔴 시장 비우호 — 신규 진입 자제'; }
       else if (good === regimes.length) { lv = 'good'; txt = '🟢 시장 우호 — 진입 환경 양호'; }
       else { lv = 'neutral'; txt = '🟡 시장 중립 — 선별 진입'; }
-      banner = `<div class="mkt-banner mkt-${lv}" title="국내 지수의 20·60일선 위치로 판정. 빠지는 장에선 돌파 성공률이 낮아요.">${txt}</div>`;
+      banner = `<div class="mkt-banner mkt-${lv}" title="오닐 M factor: 분산일(기관 매도일) 카운트 + 20·60일선. 분산일 5개+ 또는 60일선 아래면 비우호. 빠지는 장에선 돌파 성공률이 급락해요.">${txt}${distTxt}${ftdTxt}</div>`;
     }
     bar.innerHTML = banner + list.map(ix => {
       const pct = ix.change_pct;
