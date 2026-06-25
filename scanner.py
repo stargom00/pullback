@@ -186,6 +186,10 @@ CONFIG = {
     "leader_rs": 90,
     "leader_pullback_min": 0.015,
     "leader_rsi_max": 72,
+    # 손절 ATR 버퍼: 구조 손절(지지선) 아래로 ATR×배수만큼 여유를 둬
+    # 노이즈(지지선 살짝 깨고 반등)에 털리는 걸 방지. 종목 변동성 자동 반영.
+    # 추적하며 조정: 0.3(타이트)~0.5(여유). 0이면 버퍼 없음.
+    "atr_stop_buffer": 0.3,
 }
 
 
@@ -632,16 +636,24 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         stop = max(cand)            # 현재가에 가장 가까운 유효 손절(=손절폭 최소)
     else:
         stop = pullback_low         # 폴백: 둘 다 없으면 단순 저점
-    # 화면 지지선 표시를 실제 손절 기준과 일치시킴
-    if ma_stop is not None and stop == ma_stop and stop_ma_name:
+    # ── ATR 버퍼: 구조 손절 아래로 ATR×배수만큼 여유 (노이즈 흡수) ──
+    # 손절은 여전히 구조(지지선)에 고정되어 현재가 따라 안 움직이고,
+    # 종목 변동성(ATR)만큼만 살짝 아래로 내려 정상 변동에 안 털리게 한다.
+    stop_struct = stop              # 버퍼 적용 전 구조 손절 (표시용)
+    atr_val = atr(h, lo, c, 14)     # 종목 변동성 (버퍼 + 경고 공용)
+    atr_buf = atr_val * cfg.get("atr_stop_buffer", 0.0)
+    if atr_buf > 0 and stop is not None:
+        stop = stop - atr_buf
+    # 화면 지지선 표시를 실제 손절 기준과 일치시킴 (버퍼 전 구조 손절 기준)
+    if ma_stop is not None and stop_struct == ma_stop and stop_ma_name:
         disp_support = stop_ma_name          # 손절을 이평으로 잡음 → 그 이평 표시
         disp_support_dist = round((close - stop) / close * 100, 2)
-    elif stop == sig_low and sig_low is not None:
+    elif stop_struct == sig_low and sig_low is not None:
         disp_support = "지지저점"             # 의미있는 저점으로 잡음
         disp_support_dist = round((close - stop) / close * 100, 2)
     else:
         disp_support = support_ma             # 폴백: 기존 가장 가까운 이평
-        disp_support_dist = round(near_ma * 100, 2)
+        disp_support_dist = round((close - stop) / close * 100, 2)
     risk_pct = (pivot - stop) / pivot * 100 if pivot > 0 else 0.0
     pivot_dist_pct = (pivot - close) / close * 100  # 현재가→피벗 거리
 
@@ -674,7 +686,6 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     # ── 변동성(ATR%) 경고 — 미너비니: 손절폭은 종목 변동성에 맞춰라 ──
     # ATR%가 크면 하루 정상 변동이 커서, 타이트한 손절이 노이즈에 털린다.
     # 고변동 종목은 진입 신중 + 손절폭 충분히(또는 비중 축소) 필요.
-    atr_val = atr(h, lo, c, 14)
     atr_pct = round(atr_val / close * 100, 1) if close > 0 else 0.0
     # 손절폭(현재가→손절)이 ATR의 1.5배 미만이면 노이즈에 털릴 위험
     stop_dist_pct = (close - stop) / close * 100 if close > 0 else 0.0
@@ -708,6 +719,8 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "atr_pct": atr_pct,
         "vol_high": vol_high,
         "atr_tight": atr_tight,
+        "stop_struct": round(stop_struct, 2),
+        "atr_buf": round(atr_buf, 2),
         **_rr_block(pivot, stop, h, lo, c,
                     base_low=float(lo.iloc[-cfg["recent_high_window"]:].min()),
                     entry=close, warn_pct=8.0, is_kr=is_kr),
