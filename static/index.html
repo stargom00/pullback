@@ -242,7 +242,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.37.6</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.37.7</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -424,6 +424,15 @@ function entrySignal(s) {
     else if (z === 'overheated') { checks.push(['warn', `AVWAP +${d}% — 과열(평균가서 멀어짐)`, 'avwap_hot']); warn++; }
     else if (z === 'near') { checks.push(['warn', `AVWAP ${d}% — 살짝 아래(애매)`, 'avwap_near']); warn++; }
     else if (z === 'below') { checks.push(['danger', `AVWAP ${d}% — 매물 부담 큼`, 'avwap_below']); danger++; }
+  }
+  // 6) 변동성(ATR%) — 미너비니: 손절폭은 종목 변동성에 맞춰라.
+  //    고변동 종목은 하루 정상 변동이 커서 타이트한 손절이 노이즈에 털린다.
+  if (s.atr_pct != null && s.vol_high) {
+    if (s.atr_tight) {
+      checks.push(['danger', `변동성 ATR ${s.atr_pct}% — 손절 대비 큼(노이즈 손절 위험)`, 'atr_tight']); danger++;
+    } else {
+      checks.push(['warn', `고변동 ATR ${s.atr_pct}% — 비중 축소 권장`, 'atr_high']); warn++;
+    }
   }
 
   let level, label;

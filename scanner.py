@@ -671,6 +671,16 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         if prev:
             setup_score = prev["score"]
 
+    # ── 변동성(ATR%) 경고 — 미너비니: 손절폭은 종목 변동성에 맞춰라 ──
+    # ATR%가 크면 하루 정상 변동이 커서, 타이트한 손절이 노이즈에 털린다.
+    # 고변동 종목은 진입 신중 + 손절폭 충분히(또는 비중 축소) 필요.
+    atr_val = atr(h, lo, c, 14)
+    atr_pct = round(atr_val / close * 100, 1) if close > 0 else 0.0
+    # 손절폭(현재가→손절)이 ATR의 1.5배 미만이면 노이즈에 털릴 위험
+    stop_dist_pct = (close - stop) / close * 100 if close > 0 else 0.0
+    atr_tight = stop_dist_pct < atr_pct * 1.5  # 손절이 변동성 대비 너무 타이트
+    vol_high = atr_pct >= 7.0                  # 고변동 종목(하루 7%+ 변동)
+
     return {
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
@@ -695,6 +705,9 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "tl_break_intraday": tl_break_intraday,
         "ud": ud_volume_ratio(c, v),
         "pivot_dist_pct": round(pivot_dist_pct, 2),
+        "atr_pct": atr_pct,
+        "vol_high": vol_high,
+        "atr_tight": atr_tight,
         **_rr_block(pivot, stop, h, lo, c,
                     base_low=float(lo.iloc[-cfg["recent_high_window"]:].min()),
                     entry=close, warn_pct=8.0, is_kr=is_kr),
