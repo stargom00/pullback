@@ -611,12 +611,37 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     # ── 8) 피벗 / 손절 / 리스크 ──
     pw = cfg["pivot_window"]
     pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, pw, is_kr=is_kr)
-    pullback_low = float(lo.iloc[-pw:].min())  # 눌림 저점
-    # 손절 = 눌림 저점과 지지 이평선(1% 이탈 허용) 중 더 높은 쪽
-    # 단, 현재가보다 위에 있는 후보는 제외 (가격이 지지선 살짝 아래일 때 방지)
-    support_price = {"MA10": m10, "MA20": m20, "MA60": m60}[support_ma]
-    candidates = [x for x in (pullback_low, support_price * 0.99) if x < close]
-    stop = max(candidates) if candidates else pullback_low
+
+    # 손절 후보 (미너비니식: 의미있는 지지 기준, spike 꼬리 제외):
+    #  1) 현재가 아래의 지지 이평선 중 가장 가까운(=손절폭 작은) 것
+    #     — 화면 지지선이 현재가 위여도 버리지 않고, 아래 이평을 찾는다.
+    #  2) 2번+ 지지받은 '의미있는 저점'(significant_support) — 단순 최저가(spike
+    #     꼬리) 대신. 일시적 장중 급락 꼬리가 손절로 잡히는 문제 방지.
+    #  → 둘 중 현재가에 더 가까운(=손절 짧은) 쪽을 손절로. 둘 다 없으면 폴백.
+    ma_below = [x for x in (m10, m20, m60) if x and x < close]
+    ma_stop = max(ma_below) * 0.99 if ma_below else None   # 가장 가까운 아래 이평 -1%
+    # 손절에 쓴 이평 이름 (화면 지지선 표시용 — 손절가와 일치시킴)
+    stop_ma_name = None
+    if ma_below:
+        nearest = max(ma_below)
+        stop_ma_name = "MA10" if nearest == m10 else "MA20" if nearest == m20 else "MA60"
+    sig_low = significant_support(lo, pw, min_touches=2, band=0.02, exclude=1)
+    pullback_low = float(lo.iloc[-pw:].min())  # 폴백용 단순 저점
+    cand = [x for x in (ma_stop, sig_low) if x is not None and x < close]
+    if cand:
+        stop = max(cand)            # 현재가에 가장 가까운 유효 손절(=손절폭 최소)
+    else:
+        stop = pullback_low         # 폴백: 둘 다 없으면 단순 저점
+    # 화면 지지선 표시를 실제 손절 기준과 일치시킴
+    if ma_stop is not None and stop == ma_stop and stop_ma_name:
+        disp_support = stop_ma_name          # 손절을 이평으로 잡음 → 그 이평 표시
+        disp_support_dist = round((close - stop) / close * 100, 2)
+    elif stop == sig_low and sig_low is not None:
+        disp_support = "지지저점"             # 의미있는 저점으로 잡음
+        disp_support_dist = round((close - stop) / close * 100, 2)
+    else:
+        disp_support = support_ma             # 폴백: 기존 가장 가까운 이평
+        disp_support_dist = round(near_ma * 100, 2)
     risk_pct = (pivot - stop) / pivot * 100 if pivot > 0 else 0.0
     pivot_dist_pct = (pivot - close) / close * 100  # 현재가→피벗 거리
 
@@ -657,8 +682,8 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "leader": is_leader,
         "mode": "pullback",
         "pullback_pct": round(pullback * 100, 1),
-        "support_ma": support_ma,
-        "ma_dist_pct": round(near_ma * 100, 2),
+        "support_ma": disp_support,
+        "ma_dist_pct": disp_support_dist,
         "vol_ratio": round(vol_ratio, 2),
         "vol_dry": vol_dry,
         "rsi": round(cur_rsi, 1),
