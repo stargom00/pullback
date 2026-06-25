@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.37.13 [신규] 대기종목 자동 무산 (2조건).
+        그동안 대기는 수동 무산만 가능 → 돌파 안 와도 영원히 대기로 남아
+        일지 지저분 + 봇이 죽은 종목 계속 감시. 자동 무산 2조건 추가:
+          (1) 대기 WATCH_DAYS(14일) 경과 → '대기만료' 무산
+              (돌파 셋업은 베이스 완성 후 빨리 터져야 유효, 식으면 무산)
+          (2) 현재가가 손절가 아래로 빠짐 → '셋업붕괴' 무산
+              (베이스/지지 무너지면 셋업 깨진 것)
+        무산 사유(closed_reason)를 일지에 표시. 가격 갱신 시 자동 판정되며,
+        자동 무산되면 /api/watch/pending에서도 빠져 봇 감시 대상에서 제외.
+v4.37.12 [버그수정] 피벗 알림: 기존 대기종목이 /api/watch/pending에 안 뜨던 문제.
+        v4.37.11 전에 담은 대기종목은 pivot 필드가 없어 전부 누락됐음.
+        → pivot 없으면 entry(진입가=베이스천장)로 대체. 기존 대기종목도
+        바로 감시 대상이 됨(MACOM/IREN 등). 앞으로 담는 건 pivot 직접 저장.
 v4.37.11 [신규] 대기종목 피벗 돌파 알림 (텔레그램 봇 연동).
         일지 ⏳대기 종목이 피벗을 돌파하는 순간 텔레그램으로 알림받기 위함.
         - 일지에 pivot(피벗가) 저장 추가.
@@ -411,7 +424,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.37.11"
+VERSION = "v4.37.13"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -1194,7 +1207,8 @@ async def watch_pending():
     for r in load_journal():
         if r.get("status") != "pending":
             continue
-        pivot = r.get("pivot")
+        # pivot 우선, 없으면 entry(진입가=베이스천장)로 대체 (v4.37.11 이전 항목 호환)
+        pivot = r.get("pivot") or r.get("entry")
         if not pivot:
             continue
         out.append({

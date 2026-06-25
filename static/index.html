@@ -242,7 +242,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.37.11</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.37.13</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -936,6 +936,7 @@ async function loadJournalFromServer() {
 
 // ── 페이퍼 추적: 앱 열 때 추적 종목 현재가 갱신 + 자동 종료 판정 ──
 const TRACK_DAYS = 14;   // 추적 기간 2주
+const WATCH_DAYS = 14;   // 대기 유효기간 (돌파 셋업은 이 안에 터져야 유효, 지나면 자동 무산)
 // 트레이딩뷰 차트 URL — 한국주는 KRX, 미국주는 거래소 자동판별 대신 심볼만
 function tvUrl(ticker, market) {
   if (!ticker) return '#';
@@ -978,13 +979,32 @@ async function updateTracking() {
 
     // ── 대기(pending): 아직 안 산 추적관찰 ──
     // 진입가(피벗) 도달 → 자동 '진입'으로 전환, 진입일 갱신.
-    // 손절가 닿아도 손절 처리 안 함(안 샀으니 손익 0). 그냥 관찰 지속.
+    // 자동 무산 2조건: (1) 대기 WATCH_DAYS일 경과(셋업 식음)
+    //                  (2) 현재가가 손절가 아래로 빠짐(베이스/셋업 붕괴)
     if ((r.status || 'entered') === 'pending') {
       if (px >= entry) {
         r.status = 'entered';
         r.tracking = true;
         r.date = today.toISOString().slice(0, 10);  // 실제 진입일로 갱신
         r.closed_reason = '';
+        changed = true;
+        continue;
+      }
+      // 자동 무산 판정
+      const waitDays = Math.floor((today - new Date(r.date)) / 86400000);
+      if (stop && px <= stop) {
+        r.status = 'missed';
+        r.tracking = false;
+        r.closed_reason = '셋업붕괴(손절가 이탈)';
+        changed = true;
+        continue;
+      }
+      if (waitDays >= WATCH_DAYS) {
+        r.status = 'missed';
+        r.tracking = false;
+        r.closed_reason = `대기만료(${WATCH_DAYS}일 미돌파)`;
+        changed = true;
+        continue;
       }
       changed = true;
       continue;  // pending인 동안은 손절/목표/만료 판정 안 함
@@ -1327,7 +1347,7 @@ function viewRow(r) {
         : st === 'pending'
             ? `<span style="color:var(--amber);font-size:11px">피벗 대기</span><div style="font-size:9px;color:var(--muted)">${r.last_price?'현재 '+r.last_price:'미진입'}</div>`
         : st === 'missed'
-            ? `<span style="color:var(--muted);font-size:11px">무산</span>`
+            ? `<span style="color:var(--muted);font-size:11px">무산</span>${r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:''}`
         : (r.tracking && r.last_price && r.entry && r.stop
             ? (() => {
                 const liveR = (parseFloat(r.last_price) - parseFloat(r.entry)) / (parseFloat(r.entry) - parseFloat(r.stop));
