@@ -242,7 +242,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.37.23</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.37.24</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -791,13 +791,13 @@ function renderInverseCards(hits) {
       </div>
       <div style="margin:8px 0;display:flex;gap:6px;flex-wrap:wrap">${strengthBadge(s.strength)} ${levBadge}</div>
       <div class="metrics">
-        <div class="metric"><div class="k">현재가</div><div class="v mono">${s.close}</div></div>
+        <div class="metric"><div class="k">현재가</div><div class="v mono">${s.close != null ? s.close : '<span style="font-size:10px;color:var(--muted)">1x 역산</span>'}</div></div>
         <div class="metric"><div class="k">5일 수익률</div><div class="v mono" style="color:${s.ret5_pct>=0?'var(--up)':'var(--down)'}">${s.ret5_pct>=0?'+':''}${s.ret5_pct}%</div></div>
         <div class="metric"><div class="k">RSI</div><div class="v mono">${s.rsi}</div></div>
         <div class="metric"><div class="k">거래량비</div><div class="v mono">${s.vol_mult}×</div></div>
       </div>
       ${s.overheated ? '<div class="surge-warn" style="background:rgba(255,107,107,.08);border-color:rgba(255,107,107,.3)">⚠️ 인버스 과열(RSI '+s.rsi+') — 지수 과대낙폭 = 반등 시 인버스 급락 위험. 추격 금지.</div>' : ''}
-      <div style="font-size:11px;color:var(--muted);margin-top:8px">${s.strength_txt}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:8px">${s.strength_txt}${s.derived ? ' · 📐 등락은 1x에서 역산(곱버스 데이터 불안정)' : ''}</div>
     </div>`;
   }).join('');
   content.innerHTML = `
@@ -1714,8 +1714,7 @@ async function loadIndices() {
       const chgStr = (chg != null && pct != null)
         ? `${arrow} ${Math.abs(chg).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} (${pct > 0 ? '+' : ''}${pct.toFixed(2)}%)`
         : '–';
-      const dot = regimeDot(ix.regime);
-      return `<div class="idx" title="${ix.regime_txt || ''}"><span class="nm">${dot} ${ix.name}</span>`
+      return `<div class="idx" title="${ix.regime_txt || ''}"><span class="nm">${ix.name}</span>`
         + `<span class="vl">${val}</span>`
         + `<span class="ch ${dir}">${chgStr}</span></div>`;
     }).join('');

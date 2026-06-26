@@ -5,6 +5,14 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.37.24 [개선] 곱버스 다시 추가 — 1x에서 등락 역산(네이버 거꾸로 데이터 우회).
+        국장 지수 숏 매매 상품(곱버스)이 필요하다는 요청. 곱버스 일봉이
+        네이버에서 거꾸로 오는 문제는, 같은 기초지수 1x ETF(데이터 정상)에서
+        등락을 N배로 역산해 해결. 곱버스 현재가는 '1x 역산'으로 표시.
+        - 코스닥 곱버스(291630) ← 코스닥 1x(251340)
+        - 코스피 곱버스(252670/252710) ← 코스피 1x(114800)
+        - 미국 SQQQ/SPXU/QID/SDS ← PSQ/SH
+        [UI] 지수 바 앞 레짐 동그라미(🔴) 제거 — 하락으로 오인돼 혼란.
 v4.37.23 [정리] 인버스 탭에서 곱버스(2x/3x) 전부 제거 → 1x 인버스만 8개.
         [원인 확정] /api/debugraw로 확인: 네이버가 코스닥150 곱버스(291630)
                    일봉을 거꾸로 줌(코스닥 하락인데 곱버스도 하락). 소스 문제라
@@ -501,7 +509,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.37.23"
+VERSION = "v4.37.24"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -908,16 +916,45 @@ async def inverse_scan(market: str = "all", refresh: bool = False):
         except Exception:
             continue
 
-    hits = []
+    # 1단계: derive_from 없는(기준) ETF 먼저 분석 → 결과 저장
+    base_results: dict = {}
     for t, df in data.items():
         meta = inv.get(t, {})
+        if meta.get("derive_from"):
+            continue   # 파생(곱버스)은 2단계에서
         try:
             r = analyze_inverse(df, meta)
         except Exception:
             r = None
-        if r is None:
-            continue
+        if r is not None:
+            base_results[t] = r
+
+    hits = []
+    # 기준 ETF 결과 추가
+    for t, r in base_results.items():
+        meta = inv.get(t, {})
         hits.append({"ticker": t, "market": meta.get("market", "US"), **r})
+
+    # 2단계: 파생(곱버스 2x/3x)은 1x 기준에서 등락 역산 (네이버 거꾸로 데이터 우회)
+    for t, meta in inv.items():
+        src = meta.get("derive_from")
+        if not src:
+            continue
+        base = base_results.get(src)
+        if base is None:
+            continue   # 1x 데이터 없으면 곱버스도 스킵
+        lev = meta.get("leverage", 2)
+        # 1x의 일간/5일 등락에 레버리지 배수 적용 (방향 동일, 폭만 N배)
+        derived = dict(base)
+        derived["name"] = meta["name"]
+        derived["leverage"] = lev
+        derived["underlying"] = meta.get("underlying", base.get("underlying", ""))
+        derived["change_pct"] = round(base["change_pct"] * lev, 2)
+        derived["ret5_pct"] = round(base["ret5_pct"] * lev, 1)
+        derived["close"] = None       # 곱버스 실제가는 데이터 불신 → 표시 안 함
+        derived["derived"] = True      # 1x에서 역산했음 표시
+        derived["derived_from"] = src
+        hits.append({"ticker": t, "market": meta.get("market", "US"), **derived})
 
     # 강도순 정렬: strong > building > weak, 같으면 최근수익률(ret5) 높은 순
     order = {"strong": 0, "building": 1, "weak": 2}
