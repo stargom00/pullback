@@ -1777,3 +1777,132 @@ def analyze_inverse(df: pd.DataFrame, meta: dict | None = None,
             for x in ma20.iloc[-60:].tolist()
         ],
     }
+
+
+# ══════════════════════════════════════════════════════
+# 🩸붕괴 — Stage 4 숏 셋업 (돌파임박/눌림목의 거울상)
+# 하락 추세(역배열)에서 지지선을 거래량 동반 이탈하는 종목 포착.
+# ══════════════════════════════════════════════════════
+BREAKDOWN_CONFIG = {
+    "min_bars": 210,
+    "rs_max": 40,            # 약세 종목만 (RS 낮을수록 후보) — 주도주 반대
+    "near_min": -0.05,       # 지지선 대비 현재가: -5%~+3% (이탈 직전~막 이탈)
+    "near_max": 0.03,
+    "pivot_window": 20,
+    "vol_expand": 1.3,       # 이탈 시 거래량 확장 배수(가점)
+}
+
+
+def analyze_breakdown(df: pd.DataFrame, rs_rank: int | None = None,
+                      rs_mom: int | None = None, cfg: dict = BREAKDOWN_CONFIG,
+                      is_kr: bool = False) -> dict | None:
+    """Stage 4 숏 셋업 — 돌파임박의 거울상.
+    하락 추세(역배열: ma20<ma60, 200일선 아래) + 지지선 코앞/막 이탈 +
+    거래량 확장이면 후보. 숏 진입은 지지 이탈, 손절은 위(직전 반등 고점)."""
+    if df is None or len(df) < cfg["min_bars"]:
+        return None
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if len(df) < cfg["min_bars"]:
+        return None
+
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+    ma20 = c.rolling(20).mean()
+    ma60 = c.rolling(60).mean()
+    ma200 = c.rolling(200).mean()
+    r = rsi(c)
+
+    close = float(c.iloc[-1])
+    m20, m60, m200 = float(ma20.iloc[-1]), float(ma60.iloc[-1]), float(ma200.iloc[-1])
+    cur_rsi = float(r.iloc[-1])
+    if any(math.isnan(x) for x in (m20, m60, m200, cur_rsi)):
+        return None
+
+    # ── 1) 하락 추세 (역배열) ── 정배열의 거울상
+    if close > m200:
+        return None            # 200일선 위면 Stage 4 아님
+    if not (m20 < m60):
+        return None            # 단기선이 중기선 위면 하락추세 아님
+
+    # ── 2) 지지선 근접/이탈 ── (significant_support 활용)
+    support = significant_support(lo, cfg["pivot_window"], min_touches=2, band=0.02, exclude=1)
+    if support is None or support <= 0:
+        support = float(lo.iloc[-cfg["pivot_window"]:].min())
+    near = (close - support) / support if support > 0 else 1.0   # 음수면 지지 아래(이탈)
+    if not (cfg["near_min"] <= near <= cfg["near_max"]):
+        return None            # 지지 코앞(-5%)~막 이탈(+3%) 밖이면 탈락
+
+    # ── 3) 거래량 확장 (이탈 신뢰도) ──
+    vol3 = float(v.iloc[-3:].mean())
+    vol20 = float(v.iloc[-20:].mean())
+    vol_ratio = vol3 / vol20 if vol20 > 0 else 0.0
+    vol_expand = vol_ratio >= cfg["vol_expand"]
+
+    # ── 숏 진입/손절/목표 ──
+    entry = support                       # 지지 이탈 시 숏 진입
+    # 손절은 위: 직전 반등 고점(최근 pivot_window봉 고가) + ATR 버퍼
+    swing_high = float(h.iloc[-cfg["pivot_window"]:].max())
+    stop, stop_struct, atr_buf = apply_atr_buffer(swing_high, h, lo, c, 0.15)
+    if stop <= entry:
+        stop = entry * 1.06               # 폴백: 진입 +6%
+    # 목표: 다음 하방 지지 — 1년 저점 또는 진입 -2R
+    risk = stop - entry
+    target = entry - 2 * risk             # 2R 목표(아래)
+    year_low = float(lo.iloc[-252:].min()) if len(lo) >= 252 else float(lo.min())
+    target = max(target, year_low)        # 1년 저점 밑으론 안 잡음
+    rr = round((entry - target) / risk, 2) if risk > 0 else None
+
+    near_pct = round(near * 100, 2)       # 지지대비 %
+    triggered = near <= 0.0 and vol_expand  # 이미 이탈 + 거래량 = 발동
+    oversold = cur_rsi <= 30              # 과매도 → 숏 스퀴즈 경고
+
+    # ── 점수 (100점) ── 지지 근접·이탈 35 + 거래량확장 20 + 역배열강도 20 +
+    #                     RS약세 15(낮을수록↑) + 200일선아래 10
+    near_score = 35 * (1 - min(abs(near) / 0.05, 1.0))
+    align_gap = (m60 - m20) / m60 if m60 > 0 else 0.0     # 역배열 벌어짐
+    align_score = 20 * min(align_gap / 0.05, 1.0)
+    rs_score = 15 * (1 - (rs_rank or 50) / 99) if rs_rank is not None else 7.5
+    score = near_score + (20 if vol_expand else 0) + align_score + rs_score + 10
+    score = min(max(score, 0.0), 100.0)
+
+    reasons = []
+    if near <= 0:
+        reasons.append("지지이탈")
+    else:
+        reasons.append("지지임박")
+    if vol_expand:
+        reasons.append(f"거래량{round(vol_ratio,1)}배")
+    if m20 < m60 < m200:
+        reasons.append("완전역배열")
+    if cur_rsi <= 40:
+        reasons.append("약세모멘텀")
+
+    prev_close = float(c.iloc[-2])
+    change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
+
+    return {
+        "mode": "breakdown",
+        "close": round(close, 2),
+        "change_pct": round(change_pct, 2),
+        "score": round(score, 1),
+        "triggered": triggered,
+        "setup_score": None,
+        "rs": rs_rank,
+        "rs_mom": rs_mom,
+        "support": round(support, 2),
+        "near_pct": near_pct,
+        "entry": round(entry, 2),
+        "stop": round(stop, 2),
+        "target": round(target, 2),
+        "rr": rr,
+        "reasons": reasons,
+        "oversold": oversold,
+        "rsi": round(cur_rsi, 1),
+        "vol_ratio": round(vol_ratio, 2),
+        **_merger_block(c, h, lo, v),
+        **volume_info(close, v),
+        "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
+        "spark_ma20": [
+            None if math.isnan(x) else round(float(x), 4)
+            for x in c.rolling(20).mean().iloc[-60:].tolist()
+        ],
+    }
