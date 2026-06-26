@@ -1721,6 +1721,7 @@ BREAKDOWN_CONFIG = {
     "near_max": 0.05,         # 지지선 +5% 이내(붕괴 직전) ~ 이탈
     "near_min": -0.05,        # 지지선 -5%까지(막 이탈)
     "rsi_oversold": 30,       # RSI 30 이하 = 과매도(반등 위험, 추격 숏 주의)
+    "min_rr": 1.5,            # 손익비 1.5R 미만 셋업 제외
 }
 
 
@@ -1829,20 +1830,43 @@ def analyze_breakdown(df: pd.DataFrame, rs_rank: int | None = None,
     score = min(score, 100)
 
     # ── 숏 매매 계획 ──
-    # 진입: 현재가(지지 이탈 시) / 손절: 위쪽 저항(20일선 또는 최근 고가)
-    # 목표: 아래쪽 다음 지지(추가 저점)
+    # 진입: 현재가(지지 이탈/직전)
+    # 손절(위): 가까운 저항 = 최근 5~10봉 스윙 고가 (타이트하게).
+    #           20일선은 하락종목에선 너무 멀어 손익비를 망치므로 가까운 고가 우선.
+    # 목표(아래): 측정 하락폭(measured move) = 지지선 깬 후 다음 지지.
+    #             직전 박스 높이만큼 지지선 아래로 투영 → 의미 있는 하락 목표.
     entry = close
-    stop = min(m20, recent_high)        # 위쪽 저항 = 숏 손절
-    # 목표: 직전 더 깊은 저점 (없으면 현재가 -2R)
-    deeper_low = float(lo.iloc[-60:].min())
+    # 손절: 최근 5봉 고가(가까운 저항) — 단 진입가보다 충분히 위(최소 ATR의 0.5배)
+    swing_high = float(h.iloc[-5:].max())
+    near_high = float(h.iloc[-10:].max())
+    atr_val = atr(h, lo, c, 14)
+    # 손절은 가까운 스윙고가, 너무 가까우면(노이즈) 최근10봉 고가로
+    stop = swing_high if swing_high > entry + atr_val * 0.5 else near_high
+    if stop <= entry:
+        stop = entry + atr_val * 1.5   # 안전장치
     risk = stop - entry
-    target = deeper_low if deeper_low < entry else entry - risk * 2
+
+    # 목표: 측정 하락폭. 최근 박스(지지~저항) 높이를 지지선 아래로 투영.
+    box_high = float(h.iloc[-cfg["breakdown_window"]:].max())
+    box_height = box_high - support
+    measured_target = support - box_height        # 박스높이만큼 지지 아래로
+    deeper_low = float(lo.iloc[-60:].min())        # 직전 60봉 더 깊은 저점
+    # 후보 중 가장 가까운(보수적) 목표를 고르되, entry보다 확실히 아래인 것만
+    cands = [t for t in (measured_target, deeper_low) if t < entry - risk]  # 최소 1R 아래
+    if cands:
+        target = max(cands)        # 가장 가까운(보수적) 목표
+    else:
+        target = entry - risk * 2  # 후보 없으면 2R
+
     risk_pct = (stop - entry) / entry * 100 if entry > 0 else 0.0
     rr = (entry - target) / risk if risk > 0 else None
 
+    # 손익비 1.5R 미만이면 숏 부적합 (손절은 먼데 목표는 가까운 셋업 제외)
+    if rr is None or rr < cfg.get("min_rr", 1.5):
+        return None
+
     prev = float(c.iloc[-2]) if len(c) > 1 else close
     change_pct = (close - prev) / prev * 100 if prev > 0 else 0.0
-    atr_val = atr(h, lo, c, 14)
     atr_pct = round(atr_val / close * 100, 1) if close > 0 else 0.0
 
     return {
