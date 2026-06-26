@@ -1,4 +1,4 @@
-git add -A && git commit -m v43723 && git push"""
+"""
 눌림목 스캐너 — 웹 서버
 모드: pullback(눌림목) / turnaround(추세전환) / leader / super / breakout / surge
 RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장별)
