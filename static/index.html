@@ -242,7 +242,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.37.15</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.37.16</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -254,6 +254,7 @@ tr.editing{background:rgba(242,179,61,.06)}
     <button class="tab" data-mode="leader">대장후보</button>
     <button class="tab" data-mode="super">⭐슈퍼대장</button>
     <button class="tab tab-exp" data-mode="surge">⚡급등<span class="exp-tag">실험</span></button>
+    <button class="tab tab-exp" data-mode="inverse">🔻인버스<span class="exp-tag">하락</span></button>
     <button class="tab" data-mode="journal">📒 내 일지</button>
   </div>
   <div class="tabs" role="tablist">
@@ -662,10 +663,12 @@ const DESC = {
   breakout: 'RS 80+ · 베이스 천장을 거래량 동반 돌파 · 피벗 +5% 이내=유효 / +5~12%=연장 추격주의',
   imminent: '🎯 돌파 직전 · 천장(피벗) 바로 아래(-5%~0%)까지 올라왔지만 아직 안 뚫음 · 거래량 수축=가점 · RS 50+ — 돌파 전날 미리 포착',
   surge: '⚠️ 단타 신호(추세 아님) · 급등 첫날 포착: 당일 +7%↑ & 거래량 4배↑ & 직전 며칠은 조용 · RS 무관',
-  boxbreak: '📦 박스/하락추세 상단을 거래량(1.5배+) 동반 돌파 · 20/40/60일 박스 모두 확인 · 120일선 위 · RS 70+ — 국장 박스탈출/삼각수렴 돌파'
+  boxbreak: '📦 박스/하락추세 상단을 거래량(1.5배+) 동반 돌파 · 20/40/60일 박스 모두 확인 · 120일선 위 · RS 70+ — 국장 박스탈출/삼각수렴 돌파',
+  inverse: '🔻 지수 하락 베팅 · 인버스 ETF가 강세(정배열·상승)면 = 시장 하락 국면 · 곱버스는 변동성 극심, 단기·소액만 · 미너비니式 본래 현금 우선'
 };
 
 async function load(refresh = false) {
+  if (mode === 'inverse') { return loadInverse(refresh); }
   const content = document.getElementById('content');
   const status = document.getElementById('status');
   content.innerHTML = '<div class="loading"><div class="spinner"></div>스캔 중… (첫 스캔은 1~2분 걸릴 수 있어요)</div>';
@@ -695,6 +698,64 @@ async function load(refresh = false) {
   } catch (e) {
     content.innerHTML = '<div class="empty">스캔에 실패했습니다. 서버 로그를 확인한 뒤 다시 시도해 주세요.</div>';
   }
+}
+
+async function loadInverse(refresh = false) {
+  const content = document.getElementById('content');
+  const status = document.getElementById('status');
+  content.innerHTML = '<div class="loading"><div class="spinner"></div>인버스 스캔 중…</div>';
+  status.innerHTML = '';
+  document.getElementById('searchBar').style.display = 'none';
+  try {
+    const res = await fetch(`/api/inverse?market=all${refresh ? '&refresh=true' : ''}`);
+    const data = await res.json();
+    const regimeColor = data.regime === 'bear' ? '#FF6B6B' : (data.regime === 'weakening' ? '#f2b33d' : '#5fd99a');
+    status.innerHTML = `<span style="color:${regimeColor};font-weight:600">${data.regime_txt}</span>
+      <span>인버스 ${data.hits.length}개</span>
+      <span>기준 ${data.generated_at}${data.cached ? ' (캐시)' : ''}</span>`;
+    document.getElementById('sectorRow') && (document.getElementById('sectorRow').innerHTML = '');
+    renderInverseCards(data.hits || []);
+  } catch (e) {
+    content.innerHTML = '<div class="empty">인버스 스캔 실패. 서버 로그를 확인하세요.</div>';
+  }
+}
+
+function renderInverseCards(hits) {
+  const content = document.getElementById('content');
+  if (!hits.length) { content.innerHTML = '<div class="empty">인버스 데이터가 없습니다.</div>'; return; }
+  const strengthBadge = (s) => s === 'strong'
+    ? '<span class="st-badge" style="background:#3a2020;color:#ff6b6b">🔴 본격 하락장</span>'
+    : s === 'building'
+    ? '<span class="st-badge" style="background:#3a3320;color:#f2b33d">🟡 하락 조짐</span>'
+    : '<span class="st-badge" style="background:#1e2a1e;color:#7a8a7a">🟢 부적합</span>';
+  const cards = hits.map(s => {
+    const chg = s.change_pct >= 0 ? `+${s.change_pct}%` : `${s.change_pct}%`;
+    const chgColor = s.change_pct >= 0 ? 'var(--up)' : 'var(--down)';
+    const levBadge = s.leverage >= 2 ? `<span class="st-badge" style="background:#3a2020;color:#ff9b9b">${s.leverage}x 곱버스</span>` : '';
+    return `<div class="card">
+      <div class="card-top">
+        <div>
+          <div class="name">${s.name}<span class="mkt">${s.market}</span></div>
+          <div class="tick mono">${s.ticker} · ${s.underlying} 하락 베팅</div>
+        </div>
+        <div style="margin-left:auto;text-align:right">
+          <div class="mono" style="font-weight:700;color:${chgColor}">${chg}</div>
+        </div>
+      </div>
+      <div style="margin:8px 0;display:flex;gap:6px;flex-wrap:wrap">${strengthBadge(s.strength)} ${levBadge}</div>
+      <div class="metrics">
+        <div class="metric"><div class="k">현재가</div><div class="v mono">${s.close}</div></div>
+        <div class="metric"><div class="k">5일 수익률</div><div class="v mono" style="color:${s.ret5_pct>=0?'var(--up)':'var(--down)'}">${s.ret5_pct>=0?'+':''}${s.ret5_pct}%</div></div>
+        <div class="metric"><div class="k">RSI</div><div class="v mono">${s.rsi}</div></div>
+        <div class="metric"><div class="k">거래량비</div><div class="v mono">${s.vol_mult}×</div></div>
+      </div>
+      ${s.overheated ? '<div class="surge-warn" style="background:rgba(255,107,107,.08);border-color:rgba(255,107,107,.3)">⚠️ 인버스 과열(RSI '+s.rsi+') — 지수 과대낙폭 = 반등 시 인버스 급락 위험. 추격 금지.</div>' : ''}
+      <div style="font-size:11px;color:var(--muted);margin-top:8px">${s.strength_txt}</div>
+    </div>`;
+  }).join('');
+  content.innerHTML = `
+    <div class="surge-warn" style="margin-bottom:12px">🔻 인버스 = 지수 하락 베팅. <b>미너비니式 본래 하락장엔 현금이 우선</b>이고, 인버스는 보조 수단이에요. 곱버스(2x/3x)는 변동성 극심 + 장기보유 시 가치 침식 → <b>단기·소액만</b>. 인버스 강세 자체가 "시장이 나쁘다"는 확인 신호이기도 해요.</div>
+    <div class="grid">${cards}</div>`;
 }
 
 async function loadAlertList() {
@@ -1362,7 +1423,7 @@ function renderJournal() {
 
   wrap.innerHTML = `
     <div class="jrnl-tools">
-      <button class="exp" onclick="openManualAdd()" style="background:#1e3a2e;border-color:#2d5a44">➕ 수동 추가</button>
+      <button class="exp" onclick="openManualAdd()" style="background:#2d6a4a;border-color:#40916c;color:#fff">➕ 수동 추가</button>
       <button class="exp" onclick="exportCSV()">⬇ CSV 내보내기</button>
       <button onclick="if(confirm('일지를 모두 지울까요? 되돌릴 수 없어요.')){setJournal([]);renderJournal();}">전체 삭제</button>
     </div>

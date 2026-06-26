@@ -145,10 +145,12 @@ def rr_info(pivot: float, stop: float, h: pd.Series, entry: float | None = None,
 
 def _rr_block(pivot: float, stop: float, h: pd.Series, lo: pd.Series, c: pd.Series,
               base_low: float | None = None, entry: float | None = None,
-              warn_pct: float = 8.0, is_kr: bool = False) -> dict:
+              warn_pct: float = 8.0, is_kr: bool = False,
+              stop_struct: float | None = None, atr_buf: float = 0.0) -> dict:
     """카드용 손절/리스크/손익비 블록. rr_info로 손절을 현실화한 뒤
     stop·risk_pct·손익비를 모두 '현실화된 손절(stop_eff)' 기준으로 통일.
-    한국 중소형주는 변동성이 커서 손절폭 경고 기준을 완화(12%)한다."""
+    한국 중소형주는 변동성이 커서 손절폭 경고 기준을 완화(12%)한다.
+    stop_struct/atr_buf: ATR 버퍼 추적용 (버퍼전 구조손절, 버퍼값)."""
     if is_kr and warn_pct < 12.0:
         warn_pct = 12.0
     info = rr_info(pivot, stop, h, entry=entry, lo=lo, c=c, base_low=base_low)
@@ -163,6 +165,8 @@ def _rr_block(pivot: float, stop: float, h: pd.Series, lo: pd.Series, c: pd.Seri
         "rr": info["rr"],
         "target_basis": info["target_basis"],
         "risk_warn": risk_pct > warn_pct,
+        "stop_struct": round(stop_struct, 2) if stop_struct is not None else None,
+        "atr_buf": round(atr_buf, 2),
     }
 
 
@@ -253,6 +257,20 @@ def anchored_vwap(h: pd.Series, lo: pd.Series, c: pd.Series, v: pd.Series,
         "anchor_ago": n - 1 - anchor_idx,
         "zone": zone,
     }
+
+
+def apply_atr_buffer(stop: float, h: pd.Series, lo: pd.Series, c: pd.Series,
+                     mult: float) -> tuple:
+    """구조 손절 아래로 ATR×mult 만큼 버퍼를 더한다 (노이즈 흡수).
+    손절은 구조(지지선/저점)에 고정된 채, 종목 변동성만큼만 살짝 내려감.
+    반환: (버퍼적용_손절, 버퍼전_구조손절, 버퍼값). mult=0이면 버퍼 없음.
+    탭별 mult: 눌림/추세전환 0.3(여유), 돌파/박스돌파/돌파임박 0.15(타이트).
+    """
+    stop_struct = stop
+    if mult <= 0 or stop is None:
+        return stop, stop_struct, 0.0
+    buf = atr(h, lo, c, 14) * mult
+    return stop - buf, stop_struct, buf
 
 
 def atr(h: pd.Series, lo: pd.Series, c: pd.Series, period: int = 14) -> float:
@@ -639,11 +657,9 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     # ── ATR 버퍼: 구조 손절 아래로 ATR×배수만큼 여유 (노이즈 흡수) ──
     # 손절은 여전히 구조(지지선)에 고정되어 현재가 따라 안 움직이고,
     # 종목 변동성(ATR)만큼만 살짝 아래로 내려 정상 변동에 안 털리게 한다.
-    stop_struct = stop              # 버퍼 적용 전 구조 손절 (표시용)
     atr_val = atr(h, lo, c, 14)     # 종목 변동성 (버퍼 + 경고 공용)
-    atr_buf = atr_val * cfg.get("atr_stop_buffer", 0.0)
-    if atr_buf > 0 and stop is not None:
-        stop = stop - atr_buf
+    stop, stop_struct, atr_buf = apply_atr_buffer(
+        stop, h, lo, c, cfg.get("atr_stop_buffer", 0.0))
     # 화면 지지선 표시를 실제 손절 기준과 일치시킴 (버퍼 전 구조 손절 기준)
     if ma_stop is not None and stop_struct == ma_stop and stop_ma_name:
         disp_support = stop_ma_name          # 손절을 이평으로 잡음 → 그 이평 표시
@@ -719,11 +735,9 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "atr_pct": atr_pct,
         "vol_high": vol_high,
         "atr_tight": atr_tight,
-        "stop_struct": round(stop_struct, 2),
-        "atr_buf": round(atr_buf, 2),
         **_rr_block(pivot, stop, h, lo, c,
                     base_low=float(lo.iloc[-cfg["recent_high_window"]:].min()),
-                    entry=close, warn_pct=8.0, is_kr=is_kr),
+                    entry=close, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf),
         **volume_info(close, v),
         "avwap": anchored_vwap(h, lo, c, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
@@ -825,6 +839,8 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
     stop = m60 * 0.98
     candidates = [x for x in (stop, float(lo.iloc[-10:].min())) if x < close]
     stop = max(candidates) if candidates else float(lo.iloc[-10:].min())
+    # ATR 버퍼 (추세전환=0.3, 변동성 여유)
+    stop, stop_struct, atr_buf = apply_atr_buffer(stop, h, lo, c, 0.3)
     risk_pct = (pivot - stop) / pivot * 100 if pivot > 0 else 0.0
     pivot_dist_pct = (pivot - close) / close * 100
 
@@ -877,7 +893,7 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
         "pivot_dist_pct": round(pivot_dist_pct, 2),
         **_rr_block(pivot, stop, h, lo, c,
                     base_low=float(lo.iloc[-30:].min()),
-                    entry=close, warn_pct=15.0, is_kr=is_kr),
+                    entry=close, warn_pct=15.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf),
         **volume_info(close, v),
         "avwap": anchored_vwap(h, lo, c, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
@@ -1160,6 +1176,8 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
     base_days = len(base)
     # 손절: 베이스 천장(피벗) 살짝 아래 = 돌파 실패 기준
     stop = round(pivot * 0.97, 2)
+    # ATR 버퍼 (돌파=0.15, 타이트 유지 — 피벗 깨지면 빠른 손절이 정석)
+    stop, stop_struct, atr_buf = apply_atr_buffer(stop, h, lo, c, 0.15)
     risk_pct = (close - stop) / close * 100 if close > 0 else 0.0
 
     # 점수 = RS + 거래량 강도 + 유효구간(연장 안 됨) + 베이스 길이
@@ -1188,7 +1206,7 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
         "base_days": base_days,
         "base_range_pct": round(base_range * 100, 1),
         **_rr_block(pivot, stop, h, lo, c, base_low=base_low,
-                    entry=close, warn_pct=8.0, is_kr=is_kr),   # 이미 돌파 → 현재가 진입 기준
+                    entry=close, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf),   # 이미 돌파 → 현재가 진입 기준
         "rsi": round(cur_rsi, 1),
         "vol_dry": False,
         "ud_vol": up_down_volume(c, v, 50),
@@ -1302,6 +1320,8 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
 
     # 손절: 박스 상단(피벗) 살짝 아래 = 돌파 실패 기준
     stop = round(pivot * 0.97, 2)
+    # ATR 버퍼 (박스돌파=0.15, 타이트 유지)
+    stop, stop_struct, atr_buf = apply_atr_buffer(stop, h, lo, c, 0.15)
     # 이미 돌파한 상태 → 실제 진입은 현재가. 리스크/손익비 모두 현재가 기준으로 통일.
     risk_pct = (close - stop) / close * 100 if close > 0 else 0.0
 
@@ -1325,7 +1345,7 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
         "box_range_pct": round(best["box_range"] * 100, 1),
         "tl_break_intraday": intraday_unconfirmed,
         **_rr_block(pivot, stop, h, lo, c, base_low=best["box_low"],
-                    entry=close, warn_pct=8.0, is_kr=is_kr),   # 이미 돌파 → 현재가 진입 기준
+                    entry=close, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf),   # 이미 돌파 → 현재가 진입 기준
         "rsi": round(cur_rsi, 1),
         "vol_dry": False,
         "ud_vol": up_down_volume(c, v, 50),
@@ -1430,6 +1450,8 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
         stop = max(cand)   # 현재가 아래 후보 중 가장 가까운(=타이트한) 것
     else:
         stop = float(lo.iloc[-cfg["pivot_window"]:].min())   # 폴백
+    # ATR 버퍼 (돌파임박=0.15, 타이트 유지)
+    stop, stop_struct, atr_buf = apply_atr_buffer(stop, h, lo, c, 0.15)
     pivot_dist_pct = (pivot - close) / close * 100   # 현재가→피벗 남은 거리(양수)
     risk_pct = (pivot - stop) / pivot * 100 if pivot > 0 else 0.0   # 피벗 진입 기준
 
@@ -1477,7 +1499,7 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
         "rsi": round(cur_rsi, 1),
         **_rr_block(pivot, stop, h, lo, c,
                     base_low=float(lo.iloc[-cfg["pivot_window"]:].min()),
-                    entry=None, warn_pct=8.0, is_kr=is_kr),
+                    entry=None, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf),
         **volume_info(close, v),
         "avwap": anchored_vwap(h, lo, c, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
@@ -1584,5 +1606,91 @@ def analyze_surge(df: pd.DataFrame, rs_rank: int | None = None,
         "spark_ma20": [
             None if math.isnan(x) else round(float(x), 4)
             for x in c.rolling(20).mean().iloc[-60:].tolist()
+        ],
+    }
+
+
+INVERSE_CONFIG = {
+    "min_bars": 60,
+    "rsi_overbought": 80,     # 인버스가 과열(=지수 과대낙폭, 반등 위험)
+}
+
+
+def analyze_inverse(df: pd.DataFrame, meta: dict | None = None,
+                    cfg: dict = INVERSE_CONFIG) -> dict | None:
+    """인버스 ETF 분석. 일반 종목의 거울상 —
+    인버스가 강세(정배열·상승)면 = 지수가 약세 = 하락장 신호.
+
+    반환 dict의 'strength'로 하락 강도를 표현:
+      strong: 인버스 정배열+상승 = 본격 하락장 (인버스 매수 가능 구간)
+      building: 인버스 상승 시작 = 하락 전환 조짐
+      weak: 인버스 약세 = 지수 견조 (인버스 부적합)
+    """
+    if df is None or len(df) < cfg["min_bars"]:
+        return None
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if len(df) < cfg["min_bars"]:
+        return None
+
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+    ma20 = c.rolling(20).mean()
+    ma60 = c.rolling(60).mean()
+    ma200 = c.rolling(min(200, len(c))).mean()
+    r = rsi(c)
+
+    close = float(c.iloc[-1])
+    m20, m60, m200 = float(ma20.iloc[-1]), float(ma60.iloc[-1]), float(ma200.iloc[-1])
+    cur_rsi = float(r.iloc[-1])
+    if any(math.isnan(x) for x in (m20, m60, cur_rsi)):
+        return None
+
+    prev = float(c.iloc[-2]) if len(c) > 1 else close
+    change_pct = (close - prev) / prev * 100 if prev > 0 else 0.0
+
+    # 인버스 강세 판정 (= 지수 약세)
+    aligned = m20 > m60 and (math.isnan(m200) or m60 > m200) and close > m20
+    above_ma20 = close > m20
+    ma20_slope = m20 > float(ma20.iloc[-6]) if len(ma20) > 6 else False  # 20일선 상승
+    vol_mult = 0.0
+    vol50 = float(v.rolling(min(50, len(v))).mean().iloc[-1])
+    if vol50 > 0:
+        vol_mult = float(v.iloc[-1]) / vol50
+
+    # 최근 5일 수익률 (인버스가 오르는 중인가)
+    ret5 = (close / float(c.iloc[-6]) - 1) * 100 if len(c) > 6 else 0.0
+
+    if aligned and ma20_slope:
+        strength, txt = "strong", "본격 하락장 (인버스 강세)"
+    elif above_ma20 and ret5 > 0:
+        strength, txt = "building", "하락 전환 조짐 (인버스 상승 시작)"
+    else:
+        strength, txt = "weak", "지수 견조 (인버스 부적합)"
+
+    # 과열 경고: 인버스 RSI 과매수 = 지수 과대낙폭 = 반등(인버스 급락) 위험
+    overheated = cur_rsi >= cfg["rsi_overbought"]
+
+    name = (meta or {}).get("name", "")
+    leverage = (meta or {}).get("leverage", 1)
+    underlying = (meta or {}).get("underlying", "")
+
+    return {
+        "name": name,
+        "close": round(close, 2),
+        "change_pct": round(change_pct, 2),
+        "strength": strength,
+        "strength_txt": txt,
+        "leverage": leverage,
+        "underlying": underlying,
+        "above_ma20": above_ma20,
+        "ma20_slope_up": ma20_slope,
+        "aligned": aligned,
+        "ret5_pct": round(ret5, 1),
+        "vol_mult": round(vol_mult, 1),
+        "rsi": round(cur_rsi, 1),
+        "overheated": overheated,
+        "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
+        "spark_ma20": [
+            None if math.isnan(x) else round(float(x), 4)
+            for x in ma20.iloc[-60:].tolist()
         ],
     }

@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.37.16 [신규] 🔻인버스 탭 — 지수 하락 베팅 감지 (국면 확인 + 매매 신호).
+        지수 계속 하락 중 → 하락에 베팅하는 인버스 ETF 포착.
+        - inverse_universe.py: 미국 10개(SQQQ/SH/SOXS/VIXY 등) +
+          한국 6개(KODEX 인버스/곱버스 등).
+        - analyze_inverse(): 일반 종목의 거울상. 인버스 정배열+상승 =
+          지수 약세 = 하락장. strength(strong/building/weak)로 강도 표현.
+        - /api/inverse: 인버스만 fetch·분석. strong 3개+면 "🔴 하락장 확인".
+        - 인버스 과열(RSI 80+) 경고: 지수 과대낙폭=반등 시 인버스 급락 위험.
+        [용도] (1) 국면 확인 — 인버스 강세 = 시장 나쁨 재확인
+               (2) 매매 신호 — 단기·소액만. 곱버스 변동성/가치침식 경고.
+               ※ 미너비니式 본래 하락장엔 현금 우선, 인버스는 보조.
+        [기타] 일지 '수동 추가' 버튼 색 밝게(비활성처럼 보이던 것 수정).
 v4.37.15 [신규] 수동 종목 추가 (스캐너에 없는 종목 직접 담기).
         비자처럼 스캐너에 안 뜬 종목도 관찰 리스트에 담고 싶다는 요청.
         - 일지 탭에 '➕ 수동 추가' 버튼 + 모달(종목코드·이름·시장·피벗·손절·메모).
@@ -433,7 +445,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, rs_raw_score, to_rs_rank, climax_warning
+from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, analyze_inverse, rs_raw_score, to_rs_rank, climax_warning
+from inverse_universe import inverse_universe
 from sectors import get_sector
 from universe import get_universe, load_alerts
 import naver_kr
@@ -441,7 +454,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.37.15"
+VERSION = "v4.37.16"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -812,6 +825,79 @@ async def scan(market: str = "all", mode: str = "imminent", refresh: bool = Fals
     result["daykey"] = _market_session_key(market)
     _cache[key] = result
     return JSONResponse({**result, "favorites": favs, "cached": False})
+
+
+_inverse_cache: dict = {}
+
+
+@app.get("/api/inverse")
+async def inverse_scan(market: str = "all", refresh: bool = False):
+    """인버스 ETF 스캔 — 지수 하락 베팅 종목.
+    인버스가 강세(strong)면 = 시장 하락 국면 확인 + 매매 후보.
+    일반 universe와 별개의 인버스 종목만 받아 analyze_inverse 실행."""
+    market = market if market in ("kr", "us", "all") else "all"
+    key = f"inv:{market}"
+    cached = _inverse_cache.get(key)
+    if cached and not refresh and time.time() - cached["ts"] < CACHE_TTL:
+        return JSONResponse({**cached, "cached": True})
+
+    inv = inverse_universe(market)
+    us_tickers = [t for t, m in inv.items() if m["market"] == "US"]
+    kr_tickers = [t for t, m in inv.items() if m["market"] == "KR"]
+
+    data: dict = {}
+    # 미국: 배치 fetch
+    if us_tickers:
+        try:
+            data.update(_fetch_us_batch(us_tickers))
+        except Exception:
+            pass
+    # 한국: 개별 fetch (네이버)
+    for t in kr_tickers:
+        try:
+            df = _fetch(t)
+            if df is not None and not df.empty:
+                data[t] = df
+        except Exception:
+            continue
+
+    hits = []
+    for t, df in data.items():
+        meta = inv.get(t, {})
+        try:
+            r = analyze_inverse(df, meta)
+        except Exception:
+            r = None
+        if r is None:
+            continue
+        hits.append({"ticker": t, "market": meta.get("market", "US"), **r})
+
+    # 강도순 정렬: strong > building > weak, 같으면 최근수익률(ret5) 높은 순
+    order = {"strong": 0, "building": 1, "weak": 2}
+    hits.sort(key=lambda x: (order.get(x["strength"], 3), -x.get("ret5_pct", 0)))
+
+    # 시장 국면 종합: strong 인버스가 많으면 하락장 확정
+    strong_n = sum(1 for h in hits if h["strength"] == "strong")
+    building_n = sum(1 for h in hits if h["strength"] == "building")
+    if strong_n >= 3:
+        regime = "bear"
+        regime_txt = f"🔴 하락장 — 인버스 {strong_n}개 강세 (지수 약세 확인)"
+    elif strong_n + building_n >= 3:
+        regime = "weakening"
+        regime_txt = f"🟡 약세 전환 조짐 — 인버스 {strong_n+building_n}개 상승 시도"
+    else:
+        regime = "ok"
+        regime_txt = "🟢 지수 견조 — 인버스 부적합 (현금/롱 유지)"
+
+    result = {
+        "version": VERSION, "market": market,
+        "hits": hits, "regime": regime, "regime_txt": regime_txt,
+        "strong_count": strong_n,
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "ts": time.time(),
+    }
+    _inverse_cache[key] = result
+    return JSONResponse({**result, "cached": False})
 
 
 # ── 마감 후 자동 스캔 스케줄러 ──
