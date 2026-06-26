@@ -7,12 +7,21 @@
 """
 import os
 
+import sys
+
 try:
     from us_universe_ext import US_UNIVERSE_EXT
-    from us_universe_auto import US_UNIVERSE_AUTO
-except Exception:
+except Exception as e:
+    print(f"[universe] us_universe_ext import 실패 -> EXT 비활성: {e}", file=sys.stderr)
     US_UNIVERSE_EXT = {}
+
+try:
+    from us_universe_auto import US_UNIVERSE_AUTO
+except Exception as e:
+    print(f"[universe] us_universe_auto import 실패 -> AUTO 비활성: {e}", file=sys.stderr)
     US_UNIVERSE_AUTO = {}
+
+print(f"[universe] 미국 확장 로드: EXT={len(US_UNIVERSE_EXT)} AUTO={len(US_UNIVERSE_AUTO)}", file=sys.stderr)
 
 # ── 한국 거래대금 상위 동적 구성 (pykrx) ──
 # 매 거래일 1회 KRX에서 거래대금 상위 N개를 받아 파일 캐시.

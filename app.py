@@ -672,9 +672,19 @@ def _disk_cache_dir() -> str:
     return os.path.dirname(__file__)
 
 
+def _universe_sig(market: str) -> str:
+    # 유니버스 개수를 캐시 키에 넣어, 종목 수가 바뀌면 캐시가 자동 무효화되게 한다.
+    # (예: 미국 239→1424 확장 시 옛 캐시를 안 읽고 새로 빌드)
+    try:
+        from universe import get_universe
+        return f"u{len(get_universe(market))}"
+    except Exception:
+        return "u0"
+
+
 def _disk_cache_path(market: str, daykey: str) -> str:
-    # rs2 = 지수대비 상대강도 스키마 (v4.37). 옛 절대RS 캐시와 분리.
-    return os.path.join(_disk_cache_dir(), f"datacache_rs3_{market}_{daykey}.pkl")
+    # rs3 = 지수대비 상대강도 스키마(v4.37). u{N} = 유니버스 크기 시그니처(v4.38).
+    return os.path.join(_disk_cache_dir(), f"datacache_rs3_{market}_{_universe_sig(market)}_{daykey}.pkl")
 
 
 def _load_disk_cache(market: str, daykey: str):
@@ -700,7 +710,7 @@ def _save_disk_cache(market: str, daykey: str, bundle: dict):
         # 오래된 캐시 정리(해당 시장의 다른 날짜 파일 삭제)
         d = _disk_cache_dir()
         for fn in os.listdir(d):
-            if fn.startswith(f"datacache_rs3_{market}_") and daykey not in fn:
+            if fn.startswith(f"datacache_rs3_{market}_") and not fn.endswith(f"_{daykey}.pkl"):
                 try:
                     os.remove(os.path.join(d, fn))
                 except OSError:
