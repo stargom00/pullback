@@ -1613,6 +1613,7 @@ def analyze_surge(df: pd.DataFrame, rs_rank: int | None = None,
 INVERSE_CONFIG = {
     "min_bars": 60,
     "rsi_overbought": 80,     # 인버스가 과열(=지수 과대낙폭, 반등 위험)
+    "max_data_age": 4,        # 마지막 데이터가 4일 넘게 오래되면 제외(데이터 지연 방어)
 }
 
 
@@ -1631,6 +1632,22 @@ def analyze_inverse(df: pd.DataFrame, meta: dict | None = None,
     df = df.dropna(subset=["Close", "Volume"]).copy()
     if len(df) < cfg["min_bars"]:
         return None
+
+    # ── 데이터 신선도 검증 ──
+    # 마지막 봉이 오래됐으면(데이터 지연/누락) 분석 제외.
+    # 곱버스 등 일부 ETF는 네이버 데이터가 며칠 밀려 들어와 방향이 거꾸로
+    # 보이는 문제가 있음 → 최신 데이터가 아니면 거른다.
+    try:
+        from datetime import datetime
+        last_date = df.index[-1]
+        if hasattr(last_date, "to_pydatetime"):
+            last_date = last_date.to_pydatetime()
+        last_naive = last_date.replace(tzinfo=None) if getattr(last_date, "tzinfo", None) else last_date
+        age_days = (datetime.now() - last_naive).days
+        if age_days > cfg.get("max_data_age", 4):
+            return None   # 4일 넘게 갱신 안 된 데이터 = 신뢰 불가
+    except Exception:
+        pass
 
     c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
     ma20 = c.rolling(20).mean()
