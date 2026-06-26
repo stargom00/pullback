@@ -242,7 +242,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.37.20</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.37.21</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -866,7 +866,8 @@ function renderCards() {
     );
   }
   // 주도주 엄격모드 필터: RS90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓
-  if (strictMode) {
+  // 주도주(RS90+) 필터는 롱 전용 — 숏(붕괴)은 약한 종목이라 적용하지 않음
+  if (strictMode && mode !== 'breakdown') {
     list = list.filter(h => {
       const rsOk = (h.rs ?? 0) >= 90;
       const volOk = (h.vol_mult ?? 0) >= 1.5 || (h.vol_ratio ?? 0) >= 1.0;
@@ -892,7 +893,7 @@ function renderCards() {
   list.sort((a, b) => (isFav(b) ? 1 : 0) - (isFav(a) ? 1 : 0));
   content.innerHTML = list.length
     ? `<div class="grid">${list.map(card).join('')}</div>`
-    : `<div class="empty">${strictMode ? `🎯 주도주 조건(RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓)을 모두 충족하는 종목이 없습니다.<br>엄선 필터라 비어있는 게 정상이에요. 해제하려면 '🎯 주도주만'을 다시 누르세요.` : searchQuery ? `'${searchQuery}'(으)로 검색된 종목이 없습니다.<br>이 탭의 스캔 결과 중에서만 검색돼요.` : sectorFilter ? `'${sectorFilter}' 섹터에 해당 종목이 없습니다.` : `현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : mode === 'breakdown' ? 'Stage 4 숏(붕괴)' : '눌림목'} 종목이 없습니다.<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.`}</div>`;
+    : `<div class="empty">${(strictMode && mode !== 'breakdown') ? `🎯 주도주 조건(RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓)을 모두 충족하는 종목이 없습니다.<br>엄선 필터라 비어있는 게 정상이에요. 해제하려면 '🎯 주도주만'을 다시 누르세요.` : searchQuery ? `'${searchQuery}'(으)로 검색된 종목이 없습니다.<br>이 탭의 스캔 결과 중에서만 검색돼요.` : sectorFilter ? `'${sectorFilter}' 섹터에 해당 종목이 없습니다.` : `현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : mode === 'breakdown' ? 'Stage 4 숏(붕괴)' : '눌림목'} 종목이 없습니다.<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.`}</div>`;
   // 별 버튼 이벤트 바인딩
   content.querySelectorAll('.fav-btn').forEach(b => b.addEventListener('click', async (e) => {
     e.stopPropagation();
