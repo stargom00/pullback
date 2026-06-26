@@ -1711,3 +1711,170 @@ def analyze_inverse(df: pd.DataFrame, meta: dict | None = None,
             for x in ma20.iloc[-60:].tolist()
         ],
     }
+
+
+BREAKDOWN_CONFIG = {
+    "min_bars": 60,
+    "rs_max": 50,             # RS 50 이하 (약세) — 숏은 약한 종목
+    "breakdown_window": 10,   # 지지선(저점) 산정 구간
+    "vol_expand": 1.3,        # 하락 시 거래량 1.3배+ = 기관 매도
+    "near_max": 0.05,         # 지지선 +5% 이내(붕괴 직전) ~ 이탈
+    "near_min": -0.05,        # 지지선 -5%까지(막 이탈)
+    "rsi_oversold": 30,       # RSI 30 이하 = 과매도(반등 위험, 추격 숏 주의)
+}
+
+
+def analyze_breakdown(df: pd.DataFrame, rs_rank: int | None = None,
+                      rs_mom: int | None = None, cfg: dict = BREAKDOWN_CONFIG,
+                      is_kr: bool = False) -> dict | None:
+    """Stage 4(하락 국면) 숏 셋업 감지 — 롱(돌파임박/눌림목)의 거울상.
+
+    미너비니/와인스타인 4단계 중 Stage 4(하락/캐피출레이션):
+      - 역배열 (50일선 < 150/120일선 < 200일선)
+      - 200일선 하락 중
+      - 가격이 이평선 아래
+      - 저점(지지선) 이탈 또는 직전 (붕괴 임박)
+      - 하락 시 거래량 증가 (기관 매도 = 분산)
+      - RS 약세 (지수보다 약함)
+    점수 0~100 + 근거. 숏 진입가/손절(위 저항)/목표(아래 지지).
+
+    ⚠️ 숏은 손실 무한·숏스퀴즈·급반등 위험. 한국은 개인 공매도 제약.
+    """
+    if df is None or len(df) < cfg["min_bars"]:
+        return None
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if len(df) < cfg["min_bars"]:
+        return None
+
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+    ma20 = c.rolling(20).mean()
+    ma60 = c.rolling(60).mean()
+    ma120 = c.rolling(min(120, len(c))).mean()
+    ma200 = c.rolling(min(200, len(c))).mean()
+    r = rsi(c)
+
+    close = float(c.iloc[-1])
+    m20, m60, m120, m200 = (float(ma20.iloc[-1]), float(ma60.iloc[-1]),
+                            float(ma120.iloc[-1]), float(ma200.iloc[-1]))
+    cur_rsi = float(r.iloc[-1])
+    if any(math.isnan(x) for x in (m20, m60, m200, cur_rsi)):
+        return None
+
+    # ── 1) 역배열 필수 (Stage 4 핵심) ──
+    # 20일선 < 60일선 < 200일선 (롱 정배열의 반대)
+    if not (m20 < m60 < m200):
+        return None
+    # 가격이 200일선 아래 (하락 추세 확인)
+    if close >= m200:
+        return None
+
+    # ── 2) 200일선 하락 중 ──
+    m200_prev = float(ma200.iloc[-21]) if len(ma200) > 21 else m200
+    ma200_falling = m200 < m200_prev
+    if not ma200_falling:
+        return None   # 200일선 아직 안 꺾였으면 Stage 4 미확정
+
+    # ── 3) RS 약세 (숏은 약한 종목) ──
+    if rs_rank is not None and rs_rank > cfg["rs_max"]:
+        return None   # RS 높으면(강하면) 숏 부적합
+
+    # ── 4) 지지선(저점) 이탈 또는 직전 ──
+    # 최근 N봉 저점 = 지지선. 가격이 그 근처(-5%~+5%)면 붕괴 구간.
+    support = float(lo.iloc[-cfg["breakdown_window"]:].min())
+    near = (close - support) / support if support > 0 else 1.0
+    # near > 0: 지지선 위(붕괴 직전), near < 0: 지지선 아래(이탈)
+    if not (cfg["near_min"] <= near <= cfg["near_max"]):
+        return None
+
+    # ── 5) 하락 거래량 (기관 매도) ──
+    vol3 = float(v.iloc[-3:].mean())
+    vol20 = float(v.iloc[-20:].mean())
+    vol_ratio = vol3 / vol20 if vol20 > 0 else 0.0
+    vol_expand = vol_ratio >= cfg["vol_expand"]
+
+    # 분산일 카운트 (최근 25봉, 하락+거래량증가)
+    ret = c.pct_change()
+    vol_up = v > v.shift(1)
+    dist_days = int(((ret <= -0.002) & vol_up).iloc[-25:].sum())
+
+    # ── 6) 저점/고점 낮아짐 (lower highs/lows) ──
+    recent_high = float(h.iloc[-10:].max())
+    prev_high = float(h.iloc[-20:-10].max())
+    lower_highs = recent_high < prev_high
+
+    # ── 7) 과매도 경고 (반등 위험) ──
+    oversold = cur_rsi <= cfg["rsi_oversold"]
+
+    # ── 8) 반등이 이평선에 막힘 (눌림목 거울상) ──
+    # 최근 종가가 20일선 근처까지 반등했다가 막혔는지
+    bounce_rejected = (close < m20) and (recent_high >= m20 * 0.98)
+
+    # ── 점수 계산 (0~100) ──
+    score = 40   # 역배열+200일선하락+지지이탈 통과 기본점
+    reasons = []
+    if vol_expand:
+        score += 15; reasons.append(f"하락 거래량 {vol_ratio:.1f}배(기관 매도)")
+    if dist_days >= 3:
+        score += 10; reasons.append(f"분산일 {dist_days}개")
+    if lower_highs:
+        score += 10; reasons.append("저점·고점 낮아짐")
+    if rs_rank is not None and rs_rank <= 30:
+        score += 10; reasons.append(f"RS {rs_rank}(약세)")
+    if near < 0:
+        score += 10; reasons.append("지지선 이탈")
+    else:
+        reasons.append("지지선 붕괴 직전")
+    if bounce_rejected:
+        score += 5; reasons.append("이평선 반등 실패")
+    score = min(score, 100)
+
+    # ── 숏 매매 계획 ──
+    # 진입: 현재가(지지 이탈 시) / 손절: 위쪽 저항(20일선 또는 최근 고가)
+    # 목표: 아래쪽 다음 지지(추가 저점)
+    entry = close
+    stop = min(m20, recent_high)        # 위쪽 저항 = 숏 손절
+    # 목표: 직전 더 깊은 저점 (없으면 현재가 -2R)
+    deeper_low = float(lo.iloc[-60:].min())
+    risk = stop - entry
+    target = deeper_low if deeper_low < entry else entry - risk * 2
+    risk_pct = (stop - entry) / entry * 100 if entry > 0 else 0.0
+    rr = (entry - target) / risk if risk > 0 else None
+
+    prev = float(c.iloc[-2]) if len(c) > 1 else close
+    change_pct = (close - prev) / prev * 100 if prev > 0 else 0.0
+    atr_val = atr(h, lo, c, 14)
+    atr_pct = round(atr_val / close * 100, 1) if close > 0 else 0.0
+
+    return {
+        "close": round(close, 2),
+        "change_pct": round(change_pct, 2),
+        "mode": "breakdown",
+        "score": score,
+        "setup_score": score,
+        "reasons": reasons,
+        "rs": rs_rank if rs_rank is not None else "-",
+        "rs_mom": rs_mom,
+        "support": round(support, 2),
+        "near_pct": round(near * 100, 1),
+        "entry": round(entry, 2),
+        "stop": round(stop, 2),
+        "target": round(target, 2),
+        "risk_pct": round(risk_pct, 2),
+        "rr": round(rr, 1) if rr is not None else None,
+        "vol_ratio": round(vol_ratio, 1),
+        "vol_expand": vol_expand,
+        "dist_days": dist_days,
+        "lower_highs": lower_highs,
+        "oversold": oversold,
+        "bounce_rejected": bounce_rejected,
+        "ma200_falling": ma200_falling,
+        "atr_pct": atr_pct,
+        "rsi": round(cur_rsi, 1),
+        "is_kr": is_kr,
+        "triggered": near < 0 and vol_expand,   # 이탈+거래량 = 강조
+        "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
+        "spark_ma20": [
+            None if math.isnan(x) else round(float(x), 4)
+            for x in ma20.iloc[-60:].tolist()
+        ],
+    }

@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.37.19 [신규] 🩸붕괴 탭 — Stage 4 숏 셋업 감지 (돌파임박/눌림목의 거울상).
+        개별 종목 숏 매매 점수+근거 시스템. 미너비니/와인스타인 4단계 중
+        Stage 4(하락/캐피출레이션) 종목을 0~100 점수로 포착.
+        [조건] 역배열(20<60<200) + 200일선 하락 + 가격 이평선 아래 +
+               지지선 이탈/직전 + 하락 거래량(기관매도) + RS 약세(≤50).
+        [점수] 기본40 + 하락거래량15 + 분산일10 + 저점낮아짐10 +
+               RS약세10 + 지지이탈10 + 이평반등실패5.
+        [매매계획] 숏 진입(현재가)/손절(위쪽 저항=20일선or최근고가)/
+                  목표(아래 더깊은저점 또는 -2R). 손익비 표시.
+        [경고] 숏 손실무한·숏스퀴즈·급반등 위험 명시. RSI 과매도 시
+               반등 위험 경고. 한국 종목은 개인 공매도 제약 경고.
+               미너비니式 본래 현금 우선 — 단, 시장 약세 국면엔 숏도 활용.
 v4.37.18 [버그수정] 인버스 곱버스 데이터 거꾸로 표시 문제.
         [증상] 코스닥 -5% 하락일에 1배 인버스는 +5%(정상)인데 코스닥150
                곱버스(291630)는 -11%로 거꾸로 표시. 같은 기초지수인데 방향 반대.
@@ -455,7 +467,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, analyze_inverse, rs_raw_score, to_rs_rank, climax_warning
+from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, analyze_inverse, analyze_breakdown, rs_raw_score, to_rs_rank, climax_warning
 from inverse_universe import inverse_universe
 from sectors import get_sector
 from universe import get_universe, load_alerts
@@ -464,7 +476,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.37.18"
+VERSION = "v4.37.19"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -772,8 +784,8 @@ async def run_scan(market: str, mode: str) -> dict:
     rs_ranks = bundle["rs_ranks"]
     rs_moms = bundle["rs_moms"]
 
-    fn = {"turnaround": analyze_turnaround, "leader": analyze_leader, "super": analyze_super, "breakout": analyze_breakout, "surge": analyze_surge, "imminent": analyze_imminent, "boxbreak": analyze_boxbreak}.get(mode, analyze)
-    supports_intraday = mode in ("pullback", "turnaround", "imminent", "boxbreak", "breakout")  # is_kr 인자를 받는 모드
+    fn = {"turnaround": analyze_turnaround, "leader": analyze_leader, "super": analyze_super, "breakout": analyze_breakout, "surge": analyze_surge, "imminent": analyze_imminent, "boxbreak": analyze_boxbreak, "breakdown": analyze_breakdown}.get(mode, analyze)
+    supports_intraday = mode in ("pullback", "turnaround", "imminent", "boxbreak", "breakout", "breakdown")  # is_kr 인자를 받는 모드
     alerts = load_alerts()
     hits = []
     for t, df in data.items():
@@ -821,7 +833,7 @@ async def run_scan(market: str, mode: str) -> dict:
 @app.get("/api/scan")
 async def scan(market: str = "all", mode: str = "imminent", refresh: bool = False):
     market = market if market in ("kr", "us", "all") else "all"
-    mode = mode if mode in ("pullback", "turnaround", "leader", "super", "breakout", "surge", "imminent", "boxbreak") else "pullback"
+    mode = mode if mode in ("pullback", "turnaround", "leader", "super", "breakout", "surge", "imminent", "boxbreak", "breakdown") else "pullback"
     key = f"{market}:{mode}"
     favs = load_favorites()
     cached = _cache.get(key)
