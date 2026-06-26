@@ -242,7 +242,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.37.26</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.37.27</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -776,11 +776,13 @@ function renderInverseCards(hits) {
     ? '<span class="st-badge" style="background:#3a3320;color:#f2b33d">🟡 하락 조짐</span>'
     : '<span class="st-badge" style="background:#1e2a1e;color:#7a8a7a">🟢 부적합</span>';
   const cards = hits.map(s => {
-    const chg = s.change_pct >= 0 ? `+${s.change_pct}%` : `${s.change_pct}%`;
-    const chgColor = s.change_pct >= 0 ? 'var(--up)' : 'var(--down)';
     const levBadge = s.leverage >= 2 ? `<span class="st-badge" style="background:#3a2020;color:#ff9b9b">${s.leverage}x 곱버스</span>` : '';
-    // 미국(yfinance 지연)·곱버스(역산) 오늘 등락은 시점 차이로 어긋날 수 있음 → 5일 추세가 더 신뢰됨
-    const chgMayLag = s.market === 'US' || s.derived;
+    // 강도 점수 색
+    const scoreColor = s.inv_score >= 70 ? '#ff6b6b' : (s.inv_score >= 40 ? '#f2b33d' : '#7a8a7a');
+    // 기초지수 5일 등락 (인버스가 왜 오르는지)
+    const idx5 = s.index_5d_pct;
+    const idx5Str = idx5 != null ? `${idx5>=0?'+':''}${idx5}%` : '–';
+    const idx5Color = idx5 != null ? (idx5 < 0 ? 'var(--down)' : 'var(--up)') : 'var(--muted)';
     return `<div class="card">
       <div class="card-top">
         <div>
@@ -788,23 +790,23 @@ function renderInverseCards(hits) {
           <div class="tick mono">${s.ticker} · ${s.underlying} 하락 베팅</div>
         </div>
         <div style="margin-left:auto;text-align:right">
-          <div style="font-size:9px;color:var(--muted)">오늘${chgMayLag ? '*' : ''}</div>
-          <div class="mono" style="font-weight:700;color:${chgColor}">${chg}</div>
+          <div style="font-size:9px;color:var(--muted)">강도</div>
+          <div class="mono" style="font-weight:700;font-size:18px;color:${scoreColor}">${s.inv_score != null ? s.inv_score : '–'}</div>
         </div>
       </div>
       <div style="margin:8px 0;display:flex;gap:6px;flex-wrap:wrap">${strengthBadge(s.strength)} ${levBadge}</div>
       <div class="metrics">
-        <div class="metric"><div class="k">현재가</div><div class="v mono">${s.close != null ? s.close : '<span style="font-size:10px;color:var(--muted)">1x 역산</span>'}</div></div>
-        <div class="metric"><div class="k">5일 수익률</div><div class="v mono" style="color:${s.ret5_pct>=0?'var(--up)':'var(--down)'}">${s.ret5_pct>=0?'+':''}${s.ret5_pct}%</div></div>
+        <div class="metric"><div class="k">${s.underlying} 5일</div><div class="v mono" style="color:${idx5Color}">${idx5Str}</div></div>
+        <div class="metric"><div class="k">인버스 5일</div><div class="v mono" style="color:${s.ret5_pct>=0?'var(--up)':'var(--down)'}">${s.ret5_pct>=0?'+':''}${s.ret5_pct}%</div></div>
+        <div class="metric"><div class="k">연속 상승</div><div class="v mono">${s.up_streak>0?s.up_streak+'일↑':'–'}</div></div>
         <div class="metric"><div class="k">RSI</div><div class="v mono">${s.rsi}</div></div>
-        <div class="metric"><div class="k">거래량비</div><div class="v mono">${s.vol_mult}×</div></div>
       </div>
       ${s.overheated ? '<div class="surge-warn" style="background:rgba(255,107,107,.08);border-color:rgba(255,107,107,.3)">⚠️ 인버스 과열(RSI '+s.rsi+') — 지수 과대낙폭 = 반등 시 인버스 급락 위험. 추격 금지.</div>' : ''}
-      <div style="font-size:11px;color:var(--muted);margin-top:8px">${s.strength_txt}${s.derived ? ' · 📐 등락은 1x에서 역산(곱버스 데이터 불안정)' : ''}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:8px">${s.strength_txt}${s.derived ? ' · 📐 1x 역산' : ''}</div>
     </div>`;
   }).join('');
   content.innerHTML = `
-    <div class="surge-warn" style="margin-bottom:12px">🔻 인버스 = 지수 하락 베팅. <b>미너비니式 본래 하락장엔 현금이 우선</b>이고, 인버스는 보조 수단이에요. 곱버스(2x/3x)는 변동성 극심 + 장기보유 시 가치 침식 → <b>단기·소액만</b>. 인버스 강세 자체가 "시장이 나쁘다"는 확인 신호이기도 해요.<br><span style="font-size:11px;color:var(--muted)">* 미국 ETF·곱버스의 "오늘 등락"은 데이터 시점 차이로 어긋날 수 있어요. 방향 판단은 <b>5일 수익률·강도</b>를 보세요.</span></div>
+    <div class="surge-warn" style="margin-bottom:12px">🔻 인버스 = 지수 하락 베팅. <b>강도 점수(0~100)</b>가 높을수록 인버스 살 만한 국면이에요. <b>기초지수 5일 등락</b>이 마이너스(지수 빠짐)일수록 인버스 유리. 곱버스(2x/3x)는 변동성 극심 → <b>단기·소액만</b>. 미너비니式 본래 하락장엔 현금 우선.<br><span style="font-size:11px;color:var(--muted)">※ 곱버스/미국 ETF의 실시간 정확한 가격은 증권앱에서 확인하세요. 이 탭은 "지금 하락 국면인가" 판단용이에요.</span></div>
     <div class="grid">${cards}</div>`;
 }
 

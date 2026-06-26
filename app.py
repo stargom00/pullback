@@ -5,6 +5,14 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.37.27 [개선] 인버스 탭 — 부정확한 '오늘 등락' 제거, 신뢰 가능한 지표로 교체.
+        오늘 등락은 데이터 시점 문제로 계속 어긋나 → 아예 제거하고,
+        시점 영향 적은 3가지 지표로 대체:
+        1. 강도 점수 0~100 (20일선·기울기·5일·연속상승·거래량·200일선 종합)
+        2. 기초지수 5일 등락 (코스닥/나스닥 등 — 정상 데이터에서 직접 계산.
+           인버스가 왜 오르는지 직관적: "코스닥 -7% → 인버스 유리")
+        3. 연속 상승일 (인버스가 며칠째 오르는지)
+        정렬도 강도점수 기준으로. "정확한 실시간 가격은 증권앱" 안내 추가.
 v4.37.26 [개선] 미국 인버스 '오늘 등락' 시점 어긋남 + 지수 신호등 복원.
         [SQQQ 반대 원인] 미국 ETF는 yfinance가 시간외(데이마켓)를 안 줘서
                '오늘 등락'이 전일 정규장 종가 기준 → 토스 실시간과 어긋남.
@@ -527,7 +535,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.37.26"
+VERSION = "v4.37.27"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -974,9 +982,44 @@ async def inverse_scan(market: str = "all", refresh: bool = False):
         derived["derived_from"] = src
         hits.append({"ticker": t, "market": meta.get("market", "US"), **derived})
 
-    # 강도순 정렬: strong > building > weak, 같으면 최근수익률(ret5) 높은 순
+    # ── 기초지수 5일 등락 (인버스가 왜 오르는지 직관적으로) ──
+    # 인버스 데이터는 못 믿어도 기초지수(코스피/나스닥 등)는 정상 → 그걸 끌어다 씀.
+    # underlying 이름 → 5일 등락% 캐시
+    idx_5d: dict = {}
+    def _index_5d_change(underlying: str) -> float | None:
+        if underlying in idx_5d:
+            return idx_5d[underlying]
+        val = None
+        try:
+            if underlying in ("코스피200",):
+                h = naver_kr.fetch_index_history("KOSPI", days=15)
+            elif underlying in ("코스닥150",):
+                h = naver_kr.fetch_index_history("KOSDAQ", days=15)
+            else:
+                sym = {"나스닥100": "^NDX", "S&P500": "^GSPC", "다우": "^DJI",
+                       "러셀2000": "^RUT", "반도체": "^SOX", "VIX": "^VIX"}.get(underlying)
+                h = None
+                if sym:
+                    try:
+                        import yfinance as yf
+                        h = yf.Ticker(sym).history(period="15d", interval="1d", auto_adjust=False)
+                    except Exception:
+                        h = None
+            if h is not None and len(h) > 5:
+                closes = h["Close"].dropna()
+                if len(closes) > 5:
+                    val = round((float(closes.iloc[-1]) / float(closes.iloc[-6]) - 1) * 100, 1)
+        except Exception:
+            val = None
+        idx_5d[underlying] = val
+        return val
+
+    for hit in hits:
+        hit["index_5d_pct"] = _index_5d_change(hit.get("underlying", ""))
+
+    # 강도순 정렬: strong > building > weak, 같으면 강도점수 높은 순
     order = {"strong": 0, "building": 1, "weak": 2}
-    hits.sort(key=lambda x: (order.get(x["strength"], 3), -x.get("ret5_pct", 0)))
+    hits.sort(key=lambda x: (order.get(x["strength"], 3), -x.get("inv_score", 0)))
 
     # 시장 국면 종합: strong 인버스가 많으면 하락장 확정
     strong_n = sum(1 for h in hits if h["strength"] == "strong")

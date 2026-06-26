@@ -1691,6 +1691,24 @@ def analyze_inverse(df: pd.DataFrame, meta: dict | None = None,
     else:
         strength, txt = "weak", "지수 견조 (인버스 부적합)"
 
+    # ── 연속 상승일 (인버스가 며칠째 오르는지) ──
+    up_streak = 0
+    for i in range(len(c) - 1, 0, -1):
+        if float(c.iloc[i]) > float(c.iloc[i - 1]):
+            up_streak += 1
+        else:
+            break
+
+    # ── 강도 점수 0~100 (세밀화) ──
+    inv_score = 0
+    if above_ma20:      inv_score += 25
+    if ma20_slope:      inv_score += 20
+    if ret5 > 0:        inv_score += min(20, ret5 * 2)
+    if up_streak >= 2:  inv_score += min(15, up_streak * 5)
+    if vol_mult >= 1.2: inv_score += 10
+    if (not math.isnan(m200)) and close > m200: inv_score += 10
+    inv_score = int(min(inv_score, 100))
+
     # 과열 경고: 인버스 RSI 과매수 = 지수 과대낙폭 = 반등(인버스 급락) 위험
     overheated = cur_rsi >= cfg["rsi_overbought"]
 
@@ -1704,6 +1722,8 @@ def analyze_inverse(df: pd.DataFrame, meta: dict | None = None,
         "change_pct": round(change_pct, 2),
         "strength": strength,
         "strength_txt": txt,
+        "inv_score": inv_score,
+        "up_streak": up_streak,
         "leverage": leverage,
         "underlying": underlying,
         "above_ma20": above_ma20,
