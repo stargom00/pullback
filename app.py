@@ -1,10 +1,18 @@
-"""
+git add -A && git commit -m v43723 && git push"""
 눌림목 스캐너 — 웹 서버
 모드: pullback(눌림목) / turnaround(추세전환) / leader / super / breakout / surge
 RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장별)
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.37.23 [정리] 인버스 탭에서 곱버스(2x/3x) 전부 제거 → 1x 인버스만 8개.
+        [원인 확정] /api/debugraw로 확인: 네이버가 코스닥150 곱버스(291630)
+                   일봉을 거꾸로 줌(코스닥 하락인데 곱버스도 하락). 소스 문제라
+                   코드로 수정 불가. 곱버스는 어차피 변동성 극심+가치침식으로
+                   비권장 상품 → 제거가 정답.
+        [구성] US 1x: PSQ/SH/DOG/RWM/VIXY. KR 1x: KODEX인버스/코스닥인버스/구.
+               모두 데이터 정상. 국면 확인용으로 충분.
+        [역할] 인버스 탭 = ETF로 시장 하락 국면 확인. 개별 종목 숏은 🩸붕괴 탭.
 v4.37.22 [진단] 곱버스(291630) 데이터 거꾸로 문제 — raw 데이터 점검 엔드포인트.
         /api/debugraw/{ticker} 추가: 일봉 마지막5 + 장중현재가 + 병합결과를
         그대로 노출. 곱버스가 1x와 반대 방향 표시되는 원인(장중현재가 오류 vs
@@ -493,7 +501,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.37.22"
+VERSION = "v4.37.23"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
