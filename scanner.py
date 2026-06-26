@@ -1664,8 +1664,9 @@ def analyze_inverse(df: pd.DataFrame, meta: dict | None = None,
     prev = float(c.iloc[-2]) if len(c) > 1 else close
     change_pct = (close - prev) / prev * 100 if prev > 0 else 0.0
 
-    # 인버스 강세 판정 (= 지수 약세)
-    aligned = m20 > m60 and (math.isnan(m200) or m60 > m200) and close > m20
+    # 인버스 강도 판정 — 인버스는 단기 모멘텀 중심.
+    # (인버스가 장기 정배열이 되려면 지수가 몇 달째 하락해야 함 → 그땐 이미 늦음.
+    #  하락장은 짧고 급해서, "막 반등 시작"일 때가 인버스 살 타이밍.)
     above_ma20 = close > m20
     ma20_slope = m20 > float(ma20.iloc[-6]) if len(ma20) > 6 else False  # 20일선 상승
     vol_mult = 0.0
@@ -1673,13 +1674,20 @@ def analyze_inverse(df: pd.DataFrame, meta: dict | None = None,
     if vol50 > 0:
         vol_mult = float(v.iloc[-1]) / vol50
 
-    # 최근 5일 수익률 (인버스가 오르는 중인가)
+    # 최근 5일·3일 수익률 (인버스가 오르는 중인가)
     ret5 = (close / float(c.iloc[-6]) - 1) * 100 if len(c) > 6 else 0.0
+    ret3 = (close / float(c.iloc[-4]) - 1) * 100 if len(c) > 4 else 0.0
+    aligned = m20 > m60 and (math.isnan(m200) or m60 > m200) and close > m20  # 참고용(완전 하락장)
 
-    if aligned and ma20_slope:
+    # strong: 인버스가 확실히 상승 추세 (20일선 위 + 20일선 상승 + 최근 상승)
+    #         = 지수가 본격 하락 중. 인버스 매수 가능 구간.
+    if above_ma20 and ma20_slope and ret5 > 2:
         strength, txt = "strong", "본격 하락장 (인버스 강세)"
-    elif above_ma20 and ret5 > 0:
+    # building: 인버스 반등 시작 (20일선 위 또는 최근 며칠 상승)
+    #           = 지수 하락 전환 조짐. 인버스 매수 타이밍 초입.
+    elif above_ma20 or ret3 > 1:
         strength, txt = "building", "하락 전환 조짐 (인버스 상승 시작)"
+    # weak: 인버스 약세 = 지수 견조. 인버스 부적합.
     else:
         strength, txt = "weak", "지수 견조 (인버스 부적합)"
 
