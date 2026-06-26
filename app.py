@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.37.22 [진단] 곱버스(291630) 데이터 거꾸로 문제 — raw 데이터 점검 엔드포인트.
+        /api/debugraw/{ticker} 추가: 일봉 마지막5 + 장중현재가 + 병합결과를
+        그대로 노출. 곱버스가 1x와 반대 방향 표시되는 원인(장중현재가 오류 vs
+        일봉 파싱 오류) 진단용. 예: /api/debugraw/291630.KS
 v4.37.21 [버그수정] 🩸붕괴 탭에서 숏 후보 67개인데 0개 표시되는 문제.
         [원인] '🎯 주도주만'(RS90+) 필터가 켜진 상태였는데, 이 필터는
                롱 전용(강한 종목). 숏 종목은 RS 약세(≤50)라 전부 걸러짐.
@@ -489,7 +493,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.37.21"
+VERSION = "v4.37.22"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -1062,6 +1066,39 @@ async def toggle_favorite(request: Request):
         for tk in favs:
             f.write(f"{tk}\n")
     return JSONResponse({"ok": True, "favorites": favs})
+
+
+@app.get("/api/debugraw/{ticker}")
+async def debug_raw(ticker: str):
+    """한국 종목 raw 데이터 점검: 일봉 마지막 5개 + 장중 현재가 + 병합 결과.
+    곱버스 등 데이터 거꾸로 문제 진단용. 예: /api/debugraw/291630.KS"""
+    import naver_kr
+    out = {"ticker": ticker}
+    try:
+        hist = naver_kr.fetch_history(ticker)
+        if hist is not None and not hist.empty:
+            tail = hist.tail(5)
+            out["history_last5"] = [
+                {"date": str(idx.date()), "close": float(row["Close"]),
+                 "open": float(row["Open"]), "volume": float(row["Volume"])}
+                for idx, row in tail.iterrows()
+            ]
+        else:
+            out["history_last5"] = None
+    except Exception as e:
+        out["history_error"] = str(e)
+    try:
+        out["live_price"] = naver_kr.fetch_live_price(ticker)
+    except Exception as e:
+        out["live_error"] = str(e)
+    try:
+        merged = naver_kr.fetch(ticker)
+        if merged is not None and not merged.empty:
+            out["merged_last_close"] = float(merged.iloc[-1]["Close"])
+            out["merged_last_date"] = str(merged.index[-1].date())
+    except Exception as e:
+        out["merged_error"] = str(e)
+    return JSONResponse(out)
 
 
 @app.get("/api/debug/{ticker}")
