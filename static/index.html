@@ -242,7 +242,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.37.14</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.37.15</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -305,6 +305,36 @@ tr.editing{background:rgba(242,179,61,.06)}
     <div class="actions">
       <button class="cancel" onclick="closeJournal()">취소</button>
       <button class="save" onclick="saveJournal()">저장</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="manualModal">
+  <div class="modal">
+    <h3 class="drag-handle">➕ 수동 종목 추가 <span style="font-size:11px;color:var(--muted);font-weight:400">스캐너에 없는 종목 직접 담기</span></h3>
+    <div class="sub" style="color:var(--muted);font-size:12px;margin-bottom:8px">관찰 종목을 대기 상태로 담아요. 피벗 돌파 시 텔레그램 알림이 와요.</div>
+    <div class="row">
+      <div><label>종목코드 *</label><input id="maTicker" placeholder="예: V, AAPL, 005930.KS"></div>
+      <div><label>종목명</label><input id="maName" placeholder="예: 비자"></div>
+    </div>
+    <div class="row">
+      <div><label>시장</label>
+        <select id="maMarket" style="width:100%;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:inherit">
+          <option value="US">미국 (US)</option>
+          <option value="KR">한국 (KR)</option>
+        </select>
+      </div>
+      <div><label>섹터 (선택)</label><input id="maSector" placeholder="예: 결제인프라"></div>
+    </div>
+    <div class="row">
+      <div><label>피벗가 (돌파 알림 기준) *</label><input id="maPivot" inputmode="decimal" placeholder="예: 337"></div>
+      <div><label>손절가</label><input id="maStop" inputmode="decimal" placeholder="예: 320"></div>
+    </div>
+    <label>메모 (한 줄)</label>
+    <textarea id="maNote" placeholder="예: 역H&S 넥라인+200일선 돌파 대기"></textarea>
+    <div class="actions">
+      <button class="cancel" onclick="closeManualAdd()">취소</button>
+      <button class="save" onclick="saveManualAdd()">대기로 추가</button>
     </div>
   </div>
 </div>
@@ -1084,6 +1114,50 @@ function closeJournal() {
   pendingStock = null;
 }
 
+// ── 수동 종목 추가 (스캐너에 없는 종목) ──
+function openManualAdd() {
+  ['maTicker','maName','maSector','maPivot','maStop','maNote'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  document.getElementById('maMarket').value = 'US';
+  document.getElementById('manualModal').classList.add('open');
+}
+function closeManualAdd() {
+  document.getElementById('manualModal').classList.remove('open');
+}
+async function saveManualAdd() {
+  const ticker = document.getElementById('maTicker').value.trim().toUpperCase();
+  const pivot = parseFloat(document.getElementById('maPivot').value);
+  if (!ticker) { alert('종목코드를 입력하세요'); return; }
+  if (!pivot || isNaN(pivot)) { alert('피벗가를 입력하세요 (돌파 알림 기준)'); return; }
+  const stop = parseFloat(document.getElementById('maStop').value) || null;
+  // 손절 검증: 있으면 피벗보다 낮아야 함
+  if (stop && stop >= pivot) { alert('손절가는 피벗가보다 낮아야 해요'); return; }
+  const market = document.getElementById('maMarket').value;
+  const name = document.getElementById('maName').value.trim() || ticker;
+  const sector = document.getElementById('maSector').value.trim();
+  const note = document.getElementById('maNote').value.trim();
+  const today = new Date().toISOString().slice(0, 10);
+  const rec = {
+    id: Date.now(), date: today, ticker, name, market,
+    cat: '', tab: '수동관찰', signal: '', pivot_type: '수동', setup_score: '',
+    rs: '', entry: pivot, stop, pivot,           // entry=pivot(돌파 시 진입), 피벗 알림 기준
+    risk_pct: stop ? Math.round((pivot - stop) / pivot * 1000) / 10 : '',
+    sig_level: '', sig_flags: '', avwap_zone: '', rr_at_entry: '',
+    tracking: true, target: stop ? Math.round((pivot + (pivot - stop) * 2) * 100) / 100 : '',
+    last_price: pivot, last_checked: today, closed_reason: '',
+    status: 'pending',                            // 항상 대기로 시작
+    manual: true,                                 // 수동 추가 표시
+    sector, alert: '', note,
+    exit: '', result_r: '', held_days: '', review: ''
+  };
+  const j = getJournal(); j.unshift(rec);
+  journalCache = j;
+  closeManualAdd();
+  const ok = await _saveJournalToServer(j);
+  if (ok !== false) renderJournal();
+}
+
 // ── 모달 드래그 (헤더 잡고 이동) ──
 (function setupModalDrag() {
   let dragging = false, startX = 0, startY = 0, curX = 0, curY = 0;
@@ -1288,6 +1362,7 @@ function renderJournal() {
 
   wrap.innerHTML = `
     <div class="jrnl-tools">
+      <button class="exp" onclick="openManualAdd()" style="background:#1e3a2e;border-color:#2d5a44">➕ 수동 추가</button>
       <button class="exp" onclick="exportCSV()">⬇ CSV 내보내기</button>
       <button onclick="if(confirm('일지를 모두 지울까요? 되돌릴 수 없어요.')){setJournal([]);renderJournal();}">전체 삭제</button>
     </div>
@@ -1340,7 +1415,7 @@ function viewRow(r) {
   return `<tr class="${r.result_r===''&&st!=='missed'&&!broken?'open-pos':''}" style="${st==='missed'||broken?'opacity:.5':''}">
     <td class="mono">${r.date}</td>
     <td style="white-space:nowrap">${stBadge}${stActions}${broken?`<div class="st-badge" style="background:#3a2020;color:#ff6b6b;margin-top:3px" title="손절가가 진입가보다 높음 — 과거 버그로 저장된 깨진 데이터. 통계에서 제외됨. 삭제 권장.">⚠️데이터오류</div>`:''}</td>
-    <td><a href="${tvUrl(r.ticker, r.market)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${r.name} <span style="font-size:9px;opacity:.5">↗</span><div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div></a></td>
+    <td><a href="${tvUrl(r.ticker, r.market)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${r.name} <span style="font-size:9px;opacity:.5">↗</span>${r.manual?`<span class="st-badge" style="background:#1e3a2e;color:#5fd99a;margin-left:4px;font-size:9px">수동</span>`:''}<div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div></a></td>
     <td style="font-size:11px;font-weight:600;${catColor}">${cat}</td>
     <td>${r.tab}</td>
     <td>${r.signal || '-'}</td>
