@@ -242,7 +242,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.37.13</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.37.14</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1174,9 +1174,19 @@ async function saveJournal() {
   }
 }
 
+// 데이터 오류 판정: 손절가가 진입가보다 높은(또는 같은) 항목은 깨진 데이터.
+// (과거 버그 버전으로 저장된 잔재 — 손절은 항상 진입가보다 낮아야 함)
+// 단 진입/손절이 비어있으면 판정 불가 → false.
+function isBrokenRow(r) {
+  const entry = parseFloat(r.entry);
+  const stop = parseFloat(r.stop);
+  if (!entry || !stop || isNaN(entry) || isNaN(stop)) return false;
+  return stop >= entry;   // 손절 ≥ 진입 = 비정상
+}
+
 function journalStats(list) {
-  // 무산(missed)은 손익통계에서 완전 제외
-  const live = list.filter(r => r.status !== 'missed');
+  // 무산(missed) + 데이터오류(손절≥진입)는 손익통계에서 완전 제외
+  const live = list.filter(r => r.status !== 'missed' && !isBrokenRow(r));
   const pendingCount = live.filter(r => r.result_r === '' && (r.status || 'entered') === 'pending').length;
   const enteredCount = live.filter(r => r.result_r === '' && (r.status || 'entered') === 'entered').length;
   const closed = live.filter(r => r.result_r !== '' && !isNaN(parseFloat(r.result_r)));
@@ -1188,7 +1198,7 @@ function journalStats(list) {
 
 // 신호별 성과 검증: 진입 시점 신호등/AVWAP존별 승률·평균R 집계
 function signalValidation(list) {
-  const closed = list.filter(r => r.result_r !== '' && !isNaN(parseFloat(r.result_r)));
+  const closed = list.filter(r => r.result_r !== '' && !isNaN(parseFloat(r.result_r)) && !isBrokenRow(r));
   if (closed.length < 3) return null;   // 표본 3건 미만이면 의미 없음
   const group = (keyFn, labels) => {
     const out = {};
@@ -1326,9 +1336,10 @@ function viewRow(r) {
            <span class="st-act" onclick="markMissed(${r.id})" title="돌파 안 옴 · 무산">✖무산</span>
          </div>`
       : '';
-  return `<tr class="${r.result_r===''&&st!=='missed'?'open-pos':''}" style="${st==='missed'?'opacity:.5':''}">
+  const broken = isBrokenRow(r);   // 손절≥진입 = 데이터 오류
+  return `<tr class="${r.result_r===''&&st!=='missed'&&!broken?'open-pos':''}" style="${st==='missed'||broken?'opacity:.5':''}">
     <td class="mono">${r.date}</td>
-    <td style="white-space:nowrap">${stBadge}${stActions}</td>
+    <td style="white-space:nowrap">${stBadge}${stActions}${broken?`<div class="st-badge" style="background:#3a2020;color:#ff6b6b;margin-top:3px" title="손절가가 진입가보다 높음 — 과거 버그로 저장된 깨진 데이터. 통계에서 제외됨. 삭제 권장.">⚠️데이터오류</div>`:''}</td>
     <td><a href="${tvUrl(r.ticker, r.market)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${r.name} <span style="font-size:9px;opacity:.5">↗</span><div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div></a></td>
     <td style="font-size:11px;font-weight:600;${catColor}">${cat}</td>
     <td>${r.tab}</td>
@@ -1338,7 +1349,7 @@ function viewRow(r) {
     <td class="mono">${r.setup_score || '-'}</td>
     <td class="mono">${r.rs ?? '-'}</td>
     <td class="mono">${r.entry ?? '-'}</td>
-    <td class="mono">${r.stop ?? '-'}</td>
+    <td class="mono"${broken?' style="color:#ff6b6b"':''}>${r.stop ?? '-'}</td>
     <td class="mono">${r.risk_pct || '-'}</td>
     <td>${r.sig_level ? (r.sig_level==='ok'?'🟢':r.sig_level==='warn'?'🟡':'🔴') : '-'}</td>
     <td class="mono" style="${r.result_r&&parseFloat(r.result_r)>0?'color:var(--up)':r.result_r?'color:var(--down)':''}">${

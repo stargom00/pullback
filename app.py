@@ -5,6 +5,15 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.37.14 [안전장치] 데이터 오류(손절≥진입) 항목 자동 감지·격리.
+        [배경] 과거 버그 버전(v4.37.4 이전)으로 저장된 6-23 한국 종목들이
+               손절가가 진입가보다 높게 박제됨(리스크 일률 12). 현재 코드는
+               정상이나(손절에서 risk 역산), 깨진 일지 항목이 통계를 오염.
+        [처리] isBrokenRow(손절≥진입) 판정 추가:
+               - 승률·평균R 통계에서 제외 (journalStats, signalValidation)
+               - 일지에 ⚠️데이터오류 빨간 배지 + 행 흐리게 표시
+               - /api/watch/pending에서도 제외 (봇 감시 안 함)
+        깨진 항목은 삭제(✕) 권장. 정상 항목(손절<진입)은 영향 없음.
 v4.37.13 [신규] 대기종목 자동 무산 (2조건).
         그동안 대기는 수동 무산만 가능 → 돌파 안 와도 영원히 대기로 남아
         일지 지저분 + 봇이 죽은 종목 계속 감시. 자동 무산 2조건 추가:
@@ -424,7 +433,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.37.13"
+VERSION = "v4.37.14"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -1211,6 +1220,13 @@ async def watch_pending():
         pivot = r.get("pivot") or r.get("entry")
         if not pivot:
             continue
+        # 데이터 오류(손절≥진입) 항목은 봇 감시 제외
+        try:
+            e, s = float(r.get("entry") or 0), float(r.get("stop") or 0)
+            if e and s and s >= e:
+                continue
+        except (TypeError, ValueError):
+            pass
         out.append({
             "id": r.get("id"),
             "ticker": r.get("ticker"),
