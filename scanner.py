@@ -154,6 +154,20 @@ def _merger_block(c, h, lo, v) -> dict:
     return {"merger": mw["merger"], "merger_reasons": mw["reasons"]}
 
 
+def off_high_pct(c, lookback: int = 252) -> float:
+    """최근 lookback봉 고점 대비 현재가 낙폭(%). 음수=고점 아래.
+    예: 고점 6.57, 현재 3.28 → -50.1 반환. 돌파/임박 모드에서 '무너진
+    종목의 가짜 돌파' 거름용. (BLDP 케이스: -50%인데 단기저항을 피벗으로
+    오인해 '돌파임박'으로 잡히던 문제 차단)"""
+    cc = c.dropna()
+    if len(cc) < 20:
+        return 0.0
+    win = cc.iloc[-lookback:] if len(cc) >= lookback else cc
+    hi = float(win.max())
+    now = float(cc.iloc[-1])
+    return (now - hi) / hi * 100 if hi > 0 else 0.0
+
+
 def volume_info(close: float, v: pd.Series) -> dict:
     """오늘 거래량 + 거래대금 + 평균 대비 배수. 카드 표시용.
     vol_vs_avg: 오늘 거래량 ÷ 최근 50일 평균. 1.0=평소, 0.4=평소의 40%, 2.0=2배.
@@ -1184,6 +1198,7 @@ def analyze_super(df: pd.DataFrame, rs_rank: int | None = None,
 BREAKOUT_CONFIG = {
     "min_bars": 210,
     "rs_min": 85,            # 돌파는 강한 종목만 의미 있음 (주도주 위주 85)
+    "max_off_high": 25,      # 1년 고점 대비 -25% 넘게 빠진 종목 제외
     "base_min_len": 20,      # 베이스(횡보) 최소 길이
     "base_max_range": 0.25,  # 베이스 고저 폭이 25% 이내여야 "타이트한 베이스"
     "vol_mult": 1.5,         # 돌파일 거래량 ≥ 평균의 1.5배
@@ -1217,6 +1232,10 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
 
     # 상승 추세 위에서의 돌파만 (200일선 위)
     if close < m200:
+        return None
+
+    # 고점 대비 낙폭 필터 — 무너진 종목의 가짜 돌파 차단 (예: 고점 -50%)
+    if off_high_pct(c) < -cfg["max_off_high"]:
         return None
 
     # ── 베이스 식별: 돌파일(오늘) 직전 N봉이 횡보였는가 ──
@@ -1311,6 +1330,7 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
 BOXBREAK_CONFIG = {
     "min_bars": 140,         # 120일선 + 여유
     "rs_min": 85,            # 박스 탈출은 강한 종목이 크게 감 (주도주 위주 85)
+    "max_off_high": 25,      # 1년 고점 대비 -25% 넘게 빠진 종목 제외
     "box_windows": [20, 40, 60],   # 짧/중/장 박스 동시 확인
     "box_max_range": 0.30,   # 박스 고저폭 ≤30% (국장 변동성 고려, 너무 넓으면 박스 아님)
     "vol_mult": 1.5,         # 돌파일 거래량 ≥ 평균 1.5배 (박스돌파의 핵심)
@@ -1336,6 +1356,11 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
     ma_long = c.rolling(cfg["ma_long"]).mean()
     m_long = float(ma_long.iloc[-1])
     if math.isnan(m_long):
+        return None
+
+    # 고점 대비 낙폭 필터 — 무너진 종목의 가짜 박스돌파 차단 (예: 고점 -50%).
+    # -25%까진 허용하므로 정상적인 깊은 박스/컵은 통과, BLDP류만 제외.
+    if off_high_pct(c) < -cfg["max_off_high"]:
         return None
 
     # 장기선(120일) 위에서의 돌파만 — 추세 살아있는 박스 탈출
@@ -1449,6 +1474,7 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
 IMMINENT_CONFIG = {
     "min_bars": 210,
     "rs_min": 85,            # 돌파 직전 대기 — 주도주만 (기존 50→85)
+    "max_off_high": 25,      # 1년 고점 대비 -25% 넘게 빠진 종목 제외(무너진 종목의 가짜 돌파 차단)
     "near_min": -0.05,   # 피벗 대비 현재가 하한 (-5%: 천장 5% 아래까지)
     "near_max": 0.0,     # 상한 0%: 아직 안 뚫음 (피벗 이하)
     "pivot_window": 20,
@@ -1485,6 +1511,11 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
     if close < m200:
         return None
     if not (m20 > m60):
+        return None
+
+    # ── 1-b) 고점 대비 낙폭 필터 ── 신고가 근처여야 '돌파임박'. 무너진 종목
+    #         (예: 고점 -50%)의 단기저항을 피벗으로 오인하는 가짜 돌파 차단.
+    if off_high_pct(c) < -cfg["max_off_high"]:
         return None
 
     # ── 2) 피벗 근접 (천장 코앞이지만 아직 안 뚫음) ──
