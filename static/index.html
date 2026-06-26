@@ -242,7 +242,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.37.25</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver">v4.37.26</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -779,6 +779,8 @@ function renderInverseCards(hits) {
     const chg = s.change_pct >= 0 ? `+${s.change_pct}%` : `${s.change_pct}%`;
     const chgColor = s.change_pct >= 0 ? 'var(--up)' : 'var(--down)';
     const levBadge = s.leverage >= 2 ? `<span class="st-badge" style="background:#3a2020;color:#ff9b9b">${s.leverage}x 곱버스</span>` : '';
+    // 미국(yfinance 지연)·곱버스(역산) 오늘 등락은 시점 차이로 어긋날 수 있음 → 5일 추세가 더 신뢰됨
+    const chgMayLag = s.market === 'US' || s.derived;
     return `<div class="card">
       <div class="card-top">
         <div>
@@ -786,6 +788,7 @@ function renderInverseCards(hits) {
           <div class="tick mono">${s.ticker} · ${s.underlying} 하락 베팅</div>
         </div>
         <div style="margin-left:auto;text-align:right">
+          <div style="font-size:9px;color:var(--muted)">오늘${chgMayLag ? '*' : ''}</div>
           <div class="mono" style="font-weight:700;color:${chgColor}">${chg}</div>
         </div>
       </div>
@@ -801,7 +804,7 @@ function renderInverseCards(hits) {
     </div>`;
   }).join('');
   content.innerHTML = `
-    <div class="surge-warn" style="margin-bottom:12px">🔻 인버스 = 지수 하락 베팅. <b>미너비니式 본래 하락장엔 현금이 우선</b>이고, 인버스는 보조 수단이에요. 곱버스(2x/3x)는 변동성 극심 + 장기보유 시 가치 침식 → <b>단기·소액만</b>. 인버스 강세 자체가 "시장이 나쁘다"는 확인 신호이기도 해요.</div>
+    <div class="surge-warn" style="margin-bottom:12px">🔻 인버스 = 지수 하락 베팅. <b>미너비니式 본래 하락장엔 현금이 우선</b>이고, 인버스는 보조 수단이에요. 곱버스(2x/3x)는 변동성 극심 + 장기보유 시 가치 침식 → <b>단기·소액만</b>. 인버스 강세 자체가 "시장이 나쁘다"는 확인 신호이기도 해요.<br><span style="font-size:11px;color:var(--muted)">* 미국 ETF·곱버스의 "오늘 등락"은 데이터 시점 차이로 어긋날 수 있어요. 방향 판단은 <b>5일 수익률·강도</b>를 보세요.</span></div>
     <div class="grid">${cards}</div>`;
 }
 
@@ -1714,7 +1717,8 @@ async function loadIndices() {
       const chgStr = (chg != null && pct != null)
         ? `${arrow} ${Math.abs(chg).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} (${pct > 0 ? '+' : ''}${pct.toFixed(2)}%)`
         : '–';
-      return `<div class="idx" title="${ix.regime_txt || ''}"><span class="nm">${ix.name}</span>`
+      const dot = regimeDot(ix.regime);
+      return `<div class="idx" title="${ix.regime_txt || '시장 분위기(분산일 기반)'}"><span class="nm">${ix.name}${dot ? ` <span style="font-size:9px" title="시장 분위기">${dot}</span>` : ''}</span>`
         + `<span class="vl">${val}</span>`
         + `<span class="ch ${dir}">${chgStr}</span></div>`;
     }).join('');
