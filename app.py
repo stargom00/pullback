@@ -1,4 +1,3 @@
-git add -A && git commit -m v43725 && git push
 """
 눌림목 스캐너 — 웹 서버
 모드: pullback(눌림목) / turnaround(추세전환) / leader / super / breakout / surge
