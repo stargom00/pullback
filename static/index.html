@@ -119,6 +119,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .jtable td.mono{font-family:var(--mono)}
 .jtable .del{color:#FF6B6B;cursor:pointer}
 .jtable tr.open-pos{background:rgba(242,179,61,.04)}
+.merger-tag{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;background:rgba(147,112,219,.14);color:#b794f6;border:1px solid rgba(147,112,219,.4);white-space:nowrap;cursor:help}
 .st-badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px;white-space:nowrap}
 .st-act{display:inline-block;font-size:9px;padding:2px 5px;border-radius:5px;cursor:pointer;background:#222;color:#bbb;border:1px solid #333}
 .st-act:hover{background:#2e2e2e;color:#fff}
@@ -242,7 +243,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver">v4.38.0</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.38.2</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -275,6 +276,7 @@ tr.editing{background:rgba(242,179,61,.06)}
   <span class="lg" title="당일 +4% 이상 + (추세선 돌파 또는 피벗 2% 이내). 지금 진입 구간에서 출발 중이라는 신호.">🔥 트리거<span class="lg-h">오늘 출발</span></span>
   <span class="lg" title="시장경보(투경/투주/정지) 종목. 경보종목 관리에서 직접 등록한 것.">⚠️ 경보/리스크<span class="lg-h">주의</span></span>
   <span class="lg" title="점수 링 아래 '전일 NN' = 🔥 발동 전날의 셋업 점수. 높을수록 좋은 자리에서 출발한 것.">⭕ 점수<span class="lg-h">셋업 완성도</span></span>
+  <span class="lg" title="인수가 부근에 가격이 고정된 M&A/특수상황 의심 종목. 상방 막힘+하방 비대칭 리스크로 추세매매 부적합. 깔끔한 횡보가 강세 신호가 아님.">🤝 M&A의심<span class="lg-h">추세매매 부적합</span></span>
 </div>
 <div class="sectorbar" id="sectorbar"></div>
 <div class="alert-panel" id="alertPanel">
@@ -530,7 +532,7 @@ function card(s) {
     <div class="card-top">
       <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기 (최상단 고정)'}">${fav ? '★' : '☆'}</button>
       <div>
-        <div class="name">${s.triggered ? '🔥 ' : ''}${s.leader ? '👑 ' : ''}${s.name}${s.alert ? ` <span class="alert-tag" title="시장경보">⚠️ ${s.alert}</span>` : ''}${s.climax ? ` <span class="climax-tag ${s.climax_level}" title="미너비니 클라이맥스/과열 신호: ${(s.climax_reasons||[]).join(', ')}. 매수보다 매도·경계 구간일 수 있음.">${s.climax_level === 'danger' ? '🛑' : '🔆'} 과열</span>` : ''}<span class="mkt">${s.market}</span></div>
+        <div class="name">${s.triggered ? '🔥 ' : ''}${s.leader ? '👑 ' : ''}${s.name}${s.alert ? ` <span class="alert-tag" title="시장경보">⚠️ ${s.alert}</span>` : ''}${s.climax ? ` <span class="climax-tag ${s.climax_level}" title="미너비니 클라이맥스/과열 신호: ${(s.climax_reasons||[]).join(', ')}. 매수보다 매도·경계 구간일 수 있음.">${s.climax_level === 'danger' ? '🛑' : '🔆'} 과열</span>` : ''}${s.merger ? ` <span class="merger-tag" title="M&A/특수상황 의심: ${(s.merger_reasons||[]).join(', ')}. 인수가 부근에 가격이 고정돼 상방은 막히고 하방은 딜 무산 시 급락하는 비대칭 리스크. 추세매매 부적합 — 차트의 깔끔한 횡보가 강세 신호가 아님.">🤝 M&A의심</span>` : ''}<span class="mkt">${s.market}</span></div>
         <div class="tick mono">${s.ticker}${s.sector && s.sector !== '기타' ? ` · ${s.sector}` : ''}</div>
       </div>
       <div style="margin-left:auto;display:flex;flex-direction:column;align-items:center;gap:2px">
@@ -724,6 +726,7 @@ async function load(refresh = false) {
     // 시장 구분 없이 항상 전체를 받아옴 → 한국/미국 탭은 클라이언트에서 필터(재스캔 0초)
     const res = await fetch(`/api/scan?market=all&mode=${mode}${refresh ? '&refresh=true' : ''}`);
     const data = await res.json();
+    if (data.version) { const vb = document.getElementById('verBadge'); if (vb) vb.textContent = data.version; }
     status.innerHTML = `<span><b>${data.fetched ?? data.scanned}</b>/${data.scanned}개 종목 스캔</span>
       <span>${mode === 'turnaround' ? '추세전환' : mode === 'breakdown' ? 'Stage 4 숏' : '눌림목'} 후보 <b>${data.hits.length}</b>개</span>
       <span>기준 ${data.generated_at}${data.cached ? ' (캐시)' : ''}</span>

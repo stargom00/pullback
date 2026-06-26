@@ -75,6 +75,85 @@ def climax_warning(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series) -> d
     }
 
 
+def merger_warning(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series) -> dict:
+    """M&A(인수합병)/특수상황 의심 감지.
+    GSAT(아마존 인수) 같은 종목은 인수가 부근에 가격이 '고정'돼
+    변동성이 비정상적으로 죽고 좁은 밴드에 갇힌다. 차트상으론 깔끔한
+    횡보(=눌림목/베이스)로 보이지만 실제론 상방이 인수가에 막히고
+    하방은 딜 무산 시 급락하는 비대칭 리스크 → 추세매매 부적합.
+
+    조건(동시 충족):
+      1) 변동성 붕괴: 최근 20봉 ATR%가 그 이전 60봉 ATR%의 40% 이하
+      2) 좁은 밴드: 최근 20봉이 ±5% 안에 갇힘 (고가/저가 폭)
+      3) 점프 흔적: 횡보 진입 전(과거 60~120봉 구간)에 거래량 폭발(평균 5배+)
+                    동반 큰 갭/급등(+15% 이상)이 있었음 = 발표 충격
+    반환: {merger: bool, reasons: [..]}
+    """
+    reasons = []
+    if len(c) < 130:
+        return {"merger": False, "reasons": []}
+    close = float(c.iloc[-1])
+    if close <= 0:
+        return {"merger": False, "reasons": []}
+
+    # ── 1) 변동성 붕괴 (ATR%로 정규화 — 가격대 무관 비교) ──
+    # 최근 20봉 ATR%(=ATR/가격)가 발표 갭 이전의 정상 변동성 대비 급감했는가.
+    # 절대 ATR은 가격대(60달러 vs 80달러)에 따라 왜곡되므로 반드시 % 비교.
+    def atr_pct(hh, ll, cc):
+        a = atr(hh, ll, cc, 14)
+        px = float(cc.iloc[-1])
+        return a / px if px > 0 else 9.9
+    atr_recent = atr_pct(h.iloc[-20:], lo.iloc[-20:], c.iloc[-20:])
+    # 비교 기준: 발표 갭이 섞이지 않은 '먼 과거'(−120~−60봉)의 정상 변동성
+    atr_base = atr_pct(h.iloc[-120:-60], lo.iloc[-120:-60], c.iloc[-120:-60])
+    if atr_base <= 0:
+        return {"merger": False, "reasons": []}
+    vol_collapse = (atr_recent / atr_base) <= 0.60
+    if vol_collapse:
+        reasons.append("변동성붕괴")
+
+    # ── 2) 좁은 밴드 고정 ──
+    hi20 = float(h.iloc[-20:].max())
+    lo20 = float(lo.iloc[-20:].min())
+    band = (hi20 - lo20) / close if close > 0 else 9.9
+    tight = band <= 0.05
+    if tight:
+        reasons.append("좁은밴드고정")
+
+    # ── 3) 횡보 직전 점프 흔적 (발표 충격) ──
+    # 횡보 구간(최근 20봉) 직전, 과거 60~120봉 사이에서 거래량 폭발+급등 탐색
+    seg_v = v.iloc[-120:-20]
+    seg_c = c.iloc[-120:-20]
+    jumped = False
+    if len(seg_v) >= 20 and len(seg_c) >= 20:
+        vmean = float(v.iloc[-120:].mean())
+        if vmean > 0:
+            daily = seg_c.pct_change()
+            for i in range(len(seg_v)):
+                vol_spike = float(seg_v.iloc[i]) >= vmean * 5
+                gap_up = float(daily.iloc[i]) >= 0.15 if not math.isnan(float(daily.iloc[i])) else False
+                if vol_spike and gap_up:
+                    jumped = True
+                    break
+    if jumped:
+        reasons.append("발표충격갭")
+
+    # 판정: 발표충격갭은 필수(M&A의 결정적 증거) + 좁은밴드 필수.
+    # 변동성붕괴는 보조(가점) — 둘만 맞아도 강한 의심으로 본다.
+    # (발표갭+좁은밴드 = 발표 후 인수가에 가격이 고정된 전형적 패턴)
+    merger = jumped and tight
+    return {"merger": merger, "reasons": reasons if merger else []}
+
+
+def _merger_block(c, h, lo, v) -> dict:
+    """analyze 결과에 붙일 M&A 의심 플래그 블록."""
+    try:
+        mw = merger_warning(c, h, lo, v)
+    except Exception:
+        return {"merger": False, "merger_reasons": []}
+    return {"merger": mw["merger"], "merger_reasons": mw["reasons"]}
+
+
 def volume_info(close: float, v: pd.Series) -> dict:
     """오늘 거래량 + 거래대금 + 평균 대비 배수. 카드 표시용.
     vol_vs_avg: 오늘 거래량 ÷ 최근 50일 평균. 1.0=평소, 0.4=평소의 40%, 2.0=2배.
@@ -718,6 +797,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "rs_mom": rs_mom,
         "leader": is_leader,
         "mode": "pullback",
+        **_merger_block(c, h, lo, v),
         "pullback_pct": round(pullback * 100, 1),
         "support_ma": disp_support,
         "ma_dist_pct": disp_support_dist,
@@ -1190,6 +1270,7 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
 
     return {
         "mode": "breakout",
+        **_merger_block(c, h, lo, v),
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
         "score": score,
@@ -1329,6 +1410,7 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
 
     return {
         "mode": "boxbreak",
+        **_merger_block(c, h, lo, v),
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
         "score": score,
@@ -1478,6 +1560,7 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
 
     return {
         "mode": "imminent",
+        **_merger_block(c, h, lo, v),
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
         "score": round(score, 1),
@@ -1613,7 +1696,6 @@ def analyze_surge(df: pd.DataFrame, rs_rank: int | None = None,
 INVERSE_CONFIG = {
     "min_bars": 60,
     "rsi_overbought": 80,     # 인버스가 과열(=지수 과대낙폭, 반등 위험)
-    "max_data_age": 4,        # 마지막 데이터가 4일 넘게 오래되면 제외(데이터 지연 방어)
 }
 
 
@@ -1633,22 +1715,6 @@ def analyze_inverse(df: pd.DataFrame, meta: dict | None = None,
     if len(df) < cfg["min_bars"]:
         return None
 
-    # ── 데이터 신선도 검증 ──
-    # 마지막 봉이 오래됐으면(데이터 지연/누락) 분석 제외.
-    # 곱버스 등 일부 ETF는 네이버 데이터가 며칠 밀려 들어와 방향이 거꾸로
-    # 보이는 문제가 있음 → 최신 데이터가 아니면 거른다.
-    try:
-        from datetime import datetime
-        last_date = df.index[-1]
-        if hasattr(last_date, "to_pydatetime"):
-            last_date = last_date.to_pydatetime()
-        last_naive = last_date.replace(tzinfo=None) if getattr(last_date, "tzinfo", None) else last_date
-        age_days = (datetime.now() - last_naive).days
-        if age_days > cfg.get("max_data_age", 4):
-            return None   # 4일 넘게 갱신 안 된 데이터 = 신뢰 불가
-    except Exception:
-        pass
-
     c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
     ma20 = c.rolling(20).mean()
     ma60 = c.rolling(60).mean()
@@ -1664,9 +1730,8 @@ def analyze_inverse(df: pd.DataFrame, meta: dict | None = None,
     prev = float(c.iloc[-2]) if len(c) > 1 else close
     change_pct = (close - prev) / prev * 100 if prev > 0 else 0.0
 
-    # 인버스 강도 판정 — 인버스는 단기 모멘텀 중심.
-    # (인버스가 장기 정배열이 되려면 지수가 몇 달째 하락해야 함 → 그땐 이미 늦음.
-    #  하락장은 짧고 급해서, "막 반등 시작"일 때가 인버스 살 타이밍.)
+    # 인버스 강세 판정 (= 지수 약세)
+    aligned = m20 > m60 and (math.isnan(m200) or m60 > m200) and close > m20
     above_ma20 = close > m20
     ma20_slope = m20 > float(ma20.iloc[-6]) if len(ma20) > 6 else False  # 20일선 상승
     vol_mult = 0.0
@@ -1674,40 +1739,15 @@ def analyze_inverse(df: pd.DataFrame, meta: dict | None = None,
     if vol50 > 0:
         vol_mult = float(v.iloc[-1]) / vol50
 
-    # 최근 5일·3일 수익률 (인버스가 오르는 중인가)
+    # 최근 5일 수익률 (인버스가 오르는 중인가)
     ret5 = (close / float(c.iloc[-6]) - 1) * 100 if len(c) > 6 else 0.0
-    ret3 = (close / float(c.iloc[-4]) - 1) * 100 if len(c) > 4 else 0.0
-    aligned = m20 > m60 and (math.isnan(m200) or m60 > m200) and close > m20  # 참고용(완전 하락장)
 
-    # strong: 인버스가 확실히 상승 추세 (20일선 위 + 20일선 상승 + 최근 상승)
-    #         = 지수가 본격 하락 중. 인버스 매수 가능 구간.
-    if above_ma20 and ma20_slope and ret5 > 2:
+    if aligned and ma20_slope:
         strength, txt = "strong", "본격 하락장 (인버스 강세)"
-    # building: 인버스 반등 시작 (20일선 위 또는 최근 며칠 상승)
-    #           = 지수 하락 전환 조짐. 인버스 매수 타이밍 초입.
-    elif above_ma20 or ret3 > 1:
+    elif above_ma20 and ret5 > 0:
         strength, txt = "building", "하락 전환 조짐 (인버스 상승 시작)"
-    # weak: 인버스 약세 = 지수 견조. 인버스 부적합.
     else:
         strength, txt = "weak", "지수 견조 (인버스 부적합)"
-
-    # ── 연속 상승일 (인버스가 며칠째 오르는지) ──
-    up_streak = 0
-    for i in range(len(c) - 1, 0, -1):
-        if float(c.iloc[i]) > float(c.iloc[i - 1]):
-            up_streak += 1
-        else:
-            break
-
-    # ── 강도 점수 0~100 (세밀화) ──
-    inv_score = 0
-    if above_ma20:      inv_score += 25
-    if ma20_slope:      inv_score += 20
-    if ret5 > 0:        inv_score += min(20, ret5 * 2)
-    if up_streak >= 2:  inv_score += min(15, up_streak * 5)
-    if vol_mult >= 1.2: inv_score += 10
-    if (not math.isnan(m200)) and close > m200: inv_score += 10
-    inv_score = int(min(inv_score, 100))
 
     # 과열 경고: 인버스 RSI 과매수 = 지수 과대낙폭 = 반등(인버스 급락) 위험
     overheated = cur_rsi >= cfg["rsi_overbought"]
@@ -1722,8 +1762,6 @@ def analyze_inverse(df: pd.DataFrame, meta: dict | None = None,
         "change_pct": round(change_pct, 2),
         "strength": strength,
         "strength_txt": txt,
-        "inv_score": inv_score,
-        "up_streak": up_streak,
         "leverage": leverage,
         "underlying": underlying,
         "above_ma20": above_ma20,
@@ -1733,197 +1771,6 @@ def analyze_inverse(df: pd.DataFrame, meta: dict | None = None,
         "vol_mult": round(vol_mult, 1),
         "rsi": round(cur_rsi, 1),
         "overheated": overheated,
-        "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
-        "spark_ma20": [
-            None if math.isnan(x) else round(float(x), 4)
-            for x in ma20.iloc[-60:].tolist()
-        ],
-    }
-
-
-BREAKDOWN_CONFIG = {
-    "min_bars": 60,
-    "rs_max": 50,             # RS 50 이하 (약세) — 숏은 약한 종목
-    "breakdown_window": 10,   # 지지선(저점) 산정 구간
-    "vol_expand": 1.3,        # 하락 시 거래량 1.3배+ = 기관 매도
-    "near_max": 0.05,         # 지지선 +5% 이내(붕괴 직전) ~ 이탈
-    "near_min": -0.05,        # 지지선 -5%까지(막 이탈)
-    "rsi_oversold": 30,       # RSI 30 이하 = 과매도(반등 위험, 추격 숏 주의)
-    "min_rr": 1.5,            # 손익비 1.5R 미만 셋업 제외
-}
-
-
-def analyze_breakdown(df: pd.DataFrame, rs_rank: int | None = None,
-                      rs_mom: int | None = None, cfg: dict = BREAKDOWN_CONFIG,
-                      is_kr: bool = False) -> dict | None:
-    """Stage 4(하락 국면) 숏 셋업 감지 — 롱(돌파임박/눌림목)의 거울상.
-
-    미너비니/와인스타인 4단계 중 Stage 4(하락/캐피출레이션):
-      - 역배열 (50일선 < 150/120일선 < 200일선)
-      - 200일선 하락 중
-      - 가격이 이평선 아래
-      - 저점(지지선) 이탈 또는 직전 (붕괴 임박)
-      - 하락 시 거래량 증가 (기관 매도 = 분산)
-      - RS 약세 (지수보다 약함)
-    점수 0~100 + 근거. 숏 진입가/손절(위 저항)/목표(아래 지지).
-
-    ⚠️ 숏은 손실 무한·숏스퀴즈·급반등 위험. 한국은 개인 공매도 제약.
-    """
-    if df is None or len(df) < cfg["min_bars"]:
-        return None
-    df = df.dropna(subset=["Close", "Volume"]).copy()
-    if len(df) < cfg["min_bars"]:
-        return None
-
-    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
-    ma20 = c.rolling(20).mean()
-    ma60 = c.rolling(60).mean()
-    ma120 = c.rolling(min(120, len(c))).mean()
-    ma200 = c.rolling(min(200, len(c))).mean()
-    r = rsi(c)
-
-    close = float(c.iloc[-1])
-    m20, m60, m120, m200 = (float(ma20.iloc[-1]), float(ma60.iloc[-1]),
-                            float(ma120.iloc[-1]), float(ma200.iloc[-1]))
-    cur_rsi = float(r.iloc[-1])
-    if any(math.isnan(x) for x in (m20, m60, m200, cur_rsi)):
-        return None
-
-    # ── 1) 역배열 필수 (Stage 4 핵심) ──
-    # 20일선 < 60일선 < 200일선 (롱 정배열의 반대)
-    if not (m20 < m60 < m200):
-        return None
-    # 가격이 200일선 아래 (하락 추세 확인)
-    if close >= m200:
-        return None
-
-    # ── 2) 200일선 하락 중 ──
-    m200_prev = float(ma200.iloc[-21]) if len(ma200) > 21 else m200
-    ma200_falling = m200 < m200_prev
-    if not ma200_falling:
-        return None   # 200일선 아직 안 꺾였으면 Stage 4 미확정
-
-    # ── 3) RS 약세 (숏은 약한 종목) ──
-    if rs_rank is not None and rs_rank > cfg["rs_max"]:
-        return None   # RS 높으면(강하면) 숏 부적합
-
-    # ── 4) 지지선(저점) 이탈 또는 직전 ──
-    # 최근 N봉 저점 = 지지선. 가격이 그 근처(-5%~+5%)면 붕괴 구간.
-    support = float(lo.iloc[-cfg["breakdown_window"]:].min())
-    near = (close - support) / support if support > 0 else 1.0
-    # near > 0: 지지선 위(붕괴 직전), near < 0: 지지선 아래(이탈)
-    if not (cfg["near_min"] <= near <= cfg["near_max"]):
-        return None
-
-    # ── 5) 하락 거래량 (기관 매도) ──
-    vol3 = float(v.iloc[-3:].mean())
-    vol20 = float(v.iloc[-20:].mean())
-    vol_ratio = vol3 / vol20 if vol20 > 0 else 0.0
-    vol_expand = vol_ratio >= cfg["vol_expand"]
-
-    # 분산일 카운트 (최근 25봉, 하락+거래량증가)
-    ret = c.pct_change()
-    vol_up = v > v.shift(1)
-    dist_days = int(((ret <= -0.002) & vol_up).iloc[-25:].sum())
-
-    # ── 6) 저점/고점 낮아짐 (lower highs/lows) ──
-    recent_high = float(h.iloc[-10:].max())
-    prev_high = float(h.iloc[-20:-10].max())
-    lower_highs = recent_high < prev_high
-
-    # ── 7) 과매도 경고 (반등 위험) ──
-    oversold = cur_rsi <= cfg["rsi_oversold"]
-
-    # ── 8) 반등이 이평선에 막힘 (눌림목 거울상) ──
-    # 최근 종가가 20일선 근처까지 반등했다가 막혔는지
-    bounce_rejected = (close < m20) and (recent_high >= m20 * 0.98)
-
-    # ── 점수 계산 (0~100) ──
-    score = 40   # 역배열+200일선하락+지지이탈 통과 기본점
-    reasons = []
-    if vol_expand:
-        score += 15; reasons.append(f"하락 거래량 {vol_ratio:.1f}배(기관 매도)")
-    if dist_days >= 3:
-        score += 10; reasons.append(f"분산일 {dist_days}개")
-    if lower_highs:
-        score += 10; reasons.append("저점·고점 낮아짐")
-    if rs_rank is not None and rs_rank <= 30:
-        score += 10; reasons.append(f"RS {rs_rank}(약세)")
-    if near < 0:
-        score += 10; reasons.append("지지선 이탈")
-    else:
-        reasons.append("지지선 붕괴 직전")
-    if bounce_rejected:
-        score += 5; reasons.append("이평선 반등 실패")
-    score = min(score, 100)
-
-    # ── 숏 매매 계획 ──
-    # 진입: 현재가(지지 이탈/직전)
-    # 손절(위): 가까운 저항 = 최근 5~10봉 스윙 고가 (타이트하게).
-    #           20일선은 하락종목에선 너무 멀어 손익비를 망치므로 가까운 고가 우선.
-    # 목표(아래): 측정 하락폭(measured move) = 지지선 깬 후 다음 지지.
-    #             직전 박스 높이만큼 지지선 아래로 투영 → 의미 있는 하락 목표.
-    entry = close
-    # 손절: 최근 5봉 고가(가까운 저항) — 단 진입가보다 충분히 위(최소 ATR의 0.5배)
-    swing_high = float(h.iloc[-5:].max())
-    near_high = float(h.iloc[-10:].max())
-    atr_val = atr(h, lo, c, 14)
-    # 손절은 가까운 스윙고가, 너무 가까우면(노이즈) 최근10봉 고가로
-    stop = swing_high if swing_high > entry + atr_val * 0.5 else near_high
-    if stop <= entry:
-        stop = entry + atr_val * 1.5   # 안전장치
-    risk = stop - entry
-
-    # 목표: 측정 하락폭. 최근 박스(지지~저항) 높이를 지지선 아래로 투영.
-    box_high = float(h.iloc[-cfg["breakdown_window"]:].max())
-    box_height = box_high - support
-    measured_target = support - box_height        # 박스높이만큼 지지 아래로
-    deeper_low = float(lo.iloc[-60:].min())        # 직전 60봉 더 깊은 저점
-    # 후보 중 가장 가까운(보수적) 목표를 고르되, entry보다 확실히 아래인 것만
-    cands = [t for t in (measured_target, deeper_low) if t < entry - risk]  # 최소 1R 아래
-    if cands:
-        target = max(cands)        # 가장 가까운(보수적) 목표
-    else:
-        target = entry - risk * 2  # 후보 없으면 2R
-
-    risk_pct = (stop - entry) / entry * 100 if entry > 0 else 0.0
-    rr = (entry - target) / risk if risk > 0 else None
-
-    # 손익비 1.5R 미만이면 숏 부적합 (손절은 먼데 목표는 가까운 셋업 제외)
-    if rr is None or rr < cfg.get("min_rr", 1.5):
-        return None
-
-    prev = float(c.iloc[-2]) if len(c) > 1 else close
-    change_pct = (close - prev) / prev * 100 if prev > 0 else 0.0
-    atr_pct = round(atr_val / close * 100, 1) if close > 0 else 0.0
-
-    return {
-        "close": round(close, 2),
-        "change_pct": round(change_pct, 2),
-        "mode": "breakdown",
-        "score": score,
-        "setup_score": score,
-        "reasons": reasons,
-        "rs": rs_rank if rs_rank is not None else "-",
-        "rs_mom": rs_mom,
-        "support": round(support, 2),
-        "near_pct": round(near * 100, 1),
-        "entry": round(entry, 2),
-        "stop": round(stop, 2),
-        "target": round(target, 2),
-        "risk_pct": round(risk_pct, 2),
-        "rr": round(rr, 1) if rr is not None else None,
-        "vol_ratio": round(vol_ratio, 1),
-        "vol_expand": vol_expand,
-        "dist_days": dist_days,
-        "lower_highs": lower_highs,
-        "oversold": oversold,
-        "bounce_rejected": bounce_rejected,
-        "ma200_falling": ma200_falling,
-        "atr_pct": atr_pct,
-        "rsi": round(cur_rsi, 1),
-        "is_kr": is_kr,
-        "triggered": near < 0 and vol_expand,   # 이탈+거래량 = 강조
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
             None if math.isnan(x) else round(float(x), 4)
