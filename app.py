@@ -545,7 +545,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.38.7"
+VERSION = "v4.38.8"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -1414,6 +1414,14 @@ def _index_regime(code: str) -> dict | None:
                 "dist_days": dist_days, "ftd": ftd}
     except Exception:
         return None
+
+
+@app.get("/api/krstatus")
+async def kr_status():
+    """KR 동적 유니버스 로딩 진단. pykrx 설치/KRX 접근 실패 원인 확인용.
+    예: /api/krstatus → {pykrx_installed, dynamic_count, last_error, ...}"""
+    from universe import kr_dynamic_status
+    return JSONResponse(kr_dynamic_status())
 
 
 @app.get("/api/indices")

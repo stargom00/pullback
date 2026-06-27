@@ -85,8 +85,32 @@ def load_kr_dynamic(top_n: int = KR_TOP_N) -> dict:
                 pass
             _KR_DYNAMIC_CACHE.update({"daykey": daykey, "data": out})
         return out
-    except Exception:
+    except Exception as e:
+        import sys, traceback
+        _KR_DYNAMIC_CACHE["last_error"] = f"{type(e).__name__}: {e}"
+        print(f"[universe] load_kr_dynamic 실패: {type(e).__name__}: {e}", file=sys.stderr)
+        traceback.print_exc()
         return {}
+
+
+def kr_dynamic_status() -> dict:
+    """KR 동적 유니버스 로딩 상태 진단."""
+    import sys
+    info = {"KR_TOP_N": KR_TOP_N}
+    # pykrx 설치 여부
+    try:
+        import pykrx
+        info["pykrx_installed"] = True
+        info["pykrx_version"] = getattr(pykrx, "__version__", "unknown")
+    except Exception as e:
+        info["pykrx_installed"] = False
+        info["pykrx_error"] = f"{type(e).__name__}: {e}"
+    # 실제 로딩 시도
+    dyn = load_kr_dynamic()
+    info["dynamic_count"] = len(dyn)
+    info["last_error"] = _KR_DYNAMIC_CACHE.get("last_error")
+    info["static_count"] = len(KR_UNIVERSE)
+    return info
 
 
 KR_UNIVERSE = {
