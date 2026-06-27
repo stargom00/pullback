@@ -27,7 +27,7 @@ print(f"[universe] 미국 확장 로드: EXT={len(US_UNIVERSE_EXT)} AUTO={len(US
 # 매 거래일 1회 KRX에서 거래대금 상위 N개를 받아 파일 캐시.
 # pykrx 미설치/조회 실패 시 정적 KR_UNIVERSE로 폴백.
 _KR_DYNAMIC_CACHE: dict = {}
-KR_TOP_N = int(os.environ.get("KR_TOP_N", "600"))  # 코스피+코스닥 거래대금 상위
+KR_TOP_N = int(os.environ.get("KR_TOP_N", "800"))  # 코스피+코스닥 거래대금 상위 (600→800, 중소형 성장주 포착 확대)
 
 
 def load_kr_dynamic(top_n: int = KR_TOP_N) -> dict:

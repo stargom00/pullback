@@ -545,12 +545,12 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.38.5"
+VERSION = "v4.38.6"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
 US_BATCH_SIZE = 100         # 미국 종목 yf.download 배치 크기 (요청 수 1/N로 축소)
-KR_MAX_CONCURRENT = 6       # 한국 네이버 동시 호출 (배치 API 없어 개별 호출)
+KR_MAX_CONCURRENT = int(os.environ.get("KR_MAX_CONCURRENT", "10"))  # 한국 네이버 동시 호출 (6→10, 800개도 빠르게. 네이버 차단 회피선)
 _cache: dict[str, dict] = {}
 _data_cache: dict[str, dict] = {}
 _executor = ThreadPoolExecutor(max_workers=8)
