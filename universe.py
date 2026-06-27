@@ -41,7 +41,8 @@ def load_kr_dynamic(top_n: int = KR_TOP_N) -> dict:
         return _KR_DYNAMIC_CACHE["data"]
     # 파일 캐시 (/data 우선)
     cache_dir = os.environ.get("JOURNAL_DIR") or ("/data" if os.path.isdir("/data") else os.path.dirname(__file__))
-    cache_path = os.path.join(cache_dir, f"kr_universe_{daykey}.json")
+    # 캐시 키에 top_n 포함 — KR_TOP_N이 바뀌면(600→800) 옛 캐시를 안 읽고 새로 받음
+    cache_path = os.path.join(cache_dir, f"kr_universe_{top_n}_{daykey}.json")
     if os.path.exists(cache_path):
         try:
             with open(cache_path, encoding="utf-8") as f:
