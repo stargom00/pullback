@@ -51,32 +51,10 @@ def load_kr_dynamic(top_n: int = KR_TOP_N) -> dict:
             return data
         except Exception:
             pass
-    # 실제 조회
+    # 실제 조회 — 네이버 거래대금 상위 (pykrx는 KRX 로그인 요구로 폐기, v4.38.9)
     try:
-        from pykrx import stock
-        import pandas as pd
-        d = datetime.now().strftime("%Y%m%d")
-        frames = []
-        for mkt, suffix in (("KOSPI", ".KS"), ("KOSDAQ", ".KQ")):
-            df = stock.get_market_ohlcv(d, market=mkt)  # 당일 OHLCV+거래대금
-            if df is None or df.empty:
-                continue
-            df = df.copy()
-            df["suffix"] = suffix
-            frames.append(df)
-        if not frames:
-            return {}
-        alldf = pd.concat(frames)
-        # 거래대금 컬럼명은 '거래대금'
-        col = "거래대금" if "거래대금" in alldf.columns else alldf.columns[-2]
-        alldf = alldf.sort_values(col, ascending=False).head(top_n)
-        out = {}
-        for code, row in alldf.iterrows():
-            try:
-                name = stock.get_market_ticker_name(code)
-            except Exception:
-                name = code
-            out[f"{code}{row['suffix']}"] = name
+        import naver_kr
+        out = naver_kr.fetch_top_value(top_n)
         if out:
             try:
                 with open(cache_path, "w", encoding="utf-8") as f:
@@ -105,7 +83,15 @@ def kr_dynamic_status() -> dict:
     except Exception as e:
         info["pykrx_installed"] = False
         info["pykrx_error"] = f"{type(e).__name__}: {e}"
-    # 실제 로딩 시도
+    # 네이버 거래대금 상위 직접 시도 (소스 = 네이버, pykrx 아님)
+    try:
+        import naver_kr
+        sample = naver_kr.fetch_top_value(60)  # 빠른 확인용 소량
+        info["naver_top_sample"] = len(sample)
+        info["naver_first3"] = list(sample.items())[:3]
+    except Exception as e:
+        info["naver_error"] = f"{type(e).__name__}: {e}"
+    # 실제 로딩 시도 (캐시 포함)
     dyn = load_kr_dynamic()
     info["dynamic_count"] = len(dyn)
     info["last_error"] = _KR_DYNAMIC_CACHE.get("last_error")

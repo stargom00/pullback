@@ -233,3 +233,60 @@ def fetch_index(code: str) -> dict | None:
         }
     except (requests.RequestException, ValueError, KeyError):
         return None
+
+
+# ── 거래대금 상위 종목 (pykrx 대체) ─────────────────────
+# 네이버 금융 거래대금 상위 페이지를 긁어 코스피/코스닥 상위 N개를
+# {티커.KS/.KQ: 이름}으로 반환. KRX 인증(pykrx) 불필요.
+# 페이지: finance.naver.com/sise/sise_quant.naver?sosok=0(코스피)/1(코스닥)
+import time as _time
+
+_QUANT_URL = "https://finance.naver.com/sise/sise_quant.naver"
+_ITEM_RE = re.compile(r'/item/main\.naver\?code=(\d{6})"[^>]*>([^<]+)</a>')
+
+
+def _parse_quant_page(html: str) -> list:
+    """sise_quant 페이지 HTML에서 (종목코드, 종목명) 리스트 추출 (등장 순서=거래대금 순)."""
+    results = []
+    seen = set()
+    for m in _ITEM_RE.finditer(html):
+        code, name = m.group(1), m.group(2).strip()
+        if code and name and code not in seen:
+            seen.add(code)
+            results.append((code, name))
+    return results
+
+
+def fetch_top_value(top_n: int = 800) -> dict:
+    """코스피+코스닥 거래대금 상위 종목을 {코드.KS/.KQ: 이름}으로.
+    네이버 거래대금 상위 페이지를 페이지네이션으로 긁는다. KRX 인증 불필요.
+    실패 시 빈 dict (호출부에서 정적 폴백)."""
+    out = {}
+    for sosok, suffix in ((0, ".KS"), (1, ".KQ")):
+        for page in range(1, 15):  # 페이지당 ~50종목, 최대 14페이지(~700)
+            try:
+                resp = requests.get(
+                    _QUANT_URL,
+                    params={"sosok": sosok, "page": page},
+                    headers=_HEADERS,
+                    timeout=_TIMEOUT,
+                )
+                resp.raise_for_status()
+                resp.encoding = "euc-kr"  # 네이버 sise는 EUC-KR 인코딩
+                rows = _parse_quant_page(resp.text)
+                if not rows:
+                    break
+                added = 0
+                for code, name in rows:
+                    key = f"{code}{suffix}"
+                    if key not in out:
+                        out[key] = name
+                        added += 1
+                if added == 0:  # 새 종목 없으면 마지막 페이지
+                    break
+                _time.sleep(0.15)
+            except (requests.RequestException, ValueError):
+                break
+    if len(out) > top_n:
+        out = dict(list(out.items())[:top_n])
+    return out
