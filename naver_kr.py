@@ -313,6 +313,52 @@ def fetch_top_value(top_n: int = 800, include_etf: bool = False) -> dict:
                 _time.sleep(0.12)
             except (requests.RequestException, ValueError):
                 break
+    # 거래대금 상위만으로 부족하면 시가총액 상위를 병합 (커버리지 확대)
+    if len(out) < top_n:
+        try:
+            mcap = fetch_top_marketcap()
+            for k, v in mcap.items():
+                if k not in out:
+                    out[k] = v
+        except Exception:
+            pass
     if len(out) > top_n:
         out = dict(list(out.items())[:top_n])
+    return out
+
+
+# ── 시가총액 상위 (거래대금 상위와 병합해 커버리지 확대) ──
+_MARKETSUM_URL = "https://finance.naver.com/sise/sise_market_sum.naver"
+
+
+def fetch_top_marketcap(per_market_pages: int = 20) -> dict:
+    """코스피+코스닥 시가총액 상위를 {코드.KS/.KQ: 이름}으로.
+    sise_market_sum 페이지를 긁는다. ETF 제외. 거래대금 상위와 병합용."""
+    out = {}
+    for sosok, suffix in ((0, ".KS"), (1, ".KQ")):
+        empty = 0
+        for page in range(1, per_market_pages + 1):
+            try:
+                resp = requests.get(
+                    _MARKETSUM_URL,
+                    params={"sosok": sosok, "page": page},
+                    headers=_HEADERS,
+                    timeout=_TIMEOUT,
+                )
+                resp.raise_for_status()
+                resp.encoding = "euc-kr"
+                rows = _parse_quant_page(resp.text)  # 같은 링크 형식
+                if not rows:
+                    empty += 1
+                    if empty >= 2:
+                        break
+                    continue
+                empty = 0
+                for code, name in rows:
+                    if _is_etf_like(name):
+                        continue
+                    out.setdefault(f"{code}{suffix}", name)
+                _time.sleep(0.12)
+            except (requests.RequestException, ValueError):
+                break
     return out
