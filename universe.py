@@ -42,8 +42,8 @@ def load_kr_dynamic(top_n: int = KR_TOP_N) -> dict:
     # 파일 캐시 (/data 우선)
     cache_dir = os.environ.get("JOURNAL_DIR") or ("/data" if os.path.isdir("/data") else os.path.dirname(__file__))
     # 캐시 키에 top_n 포함 — KR_TOP_N이 바뀌면(600→800) 옛 캐시를 안 읽고 새로 받음
-    # v2 = 네이버 거래대금 상위 + ETF 제외 (옛 pykrx/ETF포함 캐시 무효화)
-    cache_path = os.path.join(cache_dir, f"kr_universe_v2_{top_n}_{daykey}.json")
+    # v3 = 거래대금 + 시가총액 상위 병합 (367 캐시 무효화, v4.39.3)
+    cache_path = os.path.join(cache_dir, f"kr_universe_v3_{top_n}_{daykey}.json")
     if os.path.exists(cache_path):
         try:
             with open(cache_path, encoding="utf-8") as f:
@@ -84,12 +84,15 @@ def kr_dynamic_status() -> dict:
     except Exception as e:
         info["pykrx_installed"] = False
         info["pykrx_error"] = f"{type(e).__name__}: {e}"
-    # 네이버 거래대금 상위 직접 시도 (소스 = 네이버, pykrx 아님)
+    # 네이버 소스별 직접 시도 (거래대금 vs 시가총액)
     try:
         import naver_kr
-        sample = naver_kr.fetch_top_value(60)  # 빠른 확인용 소량
-        info["naver_top_sample"] = len(sample)
-        info["naver_first3"] = list(sample.items())[:3]
+        # 거래대금만 (시총 병합 전 원시 카운트는 측정 어려우니 marketcap 단독 확인)
+        mcap = naver_kr.fetch_top_marketcap()
+        info["naver_marketcap_count"] = len(mcap)
+        info["naver_mcap_first3"] = list(mcap.items())[:3]
+        full = naver_kr.fetch_top_value(800)  # 병합 결과
+        info["naver_merged_count"] = len(full)
     except Exception as e:
         info["naver_error"] = f"{type(e).__name__}: {e}"
     # 실제 로딩 시도 (캐시 포함)
