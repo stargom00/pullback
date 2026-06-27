@@ -545,7 +545,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.39.0"
+VERSION = "v4.39.1"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -867,6 +867,15 @@ async def run_scan(market: str, mode: str) -> dict:
     supports_intraday = mode in ("pullback", "turnaround", "imminent", "boxbreak", "breakout", "breakdown")  # is_kr 인자를 받는 모드
     alerts = load_alerts()
     hits = []
+    # 진단용 시장별 카운터
+    diag = {"kr_universe": 0, "us_universe": 0, "kr_fetched": 0, "us_fetched": 0,
+            "kr_hits": 0, "us_hits": 0}
+    for t in universe:
+        if t.endswith((".KS", ".KQ")): diag["kr_universe"] += 1
+        else: diag["us_universe"] += 1
+    for t in data:
+        if t.endswith((".KS", ".KQ")): diag["kr_fetched"] += 1
+        else: diag["us_fetched"] += 1
     for t, df in data.items():
         is_kr = t.endswith((".KS", ".KQ"))
         kwargs = {"rs_rank": rs_ranks.get(t), "rs_mom": rs_moms.get(t)}
@@ -883,6 +892,8 @@ async def run_scan(market: str, mode: str) -> dict:
                      "sector": get_sector(t), "alert": alert_kind,
                      "climax": cw["climax"], "climax_reasons": cw["reasons"],
                      "climax_level": cw["level"], **result})
+        if is_kr: diag["kr_hits"] += 1
+        else: diag["us_hits"] += 1
 
     hits.sort(key=lambda x: (x.get("triggered", False), x.get("setup_score") or x["score"]), reverse=True)
 
@@ -901,6 +912,7 @@ async def run_scan(market: str, mode: str) -> dict:
         "mode": mode,
         "scanned": len(universe),
         "fetched": len(data),
+        "diag": diag,
         "hits": hits,
         "sector_summary": sector_summary,
         "warn_count": warn_count,
