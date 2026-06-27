@@ -545,7 +545,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.39.5"
+VERSION = "v4.39.6"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -1439,6 +1439,15 @@ async def kr_status():
 @app.get("/api/indices")
 async def indices():
     """상단 지수 바: 코스피/코스닥/나스닥/닛케이/비트코인. 60초 캐시."""
+    try:
+        return await _indices_impl()
+    except Exception as e:
+        import traceback
+        return JSONResponse({"error": f"{type(e).__name__}: {e}",
+                             "trace": traceback.format_exc()[-2000:]}, status_code=200)
+
+
+async def _indices_impl():
     now = time.time()
     if _indices_cache and now - _indices_cache.get("ts", 0) < _INDICES_TTL:
         return JSONResponse(_indices_cache["data"])
