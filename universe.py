@@ -20,8 +20,13 @@ try:
 except Exception as e:
     print(f"[universe] us_universe_auto import 실패 -> AUTO 비활성: {e}", file=sys.stderr)
     US_UNIVERSE_AUTO = {}
+try:
+    from us_universe_sectorleaders import US_UNIVERSE_SECTOR
+except Exception as e:
+    print(f"[universe] us_universe_sectorleaders import 실패 -> SECTOR 비활성: {e}", file=sys.stderr)
+    US_UNIVERSE_SECTOR = {}
 
-print(f"[universe] 미국 확장 로드: EXT={len(US_UNIVERSE_EXT)} AUTO={len(US_UNIVERSE_AUTO)}", file=sys.stderr)
+print(f"[universe] 미국 확장 로드: EXT={len(US_UNIVERSE_EXT)} AUTO={len(US_UNIVERSE_AUTO)} SECTOR={len(US_UNIVERSE_SECTOR)}", file=sys.stderr)
 
 # ── 한국 거래대금 상위 동적 구성 (pykrx) ──
 # 매 거래일 1회 KRX에서 거래대금 상위 N개를 받아 파일 캐시.
@@ -330,7 +335,7 @@ def load_alerts() -> dict:
 def get_universe(market: str) -> dict:
     wl = load_watchlist()
     # 미국: 정적 대형(US_UNIVERSE) + 확장(EXT) 머지
-    us_full = {**US_UNIVERSE, **US_UNIVERSE_EXT, **US_UNIVERSE_AUTO}
+    us_full = {**US_UNIVERSE, **US_UNIVERSE_EXT, **US_UNIVERSE_AUTO, **US_UNIVERSE_SECTOR}
     # 한국: 거래대금 상위 동적(있으면) + 정적 베이스 (동적 실패 시 폴백)
     kr_dyn = load_kr_dynamic()
     kr_full = {**KR_UNIVERSE, **kr_dyn} if kr_dyn else dict(KR_UNIVERSE)
