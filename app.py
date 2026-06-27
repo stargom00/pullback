@@ -545,7 +545,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.39.8"
+VERSION = "v4.39.9"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -1338,15 +1338,23 @@ def _fetch_nasdaq() -> dict | None:
 
 
 def _fetch_yf_index(symbol: str, label: str, decimals: int = 2) -> dict | None:
-    """yfinance 심볼의 현재값 + 등락 (지수·코인 공용)."""
+    """yfinance 심볼의 현재값 + 등락 (지수·코인 공용).
+    주말/휴장 대비: 10일치를 받아 마지막 거래일 종가를 잡고,
+    데이터가 1개뿐이어도 등락 없이 종가만이라도 표시한다."""
     try:
-        df = yf.Ticker(symbol).history(period="5d", interval="1d", auto_adjust=False)
-        if df is None or len(df) < 2:
+        df = yf.Ticker(symbol).history(period="10d", interval="1d", auto_adjust=False)
+        if df is None or df.empty:
             return None
-        last = float(df["Close"].iloc[-1])
-        prev = float(df["Close"].iloc[-2])
-        chg = last - prev
-        pct = (last / prev - 1) * 100 if prev > 0 else 0.0
+        closes = df["Close"].dropna()
+        if closes.empty:
+            return None
+        last = float(closes.iloc[-1])
+        if len(closes) >= 2:
+            prev = float(closes.iloc[-2])
+            chg = last - prev
+            pct = (last / prev - 1) * 100 if prev > 0 else 0.0
+        else:
+            chg, pct = 0.0, 0.0  # 데이터 1개뿐이면 등락 0으로 표시(종가만이라도)
         return {"name": label, "value": round(last, decimals),
                 "change": round(chg, decimals), "change_pct": round(pct, 2)}
     except Exception:
