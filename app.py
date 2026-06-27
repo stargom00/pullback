@@ -545,7 +545,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.38.4"
+VERSION = "v4.38.5"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -1424,7 +1424,9 @@ async def indices():
         return JSONResponse(_indices_cache["data"])
 
     loop = asyncio.get_event_loop()
-    nasdaq, kospi, kosdaq, r_kospi, r_kosdaq, r_nasdaq, nikkei, btc = await asyncio.gather(
+    # return_exceptions=True: 8개 중 하나가 예외를 던져도 나머지는 살린다.
+    # (네이버/야후 중 하나만 실패해도 지수 바 전체가 500으로 죽던 버그 수정)
+    results = await asyncio.gather(
         loop.run_in_executor(_executor, _fetch_nasdaq),
         loop.run_in_executor(_executor, naver_kr.fetch_index, "KOSPI"),
         loop.run_in_executor(_executor, naver_kr.fetch_index, "KOSDAQ"),
@@ -1433,13 +1435,18 @@ async def indices():
         loop.run_in_executor(_executor, _index_regime, "^IXIC"),
         loop.run_in_executor(_executor, _fetch_yf_index, "^N225", "닛케이"),
         loop.run_in_executor(_executor, _fetch_yf_index, "BTC-USD", "비트코인"),
+        return_exceptions=True,
     )
-    # 레짐 정보 병합
-    if kospi and r_kospi: kospi.update(r_kospi)
-    if kosdaq and r_kosdaq: kosdaq.update(r_kosdaq)
-    if nasdaq and r_nasdaq: nasdaq.update(r_nasdaq)
+    # 예외로 돌아온 결과는 None으로 정규화 (개별 실패가 전체를 죽이지 않게)
+    nasdaq, kospi, kosdaq, r_kospi, r_kosdaq, r_nasdaq, nikkei, btc = [
+        (None if isinstance(x, BaseException) else x) for x in results
+    ]
+    # 레짐 정보 병합 (둘 다 dict일 때만)
+    if isinstance(kospi, dict) and isinstance(r_kospi, dict): kospi.update(r_kospi)
+    if isinstance(kosdaq, dict) and isinstance(r_kosdaq, dict): kosdaq.update(r_kosdaq)
+    if isinstance(nasdaq, dict) and isinstance(r_nasdaq, dict): nasdaq.update(r_nasdaq)
     # 순서: 코스피, 코스닥, 나스닥, 닛케이, 비트코인 (국내 → 해외 → 코인)
-    data = {"indices": [x for x in (kospi, kosdaq, nasdaq, nikkei, btc) if x]}
+    data = {"indices": [x for x in (kospi, kosdaq, nasdaq, nikkei, btc) if isinstance(x, dict)]}
     _indices_cache["ts"] = now
     _indices_cache["data"] = data
     return JSONResponse(data)
