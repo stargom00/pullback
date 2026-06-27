@@ -253,15 +253,19 @@ _ETF_KEYWORDS = (
     # 운용사 ETF 브랜드명 (개별 종목명에 안 쓰이는 고유 브랜드)
     "KODEX", "TIGER", "KBSTAR", "ARIRANG", "KINDEX", "HANARO", "KOSEF",
     "TIMEFOLIO", "히어로즈", "KIWOOM", "마이다스", "KCGI", "FOCUS",
-    "TREX", "에셋플러스", "삼성액티브", "삼성KODEX", "1Q ", "FnGuide",
+    "TREX", "삼성액티브", "삼성KODEX", "1Q ", "FnGuide",
     # 브랜드 + 공백 형태로만 (단독 단어 오탐 방지)
     "SOL ", "ACE ", "PLUS ", "RISE ", "WOORI ", "마이티 ", "파워 ",
+    # 추가 ETF 브랜드 (스크린샷서 발견: MIDAS/WON/KoAct/TIME 등)
+    "MIDAS", "WON ", "KOACT", "TIME ", "BNK", "마이다스",
+    "DAISHIN", "HEROES", "마이에셋", "교보악사",
     # ETF/ETN 상품 유형 키워드 (개별주명에 거의 안 나옴)
     "인버스", "레버리지", "곱버스", "ETN", "ETF",
     "선물", "2X", "3X", "국고채", "통안채", "커버드콜",
-    "맥쿼리인프라", "리츠", "REITS", "TIGERETF",
-    # 지수 추종형 (개별주명엔 안 나오는 조합)
-    "200선물", "코스피200", "코스닥150",
+    "맥쿼리인프라", "REITS", "TIGERETF",
+    # 액티브/밸류업/테마 ETF 유형 (대부분 ETF 전용 작명)
+    "액티브", "밸류업", "코스피200", "코스닥150", "200선물",
+    "TR)", "채권액티브", "혼합형",
 )
 
 

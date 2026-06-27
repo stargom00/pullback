@@ -42,8 +42,8 @@ def load_kr_dynamic(top_n: int = KR_TOP_N) -> dict:
     # 파일 캐시 (/data 우선)
     cache_dir = os.environ.get("JOURNAL_DIR") or ("/data" if os.path.isdir("/data") else os.path.dirname(__file__))
     # 캐시 키에 top_n 포함 — KR_TOP_N이 바뀌면(600→800) 옛 캐시를 안 읽고 새로 받음
-    # v4 = ETF 필터 강화 (잔존 ETF 제거, v4.39.4)
-    cache_path = os.path.join(cache_dir, f"kr_universe_v4_{top_n}_{daykey}.json")
+    # v5 = ETF 필터 재강화 (MIDAS/WON/KoAct/TIME/액티브 등 차단, v4.39.8)
+    cache_path = os.path.join(cache_dir, f"kr_universe_v5_{top_n}_{daykey}.json")
     if os.path.exists(cache_path):
         try:
             with open(cache_path, encoding="utf-8") as f:
