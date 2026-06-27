@@ -373,10 +373,3 @@ def fetch_top_marketcap(per_market_pages: int = 20) -> dict:
             except (requests.RequestException, ValueError):
                 break
     return out
-
-
-def list_etf_like(universe: dict) -> dict:
-    """유니버스에서 ETF로 판별되는 종목 목록 반환 (진단용).
-    {count, items:[(ticker, name), ...]}"""
-    items = [(t, n) for t, n in universe.items() if _is_etf_like(n)]
-    return {"count": len(items), "items": items[:100]}
