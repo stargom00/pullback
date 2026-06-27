@@ -242,7 +242,22 @@ def fetch_index(code: str) -> dict | None:
 import time as _time
 
 _QUANT_URL = "https://finance.naver.com/sise/sise_quant.naver"
-_ITEM_RE = re.compile(r'/item/main\.naver\?code=(\d{6})"[^>]*>([^<]+)</a>')
+# code=XXXXXX 뒤 속성이 어떻든(따옴표·class 등) 종목명 텍스트까지 잡음
+_ITEM_RE = re.compile(r'code=(\d{6})[^>]*>\s*([^<]+?)\s*</a>')
+
+# ETF/ETN/인버스/레버리지 등 — 개별주가 아니라 제외 (미너비니/오닐 대상 아님)
+_ETF_KEYWORDS = (
+    "KODEX", "TIGER", "KBSTAR", "ARIRANG", "KINDEX", "HANARO", "KOSEF",
+    "SOL ", "ACE ", "PLUS ", "TIMEFOLIO", "RISE ", "WOORI ", "히어로즈",
+    "인버스", "레버리지", "선물", "ETN", "2X", "곱버스", "채권", "국고채",
+    "달러", "금현물", "원유", "배당", "리츠",
+)
+
+
+def _is_etf_like(name: str) -> bool:
+    """ETF/ETN/인버스/레버리지 등 개별주가 아닌 종목 판별."""
+    up = name.upper()
+    return any(k.upper() in up for k in _ETF_KEYWORDS)
 
 
 def _parse_quant_page(html: str) -> list:
@@ -257,13 +272,19 @@ def _parse_quant_page(html: str) -> list:
     return results
 
 
-def fetch_top_value(top_n: int = 800) -> dict:
+def fetch_top_value(top_n: int = 800, include_etf: bool = False) -> dict:
     """코스피+코스닥 거래대금 상위 종목을 {코드.KS/.KQ: 이름}으로.
     네이버 거래대금 상위 페이지를 페이지네이션으로 긁는다. KRX 인증 불필요.
-    실패 시 빈 dict (호출부에서 정적 폴백)."""
+    기본적으로 ETF/ETN/인버스/레버리지는 제외(개별주만). 실패 시 빈 dict."""
     out = {}
+    skipped_etf = 0
     for sosok, suffix in ((0, ".KS"), (1, ".KQ")):
-        for page in range(1, 15):  # 페이지당 ~50종목, 최대 14페이지(~700)
+        empty_streak = 0
+        for page in range(1, 26):  # 페이지당 ~50종목, 최대 25페이지(~1250/시장)
+            # 시장당 목표치 채우면 중단 (top_n 절반씩 분배 + 여유)
+            mkt_count = sum(1 for k in out if k.endswith(suffix))
+            if mkt_count >= top_n:  # 넉넉히 받고 마지막에 자름
+                break
             try:
                 resp = requests.get(
                     _QUANT_URL,
@@ -275,16 +296,21 @@ def fetch_top_value(top_n: int = 800) -> dict:
                 resp.encoding = "euc-kr"  # 네이버 sise는 EUC-KR 인코딩
                 rows = _parse_quant_page(resp.text)
                 if not rows:
-                    break
+                    empty_streak += 1
+                    if empty_streak >= 2:  # 빈 페이지 2연속이면 끝
+                        break
+                    continue
+                empty_streak = 0
                 added = 0
                 for code, name in rows:
+                    if not include_etf and _is_etf_like(name):
+                        skipped_etf += 1
+                        continue
                     key = f"{code}{suffix}"
                     if key not in out:
                         out[key] = name
                         added += 1
-                if added == 0:  # 새 종목 없으면 마지막 페이지
-                    break
-                _time.sleep(0.15)
+                _time.sleep(0.12)
             except (requests.RequestException, ValueError):
                 break
     if len(out) > top_n:
