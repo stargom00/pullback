@@ -246,11 +246,22 @@ _QUANT_URL = "https://finance.naver.com/sise/sise_quant.naver"
 _ITEM_RE = re.compile(r'code=(\d{6})[^>]*>\s*([^<]+?)\s*</a>')
 
 # ETF/ETN/인버스/레버리지 등 — 개별주가 아니라 제외 (미너비니/오닐 대상 아님)
+# ETF/ETN 전용 브랜드 접두어 (개별주명과 안 겹치는 것만).
+# 주의: "삼성","미래에셋","신한","한국투자" 같은 그룹명 단독은 넣지 말 것
+# — 삼성전자/미래에셋증권/신한지주 등 진짜 개별주가 오탐됨.
 _ETF_KEYWORDS = (
+    # 운용사 ETF 브랜드명 (개별 종목명에 안 쓰이는 고유 브랜드)
     "KODEX", "TIGER", "KBSTAR", "ARIRANG", "KINDEX", "HANARO", "KOSEF",
-    "SOL ", "ACE ", "PLUS ", "TIMEFOLIO", "RISE ", "WOORI ", "히어로즈",
-    "인버스", "레버리지", "선물", "ETN", "2X", "곱버스", "채권", "국고채",
-    "달러", "금현물", "원유", "배당", "리츠",
+    "TIMEFOLIO", "히어로즈", "KIWOOM", "마이다스", "KCGI", "FOCUS",
+    "TREX", "에셋플러스", "삼성액티브", "삼성KODEX", "1Q ", "FnGuide",
+    # 브랜드 + 공백 형태로만 (단독 단어 오탐 방지)
+    "SOL ", "ACE ", "PLUS ", "RISE ", "WOORI ", "마이티 ", "파워 ",
+    # ETF/ETN 상품 유형 키워드 (개별주명에 거의 안 나옴)
+    "인버스", "레버리지", "곱버스", "ETN", "ETF",
+    "선물", "2X", "3X", "국고채", "통안채", "커버드콜",
+    "맥쿼리인프라", "리츠", "REITS", "TIGERETF",
+    # 지수 추종형 (개별주명엔 안 나오는 조합)
+    "200선물", "코스피200", "코스닥150",
 )
 
 
@@ -362,3 +373,10 @@ def fetch_top_marketcap(per_market_pages: int = 20) -> dict:
             except (requests.RequestException, ValueError):
                 break
     return out
+
+
+def list_etf_like(universe: dict) -> dict:
+    """유니버스에서 ETF로 판별되는 종목 목록 반환 (진단용).
+    {count, items:[(ticker, name), ...]}"""
+    items = [(t, n) for t, n in universe.items() if _is_etf_like(n)]
+    return {"count": len(items), "items": items[:100]}

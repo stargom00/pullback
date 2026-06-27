@@ -545,7 +545,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.39.3"
+VERSION = "v4.39.4"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -1426,6 +1426,18 @@ def _index_regime(code: str) -> dict | None:
                 "dist_days": dist_days, "ftd": ftd}
     except Exception:
         return None
+
+
+@app.get("/api/etfcheck")
+async def etf_check(market: str = "all"):
+    """현재 유니버스에 남아있는 ETF 의심 종목 수와 목록 (진단).
+    예: /api/etfcheck → {count, items:[[ticker,name],...]}"""
+    import naver_kr
+    bundle = await _fetch_market_data(market)
+    univ = bundle["universe"]
+    # KR 종목만 대상 (US는 별도 처리)
+    kr_univ = {t: n for t, n in univ.items() if t.endswith((".KS", ".KQ"))}
+    return JSONResponse(naver_kr.list_etf_like(kr_univ))
 
 
 @app.get("/api/krstatus")
