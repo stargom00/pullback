@@ -545,7 +545,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.39.6"
+VERSION = "v4.39.7"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -933,11 +933,11 @@ async def scan(market: str = "all", mode: str = "imminent", refresh: bool = Fals
         daykey = _market_session_key(market)
         fresh = (cached.get("daykey") == daykey) if daykey else (time.time() - cached["ts"] < CACHE_TTL)
         if fresh:
-            return JSONResponse({**cached, "favorites": favs, "cached": True})
+            return JSONResponse(_clean_nan({**cached, "favorites": favs, "cached": True}))
     result = await run_scan(market, mode)
     result["daykey"] = _market_session_key(market)
     _cache[key] = result
-    return JSONResponse({**result, "favorites": favs, "cached": False})
+    return JSONResponse(_clean_nan({**result, "favorites": favs, "cached": False}))
 
 
 _inverse_cache: dict = {}
@@ -952,7 +952,7 @@ async def inverse_scan(market: str = "all", refresh: bool = False):
     key = f"inv:{market}"
     cached = _inverse_cache.get(key)
     if cached and not refresh and time.time() - cached["ts"] < CACHE_TTL:
-        return JSONResponse({**cached, "cached": True})
+        return JSONResponse(_clean_nan({**cached, "cached": True}))
 
     inv = inverse_universe(market)
     us_tickers = [t for t, m in inv.items() if m["market"] == "US"]
@@ -1074,7 +1074,7 @@ async def inverse_scan(market: str = "all", refresh: bool = False):
         "ts": time.time(),
     }
     _inverse_cache[key] = result
-    return JSONResponse({**result, "cached": False})
+    return JSONResponse(_clean_nan({**result, "cached": False}))
 
 
 # ── 마감 후 자동 스캔 스케줄러 ──
@@ -1436,6 +1436,19 @@ async def kr_status():
     return JSONResponse(kr_dynamic_status())
 
 
+def _clean_nan(obj):
+    """JSON 직렬화 전 NaN/Inf를 None으로 치환 (휴장일 등 빈 데이터 대비).
+    재귀적으로 dict/list 내부까지 정리한다."""
+    import math
+    if isinstance(obj, float):
+        return None if (math.isnan(obj) or math.isinf(obj)) else obj
+    if isinstance(obj, dict):
+        return {k: _clean_nan(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_clean_nan(v) for v in obj]
+    return obj
+
+
 @app.get("/api/indices")
 async def indices():
     """상단 지수 바: 코스피/코스닥/나스닥/닛케이/비트코인. 60초 캐시."""
@@ -1476,6 +1489,7 @@ async def _indices_impl():
     if isinstance(nasdaq, dict) and isinstance(r_nasdaq, dict): nasdaq.update(r_nasdaq)
     # 순서: 코스피, 코스닥, 나스닥, 닛케이, 비트코인 (국내 → 해외 → 코인)
     data = {"indices": [x for x in (kospi, kosdaq, nasdaq, nikkei, btc) if isinstance(x, dict)]}
+    data = _clean_nan(data)   # NaN/Inf 제거 (휴장일 빈 데이터로 인한 JSON 직렬화 실패 방지)
     _indices_cache["ts"] = now
     _indices_cache["data"] = data
     return JSONResponse(data)
