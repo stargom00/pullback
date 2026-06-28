@@ -550,8 +550,10 @@ def select_pivot(h, lo, c, close, recent_high_window: int, is_kr: bool = False):
     return pivot, ptype, tl_break, tl_break_intraday
 
 
-def ud_volume_ratio(c: pd.Series, v: pd.Series, days: int = 10) -> float:
-    """상승일 거래량 합 / 하락일 거래량 합 (최근 N일). 1보다 크면 매집 우위."""
+def ud_volume_ratio(c: pd.Series, v: pd.Series, days: int = 50) -> float:
+    """상승일 거래량 합 / 하락일 거래량 합 (최근 N일). 1보다 크면 매집 우위.
+    days=50: IBD/MarketSmith/트레이딩뷰 표준 (U/D Volume Ratio).
+    기관 매집은 수개월에 걸쳐 일어나므로 10일은 노이즈가 커 50일이 정석."""
     ret = c.diff().iloc[-days:]
     vv = v.iloc[-days:]
     up = float(vv[ret > 0].sum())
@@ -1035,6 +1037,15 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
     score += 10 * max(0.0, 1 - bot_ago / cfg["recent_bottom_max"])             # 바닥 최근성
     if base_info["corrections"] == 0:
         score += 5                                                             # 조정 0회(가장 이른 첫 베이스) 보너스
+    # U/D Volume: 매집 확증. 전환이면 1↑이 정상(오를 때 거래량↑).
+    # 1 미만이면 분산 우세 = 매집 미확증 → 감점 + 경고.
+    if ud is not None:
+        if ud >= 1.0:
+            score += 10 * min((ud - 1.0) / 1.0, 1.0)        # U/D 1~2: 매집 강도 가점
+        else:
+            score -= 12 * (1.0 - ud)                         # U/D<1: 분산 우세 감점(최대 -12)
+    ud_weak = (ud is not None and ud < 1.0)                  # 매집 미확증 경고 플래그
+    score = max(0.0, score)
 
     prev_close = float(c.iloc[-2])
     change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
@@ -1072,6 +1083,7 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
         "tl_break": tl_break,
         "tl_break_intraday": tl_break_intraday,
         "ud": ud,
+        "ud_weak": ud_weak,
         "pivot_dist_pct": round(pivot_dist_pct, 2),
         **_rr_block(pivot, stop, h, lo, c,
                     base_low=float(lo.iloc[-30:].min()),

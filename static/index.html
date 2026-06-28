@@ -243,7 +243,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.41.1</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.41.3</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -613,7 +613,8 @@ function card(s) {
       <div class="metric"><div class="k">돌파일 거래량</div><div class="v" style="color:${s.breakout_vol ? 'var(--up)' : 'inherit'}">${s.vol_mult_5d}× ${s.breakout_vol ? '🚀' : ''}</div></div>
       <div class="metric"><div class="k">거래량비</div><div class="v">${s.vol_ratio}× <span style="color:${s.ud >= 1 ? 'var(--green)' : 'var(--up)'};font-size:11px">U/D ${s.ud}</span></div></div>
       <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
-    </div>` : `
+    </div>
+    ${s.ud_weak ? `<div style="margin:8px 0;padding:8px 10px;border:1px solid #c0392b;border-radius:8px;background:#2a1414;color:#ff9b9b;font-size:12px;line-height:1.5">⚠️ <b>매집 미확증</b> — U/D ${s.ud} (1 미만). 하락일 거래량이 상승일보다 많아 <b>아직 분산 우세</b>입니다. 가격은 전환 신호를 냈지만 기관 매집이 확인되지 않았어요. U/D가 1을 넘고 거래량 동반 돌파가 나올 때까지 <b>관찰 권장</b>.</div>` : ''}` : `
     <div class="metrics mono">
       <div class="metric"><div class="k">눌림 깊이</div><div class="v">-${s.pullback_pct}%</div></div>
       <div class="metric"><div class="k">지지선</div><div class="v">${s.support_ma} <span style="color:var(--muted);font-size:11px">${s.ma_dist_pct}%</span></div></div>
