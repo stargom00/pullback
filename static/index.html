@@ -244,7 +244,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.42.2</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.42.3</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1098,7 +1098,38 @@ function tvUrl(ticker, market) {
   return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(ticker)}`;
 }
 
-async function updateTracking() {
+// 수동 현재가 갱신: 추적을 즉시 돌리고 성공/실패를 사용자에게 알림.
+// "추적대기"가 안 풀릴 때 원인 진단용.
+async function refreshPrices() {
+  const j = getJournal();
+  const active = j.filter(r => r.result_r === '' && r.status !== 'missed'
+                            && r.entry && r.stop
+                            && (r.tracking || r.status === 'pending' || r.status === 'entered'));
+  if (active.length === 0) { alert('추적할 진입/대기 종목이 없어요.'); return; }
+  let prices = {};
+  let errMsg = '';
+  try {
+    const res = await fetch('/api/prices', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ tickers: active.map(r => r.ticker) })
+    });
+    if (!res.ok) { errMsg = `서버 응답 오류 (${res.status})`; }
+    else { prices = (await res.json()).prices || {}; }
+  } catch(e) { errMsg = '네트워크 오류: ' + e.message; }
+
+  if (errMsg) { alert('현재가 갱신 실패\n' + errMsg); return; }
+
+  const got = Object.keys(prices).length;
+  const missing = active.filter(r => prices[r.ticker] == null).map(r => r.name);
+  // 가격 반영 (updateTracking과 동일 로직 재사용)
+  await updateTracking(prices);
+
+  let msg = `현재가 갱신 완료\n성공: ${got}개`;
+  if (missing.length) msg += `\n실패(가격 못 가져옴): ${missing.join(', ')}`;
+  alert(msg);
+}
+
+async function updateTracking(prefetched) {
   const j = getJournal();
   // 추적 대상: 미종료 + entry/stop 있음. 진입(entered)·대기(pending) 모두 가격 갱신.
   // status==='missed'만 제외. (과거에 tracking 플래그가 꺼진 진입 종목도 포함되게 보강)
@@ -1106,14 +1137,16 @@ async function updateTracking() {
                             && r.entry && r.stop
                             && (r.tracking || r.status === 'pending' || r.status === 'entered'));
   if (active.length === 0) return;
-  let prices = {};
-  try {
-    const res = await fetch('/api/prices', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ tickers: active.map(r => r.ticker) })
-    });
-    prices = (await res.json()).prices || {};
-  } catch(e) { return; }
+  let prices = prefetched || {};
+  if (!prefetched) {
+    try {
+      const res = await fetch('/api/prices', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ tickers: active.map(r => r.ticker) })
+      });
+      prices = (await res.json()).prices || {};
+    } catch(e) { return; }
+  }
 
   const today = new Date();
   let changed = false;
@@ -1485,6 +1518,7 @@ function renderJournal() {
 
   wrap.innerHTML = `
     <div class="jrnl-tools">
+      <button class="exp" onclick="refreshPrices()" style="background:#1e3a4a;border-color:#2d6a8c;color:#9fd4ff">🔄 현재가 갱신</button>
       <button class="exp" onclick="openManualAdd()" style="background:#2d6a4a;border-color:#40916c;color:#fff">➕ 수동 추가</button>
       <button class="exp" onclick="exportCSV()">⬇ CSV 내보내기</button>
       <button onclick="if(confirm('일지를 모두 지울까요? 되돌릴 수 없어요.')){setJournal([]);renderJournal();}">전체 삭제</button>
