@@ -1045,7 +1045,8 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
         else:
             score -= 12 * (1.0 - ud)                         # U/D<1: 분산 우세 감점(최대 -12)
     ud_weak = (ud is not None and ud < 1.0)                  # 매집 미확증 경고 플래그
-    score = max(0.0, score)
+    # 배점 총합이 125(25+20+10+10+10+15+10+10+5+10)라 100점 만점으로 정규화
+    score = max(0.0, min(100.0, score * (100.0 / 125.0)))
 
     prev_close = float(c.iloc[-2])
     change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
