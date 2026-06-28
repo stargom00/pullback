@@ -843,6 +843,70 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
 
 
 # ══════════════════════════════════════════════════════
+# 베이스 카운팅: "추세 전환 후 첫 번째 베이스"인지 판별
+# (O'Neil base-count: 1·2차는 확률↑, 3·4차는 실패율↑)
+# ══════════════════════════════════════════════════════
+def count_bases_since_bottom(c, lo, h,
+                             low_lookback: int = 250,
+                             recent_bottom_max: int = 126,
+                             correction_min: float = 0.15):
+    """52주 신저가(바닥) 이후 형성된 '베이스(의미있는 조정)' 개수를 센다.
+    반환: {bottom_ago, bottom_recent, corrections, is_first_base}
+
+    - bottom_ago: 최저점이 몇 봉 전인가
+    - bottom_recent: 최저점이 recent_bottom_max(기본 126봉≈6개월) 이내인가
+    - corrections: 바닥 이후 '15%+ 하락 후 반등' 횟수 (베이스 카운트 근사)
+    - is_first_base: (바닥 최근) AND (조정 1회 이하) → 1차 베이스 후보
+
+    조정 카운트 방식: 바닥 이후 구간에서 직전 고점 대비 correction_min(15%)
+    이상 하락했다가 다시 그 고점을 회복(또는 신고가)하면 '베이스 1개 완성'으로 간주.
+    러닝 피크를 추적하며, 피크에서 15%+ 빠진 골을 만든 뒤 새 피크가 나오면 +1."""
+    import math as _m
+    n = len(c)
+    if n < 60:
+        return {"bottom_ago": 0, "bottom_recent": False,
+                "corrections": 99, "is_first_base": False}
+
+    win = min(low_lookback, n)
+    closes = [float(x) for x in c.iloc[-win:].tolist()]
+    lows = [float(x) for x in lo.iloc[-win:].tolist()]
+
+    # 1) 최저점 위치 (저가 기준)
+    bottom_idx = min(range(len(lows)), key=lambda i: lows[i])
+    bottom_ago = len(lows) - 1 - bottom_idx
+    bottom_recent = bottom_ago <= recent_bottom_max
+
+    # 2) 바닥 이후 구간에서 조정(베이스) 카운트
+    seg = closes[bottom_idx:]
+    corrections = 0
+    if len(seg) >= 3:
+        peak = seg[0]
+        in_correction = False
+        trough = peak
+        for px in seg[1:]:
+            if px > peak:
+                # 새 고점 회복 → 직전에 의미있는 조정이 있었으면 베이스 1개 완성
+                if in_correction and peak > 0 and (peak - trough) / peak >= correction_min:
+                    corrections += 1
+                peak = px
+                trough = px
+                in_correction = False
+            else:
+                if px < trough:
+                    trough = px
+                if peak > 0 and (peak - px) / peak >= correction_min:
+                    in_correction = True
+
+    is_first_base = bottom_recent and corrections <= 1
+    return {
+        "bottom_ago": bottom_ago,
+        "bottom_recent": bottom_recent,
+        "corrections": corrections,
+        "is_first_base": is_first_base,
+    }
+
+
+# ══════════════════════════════════════════════════════
 # 추세 전환 스캔: 역배열 → 정배열 첫 형성 (최근 1개월 내)
 # ══════════════════════════════════════════════════════
 TURN_CONFIG = {
@@ -854,6 +918,11 @@ TURN_CONFIG = {
     "ma200_slope_lookback": 20,   # 200일선 기울기 판정 구간(봉)
     "ma200_rising_min": 0.0,      # 200일선이 N봉 전보다 높아야(바닥 상향전환)
     "breakout_vol_mult": 1.5,     # 돌파일 거래량이 50일 평균의 N배↑ = 진짜 돌파
+    # ── 베이스 카운팅: 추세전환 후 '첫 번째 베이스'만 통과 ──
+    "first_base_only": True,      # True면 1차 베이스가 아닌 종목 제외
+    "low_lookback": 250,          # 신저가(바닥) 탐색 구간(봉, ≈52주)
+    "recent_bottom_max": 126,     # 바닥이 이 봉수 이내여야 '최근 전환'(≈6개월)
+    "correction_min": 0.15,       # 베이스 1개로 칠 최소 조정폭(15%)
 }
 
 
@@ -915,6 +984,17 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
     if not ma200_rising:
         return None  # 장기선이 아직 안 들렸으면 1단계 미졸업 → 전환 아님
 
+    # ── 베이스 카운팅: 추세 전환 후 '첫 번째 베이스'인지 판별 ──
+    # 신저가 최근성 + 조정 1회 이하 = 1차 베이스 (3·4차 late-stage 제외)
+    base_info = count_bases_since_bottom(
+        c, lo, h,
+        low_lookback=cfg["low_lookback"],
+        recent_bottom_max=cfg["recent_bottom_max"],
+        correction_min=cfg["correction_min"],
+    )
+    if cfg.get("first_base_only", True) and not base_info["is_first_base"]:
+        return None  # 1차 베이스가 아니면(2·3·4차) 제외
+
     # 거래량: 전환 구간(최근 10일)이 평소(50일)보다 늘었는가 (확장이 좋음)
     vol10 = float(v.iloc[-10:].mean())
     vol50 = float(v.iloc[-50:].mean())
@@ -950,6 +1030,11 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
     score += 15 * min(vol_mult_5d / 3.0, 1.0)                                   # 돌파일 거래량 폭증
     if breakout_vol:
         score += 10                                                            # 진짜 돌파 보너스
+    # 바닥 신선도: 최근에 바닥 친 1차 베이스일수록 가점 (전환 초기 = 확률↑)
+    bot_ago = base_info["bottom_ago"]
+    score += 10 * max(0.0, 1 - bot_ago / cfg["recent_bottom_max"])             # 바닥 최근성
+    if base_info["corrections"] == 0:
+        score += 5                                                             # 조정 0회(가장 이른 첫 베이스) 보너스
 
     prev_close = float(c.iloc[-2])
     change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
@@ -974,6 +1059,9 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
         "ma200_dist_pct": round(ma200_dist * 100, 1),
         "ma200_rising": ma200_rising,
         "breakout_vol": breakout_vol,
+        "base_count": base_info["corrections"] + 1,   # 현재 진행 중인 베이스 차수(1차=1)
+        "bottom_ago": base_info["bottom_ago"],
+        "is_first_base": base_info["is_first_base"],
         "vol_mult_today": round(vol_mult_today, 1),
         "vol_mult_5d": round(vol_mult_5d, 1),
         "vol_ratio": round(vol_ratio, 2),
