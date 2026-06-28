@@ -244,7 +244,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.42.3</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.42.4</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1584,7 +1584,7 @@ function viewRow(r) {
       r.result_r
         ? `${r.result_r}R${r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:''}`
         : st === 'pending'
-            ? `<span style="color:var(--amber);font-size:11px">피벗 대기</span><div style="font-size:9px;color:var(--muted)">${r.last_price?'현재 '+r.last_price:'미진입'}</div>`
+            ? `<span style="color:var(--amber);font-size:11px">피벗 대기</span><div style="font-size:9px;color:var(--muted)">${r.last_price?'현재 '+(/\.(KS|KQ)$/i.test(r.ticker||'')?Math.round(parseFloat(r.last_price)).toLocaleString():parseFloat(r.last_price).toFixed(2)):'미진입'}</div>`
         : st === 'missed'
             ? `<span style="color:var(--muted);font-size:11px">무산</span>${r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:''}`
         : (r.tracking && r.last_price && r.entry && r.stop
@@ -1592,8 +1592,12 @@ function viewRow(r) {
                 const liveR = (parseFloat(r.last_price) - parseFloat(r.entry)) / (parseFloat(r.entry) - parseFloat(r.stop));
                 const dheld = Math.floor((Date.now() - new Date(r.date)) / 86400000);
                 const col = liveR >= 0 ? 'var(--up)' : 'var(--down)';
+                // 현재가 포맷: 한국주는 정수+콤마, 미국주는 소수점 2자리 (부동소수점 오차 제거)
+                const isKr = /\.(KS|KQ)$/i.test(r.ticker || '');
+                const px = parseFloat(r.last_price);
+                const pxStr = isKr ? Math.round(px).toLocaleString() : px.toFixed(2);
                 return `<span style="color:${col};font-weight:600">${liveR>=0?'+':''}${liveR.toFixed(1)}R</span>`
-                     + `<div style="font-size:9px;color:var(--muted)">현재 ${r.last_price} · D+${dheld}</div>`;
+                     + `<div style="font-size:9px;color:var(--muted)">현재 ${pxStr} · D+${dheld}</div>`;
               })()
             : `<span style="color:var(--muted);font-size:11px">추적대기</span><div style="font-size:9px;color:var(--muted)">${r.entry?'앱 새로고침 시 갱신':''}</div>`)
     }</td>
