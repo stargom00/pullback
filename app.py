@@ -545,7 +545,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.42.4"
+VERSION = "v4.42.5"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -1237,6 +1237,76 @@ async def debug_raw(ticker: str):
     except Exception as e:
         out["merged_error"] = str(e)
     return JSONResponse(out)
+
+
+@app.get("/api/lookup/{ticker}")
+async def lookup_ticker(ticker: str):
+    """검색 전용: 종목이 어느 탭 조건에 안 맞아도 핵심 지표를 반환.
+    프론트 검색에서 현재 탭 결과에 없을 때 이걸로 종목 데이터를 조회.
+    예: /api/lookup/BIIB"""
+    ticker = ticker.strip().upper()
+    _uni = get_universe(None)
+    # 숫자코드만 입력 시 한국 접미사 자동 매칭
+    if ticker not in _uni:
+        for suf in (".KS", ".KQ"):
+            if (ticker + suf) in _uni:
+                ticker = ticker + suf
+                break
+    name = _uni.get(ticker, ticker)
+    df = await asyncio.get_event_loop().run_in_executor(_executor, _fetch, ticker)
+    if df is None or df.empty or len(df) < 60:
+        return JSONResponse({"error": "데이터 없음 또는 부족", "ticker": ticker, "name": name})
+
+    is_kr = ticker.endswith((".KS", ".KQ"))
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+    close = float(c.iloc[-1])
+    prev = float(c.iloc[-2]) if len(c) >= 2 else close
+    change_pct = round((close / prev - 1) * 100, 2) if prev > 0 else 0.0
+
+    ma20 = float(c.rolling(20).mean().iloc[-1])
+    ma60 = float(c.rolling(60).mean().iloc[-1])
+    ma200 = float(c.rolling(200).mean().iloc[-1]) if len(c) >= 200 else None
+    ma200_dist = round((close / ma200 - 1) * 100, 1) if ma200 else None
+
+    # 정배열 여부
+    aligned = bool((close > ma20 > ma60) and (ma200 is None or ma60 > ma200))
+    # 거래량
+    vol_today = float(v.iloc[-1])
+    vol_avg50 = float(v.iloc[-51:-1].mean()) if len(v) >= 51 else float(v.mean())
+    vol_mult = round(vol_today / vol_avg50, 2) if vol_avg50 > 0 else None
+    turnover = round(close * vol_today)
+    # RSI(14)
+    delta = c.diff()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = (-delta.clip(upper=0)).rolling(14).mean()
+    last_loss = float(loss.iloc[-1])
+    if last_loss == 0:
+        rsi = 100.0
+    else:
+        rsi = float((100 - 100 / (1 + gain / loss)).iloc[-1])
+    # U/D Volume (50일)
+    from scanner import ud_volume_ratio
+    ud = ud_volume_ratio(c, v)
+
+    # 52주 고저 대비 위치
+    hi52 = float(c.iloc[-252:].max()) if len(c) >= 252 else float(c.max())
+    lo52 = float(c.iloc[-252:].min()) if len(c) >= 252 else float(c.min())
+    from_high = round((close / hi52 - 1) * 100, 1) if hi52 > 0 else None
+    from_low = round((close / lo52 - 1) * 100, 1) if lo52 > 0 else None
+
+    payload = {
+        "ticker": ticker, "name": name,
+        "market": "KR" if is_kr else "US",
+        "close": close, "change_pct": change_pct,
+        "ma20": round(ma20), "ma60": round(ma60),
+        "ma200": round(ma200) if ma200 else None,
+        "ma200_dist": ma200_dist,
+        "aligned": aligned,
+        "vol_mult": vol_mult, "turnover": turnover,
+        "rsi": round(rsi, 1), "ud": ud,
+        "from_high": from_high, "from_low": from_low,
+    }
+    return JSONResponse(payload)
 
 
 @app.get("/api/debug/{ticker}")
