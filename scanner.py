@@ -848,8 +848,8 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
 # ══════════════════════════════════════════════════════
 def count_bases_since_bottom(c, lo, h,
                              low_lookback: int = 250,
-                             recent_bottom_max: int = 126,
-                             correction_min: float = 0.15):
+                             recent_bottom_max: int = 200,
+                             correction_min: float = 0.18):
     """52주 신저가(바닥) 이후 형성된 '베이스(의미있는 조정)' 개수를 센다.
     반환: {bottom_ago, bottom_recent, corrections, is_first_base}
 
@@ -911,18 +911,18 @@ def count_bases_since_bottom(c, lo, h,
 # ══════════════════════════════════════════════════════
 TURN_CONFIG = {
     "min_bars": 210,
-    "align_window": 22,      # 정배열 형성이 최근 N봉 이내여야 함
-    "max_ma200_dist": 0.25,  # 200일선에서 25% 이상 떨어졌으면 이미 늦음
-    "rs_min": 80,            # 추세전환도 주도주 위주로 (기존 30→80)
+    "align_window": 40,      # 정배열 형성이 최근 N봉 이내 (22→40, 너무 빡빡했음)
+    "max_ma200_dist": 0.35,  # 200일선 거리 한계 (25→35%, 약세장에선 여유 필요)
+    "rs_min": 70,            # RS 최소 (80→70, 전환 초기는 RS가 아직 낮을 수 있음)
     # ── 1→2단계 첫 돌파 신호 ──
     "ma200_slope_lookback": 20,   # 200일선 기울기 판정 구간(봉)
-    "ma200_rising_min": 0.0,      # 200일선이 N봉 전보다 높아야(바닥 상향전환)
+    "ma200_rising_min": -0.03,    # 200일선 기울기 (0→-3%, 바닥 평탄~막 드는 구간 허용)
     "breakout_vol_mult": 1.5,     # 돌파일 거래량이 50일 평균의 N배↑ = 진짜 돌파
-    # ── 베이스 카운팅: 추세전환 후 '첫 번째 베이스'만 통과 ──
+    # ── 베이스 카운팅: 추세전환 후 '첫 번째 베이스'만 통과 (핵심, 유지) ──
     "first_base_only": True,      # True면 1차 베이스가 아닌 종목 제외
     "low_lookback": 250,          # 신저가(바닥) 탐색 구간(봉, ≈52주)
-    "recent_bottom_max": 126,     # 바닥이 이 봉수 이내여야 '최근 전환'(≈6개월)
-    "correction_min": 0.15,       # 베이스 1개로 칠 최소 조정폭(15%)
+    "recent_bottom_max": 200,     # 바닥 최근성 (126→200봉≈10개월, 너무 빡빡했음)
+    "correction_min": 0.18,       # 베이스 1개로 칠 최소 조정폭 (15→18%, 작은 출렁임은 베이스로 안 셈)
 }
 
 
