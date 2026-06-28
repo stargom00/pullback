@@ -244,7 +244,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.41.5</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.41.6</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -609,7 +609,7 @@ function card(s) {
     </div>` : s.mode === 'turnaround' ? `
     <div class="metrics mono">
       <div class="metric"><div class="k">정배열</div><div class="v">D+${s.align_days}${s.ma200_rising ? ' <span style="color:var(--green);font-size:11px">📈장기선↑</span>' : ''}</div></div>
-      <div class="metric"><div class="k">베이스 차수</div><div class="v" style="color:${s.base_count === 1 ? 'var(--green)' : 'inherit'}">${s.base_count === 1 ? '⭐단독(최선)' : s.base_count === 2 ? '2차' : (s.base_count || '-') + '차'}${s.bottom_ago != null ? ` <span style="font-size:11px;opacity:.7">바닥${s.bottom_ago}봉전</span>` : ''}</div></div>
+      <div class="metric"><div class="k">베이스 차수</div><div class="v" style="color:${s.base_count === 1 ? 'var(--green)' : 'inherit'}">${s.base_count === 1 ? '최초기' : (s.base_count || '-') + '차'}${s.bottom_ago != null ? ` <span style="font-size:11px;opacity:.7">바닥${s.bottom_ago}봉전</span>` : ''}</div></div>
       <div class="metric"><div class="k">200일선 위</div><div class="v">+${s.ma200_dist_pct}%</div></div>
       <div class="metric"><div class="k">돌파일 거래량</div><div class="v" style="color:${s.breakout_vol ? 'var(--up)' : 'inherit'}">${s.vol_mult_5d}× ${s.breakout_vol ? '🚀' : ''}</div></div>
       <div class="metric"><div class="k">거래량비</div><div class="v">${s.vol_ratio}× <span style="color:${s.ud >= 1 ? 'var(--green)' : 'var(--up)'};font-size:11px">U/D ${s.ud}</span></div></div>
