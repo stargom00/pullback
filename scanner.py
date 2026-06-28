@@ -122,8 +122,8 @@ def merger_warning(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series) -> d
 
     # ── 3) 횡보 직전 점프 흔적 (발표 충격) ──
     # 횡보 구간(최근 20봉) 직전, 과거 60~120봉 사이에서 거래량 폭발+급등 탐색
-    seg_v = v.iloc[-120:-20]
-    seg_c = c.iloc[-120:-20]
+    seg_v = v.iloc[-120:-5]
+    seg_c = c.iloc[-120:-5]
     jumped = False
     if len(seg_v) >= 20 and len(seg_c) >= 20:
         vmean = float(v.iloc[-120:].mean())
@@ -878,6 +878,20 @@ def count_bases_since_bottom(c, lo, h,
     bottom_ago = len(lows) - 1 - bottom_idx
     bottom_recent = bottom_ago <= recent_bottom_max
 
+    # 1-b) '진짜 바닥' 검증: 바닥 이전에 의미있는 하락이 있었는가.
+    # 장기 상승 종목(URI 등)이 잠깐 눌린 저점을 '바닥'으로 오인하는 것 방지.
+    # 바닥 시점 저가가 그 이전 구간 최고가 대비 prior_drop_min(25%)+ 낮아야 진짜 바닥.
+    prior_drop_min = 0.25
+    bottom_low = lows[bottom_idx]
+    pre_seg = closes[:bottom_idx] if bottom_idx > 0 else []
+    if pre_seg:
+        pre_peak = max(pre_seg)
+        prior_drop = (pre_peak - bottom_low) / pre_peak if pre_peak > 0 else 0.0
+        real_bottom = prior_drop >= prior_drop_min   # 바닥 전 25%+ 하락 = 진짜 역배열 바닥
+    else:
+        # 바닥이 데이터 맨 앞 = 그 이전 하락을 못 봄 → 보수적으로 진짜 바닥 아님 처리
+        real_bottom = False
+
     # 2) 바닥 이후 구간에서 조정(베이스) 카운트
     seg = closes[bottom_idx:]
     corrections = 0
@@ -899,11 +913,12 @@ def count_bases_since_bottom(c, lo, h,
                 if peak > 0 and (peak - px) / peak >= correction_min:
                     in_correction = True
 
-    is_first_base = bottom_recent and corrections <= 1
+    is_first_base = bottom_recent and corrections <= 1 and real_bottom
     return {
         "bottom_ago": bottom_ago,
         "bottom_recent": bottom_recent,
         "corrections": corrections,
+        "real_bottom": real_bottom,
         "is_first_base": is_first_base,
     }
 
