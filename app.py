@@ -799,6 +799,7 @@ async def _fetch_market_data(market: str) -> dict:
     data: dict = dict(reused)   # 재사용분으로 시작, 아래에서 새 종목만 채움
 
     # ── 한국: 네이버 개별 호출 (배치 API 없음), 동시성 제한 ──
+    _t_kr = time.time()
     if kr_tickers:
         sem = asyncio.Semaphore(KR_MAX_CONCURRENT)
 
@@ -810,8 +811,10 @@ async def _fetch_market_data(market: str) -> dict:
         for t, df in zip(kr_tickers, kr_dfs):
             if df is not None:
                 data[t] = df
+    _dur_kr = time.time() - _t_kr
 
     # ── 미국: yf.download 배치 (100개씩) → 요청 수 1/100로 축소 ──
+    _t_us = time.time()
     if us_tickers:
         batches = [us_tickers[i:i + US_BATCH_SIZE]
                    for i in range(0, len(us_tickers), US_BATCH_SIZE)]
@@ -825,8 +828,10 @@ async def _fetch_market_data(market: str) -> dict:
             results = await asyncio.gather(*[fetch_us_batch(b) for b in chunk])
             for r in results:
                 data.update(r)
+    _dur_us = time.time() - _t_us
 
     # ── RS 등급: "지수 대비 초과성과" 기반 ──
+    _t_rs = time.time()
     # 각 종목 raw score에서 해당 시장 지수의 raw score를 빼서 universe 편향 제거.
     # (지수를 이긴 정도 → 백분위). 지수 fetch는 블로킹이라 executor에서.
     bench = await loop.run_in_executor(_executor, _benchmark_rs_scores)
@@ -853,6 +858,20 @@ async def _fetch_market_data(market: str) -> dict:
     rank3 = {**to_rs_rank(kr3), **to_rs_rank(us3)}
     rank12 = {**to_rs_rank(kr12), **to_rs_rank(us12)}
     rs_moms = {t: rank3[t] - rank12[t] for t in data if t in rank3 and t in rank12}
+    _dur_rs = time.time() - _t_rs
+
+    # ── 속도 진단 로그 — 어느 단계가 느린지 Railway 로그로 확인 ──
+    _timing = {
+        "market": market,
+        "n_total": len(tickers),
+        "n_reused": len(reused),
+        "n_fetched_kr": len(kr_tickers),
+        "n_fetched_us": len(us_tickers),
+        "kr_sec": round(_dur_kr, 1),
+        "us_sec": round(_dur_us, 1),
+        "rs_sec": round(_dur_rs, 1),
+    }
+    print(f"[TIMING] {_timing}", flush=True)
 
     bundle = {
         "universe": universe,
@@ -861,6 +880,7 @@ async def _fetch_market_data(market: str) -> dict:
         "rs_moms": rs_moms,
         "ts": time.time(),
         "daykey": daykey,
+        "timing": _timing,
     }
     _data_cache[cache_key] = bundle
     # 장 마감 후 fetch였다면 디스크에 저장 → 다음 거래일까지 재사용
@@ -876,6 +896,7 @@ async def run_scan(market: str, mode: str) -> dict:
     data = bundle["data"]
     rs_ranks = bundle["rs_ranks"]
     rs_moms = bundle["rs_moms"]
+    _scan_timing = bundle.get("timing")
 
     fn = {"turnaround": analyze_turnaround, "leader": analyze_leader, "super": analyze_super, "breakout": analyze_breakout, "surge": analyze_surge, "imminent": analyze_imminent, "boxbreak": analyze_boxbreak, "breakdown": analyze_breakdown}.get(mode, analyze)
     supports_intraday = mode in ("pullback", "turnaround", "imminent", "boxbreak", "breakout", "breakdown")  # is_kr 인자를 받는 모드
@@ -930,6 +951,7 @@ async def run_scan(market: str, mode: str) -> dict:
         "hits": hits,
         "sector_summary": sector_summary,
         "warn_count": warn_count,
+        "timing": _scan_timing,
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "ts": time.time(),
     }
