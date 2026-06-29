@@ -545,7 +545,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.42.6"
+VERSION = "v4.43.0"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
@@ -779,10 +779,24 @@ async def _fetch_market_data(market: str) -> dict:
     universe = get_universe(market)
     loop = asyncio.get_event_loop()
     tickers = list(universe.keys())
-    kr_tickers = [t for t in tickers if naver_kr.is_kr(t)]
-    us_tickers = [t for t in tickers if not naver_kr.is_kr(t)]
 
-    data: dict = {}
+    # ── 증분 다운로드(C안): 직전 캐시에 있는 종목 df는 재사용, 새로 편입된 종목만 받는다.
+    # 장중 유니버스가 30분마다 갱신될 때 전체 재다운로드를 피해 속도/비용을 아끼면서,
+    # 섹터 로테이션으로 새로 들어온 종목(거래대금 급증)은 즉시 가격을 받아 스캔에 포함.
+    prev = _data_cache.get(cache_key)
+    prev_data = (prev or {}).get("data", {}) if isinstance(prev, dict) else {}
+    reused: dict = {}
+    fetch_targets = []
+    for t in tickers:
+        if t in prev_data and prev_data[t] is not None:
+            reused[t] = prev_data[t]      # 직전 캐시 재사용 (다운로드 스킵)
+        else:
+            fetch_targets.append(t)        # 캐시에 없음 → 새로 받아야 함
+
+    kr_tickers = [t for t in fetch_targets if naver_kr.is_kr(t)]
+    us_tickers = [t for t in fetch_targets if not naver_kr.is_kr(t)]
+
+    data: dict = dict(reused)   # 재사용분으로 시작, 아래에서 새 종목만 채움
 
     # ── 한국: 네이버 개별 호출 (배치 API 없음), 동시성 제한 ──
     if kr_tickers:

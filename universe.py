@@ -33,27 +33,44 @@ print(f"[universe] 미국 확장 로드: EXT={len(US_UNIVERSE_EXT)} AUTO={len(US
 # pykrx 미설치/조회 실패 시 정적 KR_UNIVERSE로 폴백.
 _KR_DYNAMIC_CACHE: dict = {}
 KR_TOP_N = int(os.environ.get("KR_TOP_N", "800"))  # 코스피+코스닥 거래대금 상위 (600→800, 중소형 성장주 포착 확대)
+# 장중 거래대금 급증 종목 포착: 한국 장중(09:00~15:30 KST)엔 캐시를 INTRADAY_REFRESH_MIN분마다
+# 갱신해 섹터 로테이션으로 새로 거래 터지는 종목을 유니버스에 빠르게 편입. 장 외엔 하루 1회.
+INTRADAY_REFRESH_MIN = int(os.environ.get("KR_INTRADAY_REFRESH_MIN", "30"))
+
+def _kr_cache_slot() -> str:
+    """캐시 키에 붙일 시간 슬롯. 한국 장중이면 30분 단위 슬롯, 그 외엔 'eod'(하루 1회).
+    예) 장중 10:25 → '20260629_1000' (10:00~10:29 슬롯), 장 외 → '20260629_eod'."""
+    from datetime import datetime, timezone, timedelta
+    kst = datetime.now(timezone(timedelta(hours=9)))
+    daykey = kst.strftime("%Y%m%d")
+    # 평일 09:00~15:30만 장중으로 간주
+    minutes = kst.hour * 60 + kst.minute
+    is_market = (kst.weekday() < 5) and (9 * 60 <= minutes <= 15 * 60 + 30)
+    if not is_market:
+        return f"{daykey}_eod"
+    slot = (minutes // INTRADAY_REFRESH_MIN) * INTRADAY_REFRESH_MIN
+    return f"{daykey}_{slot:04d}"
 
 
 def load_kr_dynamic(top_n: int = KR_TOP_N) -> dict:
     """KRX 거래대금 상위 top_n 종목을 {티커.KS/.KQ: 이름}으로 반환.
     하루 1회만 실제 조회(파일 캐시), 실패 시 빈 dict."""
     import json
-    from datetime import datetime
-    daykey = datetime.now().strftime("%Y%m%d")
-    # 메모리 캐시
-    if _KR_DYNAMIC_CACHE.get("daykey") == daykey and _KR_DYNAMIC_CACHE.get("data"):
+    # 장중엔 30분 슬롯, 장 외엔 하루 1회로 갱신되는 캐시 키
+    slotkey = _kr_cache_slot()
+    # 메모리 캐시 (슬롯이 같을 때만 재사용 → 장중 30분마다 자동 무효화)
+    if _KR_DYNAMIC_CACHE.get("slotkey") == slotkey and _KR_DYNAMIC_CACHE.get("data"):
         return _KR_DYNAMIC_CACHE["data"]
     # 파일 캐시 (/data 우선)
     cache_dir = os.environ.get("JOURNAL_DIR") or ("/data" if os.path.isdir("/data") else os.path.dirname(__file__))
-    # 캐시 키에 top_n 포함 — KR_TOP_N이 바뀌면(600→800) 옛 캐시를 안 읽고 새로 받음
+    # 캐시 키에 top_n + 시간슬롯 포함 — 슬롯이 바뀌면 새로 받음
     # v5 = ETF 필터 재강화 (MIDAS/WON/KoAct/TIME/액티브 등 차단, v4.39.8)
-    cache_path = os.path.join(cache_dir, f"kr_universe_v5_{top_n}_{daykey}.json")
+    cache_path = os.path.join(cache_dir, f"kr_universe_v5_{top_n}_{slotkey}.json")
     if os.path.exists(cache_path):
         try:
             with open(cache_path, encoding="utf-8") as f:
                 data = json.load(f)
-            _KR_DYNAMIC_CACHE.update({"daykey": daykey, "data": data})
+            _KR_DYNAMIC_CACHE.update({"slotkey": slotkey, "data": data})
             return data
         except Exception:
             pass
@@ -67,7 +84,7 @@ def load_kr_dynamic(top_n: int = KR_TOP_N) -> dict:
                     json.dump(out, f, ensure_ascii=False)
             except Exception:
                 pass
-            _KR_DYNAMIC_CACHE.update({"daykey": daykey, "data": out})
+            _KR_DYNAMIC_CACHE.update({"slotkey": slotkey, "data": out})
         return out
     except Exception as e:
         import sys, traceback
