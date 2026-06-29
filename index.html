@@ -244,7 +244,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.42.2</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.42.6</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -837,6 +837,68 @@ document.getElementById('cardSearch').addEventListener('input', (e) => {
   renderCards();
 });
 
+// 유니버스 전체 종목 조회 (현재 탭에 안 잡힌 종목 검색용)
+let _lookupTimer = null;
+let _lookupLast = '';
+function triggerLookup(query) {
+  // 디바운스: 입력 멈춘 뒤 500ms 후 1회 호출
+  clearTimeout(_lookupTimer);
+  _lookupTimer = setTimeout(async () => {
+    const q = query.trim();
+    if (!q || q.length < 1) return;
+    if (q === _lookupLast) return;   // 중복 호출 방지
+    _lookupLast = q;
+    const hint = document.getElementById('lookupHint');
+    try {
+      const res = await fetch('/api/lookup/' + encodeURIComponent(q));
+      const d = await res.json();
+      // 검색어가 그새 바뀌었으면 무시
+      if (searchQuery.trim() !== q) return;
+      if (d.error) {
+        if (hint) hint.innerHTML = `유니버스에 '${q}'이(가) 없거나 데이터를 못 가져왔어요.`;
+        return;
+      }
+      renderLookupCard(d);
+    } catch (e) {
+      if (hint) hint.textContent = '조회 중 오류가 났어요.';
+    }
+  }, 500);
+}
+
+function renderLookupCard(d) {
+  const content = document.getElementById('content');
+  const isKr = d.market === 'KR';
+  const fmtPx = isKr ? Math.round(d.close).toLocaleString() : Number(d.close).toFixed(2);
+  const chgCls = d.change_pct >= 0 ? 'var(--up)' : 'var(--down)';
+  const chgSign = d.change_pct >= 0 ? '+' : '';
+  const turnoverStr = isKr
+    ? (d.turnover >= 1e8 ? Math.round(d.turnover/1e8).toLocaleString()+'억' : Math.round(d.turnover/1e4).toLocaleString()+'만')
+    : (d.turnover >= 1e9 ? '$'+(d.turnover/1e9).toFixed(1)+'B' : '$'+Math.round(d.turnover/1e6)+'M');
+  const tvHref = isKr
+    ? `https://www.tradingview.com/chart/?symbol=KRX:${(d.ticker||'').replace(/\.(KS|KQ)$/,'')}`
+    : `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(d.ticker)}`;
+  content.innerHTML = `
+    <div style="max-width:520px;margin:0 auto">
+      <div style="background:#1a1a24;border:1px solid #2d6a8c;border-radius:12px;padding:16px;margin-bottom:12px">
+        <div style="font-size:12px;color:#9fd4ff;margin-bottom:10px">🔍 유니버스 조회 — 이 종목은 현재 어느 시그널에도 안 잡혔어요. 참고용 현재 지표예요.</div>
+        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px">
+          <a href="${tvHref}" target="_blank" rel="noopener" style="font-size:18px;font-weight:700;color:inherit;text-decoration:none">${d.name} <span style="font-size:10px;opacity:.5">↗</span></a>
+          <span style="font-size:11px;color:var(--muted)">${d.ticker} · ${d.market}</span>
+        </div>
+        <div style="font-size:22px;font-weight:700;margin-bottom:12px">${fmtPx} <span style="font-size:14px;color:${chgCls}">${chgSign}${d.change_pct}%</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:13px">
+          <div><div style="color:var(--muted);font-size:11px">정배열</div><div style="color:${d.aligned?'var(--green)':'var(--muted)'}">${d.aligned?'정배열 ✓':'역배열'}</div></div>
+          <div><div style="color:var(--muted);font-size:11px">200일선 대비</div><div style="color:${(d.ma200_dist??0)>=0?'var(--up)':'var(--down)'}">${d.ma200_dist!=null?(d.ma200_dist>=0?'+':'')+d.ma200_dist+'%':'-'}</div></div>
+          <div><div style="color:var(--muted);font-size:11px">RSI</div><div>${d.rsi??'-'}</div></div>
+          <div><div style="color:var(--muted);font-size:11px">거래량비</div><div>${d.vol_mult!=null?d.vol_mult+'×':'-'} <span style="font-size:10px;color:${(d.ud??0)>=1?'var(--green)':'var(--down)'}">U/D ${d.ud??'-'}</span></div></div>
+          <div><div style="color:var(--muted);font-size:11px">거래대금</div><div>${turnoverStr}</div></div>
+          <div><div style="color:var(--muted);font-size:11px">52주 고점대비</div><div style="color:${(d.from_high??0)>=-5?'var(--up)':'var(--muted)'}">${d.from_high!=null?d.from_high+'%':'-'}</div></div>
+        </div>
+        <div style="margin-top:10px;font-size:11px;color:var(--muted)">52주 저점 대비 ${d.from_low!=null?'+'+d.from_low+'%':'-'} · 20일선 ${d.ma20?.toLocaleString?.()??d.ma20} · 60일선 ${d.ma60?.toLocaleString?.()??d.ma60}</div>
+      </div>
+    </div>`;
+}
+
 document.getElementById('alertAdd').addEventListener('click', async () => {
   const t = document.getElementById('alertTicker').value.trim();
   const k = document.getElementById('alertKind').value;
@@ -904,7 +966,11 @@ function renderCards() {
   list.sort((a, b) => (isFav(b) ? 1 : 0) - (isFav(a) ? 1 : 0));
   content.innerHTML = list.length
     ? `<div class="grid">${list.map(card).join('')}</div>`
-    : `<div class="empty">${(strictMode && mode !== 'breakdown') ? `🎯 주도주 조건(RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓)을 모두 충족하는 종목이 없습니다.<br>엄선 필터라 비어있는 게 정상이에요. 해제하려면 '🎯 주도주만'을 다시 누르세요.` : searchQuery ? `'${searchQuery}'(으)로 검색된 종목이 없습니다.<br>이 탭의 스캔 결과 중에서만 검색돼요.` : sectorFilter ? `'${sectorFilter}' 섹터에 해당 종목이 없습니다.` : `현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : mode === 'breakdown' ? 'Stage 4 숏(붕괴)' : '눌림목'} 종목이 없습니다.<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.`}</div>`;
+    : `<div class="empty">${(strictMode && mode !== 'breakdown') ? `🎯 주도주 조건(RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓)을 모두 충족하는 종목이 없습니다.<br>엄선 필터라 비어있는 게 정상이에요. 해제하려면 '🎯 주도주만'을 다시 누르세요.` : searchQuery ? `'${searchQuery}'은(는) 이 탭의 시그널엔 없어요.<br><span id="lookupHint" style="color:var(--muted);font-size:12px">유니버스 전체에서 찾는 중…</span>` : sectorFilter ? `'${sectorFilter}' 섹터에 해당 종목이 없습니다.` : `현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : mode === 'breakdown' ? 'Stage 4 숏(붕괴)' : '눌림목'} 종목이 없습니다.<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.`}</div>`;
+  // 탭 결과에 없으면 유니버스 전체 조회 (검색어 있을 때만)
+  if (!list.length && searchQuery && !strictMode) {
+    triggerLookup(searchQuery);
+  }
   // 별 버튼 이벤트 바인딩
   content.querySelectorAll('.fav-btn').forEach(b => b.addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -1098,7 +1164,38 @@ function tvUrl(ticker, market) {
   return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(ticker)}`;
 }
 
-async function updateTracking() {
+// 수동 현재가 갱신: 추적을 즉시 돌리고 성공/실패를 사용자에게 알림.
+// "추적대기"가 안 풀릴 때 원인 진단용.
+async function refreshPrices() {
+  const j = getJournal();
+  const active = j.filter(r => r.result_r === '' && r.status !== 'missed'
+                            && r.entry && r.stop
+                            && (r.tracking || r.status === 'pending' || r.status === 'entered'));
+  if (active.length === 0) { alert('추적할 진입/대기 종목이 없어요.'); return; }
+  let prices = {};
+  let errMsg = '';
+  try {
+    const res = await fetch('/api/prices', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ tickers: active.map(r => r.ticker) })
+    });
+    if (!res.ok) { errMsg = `서버 응답 오류 (${res.status})`; }
+    else { prices = (await res.json()).prices || {}; }
+  } catch(e) { errMsg = '네트워크 오류: ' + e.message; }
+
+  if (errMsg) { alert('현재가 갱신 실패\n' + errMsg); return; }
+
+  const got = Object.keys(prices).length;
+  const missing = active.filter(r => prices[r.ticker] == null).map(r => r.name);
+  // 가격 반영 (updateTracking과 동일 로직 재사용)
+  await updateTracking(prices);
+
+  let msg = `현재가 갱신 완료\n성공: ${got}개`;
+  if (missing.length) msg += `\n실패(가격 못 가져옴): ${missing.join(', ')}`;
+  alert(msg);
+}
+
+async function updateTracking(prefetched) {
   const j = getJournal();
   // 추적 대상: 미종료 + entry/stop 있음. 진입(entered)·대기(pending) 모두 가격 갱신.
   // status==='missed'만 제외. (과거에 tracking 플래그가 꺼진 진입 종목도 포함되게 보강)
@@ -1106,14 +1203,16 @@ async function updateTracking() {
                             && r.entry && r.stop
                             && (r.tracking || r.status === 'pending' || r.status === 'entered'));
   if (active.length === 0) return;
-  let prices = {};
-  try {
-    const res = await fetch('/api/prices', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ tickers: active.map(r => r.ticker) })
-    });
-    prices = (await res.json()).prices || {};
-  } catch(e) { return; }
+  let prices = prefetched || {};
+  if (!prefetched) {
+    try {
+      const res = await fetch('/api/prices', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ tickers: active.map(r => r.ticker) })
+      });
+      prices = (await res.json()).prices || {};
+    } catch(e) { return; }
+  }
 
   const today = new Date();
   let changed = false;
@@ -1485,6 +1584,7 @@ function renderJournal() {
 
   wrap.innerHTML = `
     <div class="jrnl-tools">
+      <button class="exp" onclick="refreshPrices()" style="background:#1e3a4a;border-color:#2d6a8c;color:#9fd4ff">🔄 현재가 갱신</button>
       <button class="exp" onclick="openManualAdd()" style="background:#2d6a4a;border-color:#40916c;color:#fff">➕ 수동 추가</button>
       <button class="exp" onclick="exportCSV()">⬇ CSV 내보내기</button>
       <button onclick="if(confirm('일지를 모두 지울까요? 되돌릴 수 없어요.')){setJournal([]);renderJournal();}">전체 삭제</button>
@@ -1544,13 +1644,25 @@ function viewRow(r) {
     <td class="mono">${r.date}</td>
     <td style="white-space:nowrap">${stBadge}${stActions}${broken?`<div class="st-badge" style="background:#3a2020;color:#ff6b6b;margin-top:3px" title="손절가가 진입가보다 높음 — 과거 버그로 저장된 깨진 데이터. 통계에서 제외됨. 삭제 권장.">⚠️데이터오류</div>`:''}</td>
     <td><a href="${tvUrl(r.ticker, r.market)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${r.name} <span style="font-size:9px;opacity:.5">↗</span>${r.manual?`<span class="st-badge" style="background:#1e3a2e;color:#5fd99a;margin-left:4px;font-size:9px">수동</span>`:''}<div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div>${subInfo?`<div style="font-size:10px;color:var(--muted);opacity:.8">${subInfo}</div>`:''}</a></td>
-    <td class="mono">${r.entry ?? '-'}</td>
+    <td class="mono">${(() => {
+      const isKr = /\.(KS|KQ)$/i.test(r.ticker || '');
+      const entryStr = r.entry ?? '-';
+      // 진입/대기 상태이고 현재가가 있으면 진입가 아래에 현재가 표시 (진입가 → 현재가 비교)
+      if (r.last_price && r.entry && (st === 'entered' || st === 'pending')) {
+        const px = parseFloat(r.last_price);
+        const pxStr = isKr ? Math.round(px).toLocaleString() : px.toFixed(2);
+        const up = px >= parseFloat(r.entry);
+        const col = up ? 'var(--up)' : 'var(--down)';
+        return `${entryStr}<div style="font-size:10px;color:${col};margin-top:1px">→ ${pxStr}</div>`;
+      }
+      return entryStr;
+    })()}</td>
     <td class="mono"${broken?' style="color:#ff6b6b"':''}>${r.stop ?? '-'}</td>
     <td class="mono" style="${r.result_r&&parseFloat(r.result_r)>0?'color:var(--up)':r.result_r?'color:var(--down)':''}">${
       r.result_r
         ? `${r.result_r}R${r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:''}`
         : st === 'pending'
-            ? `<span style="color:var(--amber);font-size:11px">피벗 대기</span><div style="font-size:9px;color:var(--muted)">${r.last_price?'현재 '+r.last_price:'미진입'}</div>`
+            ? `<span style="color:var(--amber);font-size:11px">피벗 대기</span><div style="font-size:9px;color:var(--muted)">${r.last_price?'현재 '+(/\.(KS|KQ)$/i.test(r.ticker||'')?Math.round(parseFloat(r.last_price)).toLocaleString():parseFloat(r.last_price).toFixed(2)):'미진입'}</div>`
         : st === 'missed'
             ? `<span style="color:var(--muted);font-size:11px">무산</span>${r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:''}`
         : (r.tracking && r.last_price && r.entry && r.stop
@@ -1559,7 +1671,7 @@ function viewRow(r) {
                 const dheld = Math.floor((Date.now() - new Date(r.date)) / 86400000);
                 const col = liveR >= 0 ? 'var(--up)' : 'var(--down)';
                 return `<span style="color:${col};font-weight:600">${liveR>=0?'+':''}${liveR.toFixed(1)}R</span>`
-                     + `<div style="font-size:9px;color:var(--muted)">현재 ${r.last_price} · D+${dheld}</div>`;
+                     + `<div style="font-size:9px;color:var(--muted)">D+${dheld}</div>`;
               })()
             : `<span style="color:var(--muted);font-size:11px">추적대기</span><div style="font-size:9px;color:var(--muted)">${r.entry?'앱 새로고침 시 갱신':''}</div>`)
     }</td>
