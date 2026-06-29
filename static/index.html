@@ -730,9 +730,11 @@ async function load(refresh = false) {
     const res = await fetch(`/api/scan?market=all&mode=${mode}${refresh ? '&refresh=true' : ''}`);
     const data = await res.json();
     if (data.version) { const vb = document.getElementById('verBadge'); if (vb) vb.textContent = data.version; }
+    const _tm = data.timing;
+    const _tmStr = _tm ? ` · ⏱ KR ${_tm.kr_sec}s / US ${_tm.us_sec}s / RS ${_tm.rs_sec}s (신규 ${_tm.n_fetched_kr+_tm.n_fetched_us}, 재사용 ${_tm.n_reused})` : '';
     status.innerHTML = `<span><b>${data.fetched ?? data.scanned}</b>/${data.scanned}개 종목 스캔</span>
       <span>${mode === 'turnaround' ? '추세전환' : mode === 'breakdown' ? 'Stage 4 숏' : '눌림목'} 후보 <b>${data.hits.length}</b>개</span>
-      <span>기준 ${data.generated_at}${data.cached ? ' (캐시)' : ''}</span>
+      <span>기준 ${data.generated_at}${data.cached ? ' (캐시)' : ''}${_tmStr}</span>
       ${data.warn_count ? `<span style="color:#FF6B6B">⚠️ 경보/과대리스크 ${data.warn_count}</span>` : ''}
       <span class="alert-mgr" id="alertToggle">경보종목 관리</span>`;
     const tg = document.getElementById('alertToggle');
