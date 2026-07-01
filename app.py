@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.44.0 [신규 2건] 📊 섹터 요약 탭 + 🧩 패턴 탐지 탭(실험).
+        [섹터] /api/sectors: 유니버스 전 종목의 마지막 봉 등락률을 섹터로 집계.
+               코스피/코스닥/미국 3패널, 섹터별 평균등락·종목수·상승비율·상위3.
+               신규 파일 us_sectors_auto.py — 미국 자동 섹터 매핑(rreichel3
+               industry 기반)으로 커버리지 21%→97%. sectors.py 정밀 매핑 우선,
+               자동은 빈 곳만 보완. 파일 없어도 서버 정상(try/except).
+        [패턴] scanner.analyze_pattern: 컵앤핸들(12~35% U바닥+3~20봉 얕은 손잡이),
+               치솟은깃발(45봉내 +90% 후 3~20봉 ≤25% 깃발), 더블바닥(±4% 두 바닥
+               +중간반등 10%+). 패턴이 거의 완성돼 피벗 근처(-6%~+1.5%, 깃발은
+               -18%)인 종목만 표시. 돌파임박(위치 신호)과 달리 몇 주~몇 달의
+               '형태'를 인식. 합성 데이터 검증: 3패턴 탐지 ✓, 랜덤워크 오탐 5%,
+               단순 상승추세 오탐 0%.
 v4.43.2 [치명버그수정] 가격이 며칠 전에 얼어붙던 문제 — 증분 캐시 신선도 검사.
         [증상] 기가비스 168,300원 표시(6/26 종가), 실제는 189,200원(7/1 종가).
                한국·미국 전 종목 가격이 서버 기동 시점 데이터에서 안 바뀜.
@@ -549,16 +561,28 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, analyze_inverse, analyze_breakdown, rs_raw_score, to_rs_rank, climax_warning
+from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, analyze_inverse, analyze_breakdown, analyze_pattern, rs_raw_score, to_rs_rank, climax_warning
 from inverse_universe import inverse_universe
 from sectors import get_sector
+try:
+    from us_sectors_auto import US_SECTORS_AUTO   # v4.44.0: 미국 자동 매핑 보완(커버리지 21%→97%)
+except Exception as _e:
+    print(f"[sectors] us_sectors_auto 미탑재 -> 자동보완 비활성: {_e}", flush=True)
+    US_SECTORS_AUTO = {}
+
+
+def _sector_of(t: str) -> str:
+    s = get_sector(t)
+    if s == "기타" and not t.endswith((".KS", ".KQ")):
+        return US_SECTORS_AUTO.get(t.upper(), "기타")
+    return s
 from universe import get_universe, load_alerts
 import naver_kr
 import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.43.2"
+VERSION = "v4.44.0"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -917,7 +941,7 @@ async def run_scan(market: str, mode: str) -> dict:
     rs_moms = bundle["rs_moms"]
     _scan_timing = bundle.get("timing")
 
-    fn = {"turnaround": analyze_turnaround, "leader": analyze_leader, "super": analyze_super, "breakout": analyze_breakout, "surge": analyze_surge, "imminent": analyze_imminent, "boxbreak": analyze_boxbreak, "breakdown": analyze_breakdown}.get(mode, analyze)
+    fn = {"turnaround": analyze_turnaround, "leader": analyze_leader, "super": analyze_super, "breakout": analyze_breakout, "surge": analyze_surge, "imminent": analyze_imminent, "boxbreak": analyze_boxbreak, "breakdown": analyze_breakdown, "pattern": analyze_pattern}.get(mode, analyze)
     supports_intraday = mode in ("pullback", "turnaround", "imminent", "boxbreak", "breakout", "breakdown")  # is_kr 인자를 받는 모드
     alerts = load_alerts()
     hits = []
@@ -943,7 +967,7 @@ async def run_scan(market: str, mode: str) -> dict:
         # 미너비니식 클라이맥스(과열/매도) 경고 — 모든 모드에 부착
         cw = climax_warning(df["Close"], df["High"], df["Low"], df["Volume"])
         hits.append({"ticker": t, "name": universe[t], "market": mkt,
-                     "sector": get_sector(t), "alert": alert_kind,
+                     "sector": _sector_of(t), "alert": alert_kind,
                      "climax": cw["climax"], "climax_reasons": cw["reasons"],
                      "climax_level": cw["level"], **result})
         if is_kr: diag["kr_hits"] += 1
@@ -1292,6 +1316,55 @@ async def debug_raw(ticker: str):
     except Exception as e:
         out["merged_error"] = str(e)
     return JSONResponse(out)
+
+
+@app.get("/api/sectors")
+async def api_sectors():
+    """전일(마지막 봉) 섹터별 강세 요약 — 코스피/코스닥/미국 3패널.
+    유니버스 전 종목의 마지막 봉 등락률을 섹터로 묶어 평균·상승비율·상위 종목 집계.
+    v4.44.0. 섹터 매핑된 종목 기준(기타 제외)."""
+    bundle = await _fetch_market_data("all")
+    data = bundle["data"]
+    universe = bundle["universe"]
+    panels: dict[str, dict[str, list]] = {"KOSPI": {}, "KOSDAQ": {}, "US": {}}
+    for t, df in data.items():
+        if df is None or len(df) < 2:
+            continue
+        try:
+            c = df["Close"]
+            last, prev = float(c.iloc[-1]), float(c.iloc[-2])
+        except Exception:
+            continue
+        if prev <= 0:
+            continue
+        chg = (last / prev - 1) * 100
+        sec = _sector_of(t)
+        if sec == "기타":
+            continue
+        panel = "KOSPI" if t.endswith(".KS") else ("KOSDAQ" if t.endswith(".KQ") else "US")
+        panels[panel].setdefault(sec, []).append((t, universe.get(t, t), chg))
+    out = {}
+    for pname, groups in panels.items():
+        min_n = 2 if pname != "US" else 3   # 국내는 섹터당 종목 적어 완화
+        rows = []
+        for sec, items in groups.items():
+            if len(items) < min_n:
+                continue
+            chgs = [x[2] for x in items]
+            avg = sum(chgs) / len(chgs)
+            up = sum(1 for x in chgs if x > 0) * 100 // len(chgs)
+            top = sorted(items, key=lambda x: x[2], reverse=True)[:3]
+            rows.append({
+                "sector": sec, "n": len(items),
+                "avg_chg": round(avg, 2), "up_pct": up,
+                "top": [{"ticker": tk, "name": nm, "chg": round(cg, 1)}
+                        for tk, nm, cg in top],
+            })
+        rows.sort(key=lambda r: r["avg_chg"], reverse=True)
+        out[pname] = rows
+    ts = bundle.get("ts")
+    asof = datetime.fromtimestamp(ts, KST).strftime("%Y-%m-%d %H:%M") if ts else ""
+    return {"version": VERSION, "asof": asof, "panels": out}
 
 
 @app.get("/api/lookup/{ticker}")

@@ -2053,3 +2053,233 @@ def analyze_breakdown(df: pd.DataFrame, rs_rank: int | None = None,
             for x in c.rolling(20).mean().iloc[-60:].tolist()
         ],
     }
+
+
+# ════════════════════════════════════════════════════════════════
+# 패턴 탐지 (v4.44.0) — 컵앤핸들 / 더블바닥 / 치솟은깃발
+# 돌파임박(위치 신호)과 달리 몇 주~몇 달의 '형태'를 인식.
+# 패턴이 거의 완성돼 피벗 근처(-6%~+1%)인 종목만 반환.
+# ════════════════════════════════════════════════════════════════
+PATTERN_CONFIG = {
+    "min_bars": 130,
+    "near_lo": -6.0,   # 피벗까지 최대 -6% (거의 완성)
+    "near_hi": 1.5,    # 피벗 +1.5%까지 (막 돌파 포함)
+}
+
+
+def _pat_htf(c, h, lo, v):
+    """치솟은깃발(High Tight Flag): ≤45봉 내 +90% 급등 후 3~20봉 얕은(≤25%) 깃발."""
+    n = len(c)
+    if n < 70:
+        return None
+    W = 60
+    hw = h.iloc[-W:].reset_index(drop=True)
+    lw = lo.iloc[-W:].reset_index(drop=True)
+    vw = v.iloc[-W:].reset_index(drop=True)
+    i_peak = int(hw[:-3].idxmax())          # 고점(마지막 2봉 제외: 깃발 최소 3봉)
+    flag_len = W - 1 - i_peak
+    if not (3 <= flag_len <= 20):
+        return None
+    peak = float(hw.iloc[i_peak])
+    run_win = lw.iloc[max(0, i_peak - 45):i_peak]
+    if len(run_win) < 5:
+        return None
+    run_lo_i = int(run_win.idxmin())
+    run_lo = float(lw.iloc[run_lo_i])
+    if run_lo <= 0 or peak / run_lo - 1 < 0.90:
+        return None                          # 45봉 내 +90% 급등이어야
+    flag_low = float(lw.iloc[i_peak + 1:].min())
+    depth = (peak - flag_low) / peak
+    if depth > 0.25:
+        return None                          # 깃발 눌림 25% 이내
+    run_v = float(vw.iloc[max(run_lo_i, i_peak - 15):i_peak + 1].mean())
+    flag_v = float(vw.iloc[i_peak + 1:].mean())
+    vol_dry = run_v > 0 and flag_v < run_v * 0.7
+    if run_v > 0 and flag_v > run_v * 1.05:
+        return None                          # 깃발에서 거래량 확대는 분배 위험
+    return {"pattern": "치솟은깃발", "pattern_emoji": "🚩", "pivot": peak,
+            "near_lo": -18.0,   # 깃발은 피벗 아래 깊이 매달림(정상)
+            "stop_raw": flag_low, "base_len": int(flag_len),
+            "depth_pct": round(depth * 100, 1), "vol_dry": vol_dry,
+            "quality": 20 + (10 if vol_dry else 0) + (5 if depth < 0.15 else 0)}
+
+
+def _pat_cup_handle(c, h, lo, v):
+    """컵앤핸들: 좌측고점 → 12~35% U자 바닥 → 우측회복 → 3~20봉 얕은 손잡이."""
+    n = len(c)
+    L = min(n, 180)
+    hw = h.iloc[-L:].reset_index(drop=True)
+    lw = lo.iloc[-L:].reset_index(drop=True)
+    vw = v.iloc[-L:].reset_index(drop=True)
+    if L < 90:
+        return None
+    i_rim = int(hw[:L - 35].idxmax())        # 좌측 림: 최소 35봉 전
+    rim = float(hw.iloc[i_rim])
+    if i_rim >= L - 40:
+        return None
+    i_low = int(lw[i_rim + 3:L - 5].idxmin())
+    cup_low = float(lw.iloc[i_low])
+    depth = (rim - cup_low) / rim
+    if not (0.12 <= depth <= 0.35):
+        return None
+    # U자(바닥 체류): 바닥 5% 이내 봉 4개 이상 → V자 반등 배제
+    if int((lw.iloc[i_rim:] <= cup_low * 1.05).sum()) < 4:
+        return None
+    # 우측 회복: 림 -5% 이내 재도달 지점
+    rec = hw.iloc[i_low + 3:] >= rim * 0.95
+    if not rec.any():
+        return None
+    i_rec = int(rec.idxmax())
+    if i_rec - i_rim < 30:
+        return None                          # 컵 전체 최소 30봉
+    handle_len = L - 1 - i_rec
+    if not (3 <= handle_len <= 20):
+        return None
+    hd_high = float(hw.iloc[i_rec:].max())
+    hd_low = float(lw.iloc[i_rec + 1:].min()) if handle_len >= 2 else float(lw.iloc[-1])
+    if hd_high > rim * 1.06:
+        return None                          # 이미 크게 돌파했으면 패턴 완료(늦음)
+    if hd_low < cup_low + 0.5 * (rim - cup_low):
+        return None                          # 손잡이는 컵 상반부에
+    hd_depth = (hd_high - hd_low) / hd_high
+    if hd_depth > 0.13:
+        return None
+    right_v = float(vw.iloc[i_low:i_rec + 1].mean())
+    hd_v = float(vw.iloc[i_rec + 1:].mean()) if handle_len >= 2 else right_v
+    vol_dry = right_v > 0 and hd_v < right_v * 0.85
+    return {"pattern": "컵앤핸들", "pattern_emoji": "☕", "pivot": hd_high,
+            "stop_raw": hd_low, "base_len": int(L - 1 - i_rim),
+            "depth_pct": round(depth * 100, 1), "vol_dry": vol_dry,
+            "quality": 15 + (10 if vol_dry else 0) + (5 if hd_depth < 0.08 else 0)}
+
+
+def _pat_double_bottom(c, h, lo, v):
+    """더블바닥(W): 두 바닥(±4%, 15~90봉 간격) + 중간고점 10%↑ + 우측 회복."""
+    n = len(c)
+    L = min(n, 150)
+    hw = h.iloc[-L:].reset_index(drop=True)
+    lw = lo.iloc[-L:].reset_index(drop=True)
+    if L < 60:
+        return None
+    # 2차(최근) 바닥 먼저 → 그 앞에서 1차 바닥 탐색 (순서 뒤집혀 잡히는 버그 방지)
+    seg2 = lw.iloc[max(0, L - 60):L - 2]
+    if seg2.empty:
+        return None
+    i2 = int(seg2.idxmin())
+    b2 = float(lw.iloc[i2])
+    if i2 < 20:
+        return None
+    seg1 = lw.iloc[:i2 - 15]
+    if seg1.empty:
+        return None
+    i1 = int(seg1.idxmin())
+    b1 = float(lw.iloc[i1])
+    if not (15 <= i2 - i1 <= 90) or b1 <= 0:
+        return None
+    if not (0.96 <= b2 / b1 <= 1.04):
+        return None                          # 두 바닥 ±4%
+    if L - 1 - i2 > 50:
+        return None                          # 2차 바닥이 너무 오래전이면 무효
+    mid = float(hw.iloc[i1:i2 + 1].max())
+    if mid / min(b1, b2) - 1 < 0.10:
+        return None                          # 중간 반등 10%+
+    pre_high = float(hw.iloc[:i1].max()) if i1 >= 5 else None
+    if pre_high is None or pre_high < b1 * 1.15:
+        return None                          # 바닥 전 하락추세 확인
+    close = float(c.iloc[-1])
+    if close < b2 * 1.03:
+        return None                          # 우측 회복 시작
+    return {"pattern": "더블바닥", "pattern_emoji": "🔻🔻", "pivot": mid,
+            "stop_raw": b2, "base_len": int(L - 1 - i1),
+            "depth_pct": round((pre_high - min(b1, b2)) / pre_high * 100, 1),
+            "vol_dry": False, "quality": 12}
+
+
+def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
+                    rs_mom: int | None = None,
+                    cfg: dict = PATTERN_CONFIG) -> dict | None:
+    """장기 패턴(컵앤핸들/치솟은깃발/더블바닥)이 거의 완성돼 피벗 근처인 종목."""
+    if df is None or len(df) < cfg["min_bars"]:
+        return None
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if len(df) < cfg["min_bars"]:
+        return None
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+    close = float(c.iloc[-1])
+    if close <= 0:
+        return None
+
+    hits = []
+    for det in (_pat_htf, _pat_cup_handle, _pat_double_bottom):
+        try:
+            r = det(c, h, lo, v)
+        except Exception:
+            r = None
+        if r:
+            hits.append(r)
+    if not hits:
+        return None
+    # 피벗 근접 조건: -6% ~ +1.5%
+    best = None
+    for r in hits:
+        near = (close - r["pivot"]) / r["pivot"] * 100
+        near_lo = r.get("near_lo", cfg["near_lo"])
+        if near_lo <= near <= cfg["near_hi"]:
+            r["_near"] = near
+            if best is None or r["quality"] > best["quality"]:
+                best = r
+    if best is None:
+        return None
+
+    pivot = float(best["pivot"])
+    stop, stop_struct, atr_buf = apply_atr_buffer(float(best["stop_raw"]), h, lo, c, 0.15)
+    rr = rs_rank if rs_rank is not None else 50
+    near = best["_near"]
+    vol20 = float(v.iloc[-20:].mean())
+    vol_ratio = float(v.iloc[-1]) / vol20 if vol20 > 0 else 0.0
+    prev_close = float(c.iloc[-2])
+    change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
+    cur_rsi = float(rsi(c).iloc[-1])
+
+    # 점수: 근접 30 + 패턴품질(최대 30) + RS 25 + 거래량수축 15
+    score = (
+        30 * (1 - min(abs(min(near, 0)) / 6.0, 1.0))
+        + best["quality"]
+        + 25 * max(0.0, (rr - 50) / 49)
+        + (15 if best["vol_dry"] else 0)
+    )
+    score = min(score, 100.0)
+
+    return {
+        "mode": "pattern",
+        **_merger_block(c, h, lo, v),
+        "close": round(close, 2),
+        "change_pct": round(change_pct, 2),
+        "score": round(score, 1),
+        "triggered": near >= -2.0,
+        "setup_score": None,
+        "rs": rs_rank,
+        "rs_mom": rs_mom,
+        "leader": (rs_rank or 0) >= 90,
+        "pattern": best["pattern"],
+        "pattern_emoji": best["pattern_emoji"],
+        "base_len": best["base_len"],
+        "depth_pct": best["depth_pct"],
+        "pivot": round(pivot, 2),
+        "pivot_dist_pct": round((pivot - close) / close * 100, 2),
+        "vol_ratio": round(vol_ratio, 2),
+        "ud_vol": up_down_volume(c, v, 50),
+        "vol_dry": best["vol_dry"],
+        "rsi": round(cur_rsi, 1),
+        **_rr_block(pivot, stop, h, lo, c,
+                    base_low=float(best["stop_raw"]),
+                    entry=None, warn_pct=8.0, is_kr=False,
+                    stop_struct=stop_struct, atr_buf=atr_buf),
+        **volume_info(close, v),
+        "avwap": anchored_vwap(h, lo, c, v),
+        "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
+        "spark_ma20": [
+            None if math.isnan(x) else round(float(x), 4)
+            for x in c.rolling(20).mean().iloc[-60:].tolist()
+        ],
+    }
