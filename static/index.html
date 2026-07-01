@@ -244,7 +244,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.44.0</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.44.1</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -654,9 +654,9 @@ function card(s) {
       <span class="badge ${s.vol_mult >= 2 ? 'on' : ''}">거래량 ${s.vol_mult}×</span>${s.tl_break_intraday ? '<span class="badge warn" title="장중에 박스를 넘었지만 종가 확정 전. 마감까지 확인하세요.">장중 돌파 ⚠️</span>' : ''}
     </div>` : s.mode === 'pattern' ? `
     <div class="badges">
-      <span class="badge on">${s.pattern_emoji} ${s.pattern}</span>
+      <span class="badge on">${s.pattern_emoji} ${s.pattern} 형성 ${s.base_len}일째 (≈${Math.max(1, Math.round(s.base_len / 5))}주)</span>
       <span class="badge ${Math.abs(s.pivot_dist_pct) <= 2 ? 'warn' : 'on'}">피벗 ${s.pivot_dist_pct >= 0 ? '+' : ''}${s.pivot_dist_pct}%</span>
-      <span class="badge">베이스 ${s.base_len}일 · 깊이 ${s.depth_pct}%</span>
+      <span class="badge">패턴 깊이 ${s.depth_pct}%</span>
       <span class="badge ${s.vol_dry ? 'on' : ''}">거래량 수축</span>
     </div>` : s.mode === 'imminent' ? `
     <div class="badges">
@@ -791,22 +791,30 @@ async function loadSectors() {
     const d = await res.json();
     if (d.version) { const vb = document.getElementById('verBadge'); if (vb) vb.textContent = d.version; }
     status.innerHTML = `<span>기준 ${d.asof}</span><span>마지막 봉 대비 등락 · 섹터 매핑 종목 기준</span>`;
-    const panelName = {KOSPI: '🇰🇷 코스피', KOSDAQ: '🇰🇷 코스닥', US: '🇺🇸 미국(나스닥·NYSE)'};
-    const chgColor = v => v > 0 ? 'style="color:#FF6B6B"' : v < 0 ? 'style="color:#5B9BFF"' : '';
-    let html = '';
-    for (const key of ['KOSPI', 'KOSDAQ', 'US']) {
-      const rows = (d.panels || {})[key] || [];
-      html += `<div style="margin:18px 0 8px;font-weight:700;font-size:15px">${panelName[key]}</div>`;
-      if (!rows.length) { html += '<div class="empty" style="padding:12px">집계할 섹터 없음 (데이터 부족)</div>'; continue; }
-      html += rows.map(r => `
-        <div style="display:flex;align-items:baseline;gap:10px;padding:8px 10px;border-bottom:1px solid var(--line);flex-wrap:wrap">
-          <b style="min-width:110px">${r.sector}</b>
-          <span class="mono" ${chgColor(r.avg_chg)}><b>${r.avg_chg > 0 ? '+' : ''}${r.avg_chg}%</b></span>
-          <span style="color:var(--muted);font-size:12px">${r.n}종목 · 상승 ${r.up_pct}%</span>
-          <span style="font-size:12px;color:var(--muted)">${r.top.map(t => `${t.name} <span ${chgColor(t.chg)}>${t.chg > 0 ? '+' : ''}${t.chg}%</span>`).join(' · ')}</span>
-        </div>`).join('');
+    const panelName = {KOSPI: '코스피', KOSDAQ: '코스닥', US: '나스닥·NYSE'};
+    const chgColor = v => v > 0 ? 'color:#FF6B6B' : v < 0 ? 'color:#5B9BFF' : 'color:var(--muted)';
+    const p = d.panels || {};
+    const cols = ['KOSPI', 'KOSDAQ', 'US'];
+    const maxRows = Math.max(...cols.map(k => (p[k] || []).length), 1);
+    const cell = r => r ? `
+      <td style="padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top" title="${r.top.map(t => `${t.name} ${t.chg > 0 ? '+' : ''}${t.chg}%`).join(' · ')}">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+          <b style="font-size:13px">${r.sector}</b>
+          <span class="mono" style="${chgColor(r.avg_chg)};font-weight:700;white-space:nowrap">${r.avg_chg > 0 ? '+' : ''}${r.avg_chg}%</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted)">${r.n}종목 · 상승 ${r.up_pct}%</div>
+      </td>` : '<td style="border-bottom:1px solid var(--line)"></td>';
+    let body = '';
+    for (let i = 0; i < maxRows; i++) {
+      body += '<tr>' + cols.map(k => cell((p[k] || [])[i])).join('') + '</tr>';
     }
-    content.innerHTML = `<div style="max-width:860px;margin:0 auto">${html}</div>`;
+    content.innerHTML = `<div style="max-width:980px;margin:0 auto;overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;table-layout:fixed;min-width:640px">
+        <thead><tr>${cols.map(k => `<th style="text-align:left;padding:10px;font-size:14px;border-bottom:2px solid var(--line)">${k === 'US' ? '🇺🇸' : '🇰🇷'} ${panelName[k]}</th>`).join('')}</tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+      <div style="color:var(--muted);font-size:11px;padding:10px">강세순 정렬 · 셀에 마우스를 올리면 상위 종목 표시 · 섹터 매핑된 종목 기준</div>
+    </div>`;
   } catch (e) {
     content.innerHTML = '<div class="empty">섹터 집계에 실패했습니다.</div>';
   }
