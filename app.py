@@ -5,6 +5,8 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.44.2 [개선] 섹터 표 셀 안에 대표 종목 2개(+등락) 직접 표시.
+        기존엔 마우스 오버 툴팁에만 있었음. 툴팁(상위 3)은 유지.
 v4.44.1 [버그수정] 패턴 탭이 눌림목 결과를 보여주던 문제.
         [원인] /api/scan 모드 화이트리스트에 "pattern" 누락 → "pullback" 폴백.
                run_scan 디스패치에만 추가하고 엔드포인트 검증을 빠뜨림.
@@ -587,7 +589,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.44.1"
+VERSION = "v4.44.2"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
