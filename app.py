@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.43.2 [치명버그수정] 가격이 며칠 전에 얼어붙던 문제 — 증분 캐시 신선도 검사.
+        [증상] 기가비스 168,300원 표시(6/26 종가), 실제는 189,200원(7/1 종가).
+               한국·미국 전 종목 가격이 서버 기동 시점 데이터에서 안 바뀜.
+        [원인] 증분 다운로드가 직전 캐시의 나이를 확인하지 않고 무조건 재사용.
+               "캐시에 있으면 재사용, 없으면 받기"라 서버가 살아있는 동안 기존
+               종목은 영원히 갱신 안 됨("재사용 2309개"의 정체). 마감 후엔 이
+               냉동 데이터가 당일 daykey로 디스크 저장돼 오염이 고착됨.
+        [해결] (1) 재사용 조건에 신선도 추가: 직전 캐시가 REUSE_TTL(기본 30분,
+               env 조정 가능) 이내일 때만 재사용, 넘으면 전체 재수집.
+               (2) 디스크 캐시 네임스페이스 rs3→rs4 버스트: /data에 남은 오염
+               파일 무시하고 새로 빌드. 옛 rs3 파일은 저장 시 자동 청소.
+        [영향] 하루 첫 스캔·30분 경과 후 스캔은 전체 수집(KR ~100-200초).
+               대신 가격은 항상 30분 이내 최신. 마감 후는 디스크 캐시로 즉시.
 v4.38.0 [대형] 미국 유니버스 239 → 1424개 대폭 확장 (트레이딩 가능하게).
         [이유] 239개는 셋업 발굴에 너무 좁음. SLS(셀라스) 같은 중소형 모멘텀주가
                베이스 다질 때도 안 잡혔음 — 아예 스캔 대상이 아니었기 때문.
@@ -545,9 +558,10 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.43.1"
+VERSION = "v4.43.2"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
+REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
 US_BATCH_SIZE = 100         # 미국 종목 yf.download 배치 크기 (요청 수 1/N로 축소)
 KR_MAX_CONCURRENT = int(os.environ.get("KR_MAX_CONCURRENT", "10"))  # 한국 네이버 동시 호출 (16→10 원복)
@@ -683,8 +697,8 @@ def _universe_sig(market: str) -> str:
 
 
 def _disk_cache_path(market: str, daykey: str) -> str:
-    # rs3 = 지수대비 상대강도 스키마(v4.37). u{N} = 유니버스 크기 시그니처(v4.38).
-    return os.path.join(_disk_cache_dir(), f"datacache_rs3_{market}_{_universe_sig(market)}_{daykey}.pkl")
+    # rs4 = v4.43.2 캐시버스트(증분재사용 버그로 오염된 rs3 파일 무시). u{N} = 유니버스 크기 시그니처.
+    return os.path.join(_disk_cache_dir(), f"datacache_rs4_{market}_{_universe_sig(market)}_{daykey}.pkl")
 
 
 def _load_disk_cache(market: str, daykey: str):
@@ -710,7 +724,8 @@ def _save_disk_cache(market: str, daykey: str, bundle: dict):
         # 오래된 캐시 정리(해당 시장의 다른 날짜 파일 삭제)
         d = _disk_cache_dir()
         for fn in os.listdir(d):
-            if fn.startswith(f"datacache_rs3_{market}_") and not fn.endswith(f"_{daykey}.pkl"):
+            if (fn.startswith(f"datacache_rs4_{market}_") and not fn.endswith(f"_{daykey}.pkl")) \
+               or fn.startswith(f"datacache_rs3_{market}_"):
                 try:
                     os.remove(os.path.join(d, fn))
                 except OSError:
@@ -781,10 +796,14 @@ async def _fetch_market_data(market: str) -> dict:
     tickers = list(universe.keys())
 
     # ── 증분 다운로드(C안): 직전 캐시에 있는 종목 df는 재사용, 새로 편입된 종목만 받는다.
-    # 장중 유니버스가 30분마다 갱신될 때 전체 재다운로드를 피해 속도/비용을 아끼면서,
-    # 섹터 로테이션으로 새로 들어온 종목(거래대금 급증)은 즉시 가격을 받아 스캔에 포함.
+    # [v4.43.2] 신선도 검사 추가: 직전 캐시가 REUSE_TTL(기본 30분) 이내일 때만 재사용.
+    # 이전엔 나이 확인 없이 무조건 재사용해 서버가 살아있는 동안 가격이 며칠 전에
+    # 얼어붙는 버그가 있었음(기가비스 6/26 종가 고정 사례). 30분 = 장중 유니버스
+    # 슬롯 갱신 주기와 일치 — 원래 증분 캐시의 설계 의도(30분 내 유니버스 갱신 시
+    # 기존 종목 재사용)로 범위를 되돌림.
     prev = _data_cache.get(cache_key)
-    prev_data = (prev or {}).get("data", {}) if isinstance(prev, dict) else {}
+    prev_fresh = isinstance(prev, dict) and (time.time() - prev.get("ts", 0) < REUSE_TTL)
+    prev_data = prev.get("data", {}) if prev_fresh else {}
     reused: dict = {}
     fetch_targets = []
     for t in tickers:
