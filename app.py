@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.44.1 [버그수정] 패턴 탭이 눌림목 결과를 보여주던 문제.
+        [원인] /api/scan 모드 화이트리스트에 "pattern" 누락 → "pullback" 폴백.
+               run_scan 디스패치에만 추가하고 엔드포인트 검증을 빠뜨림.
+        [추가] 패턴 카드에 형성 기간(일수+주 환산) 명시. 섹터 탭을 코스피/
+               코스닥/미국 3열 표로 재구성(셀에 마우스 올리면 상위 종목).
 v4.44.0 [신규 2건] 📊 섹터 요약 탭 + 🧩 패턴 탐지 탭(실험).
         [섹터] /api/sectors: 유니버스 전 종목의 마지막 봉 등락률을 섹터로 집계.
                코스피/코스닥/미국 3패널, 섹터별 평균등락·종목수·상승비율·상위3.
@@ -582,7 +587,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.44.0"
+VERSION = "v4.44.1"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1003,7 +1008,7 @@ async def run_scan(market: str, mode: str) -> dict:
 @app.get("/api/scan")
 async def scan(market: str = "all", mode: str = "imminent", refresh: bool = False):
     market = market if market in ("kr", "us", "all") else "all"
-    mode = mode if mode in ("pullback", "turnaround", "leader", "super", "breakout", "surge", "imminent", "boxbreak", "breakdown") else "pullback"
+    mode = mode if mode in ("pullback", "turnaround", "leader", "super", "breakout", "surge", "imminent", "boxbreak", "breakdown", "pattern") else "pullback"
     key = f"{market}:{mode}"
     favs = load_favorites()
     cached = _cache.get(key)
