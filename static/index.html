@@ -244,7 +244,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.43.2</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.44.0</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -252,12 +252,14 @@ tr.editing{background:rgba(242,179,61,.06)}
     <button class="tab" data-mode="pullback">눌림목</button>
     <button class="tab" data-mode="breakout">🚀 돌파</button>
     <button class="tab" data-mode="boxbreak">📦 박스돌파</button>
+    <button class="tab tab-exp" data-mode="pattern">🧩 패턴<span class="exp-tag">실험</span></button>
     <button class="tab" data-mode="turnaround">추세전환</button>
     <button class="tab" data-mode="leader">대장후보</button>
     <button class="tab" data-mode="super">⭐슈퍼대장</button>
     <button class="tab tab-exp" data-mode="surge">⚡급등<span class="exp-tag">실험</span></button>
     <button class="tab tab-exp" data-mode="inverse">🔻인버스<span class="exp-tag">하락</span></button>
     <button class="tab tab-exp" data-mode="breakdown">🩸붕괴<span class="exp-tag">숏</span></button>
+    <button class="tab" data-mode="sectors">📊 섹터</button>
     <button class="tab" data-mode="journal">📒 내 일지</button>
   </div>
   <div class="tabs" role="tablist">
@@ -546,12 +548,24 @@ function card(s) {
       <span class="chg ${chgCls}">${chgSign}${s.change_pct}%</span>
     </div>
     ${sparkSVG(s.spark, s.spark_ma20)}
-    ${(s.mode === 'pullback' || s.mode === 'turnaround' || s.mode === 'breakout' || s.mode === 'imminent' || s.mode === 'boxbreak') && (s.volume || s.turnover) ? `
+    ${(s.mode === 'pullback' || s.mode === 'turnaround' || s.mode === 'breakout' || s.mode === 'imminent' || s.mode === 'boxbreak' || s.mode === 'pattern') && (s.volume || s.turnover) ? `
     <div class="metrics mono" style="padding-bottom:0;border-bottom:none">
       <div class="metric"><div class="k">거래량 ${s.vol_vs_avg != null ? `<span style="font-size:9px;opacity:.6">(평균 ${s.vol_vs_avg}×)</span>` : ''}</div><div class="v">${fmtVolume(s.volume, s.market)}</div></div>
       <div class="metric"><div class="k">거래대금</div><div class="v">${fmtTurnover(s.turnover, s.market)}</div></div>
     </div>` : ''}
-    ${s.mode === 'surge' ? `
+    ${s.mode === 'pattern' ? `
+    <div class="metrics mono">
+      <div class="metric"><div class="k">피벗까지</div><div class="v" style="color:${Math.abs(s.pivot_dist_pct) <= 2 ? 'var(--up)' : 'var(--amber)'}">${s.pivot_dist_pct >= 0 ? '+' : ''}${s.pivot_dist_pct}%</div></div>
+      <div class="metric"><div class="k">거래량비</div><div class="v" style="${s.vol_dry ? 'color:var(--green)' : ''}">${s.vol_ratio}×</div></div>
+      <div class="metric"><div class="k">RS</div><div class="v" style="color:var(--rs)">${s.rs ?? '-'}</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}${s.ud_vol != null ? ` <span style="color:${s.ud_vol >= 1 ? 'var(--green)' : '#e0a030'};font-size:11px" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집, 1.0↓ 분산">U/D ${s.ud_vol}</span>` : ''}</div></div>
+    </div>
+    <div class="metrics mono" style="border-top:none;padding-top:0">
+      <div class="metric"><div class="k">피벗 (${s.pattern})</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
+      <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
+      <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(${s.entry_basis ?? '피벗'}진입)</span></div><div class="v">${s.risk_pct}%</div></div>
+      <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
+    </div>` : s.mode === 'surge' ? `
     <div class="metrics mono">
       <div class="metric"><div class="k">당일</div><div class="v" style="color:var(--up)">+${s.change_pct}%</div></div>
       <div class="metric"><div class="k">거래량</div><div class="v">${s.vol_mult}×</div></div>
@@ -638,6 +652,12 @@ function card(s) {
       <span class="badge on">📦 박스돌파 ${s.box_days}일</span>
       <span class="badge ${s.ext_pct <= 5 ? 'on' : ''}">${s.ext_pct <= 5 ? '매수 유효구간' : '연장 ⚠️ 추격주의'}</span>
       <span class="badge ${s.vol_mult >= 2 ? 'on' : ''}">거래량 ${s.vol_mult}×</span>${s.tl_break_intraday ? '<span class="badge warn" title="장중에 박스를 넘었지만 종가 확정 전. 마감까지 확인하세요.">장중 돌파 ⚠️</span>' : ''}
+    </div>` : s.mode === 'pattern' ? `
+    <div class="badges">
+      <span class="badge on">${s.pattern_emoji} ${s.pattern}</span>
+      <span class="badge ${Math.abs(s.pivot_dist_pct) <= 2 ? 'warn' : 'on'}">피벗 ${s.pivot_dist_pct >= 0 ? '+' : ''}${s.pivot_dist_pct}%</span>
+      <span class="badge">베이스 ${s.base_len}일 · 깊이 ${s.depth_pct}%</span>
+      <span class="badge ${s.vol_dry ? 'on' : ''}">거래량 수축</span>
     </div>` : s.mode === 'imminent' ? `
     <div class="badges">
       <span class="badge ${s.pivot_dist_pct <= 2 ? 'warn' : 'on'}">🎯 돌파 임박 (피벗 +${s.pivot_dist_pct}%)</span>
@@ -670,7 +690,7 @@ function card(s) {
       <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(${s.entry_basis ?? '피벗'}진입)</span></div><div class="v">${s.risk_pct}%</div></div>
       <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
     </div>`}
-    ${(s.mode === 'leader' || s.mode === 'super' || s.mode === 'breakout' || s.mode === 'surge' || s.mode === 'imminent' || s.mode === 'boxbreak') ? '' : s.mode === 'turnaround' ? `
+    ${(s.mode === 'leader' || s.mode === 'super' || s.mode === 'breakout' || s.mode === 'surge' || s.mode === 'imminent' || s.mode === 'boxbreak' || s.mode === 'pattern') ? '' : s.mode === 'turnaround' ? `
     <div class="badges">
       <span class="badge on">정배열 전환</span>
       <span class="badge ${s.rs_mom >= 10 ? 'on' : ''}">RS 개선</span>
@@ -681,7 +701,7 @@ function card(s) {
       <span class="badge ${s.tightening ? 'on' : ''}">변동폭 축소</span>
       <span class="badge ${s.recent_high_ok ? 'on' : ''}">고점 유지</span>${s.tl_break ? '<span class="badge on">추세선 돌파</span>' : (s.tl_break_intraday ? '<span class="badge warn" title="장중에 추세선을 넘었지만 아직 종가 확정 전. 마감까지 위를 지키는지 + 거래량을 확인하세요.">장중 돌파 ⚠️ 미확정</span>' : '')}
     </div>`}
-    ${(s.mode === 'pullback' || s.mode === 'turnaround' || s.mode === 'breakout' || s.mode === 'imminent' || s.mode === 'boxbreak') ? (() => {
+    ${(s.mode === 'pullback' || s.mode === 'turnaround' || s.mode === 'breakout' || s.mode === 'imminent' || s.mode === 'boxbreak' || s.mode === 'pattern') ? (() => {
       const sig = entrySignal(s);
       const items = sig.checks.map(([lv, txt]) => `<span class="chk chk-${lv}">${lv==='ok'?'✓':lv==='warn'?'△':'✕'} ${txt}</span>`).join('');
       return `<div class="entry-sig sig-${sig.level}">
@@ -716,11 +736,14 @@ const DESC = {
   surge: '⚠️ 단타 신호(추세 아님) · 급등 첫날 포착: 당일 +7%↑ & 거래량 4배↑ & 직전 며칠은 조용 · RS 무관',
   boxbreak: '📦 박스/하락추세 상단을 거래량(1.5배+) 동반 돌파 · 20/40/60일 박스 모두 확인 · 120일선 위 · RS 70+ — 국장 박스탈출/삼각수렴 돌파',
   inverse: '🔻 지수 하락 베팅 · 인버스 ETF가 강세(정배열·상승)면 = 시장 하락 국면 · 곱버스는 변동성 극심, 단기·소액만 · 미너비니式 본래 현금 우선',
+  pattern: '🧩 장기 패턴이 거의 완성된 종목 · 컵앤핸들(12~35% U바닥+얕은 손잡이) / 치솟은깃발(45봉내 +90% 후 얕은 깃발) / 더블바닥(W자) · 피벗 근처만 표시 — 돌파임박과 달리 몇 주~몇 달 형태를 인식',
+  sectors: '📊 전일 섹터별 강세 요약 · 코스피/코스닥/미국 각각 섹터 평균 등락·상승비율·상위 종목 · 섹터 매핑된 종목 기준',
   breakdown: '🩸 Stage 4 숏 셋업 · 역배열(20<60<200)+200일선 하락+지지 이탈+하락 거래량+RS 약세 · ⚠️ 숏은 손실 무한·숏스퀴즈·급반등 위험, 한국은 개인 공매도 제약 · 미국 종목 위주'
 };
 
 async function load(refresh = false) {
   if (mode === 'inverse') { return loadInverse(refresh); }
+  if (mode === 'sectors') { return loadSectors(); }
   const content = document.getElementById('content');
   const status = document.getElementById('status');
   content.innerHTML = '<div class="loading"><div class="spinner"></div>스캔 중… (첫 스캔은 1~2분 걸릴 수 있어요)</div>';
@@ -752,6 +775,40 @@ async function load(refresh = false) {
     renderCards();
   } catch (e) {
     content.innerHTML = '<div class="empty">스캔에 실패했습니다. 서버 로그를 확인한 뒤 다시 시도해 주세요.</div>';
+  }
+}
+
+
+async function loadSectors() {
+  const content = document.getElementById('content');
+  const status = document.getElementById('status');
+  document.getElementById('searchBar').style.display = 'none';
+  renderSectors([]);
+  content.innerHTML = '<div class="loading"><div class="spinner"></div>섹터 집계 중…</div>';
+  status.innerHTML = '';
+  try {
+    const res = await fetch('/api/sectors');
+    const d = await res.json();
+    if (d.version) { const vb = document.getElementById('verBadge'); if (vb) vb.textContent = d.version; }
+    status.innerHTML = `<span>기준 ${d.asof}</span><span>마지막 봉 대비 등락 · 섹터 매핑 종목 기준</span>`;
+    const panelName = {KOSPI: '🇰🇷 코스피', KOSDAQ: '🇰🇷 코스닥', US: '🇺🇸 미국(나스닥·NYSE)'};
+    const chgColor = v => v > 0 ? 'style="color:#FF6B6B"' : v < 0 ? 'style="color:#5B9BFF"' : '';
+    let html = '';
+    for (const key of ['KOSPI', 'KOSDAQ', 'US']) {
+      const rows = (d.panels || {})[key] || [];
+      html += `<div style="margin:18px 0 8px;font-weight:700;font-size:15px">${panelName[key]}</div>`;
+      if (!rows.length) { html += '<div class="empty" style="padding:12px">집계할 섹터 없음 (데이터 부족)</div>'; continue; }
+      html += rows.map(r => `
+        <div style="display:flex;align-items:baseline;gap:10px;padding:8px 10px;border-bottom:1px solid var(--line);flex-wrap:wrap">
+          <b style="min-width:110px">${r.sector}</b>
+          <span class="mono" ${chgColor(r.avg_chg)}><b>${r.avg_chg > 0 ? '+' : ''}${r.avg_chg}%</b></span>
+          <span style="color:var(--muted);font-size:12px">${r.n}종목 · 상승 ${r.up_pct}%</span>
+          <span style="font-size:12px;color:var(--muted)">${r.top.map(t => `${t.name} <span ${chgColor(t.chg)}>${t.chg > 0 ? '+' : ''}${t.chg}%</span>`).join(' · ')}</span>
+        </div>`).join('');
+    }
+    content.innerHTML = `<div style="max-width:860px;margin:0 auto">${html}</div>`;
+  } catch (e) {
+    content.innerHTML = '<div class="empty">섹터 집계에 실패했습니다.</div>';
   }
 }
 
@@ -1291,6 +1348,7 @@ let pendingStock = null;
 // 모드→탭이름 매핑 (한 곳에서만 관리 — 새 모드 추가시 여기만 수정)
 const MODE_TAB_LABEL = {
   imminent: '돌파임박',
+  pattern: '패턴',
   pullback: '눌림목',
   breakout: '돌파',
   boxbreak: '박스돌파',
