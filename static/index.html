@@ -120,6 +120,9 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .jtable td.mono{font-family:var(--mono)}
 .jtable .del{color:#FF6B6B;cursor:pointer}
 .jtable tr.open-pos{background:rgba(242,179,61,.04)}
+.jtable tbody tr:nth-child(even){background:rgba(255,255,255,.015)}
+.jtable td:nth-child(3) a{font-size:13.5px;font-weight:600}
+.note-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .merger-tag{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;background:rgba(147,112,219,.14);color:#b794f6;border:1px solid rgba(147,112,219,.4);white-space:nowrap;cursor:help}
 .st-badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px;white-space:nowrap}
 .st-act{display:inline-block;font-size:9px;padding:2px 5px;border-radius:5px;cursor:pointer;background:#222;color:#bbb;border:1px solid #333}
@@ -244,7 +247,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.45.0</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.46.0</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -308,6 +311,12 @@ tr.editing{background:rgba(242,179,61,.06)}
       <div><label id="jmEntryLabel">진입 가정가</label><input id="jmEntry" inputmode="decimal" placeholder="예: 167000"></div>
       <div><label>손절가</label><input id="jmStop" inputmode="decimal"></div>
     </div>
+    <label>기록 목적</label>
+    <select id="jmCat" style="width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;font-size:13px">
+      <option value="추세추종">📈 추세추종 (실제 매매)</option>
+      <option value="단타">⚡ 단타 (실제 매매)</option>
+      <option value="관찰">👁 관찰만 — 매매 안 함, 추세 지켜보기</option>
+    </select>
     <label>진입 근거 (한 줄)</label>
     <textarea id="jmNote" placeholder="예: 추세선 돌파 + 섹터 동조, 피벗 코앞"></textarea>
     <div class="actions">
@@ -1409,6 +1418,8 @@ function openJournal(ticker) {
     ? '진입 가정가 (피벗 돌파가)'
     : '진입 가정가 (현재가 근처)';
   document.getElementById('jmNote').value = '';
+  const jc = document.getElementById('jmCat');
+  if (jc) jc.value = modeCategory(s.mode);
   if (window._resetModalPos) window._resetModalPos();
   document.getElementById('journalModal').classList.add('open');
 }
@@ -1513,7 +1524,7 @@ async function saveJournal() {
     ticker: s.ticker, name: s.name, market: s.market, sector: s.sector || '',
     tab: modeTab(s.mode),
     mode_raw: s.mode || '',
-    category: modeCategory(s.mode),
+    category: (document.getElementById('jmCat') && document.getElementById('jmCat').value) || modeCategory(s.mode),
     signal: (s.triggered ? '🔥' : '') + (s.leader ? '👑' : ''),
     pivot_type: s.pivot_type || '', setup_score: s.setup_score != null ? Math.round(s.setup_score) : '',
     rs: s.rs, entry, stop,
@@ -1536,7 +1547,9 @@ async function saveJournal() {
     //  missed(무산): 셋업 깨짐 → 손익 0, 통계 제외
     //  closed(종료): result_r 확정
     // 돌파 계열은 '아직 안 산 추적관찰'로 보고 기본 pending, 그 외는 즉시 entered
-    status: ['breakout', 'imminent', 'boxbreak'].includes(s.mode) ? 'pending' : 'entered',
+    status: ((document.getElementById('jmCat') && document.getElementById('jmCat').value) === '관찰')
+      ? 'pending'
+      : ['breakout', 'imminent', 'boxbreak'].includes(s.mode) ? 'pending' : 'entered',
     alert: s.alert || '', note,
     exit: '', result_r: '', held_days: '', review: ''
   };
@@ -1655,8 +1668,17 @@ function renderJournal() {
       진입가·손절·근거만 적으면 나머지는 자동으로 채워집니다.</div>`;
     return;
   }
-  // 카테고리 필터
-  const j = journalFilter === 'all' ? all : all.filter(r => (r.category || '추세추종') === journalFilter);
+  // 필터: 상태(진입중/대기/종료) 또는 카테고리(추세/단타/관찰)
+  const isWatch = r => (r.category || '추세추종') === '관찰';
+  const stOf = r => r.status || (r.result_r ? 'closed' : 'entered');
+  let j = all;
+  if (journalFilter === 'entered') j = all.filter(r => stOf(r) === 'entered' && !isWatch(r));
+  else if (journalFilter === 'pending') j = all.filter(r => stOf(r) === 'pending' && !isWatch(r));
+  else if (journalFilter === 'closed') j = all.filter(r => stOf(r) === 'closed' && !isWatch(r));
+  else if (journalFilter !== 'all') j = all.filter(r => (r.category || '추세추종') === journalFilter);
+  // 정렬: 진입중 → 대기 → 관찰 → 종료 → 무산, 각 그룹 안에선 최신순
+  const grp = r => isWatch(r) ? 2 : ({entered: 0, pending: 1, closed: 3, missed: 4}[stOf(r)] ?? 3);
+  j = [...j].sort((a, b) => grp(a) - grp(b) || (b.date || '').localeCompare(a.date || ''));
   // 카테고리별 통계 (추세추종 / 단타 분리)
   const trend = journalStats(all.filter(r => (r.category || '추세추종') === '추세추종'));
   const scalp = journalStats(all.filter(r => (r.category || '추세추종') === '단타'));
@@ -1676,13 +1698,17 @@ function renderJournal() {
         <div class="statcard-v">진입 ${trend.enteredCount} · 대기 ${trend.pendingCount} · 종료 ${trend.closedCount} · 승률 ${trend.winRate}${trend.winRate!=='–'?'%':''} · 평균 ${trend.avgR}R${(() => { const imp = getJournal().filter(x => x.exit_reason === '충동').length; return imp ? ` · <span style="color:#ff6b6b;font-weight:700">충동 ${imp}</span>` : ''; })()}</div>
       </div>
       <div class="statcard">
+        <div class="statcard-t">👁 관찰</div>
+        <div class="statcard-v">${all.filter(r => (r.category||'추세추종')==='관찰').length}종목 추적 중 · 매매 통계 제외</div>
+      </div>
+      <div class="statcard">
         <div class="statcard-t">⚡ 단타</div>
         <div class="statcard-v">총 ${scalp.total} · 종료 ${scalp.closedCount} · 승률 ${scalp.winRate}${scalp.winRate!=='–'?'%':''} · 평균 ${scalp.avgR}R</div>
       </div>
     </div>
     ${renderSignalValidation(all)}
     <div class="jrnl-filter">
-      ${fbtn('all','전체')} ${fbtn('추세추종','📈 추세추종')} ${fbtn('단타','⚡ 단타')}
+      ${fbtn('all','전체')} ${fbtn('entered','▶ 진입중')} ${fbtn('pending','⏳ 대기')} ${fbtn('closed','✔ 종료')} ${fbtn('추세추종','📈 추세')} ${fbtn('단타','⚡ 단타')} ${fbtn('관찰','👁 관찰')}
     </div>
     <div style="overflow-x:auto">
     <table class="jtable">
@@ -1707,6 +1733,9 @@ function viewRow(r) {
     : st === 'missed'
       ? `<span class="st-badge" style="background:#3a2a2a;color:var(--muted)">✖무산</span>`
       : `<span class="st-badge" style="background:#2a2a3a;color:var(--muted)">✔종료</span>`;
+  const watch = (r.category || '추세추종') === '관찰';
+  const watchBadge = watch ? `<span class="st-badge" style="background:#1a2a3f;color:#7fb8ff">👁관찰</span>` : '';
+  const borderCol = watch ? '#3b6ea5' : st === 'entered' ? '#40916c' : st === 'pending' ? '#a8842c' : st === 'missed' ? '#333' : '#3a3a4a';
   // 대기 중이면 진입/무산, 진입 중이면 종료 빠른 버튼
   const stActions = st === 'pending'
       ? `<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">
@@ -1721,9 +1750,9 @@ function viewRow(r) {
   const broken = isBrokenRow(r);   // 손절≥진입 = 데이터 오류
   // 종목 셀에 보조정보(탭·RS·섹터) 작게 접어넣기 — 컬럼은 줄이되 정보는 유지
   const subInfo = [r.tab, r.rs != null ? 'RS '+r.rs : '', r.sector].filter(Boolean).join(' · ');
-  return `<tr class="${r.result_r===''&&st!=='missed'&&!broken?'open-pos':''}" style="${st==='missed'||broken?'opacity:.5':''}">
+  return `<tr class="${r.result_r===''&&st!=='missed'&&!broken?'open-pos':''}" style="border-left:3px solid ${borderCol};${st==='missed'||broken?'opacity:.5':st==='closed'?'opacity:.78':''}">
     <td class="mono">${r.date}</td>
-    <td style="white-space:nowrap">${stBadge}${stActions}${broken?`<div class="st-badge" style="background:#3a2020;color:#ff6b6b;margin-top:3px" title="손절가가 진입가보다 높음 — 과거 버그로 저장된 깨진 데이터. 통계에서 제외됨. 삭제 권장.">⚠️데이터오류</div>`:''}</td>
+    <td style="white-space:nowrap">${watch ? watchBadge : stBadge}${watch ? '' : stActions}${broken?`<div class="st-badge" style="background:#3a2020;color:#ff6b6b;margin-top:3px" title="손절가가 진입가보다 높음 — 과거 버그로 저장된 깨진 데이터. 통계에서 제외됨. 삭제 권장.">⚠️데이터오류</div>`:''}</td>
     <td><a href="${tvUrl(r.ticker, r.market)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${r.name} <span style="font-size:9px;opacity:.5">↗</span>${r.manual?`<span class="st-badge" style="background:#1e3a2e;color:#5fd99a;margin-left:4px;font-size:9px">수동</span>`:''}<div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div>${subInfo?`<div style="font-size:10px;color:var(--muted);opacity:.8">${subInfo}</div>`:''}</a></td>
     <td class="mono">${(() => {
       const isKr = /\.(KS|KQ)$/i.test(r.ticker || '');
@@ -1756,7 +1785,7 @@ function viewRow(r) {
               })()
             : `<span style="color:var(--muted);font-size:11px">추적대기</span><div style="font-size:9px;color:var(--muted)">${r.entry?'앱 새로고침 시 갱신':''}</div>`)
     }</td>
-    <td style="white-space:normal;max-width:240px;font-size:11px;color:var(--muted)">${r.note || ''}${r.review?`<br><i style="color:var(--amber)">복기: ${r.review}</i>`:''}</td>
+    <td style="white-space:normal;max-width:240px;font-size:11px;color:var(--muted)"><div class="note-clamp" title="${(r.note||'').replace(/"/g,'&quot;')}${r.review?' / 복기: '+r.review.replace(/"/g,'&quot;'):''}">${r.note || ''}${r.review?`<br><i style="color:var(--amber)">복기: ${r.review}</i>`:''}</div></td>
     <td style="white-space:nowrap">
       <span class="edit-btn" onclick="editingId=${r.id};renderJournal()" title="수정/상세">✏️</span>
       <span class="del" onclick="delJournal(${r.id})" title="삭제">✕</span>
@@ -1818,6 +1847,7 @@ function editRow(r) {
         <select id="e_cat" class="ein" style="width:110px">
           <option value="추세추종" ${cat==='추세추종'?'selected':''}>📈 추세추종</option>
           <option value="단타" ${cat==='단타'?'selected':''}>⚡ 단타</option>
+          <option value="관찰" ${cat==='관찰'?'selected':''}>👁 관찰</option>
         </select>
         <input id="e_held" class="ein" value="${r.held_days || ''}" placeholder="보유일" style="width:60px">
         <div style="display:flex;gap:6px;margin-left:auto">
