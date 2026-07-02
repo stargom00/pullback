@@ -99,7 +99,14 @@ def fetch_index_history(code: str, days: int = 200) -> pd.DataFrame | None:
 
 
 def _fetch_sise_history(symbol: str, days: int) -> pd.DataFrame | None:
-    """siseJson 일봉 공통 fetch. symbol은 종목코드(6자리) 또는 지수명(KOSPI 등)."""
+    """siseJson 일봉 공통 fetch. symbol은 종목코드(6자리) 또는 지수명(KOSPI 등).
+
+    v4.48.1: 재시도(2회) + 지수 백오프 + 지터 추가.
+    - 유니버스 확대(800→1500+) 시 일시적 실패 하나가 종목 누락으로 이어지지 않게.
+    - 429/5xx엔 더 길게 대기. 매 요청에 50~150ms 지터로 버스트 완화(차단 예방).
+    """
+    import random as _rand
+    import time as _time
     end = datetime.now()
     start = end - timedelta(days=days)
     params = {
@@ -109,12 +116,23 @@ def _fetch_sise_history(symbol: str, days: int) -> pd.DataFrame | None:
         "endTime": end.strftime("%Y%m%d"),
         "timeframe": "day",
     }
-    try:
-        resp = requests.get(_SISE_URL, params=params, headers=_HEADERS, timeout=_TIMEOUT)
-        resp.raise_for_status()
-        return _parse_sise(resp.text)
-    except (requests.RequestException, ValueError):
-        return None
+    _time.sleep(_rand.uniform(0.05, 0.15))   # 버스트 완화 지터
+    for attempt in range(3):                  # 최초 1회 + 재시도 2회
+        try:
+            resp = requests.get(_SISE_URL, params=params, headers=_HEADERS, timeout=_TIMEOUT)
+            if resp.status_code == 429 or resp.status_code >= 500:
+                # 레이트리밋/서버 오류 → 백오프 후 재시도 (429는 더 길게)
+                base = 2.0 if resp.status_code == 429 else 0.6
+                _time.sleep(base * (attempt + 1) + _rand.uniform(0, 0.4))
+                continue
+            resp.raise_for_status()
+            return _parse_sise(resp.text)
+        except (requests.RequestException, ValueError):
+            if attempt < 2:
+                _time.sleep(0.6 * (attempt + 1) + _rand.uniform(0, 0.3))
+                continue
+            return None
+    return None
 
 
 def fetch_live_price(ticker: str) -> float | None:

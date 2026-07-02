@@ -32,7 +32,7 @@ print(f"[universe] 미국 확장 로드: EXT={len(US_UNIVERSE_EXT)} AUTO={len(US
 # 매 거래일 1회 KRX에서 거래대금 상위 N개를 받아 파일 캐시.
 # pykrx 미설치/조회 실패 시 정적 KR_UNIVERSE로 폴백.
 _KR_DYNAMIC_CACHE: dict = {}
-KR_TOP_N = int(os.environ.get("KR_TOP_N", "800"))  # 코스피+코스닥 거래대금 상위 (600→800, 중소형 성장주 포착 확대)
+KR_TOP_N = int(os.environ.get("KR_TOP_N", "1500"))  # 거래대금 상위 (800→1500, v4.48.1: 유동성 있는 전 종목 커버 — 화장품·건설 로테이션을 베이스 단계부터 포착. naver_kr에 재시도·지터 추가로 확대분 안정화)
 # 장중 거래대금 급증 종목 포착: 한국 장중(09:00~15:30 KST)엔 캐시를 INTRADAY_REFRESH_MIN분마다
 # 갱신해 섹터 로테이션으로 새로 거래 터지는 종목을 유니버스에 빠르게 편입. 장 외엔 하루 1회.
 INTRADAY_REFRESH_MIN = int(os.environ.get("KR_INTRADAY_REFRESH_MIN", "30"))
