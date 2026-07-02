@@ -5,6 +5,15 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.48.1 [긴급수정] 스캔 반복 실패 해결 — 유니버스 확대 후속.
+        [싱글플라이트 락] 콜드 스캔(2~4분) 중 재시도·타 탭 요청이 전체 페치를
+               중복 실행 → 메모리 2~3배 → OOM → 컨테이너 재시작 루프가 원인.
+               시장별 asyncio.Lock으로 페치는 1회만, 후속 요청은 캐시 공유.
+        [KR 균형 수집] top_n=1500 트림이 코스피 1250+코스닥 250으로 왜곡되던
+               버그 수정 → 시장당 절반(750/750) 수집 + 교차 트림. 캐시 키 v6.
+        [메모리 절감] 일봉 DF float64→float32 다운캐스트 (300MB+ → 절반).
+               스캔 판정 동일성 검증 완료.
+        [지터 축소] 0.05~0.15 → 0.02~0.08초 (락 도입으로 중복 부하 소멸).
 v4.48.0 [신규] 무적 스캐너 1차 — BHE 사후분석 기반 품질 게이트 (감사 결과 반영).
         [감사 발견] ① climax_warning 미연결(죽은 코드) ② 베이스 카운트가 추세전환
                탭에만 연결 ③ risk_warn이 표시만 하고 제외 안 함(BHE 10.3% 통과 원인)
@@ -655,7 +664,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.48.0"
+VERSION = "v4.48.1"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -667,6 +676,19 @@ _data_cache: dict[str, dict] = {}
 _executor = ThreadPoolExecutor(max_workers=8)  # v4.39.x 원복(동시성 과다가 오히려 느려짐)
 
 
+def _downcast(df):
+    """가격/거래량을 float32로 다운캐스트 (v4.48.1).
+    유니버스 3,570개 × float64 DF는 300MB+로 Railway 메모리를 압박 → 절반으로.
+    가격 정밀도 손실은 소수 5~6자리 수준이라 스캔 판정에 영향 없음."""
+    try:
+        for col in ("Open", "High", "Low", "Close", "Volume"):
+            if col in df.columns:
+                df[col] = df[col].astype("float32")
+    except Exception:
+        pass
+    return df
+
+
 def _fetch(ticker: str):
     # 한국 종목(.KS/.KQ)은 네이버, 그 외는 yfinance
     if naver_kr.is_kr(ticker):
@@ -674,14 +696,14 @@ def _fetch(ticker: str):
             df = naver_kr.fetch(ticker)
             if df is None or df.empty:
                 return None
-            return df
+            return _downcast(df)
         except Exception:
             return None
     try:
         df = yf.Ticker(ticker).history(period="1y", interval="1d", auto_adjust=True)
         if df is None or df.empty:
             return None
-        return df
+        return _downcast(df)
     except Exception:
         return None
 
@@ -720,7 +742,7 @@ def _fetch_us_batch(tickers: list[str]) -> dict:
             # 전부 NaN인 종목(상장폐지/데이터없음) 제외
             if df["Close"].dropna().empty:
                 continue
-            out[t] = df
+            out[t] = _downcast(df)
         except Exception:
             continue
     return out
@@ -867,10 +889,23 @@ def _benchmark_rs_scores() -> dict:
     return out
 
 
+# 시장별 싱글플라이트 락 (v4.48.1): 콜드 스캔(2~4분) 중 재시도/다른 탭 요청이
+# 전체 유니버스 페치를 중복 실행 → 메모리 2~3배 → Railway OOM → 컨테이너 재시작
+# → "스캔 반복 실패" 루프의 원인. 락 안에서 캐시를 재확인하므로 뒤늦게 진입한
+# 요청은 페치 없이 방금 채워진 캐시를 그대로 받는다.
+_market_fetch_locks: dict = {}
+
+
 async def _fetch_market_data(market: str) -> dict:
     """시장 단위로 종목 일봉 + RS 계산. 모드와 무관하므로 시장별로 캐시해 재사용.
     여기서만 네이버/야후를 호출한다 (모드 전환 시 재호출 안 함)."""
     cache_key = f"data:{market}"
+    _lock = _market_fetch_locks.setdefault(cache_key, asyncio.Lock())
+    async with _lock:
+        return await _fetch_market_data_inner(market, cache_key)
+
+
+async def _fetch_market_data_inner(market: str, cache_key: str) -> dict:
 
     # 1) 장 마감 후면 디스크 캐시 우선 — 다음 거래일까지 재호출 0
     daykey = _market_session_key(market)

@@ -65,7 +65,7 @@ def load_kr_dynamic(top_n: int = KR_TOP_N) -> dict:
     cache_dir = os.environ.get("JOURNAL_DIR") or ("/data" if os.path.isdir("/data") else os.path.dirname(__file__))
     # 캐시 키에 top_n + 시간슬롯 포함 — 슬롯이 바뀌면 새로 받음
     # v5 = ETF 필터 재강화 (MIDAS/WON/KoAct/TIME/액티브 등 차단, v4.39.8)
-    cache_path = os.path.join(cache_dir, f"kr_universe_v5_{top_n}_{slotkey}.json")
+    cache_path = os.path.join(cache_dir, f"kr_universe_v6_{top_n}_{slotkey}.json")  # v6 = 코스피/코스닥 균형 트림 (v4.48.1)
     if os.path.exists(cache_path):
         try:
             with open(cache_path, encoding="utf-8") as f:

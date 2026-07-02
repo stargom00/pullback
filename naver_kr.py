@@ -116,7 +116,7 @@ def _fetch_sise_history(symbol: str, days: int) -> pd.DataFrame | None:
         "endTime": end.strftime("%Y%m%d"),
         "timeframe": "day",
     }
-    _time.sleep(_rand.uniform(0.05, 0.15))   # 버스트 완화 지터
+    _time.sleep(_rand.uniform(0.02, 0.08))   # 버스트 완화 지터 (v4.48.1 축소 — 싱글플라이트 락 도입으로 여유)
     for attempt in range(3):                  # 최초 1회 + 재시도 2회
         try:
             resp = requests.get(_SISE_URL, params=params, headers=_HEADERS, timeout=_TIMEOUT)
@@ -311,12 +311,16 @@ def fetch_top_value(top_n: int = 800, include_etf: bool = False) -> dict:
     기본적으로 ETF/ETN/인버스/레버리지는 제외(개별주만). 실패 시 빈 dict."""
     out = {}
     skipped_etf = 0
+    # v4.48.1: 시장당 top_n의 절반씩 균형 수집.
+    # 기존엔 시장당 top_n까지 받고 마지막에 앞에서부터 잘랐는데, 수집 순서가
+    # 코스피 전부 → 코스닥이라 top_n=1500이면 코스피 1250 + 코스닥 250이 되는
+    # 버그(모멘텀 중소형주가 사는 코스닥이 증발). 절반씩이면 트림 왜곡 없음.
+    per_market = (top_n + 1) // 2
     for sosok, suffix in ((0, ".KS"), (1, ".KQ")):
         empty_streak = 0
         for page in range(1, 26):  # 페이지당 ~50종목, 최대 25페이지(~1250/시장)
-            # 시장당 목표치 채우면 중단 (top_n 절반씩 분배 + 여유)
             mkt_count = sum(1 for k in out if k.endswith(suffix))
-            if mkt_count >= top_n:  # 넉넉히 받고 마지막에 자름
+            if mkt_count >= per_market:
                 break
             try:
                 resp = requests.get(
@@ -356,7 +360,17 @@ def fetch_top_value(top_n: int = 800, include_etf: bool = False) -> dict:
         except Exception:
             pass
     if len(out) > top_n:
-        out = dict(list(out.items())[:top_n])
+        # 교차 트림: 시장별 순위를 유지하며 번갈아 채워 코스피 편중 방지
+        ks = [(k, v) for k, v in out.items() if k.endswith(".KS")]
+        kq = [(k, v) for k, v in out.items() if k.endswith(".KQ")]
+        merged, i = {}, 0
+        while len(merged) < top_n and (i < len(ks) or i < len(kq)):
+            if i < len(ks) and len(merged) < top_n:
+                merged[ks[i][0]] = ks[i][1]
+            if i < len(kq) and len(merged) < top_n:
+                merged[kq[i][0]] = kq[i][1]
+            i += 1
+        out = merged
     return out
 
 
