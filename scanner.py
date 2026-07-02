@@ -75,6 +75,77 @@ def climax_warning(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series) -> d
     }
 
 
+def late_stage_info(c: pd.Series, lo: pd.Series, h: pd.Series, v: pd.Series,
+                    is_kr: bool = False) -> dict:
+    """후기 스테이지/과확장 종합 판정 (v4.48).
+    미너비니: 큰 시세를 낸 뒤의 베이스일수록 실패 확률이 높고,
+    200일선 이격이 클수록 클라이맥스(소진) 리스크가 커진다.
+    반환: {ext200_pct, base_count_approx, flags[], level: none|caution|danger}
+    - ext200 >= danger(기본 100%) 또는 클라이맥스 danger → danger (제외 대상)
+    - ext200 >= caution(기본 60%) / 조정 3회+ / 클라이맥스 caution → caution (배지)
+    """
+    cfg = CONFIG
+    flags, level = [], "none"
+    try:
+        ma200 = c.rolling(200).mean()
+        m200 = float(ma200.iloc[-1]) if len(ma200.dropna()) else 0.0
+        close = float(c.iloc[-1])
+        ext200 = (close / m200 - 1.0) if m200 > 0 else 0.0
+    except Exception:
+        ext200 = 0.0
+    if ext200 >= cfg.get("ext200_danger", 1.0):
+        flags.append(f"이격{int(ext200*100)}%")
+        level = "danger"
+    elif ext200 >= cfg.get("ext200_caution", 0.6):
+        flags.append(f"이격{int(ext200*100)}%")
+        level = "caution"
+    # 베이스 카운트 근사 (바닥 후 15%+ 조정 횟수)
+    try:
+        bi = count_bases_since_bottom(c, lo, h)
+        n_corr = bi.get("corrections", 0)
+        if 0 < n_corr < 99 and n_corr >= cfg.get("late_base_caution", 3):
+            flags.append(f"{n_corr + 1}차베이스")
+            if level == "none":
+                level = "caution"
+    except Exception:
+        pass
+    # 클라이맥스 (기존 함수 — 이제야 연결)
+    try:
+        cx = climax_warning(c, h, lo, v)
+        if cx.get("climax"):
+            flags.extend(cx.get("reasons", []))
+            if cx.get("level") == "danger":
+                level = "danger"
+            elif level == "none":
+                level = "caution"
+    except Exception:
+        pass
+    return {"ext200_pct": round(ext200 * 100, 1),
+            "late_flags": flags, "late_level": level}
+
+
+def _risk_hard_ok(rrb: dict, is_kr: bool, pivot: float | None = None) -> bool:
+    """리스크 기하 하드 게이트: 손절폭이 시장 한도(US 8%/KR 12%)를 넘으면
+    베이스가 너무 느슨한 것 → 후보 제외. (risk_warn 표시만 하던 것을 강제화)
+
+    판정 기준은 '피벗 → 현실화 손절' 거리 (베이스의 구조적 느슨함).
+    당일 급등한 돌파일의 종가 기준 리스크로 판정하면 정상 셋업까지 잘리므로
+    (Case13 회귀), pivot이 주어지면 피벗 기준으로 계산한다.
+    BHE 사례(피벗 94.75, 손절 85 → 10.3%)는 피벗 기준으로도 차단됨."""
+    if not CONFIG.get("risk_hard_enforce", True):
+        return True
+    limit = CONFIG.get("risk_hard_kr", 12.0) if is_kr else CONFIG.get("risk_hard_us", 8.0)
+    try:
+        stop_eff = float(rrb.get("stop", 0.0))
+        if pivot and pivot > 0 and stop_eff > 0:
+            risk = (pivot - stop_eff) / pivot * 100.0
+        else:
+            risk = float(rrb.get("risk_pct", 0.0))
+        return risk <= limit
+    except Exception:
+        return True
+
+
 def merger_warning(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series) -> dict:
     """M&A(인수합병)/특수상황 의심 감지.
     GSAT(아마존 인수) 같은 종목은 인수가 부근에 가격이 '고정'돼
@@ -276,6 +347,18 @@ CONFIG = {
     #    장중고점 대비 -24%인데 종가고점 대비 -18%로 계산돼 눌림목에 잘못 표시됨)
     "pullback_max_kr": 0.15,   # KR: 변동성 커서 15%까지 허용
     "pullback_max_us": 0.12,   # US: 12% (미너비니 기준 건강한 눌림 상한)
+    # ── 후기 스테이지/확장도 게이트 (v4.48, BHE 사후분석) ──
+    # BHE 사례: 6개월 +110%, 200일선 이격 +70%의 4차 베이스 돌파(95)를 통과시켜
+    # -9.4% 붕괴를 맞음. 확장도가 주 필터(BHE의 베이스들은 9%대로 얕아 카운트로 안 걸림).
+    "ext200_caution": 0.60,    # 200일선 이격 60%+ → 후기 스테이지 경고 (배지+감점)
+    "ext200_danger": 1.00,     # 200일선 이격 100%+ → 제외 (클라이맥스 영역)
+    "late_base_caution": 3,    # 바닥 후 15%+ 조정 3회+ (≈4차 베이스) → 경고
+    "late_stage_exclude": True,  # danger 레벨 제외 여부
+    # 리스크 기하 하드 게이트: 구조 손절이 한도보다 멀면 "베이스가 느슨" → 제외.
+    # (기존 risk_warn은 표시만 했음 — BHE 10.3%가 경고 딱지 달고 통과한 버그)
+    "risk_hard_kr": 12.0,
+    "risk_hard_us": 8.0,
+    "risk_hard_enforce": True,
     "pullback_max": 0.18,      # (구버전 호환용 폴백 — 시장별 키 없을 때만 사용)
     "ma_proximity": 0.035,     # 이평선과의 거리 허용치 3.5%
     "vol_contraction": 0.85,   # 최근 3일 평균 거래량 < 20일 평균 × 0.85
@@ -812,6 +895,16 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     atr_tight = stop_dist_pct < atr_pct * 1.5  # 손절이 변동성 대비 너무 타이트
     vol_high = atr_pct >= 7.0                  # 고변동 종목(하루 7%+ 변동)
 
+    # ── v4.48 게이트: 리스크 기하 + 후기 스테이지 ──
+    rrb = _rr_block(pivot, stop, h, lo, c,
+                    base_low=float(lo.iloc[-cfg["recent_high_window"]:].min()),
+                    entry=close, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf)
+    if not _risk_hard_ok(rrb, is_kr, pivot=pivot):
+        return None
+    _ls = late_stage_info(c, lo, h, v, is_kr)
+    if _ls["late_level"] == "danger" and cfg.get("late_stage_exclude", True):
+        return None
+
     return {
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
@@ -840,9 +933,9 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "atr_pct": atr_pct,
         "vol_high": vol_high,
         "atr_tight": atr_tight,
-        **_rr_block(pivot, stop, h, lo, c,
-                    base_low=float(lo.iloc[-cfg["recent_high_window"]:].min()),
-                    entry=close, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf),
+        **rrb,
+        "late_flags": _ls["late_flags"], "late_level": _ls["late_level"],
+        "ext200_pct": _ls["ext200_pct"],
         **volume_info(close, v),
         "avwap": anchored_vwap(h, lo, c, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
@@ -1412,8 +1505,19 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
         + 10 * min(base_days / 60, 1.0),       # 베이스 길수록(최대 60봉)
         1)
 
+    # ── v4.48 게이트: 리스크 기하 + 후기 스테이지 ──
+    rrb = _rr_block(pivot, stop, h, lo, c, base_low=base_low,
+                    entry=close, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf)
+    if not _risk_hard_ok(rrb, is_kr, pivot=pivot):
+        return None
+    _ls = late_stage_info(c, lo, h, v, is_kr)
+    if _ls["late_level"] == "danger" and CONFIG.get("late_stage_exclude", True):
+        return None
+
     return {
         "mode": "breakout",
+        "late_flags": _ls["late_flags"], "late_level": _ls["late_level"],
+        "ext200_pct": _ls["ext200_pct"],
         **_merger_block(c, h, lo, v),
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
@@ -1430,8 +1534,7 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
         "vol_mult": round(vol_mult, 1),
         "base_days": base_days,
         "base_range_pct": round(base_range * 100, 1),
-        **_rr_block(pivot, stop, h, lo, c, base_low=base_low,
-                    entry=close, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf),   # 이미 돌파 → 현재가 진입 기준
+        **rrb,   # 이미 돌파 → 현재가 진입 기준
         "rsi": round(cur_rsi, 1),
         "vol_dry": False,
         "ud_vol": up_down_volume(c, v, 50),
@@ -1558,8 +1661,19 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
 
     score = round(best["quality"] * 100 * (0.7 + 0.3 * rs_rank / 99), 1)
 
+    # ── v4.48 게이트: 리스크 기하 + 후기 스테이지 ──
+    rrb = _rr_block(pivot, stop, h, lo, c, base_low=best["box_low"],
+                    entry=close, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf)
+    if not _risk_hard_ok(rrb, is_kr, pivot=pivot):
+        return None
+    _ls = late_stage_info(c, lo, h, v, is_kr)
+    if _ls["late_level"] == "danger" and CONFIG.get("late_stage_exclude", True):
+        return None
+
     return {
         "mode": "boxbreak",
+        "late_flags": _ls["late_flags"], "late_level": _ls["late_level"],
+        "ext200_pct": _ls["ext200_pct"],
         **_merger_block(c, h, lo, v),
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
@@ -1576,8 +1690,7 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
         "box_days": best["win"],
         "box_range_pct": round(best["box_range"] * 100, 1),
         "tl_break_intraday": intraday_unconfirmed,
-        **_rr_block(pivot, stop, h, lo, c, base_low=best["box_low"],
-                    entry=close, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf),   # 이미 돌파 → 현재가 진입 기준
+        **rrb,   # 이미 돌파 → 현재가 진입 기준
         "rsi": round(cur_rsi, 1),
         "vol_dry": False,
         "ud_vol": up_down_volume(c, v, 50),
@@ -1714,6 +1827,16 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
     prev_close = float(c.iloc[-2])
     change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
 
+    # ── v4.48 게이트: 리스크 기하 + 후기 스테이지 ──
+    rrb = _rr_block(pivot, stop, h, lo, c,
+                    base_low=float(lo.iloc[-cfg["pivot_window"]:].min()),
+                    entry=None, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf)
+    if not _risk_hard_ok(rrb, is_kr, pivot=pivot):
+        return None
+    _ls = late_stage_info(c, lo, h, v, is_kr)
+    if _ls["late_level"] == "danger" and CONFIG.get("late_stage_exclude", True):
+        return None
+
     return {
         "mode": "imminent",
         **_merger_block(c, h, lo, v),
@@ -1736,9 +1859,9 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
         "vol_dry": vol_dry,
         "tightening": tightening,
         "rsi": round(cur_rsi, 1),
-        **_rr_block(pivot, stop, h, lo, c,
-                    base_low=float(lo.iloc[-cfg["pivot_window"]:].min()),
-                    entry=None, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf),
+        **rrb,
+        "late_flags": _ls["late_flags"], "late_level": _ls["late_level"],
+        "ext200_pct": _ls["ext200_pct"],
         **volume_info(close, v),
         "avwap": anchored_vwap(h, lo, c, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
