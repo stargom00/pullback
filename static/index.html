@@ -265,7 +265,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.48.1</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.48.0</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -828,7 +828,7 @@ async function load(refresh = false) {
     const _tm = data.timing;
     const _tmStr = _tm ? ` · ⏱ KR ${_tm.kr_sec}s / US ${_tm.us_sec}s / RS ${_tm.rs_sec}s (신규 ${_tm.n_fetched_kr+_tm.n_fetched_us}, 재사용 ${_tm.n_reused})` : '';
     status.innerHTML = `<span><b>${data.fetched ?? data.scanned}</b>/${data.scanned}개 종목 스캔</span>
-      <span>${mode === 'turnaround' ? '추세전환' : mode === 'breakdown' ? 'Stage 4 숏' : '눌림목'} 후보 <b>${data.hits.length}</b>개</span>
+      <span>${(typeof MODE_TAB_LABEL !== 'undefined' && MODE_TAB_LABEL[mode]) || modeTab(mode) || '스캔'} 후보 <b>${data.hits.length}</b>개</span>
       <span>기준 ${data.generated_at}${data.cached ? ' (캐시)' : ''}${_tmStr}</span>
       ${data.warn_count ? `<span style="color:#FF6B6B">⚠️ 경보/과대리스크 ${data.warn_count}</span>` : ''}
       <span class="alert-mgr" id="alertToggle">경보종목 관리</span>`;
@@ -1645,6 +1645,46 @@ const MODE_TAB_LABEL = {
   super: '슈퍼대장',
   surge: '급등',
 };
+// ── R 누적 곡선 (v4.48.2): 종료 매매를 시간순으로 누적 — 시스템의 에쿼티 커브 ──
+// 우상향이면 시스템이 작동 중, 꺾이면 규칙 위반이나 시장 역행을 의심.
+function renderRCurve(all) {
+  const closed = all
+    .filter(r => r.result_r !== '' && r.status !== 'missed' && (r.category || '추세추종') !== '관찰')
+    .map(r => ({ d: r.closed_date || r.last_checked || r.date || '', v: parseFloat(r.result_r) }))
+    .filter(x => !isNaN(x.v))
+    .sort((a, b) => a.d.localeCompare(b.d));
+  if (closed.length < 2) return '';
+  let cum = 0;
+  const pts = closed.map(x => (cum += x.v, { d: x.d, c: cum }));
+  const W = 560, H = 120, PAD = 8;
+  const min = Math.min(0, ...pts.map(p => p.c));
+  const max = Math.max(0, ...pts.map(p => p.c));
+  const span = (max - min) || 1;
+  const X = i => PAD + i / (pts.length - 1) * (W - PAD * 2);
+  const Y = v => PAD + (max - v) / span * (H - PAD * 2);
+  const line = pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(p.c).toFixed(1)}`).join(' ');
+  const zero = Y(0);
+  const last = pts[pts.length - 1].c;
+  const col = last >= 0 ? 'var(--green)' : '#ff6b6b';
+  // 최대 낙폭 (R 기준 드로다운)
+  let peak = -1e9, mdd = 0;
+  for (const p of pts) { peak = Math.max(peak, p.c); mdd = Math.min(mdd, p.c - peak); }
+  const dots = pts.map((p, i) =>
+    `<circle cx="${X(i).toFixed(1)}" cy="${Y(p.c).toFixed(1)}" r="2.5" fill="${closed[i].v >= 0 ? 'var(--green)' : '#ff6b6b'}"><title>${p.d} · ${closed[i].v > 0 ? '+' : ''}${closed[i].v}R → 누적 ${p.c.toFixed(2)}R</title></circle>`).join('');
+  return `
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
+      <div style="font-size:13px;font-weight:700">📈 R 누적 곡선 <span style="color:var(--muted);font-weight:400;font-size:11px">종료 ${pts.length}건 · 관찰 제외</span></div>
+      <div style="font-size:12px">누적 <b style="color:${col}">${last > 0 ? '+' : ''}${last.toFixed(2)}R</b> · 최대낙폭 <span style="color:#ff9b9b">${mdd.toFixed(2)}R</span></div>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto;display:block;margin-top:6px">
+      <line x1="${PAD}" y1="${zero.toFixed(1)}" x2="${W - PAD}" y2="${zero.toFixed(1)}" stroke="var(--line)" stroke-dasharray="3,3"/>
+      <path d="${line}" fill="none" stroke="${col}" stroke-width="2"/>
+      ${dots}
+    </svg>
+  </div>`;
+}
+
 function modeTab(mode) { return MODE_TAB_LABEL[mode] || mode || '-'; }
 function modeCategory(mode) { return mode === 'surge' ? '단타' : '추세추종'; }
 function openJournal(ticker) {
@@ -2029,6 +2069,7 @@ function renderJournal() {
         <div class="statcard-v">총 ${scalp.total} · 종료 ${scalp.closedCount} · 승률 ${scalp.winRate}${scalp.winRate!=='–'?'%':''} · 평균 ${scalp.avgR}R</div>
       </div>
     </div>
+    ${renderRCurve(all)}
     ${renderSignalValidation(all)}
     <div class="jrnl-filter">
       ${fbtn('all','전체')} ${fbtn('entered','▶ 진입중')} ${fbtn('pending','⏳ 대기')} ${fbtn('closed','✔ 종료')} ${fbtn('추세추종','📈 추세')} ${fbtn('단타','⚡ 단타')} ${fbtn('관찰','👁 관찰')}
