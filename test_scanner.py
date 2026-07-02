@@ -133,7 +133,7 @@ closes12 = [100.0] * 30 + zig + [97.0, 100.0, 103.5]  # 마지막 3봉 돌파
 h12 = pd.Series([c * 1.005 for c in closes12])
 c12 = pd.Series(closes12)
 tl = trendline_level(h12)
-pivot, ptype, tlb = select_pivot(h12, pd.Series([c*0.995 for c in closes12]), c12, float(c12.iloc[-1]), 10)
+pivot, ptype, tlb, tlb_intra = select_pivot(h12, pd.Series([c*0.995 for c in closes12]), c12, float(c12.iloc[-1]), 10)
 print(f"Case12 추세선: level={'None' if tl is None else round(tl,1)} | 돌파감지={tlb} | 피벗종류={ptype}")
 
 # ── Case 13: 🔥 트리거 — 인텔 패턴에 당일 +9% 돌파 양봉 추가 ──

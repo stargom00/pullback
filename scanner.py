@@ -271,7 +271,12 @@ CONFIG = {
     "ma_long": 60,
     "ma_trend": 200,           # 장기 추세 필터
     "pullback_min": 0.03,      # 최근 고점 대비 최소 조정폭 3%
-    "pullback_max": 0.18,      # 최대 조정폭 18% (이상이면 추세 훼손 간주)
+    # 최대 조정폭 (이상이면 눌림이 아니라 새 베이스 구축 → 패턴 탭 영역)
+    # ※ 장중 고가 기준으로 측정 (종가 기준은 실제 조정을 과소평가 — 디앤디 사례:
+    #    장중고점 대비 -24%인데 종가고점 대비 -18%로 계산돼 눌림목에 잘못 표시됨)
+    "pullback_max_kr": 0.15,   # KR: 변동성 커서 15%까지 허용
+    "pullback_max_us": 0.12,   # US: 12% (미너비니 기준 건강한 눌림 상한)
+    "pullback_max": 0.18,      # (구버전 호환용 폴백 — 시장별 키 없을 때만 사용)
     "ma_proximity": 0.035,     # 이평선과의 거리 허용치 3.5%
     "vol_contraction": 0.85,   # 최근 3일 평균 거래량 < 20일 평균 × 0.85
     "rsi_min": 35,
@@ -678,19 +683,23 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
     breakout_day = change_pct >= 4.0
 
-    # ── 2) 최근 고점이 살아있는가 ──
-    last60 = c.iloc[-60:].reset_index(drop=True)
-    high60 = float(last60.max())
-    bars_since_high = len(last60) - 1 - int(last60.idxmax())
+    # ── 2) 최근 고점이 살아있는가 — 장중 고가(h) 기준 ──
+    last60_h = h.iloc[-60:].reset_index(drop=True)
+    high60 = float(last60_h.max())
+    bars_since_high = len(last60_h) - 1 - int(last60_h.idxmax())
     recent_high_ok = bars_since_high <= cfg["recent_high_window"]
 
-    # ── 3) 조정폭 (눌림 깊이) — 돌파일엔 전날 종가/전날까지의 고점 기준 ──
+    # ── 3) 조정폭 (눌림 깊이) — 장중 고가 기준, 시장별 상한 ──
+    #    종가 기준 측정은 실제 조정을 3~6%p 과소평가함 (고점 캔들의 윗꼬리 무시).
+    #    돌파일엔 전날 종가/전날까지의 고가 기준으로 평가.
+    pb_max = cfg.get("pullback_max_kr" if is_kr else "pullback_max_us",
+                     cfg.get("pullback_max", 0.18))
     if breakout_day:
-        high60_ref = float(c.iloc[-61:-1].max())
+        high60_ref = float(h.iloc[-61:-1].max())
         pullback = (high60_ref - prev_close) / high60_ref
     else:
         pullback = (high60 - close) / high60
-    pullback_ok = pb_min <= pullback <= cfg["pullback_max"]
+    pullback_ok = pb_min <= pullback <= pb_max
     if not pullback_ok:
         return None
 

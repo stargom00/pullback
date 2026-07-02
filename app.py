@@ -5,6 +5,23 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.47.0 [신규] R 기반 리스크 시스템 — 감정매매를 구조로 차단.
+        [철학] 모든 결정은 매수 전에. 사이즈는 공식이, 진입 허용은 게이트가 정한다.
+        [설정] /api/rsettings (영구 볼륨): 총자산·1R%(기본 0.5)·오픈 상한(3R)·
+               주간(-3R)/월간(-6R) 한도·시장 게이트·분산일·환율. ⚙️ 버튼(일지 탭).
+        [사이즈] 진입 폼에 실시간 계산줄: 주식수 = 1R금액 ÷ (진입-손절).
+               US는 환율 환산. 확신은 진입 여부에만 — 수량엔 반영 안 됨.
+        [대시보드] 일지 상단 리스크바: 오픈 리스크 게이지(nR/상한)·주간R·월간R·
+               연속손실·게이트 상태.
+        [서킷브레이커] ① 오픈 합계 > 상한 → 신규 진입 차단(관찰 저장은 허용)
+               ② 주간 -3R → 그 주 잠금 ③ 월간 -6R → 그 달 잠금
+               ④ 연속 3패 → 다음 진입 R 절반 자동 축소(승리 시 복구).
+        [게이트] 🟢확인된 상승(3R)/🟡조정 압박(1.5R)/🔴조정(신규 0) — 수동 설정.
+        [진입 잠금] 일지 추가(즉시 진입 계열)와 대기→▶진입 전환 모두 게이트 통과 필요.
+               잠금 시 '관찰(대기)' 저장으로 우회 제안. 규칙은 기억이 아니라 구조로.
+        [스캐너 수정] 눌림 깊이를 장중 고가 기준으로 측정 (종가 기준은 3~6%p 과소평가 —
+               디앤디 -24% 조정이 -18%로 계산돼 눌림목 오탐되던 버그).
+               시장별 상한: KR 15% / US 12%. 초과 시 눌림 아닌 새 베이스로 간주.
 v4.46.1 [안전장치] 일지 이력 보존 강화 — 사용자 우려(과거 기록 덮어씀) 대응.
         [사실] 추가는 항상 새 id의 새 기록 — 덮어쓰기 코드는 원래 없음.
         [개선] ① 추적 중 종목 재추가: 차단 → 확인 후 별개 새 기록으로 허용
@@ -619,7 +636,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.46.1"
+VERSION = "v4.47.0"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1830,6 +1847,65 @@ async def watch_pending():
             "tab": r.get("tab", ""),
         })
     return JSONResponse({"pending": out, "count": len(out)})
+
+
+# ── R 기반 리스크 시스템 설정 (v4.47) ──────────────────────
+# 총자산·R%·서킷브레이커·시장게이트를 저널과 같은 영구 볼륨에 저장.
+# 프론트가 포지션 사이즈 계산과 진입 잠금에 사용.
+RSETTINGS_PATH = os.path.join(os.path.dirname(JOURNAL_PATH), "r_settings.json")
+RSETTINGS_DEFAULT = {
+    "equity": 0,           # 총자산 (KRW)
+    "r_pct": 0.5,          # 1R = 총자산의 %  (검증 전 0.5%, 검증 후 0.75~1%)
+    "max_open_r": 3.0,     # 동시 오픈 리스크 상한 (R)
+    "weekly_stop_r": 3.0,  # 주간 -nR 도달 시 신규 진입 중단
+    "monthly_stop_r": 6.0, # 월간 -nR 도달 시 그 달 종료
+    "gate": "confirmed",   # 시장 게이트: confirmed | pressure | correction
+    "dist_days": 0,        # 분산일 카운트 (수동 입력, 게이트 판단 참고용)
+    "usd_krw": 1400.0,     # 환율 (US 종목 사이즈 계산용, 수동 갱신)
+}
+
+
+@app.get("/api/rsettings")
+async def get_rsettings():
+    data = dict(RSETTINGS_DEFAULT)
+    if os.path.exists(RSETTINGS_PATH):
+        try:
+            with open(RSETTINGS_PATH, encoding="utf-8") as f:
+                saved = _json.load(f)
+                if isinstance(saved, dict):
+                    data.update(saved)
+        except (ValueError, OSError):
+            pass
+    return JSONResponse(data)
+
+
+@app.post("/api/rsettings")
+async def save_rsettings(request: Request):
+    body = await request.json()
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "error": "객체 필요"}, status_code=400)
+    # 기존 저장값 위에 머지 — 부분 업데이트가 다른 필드를 기본값으로 지우지 않게
+    data = dict(RSETTINGS_DEFAULT)
+    if os.path.exists(RSETTINGS_PATH):
+        try:
+            with open(RSETTINGS_PATH, encoding="utf-8") as f:
+                saved = _json.load(f)
+                if isinstance(saved, dict):
+                    data.update({k: saved[k] for k in RSETTINGS_DEFAULT if k in saved})
+        except (ValueError, OSError):
+            pass
+    data.update({k: body[k] for k in RSETTINGS_DEFAULT if k in body})
+    # 검증: 게이트 값 화이트리스트, 숫자 범위 상식선
+    if data["gate"] not in ("confirmed", "pressure", "correction"):
+        data["gate"] = "confirmed"
+    try:
+        tmp = RSETTINGS_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(data, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, RSETTINGS_PATH)
+    except OSError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, **data})
 
 
 @app.post("/api/journal")
