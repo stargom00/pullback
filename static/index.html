@@ -601,7 +601,7 @@ function card(s) {
     <div class="card-top">
       <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기 (최상단 고정)'}">${fav ? '★' : '☆'}</button>
       <div>
-        <div class="name">${s.triggered ? '🔥 ' : ''}${s.leader ? '👑 ' : ''}${s.name}${s.alert ? ` <span class="alert-tag" title="시장경보">⚠️ ${s.alert}</span>` : ''}${s.climax ? ` <span class="climax-tag ${s.climax_level}" title="미너비니 클라이맥스/과열 신호: ${(s.climax_reasons||[]).join(', ')}. 매수보다 매도·경계 구간일 수 있음.">${s.climax_level === 'danger' ? '🛑' : '🔆'} 과열</span>` : ''}${s.merger ? ` <span class="merger-tag" title="M&A/특수상황 의심: ${(s.merger_reasons||[]).join(', ')}. 인수가 부근에 가격이 고정돼 상방은 막히고 하방은 딜 무산 시 급락하는 비대칭 리스크. 추세매매 부적합 — 차트의 깔끔한 횡보가 강세 신호가 아님.">🤝 M&A의심</span>` : ''}${s.ud_weak ? ` <span class="merger-tag" title="U/D Volume ${s.ud} (50일 기준, 1 미만). 하락일 거래량이 상승일보다 많아 아직 분산 우세 = 기관 매집 미확증. 가격은 전환 신호를 냈지만 거래량 확증 전이라 관찰 권장." style="background:#3a1a1a;color:#ff8888">📉 매집미확증</span>` : ''}<span class="mkt">${s.market}</span></div>
+        <div class="name">${s.triggered ? '🔥 ' : ''}${s.leader ? '👑 ' : ''}${s.name}${s.alert ? ` <span class="alert-tag" title="시장경보">⚠️ ${s.alert}</span>` : ''}${s.climax ? ` <span class="climax-tag ${s.climax_level}" title="미너비니 클라이맥스/과열 신호: ${(s.climax_reasons||[]).join(', ')}. 매수보다 매도·경계 구간일 수 있음.">${s.climax_level === 'danger' ? '🛑' : '🔆'} 과열</span>` : ''}${(s.late_flags && s.late_flags.length) ? ` <span class="climax-tag ${s.late_level}" title="후기 스테이지/과확장 (v4.48): ${s.late_flags.join(', ')}${s.ext200_pct ? ` · 200일선 이격 +${s.ext200_pct}%` : ''}. 큰 시세 이후의 베이스일수록 실패 확률이 높음 — 사이즈 축소 또는 관망 권장.">${s.late_level === 'danger' ? '🛑' : '🏔'} 후기</span>` : ''}${s.merger ? ` <span class="merger-tag" title="M&A/특수상황 의심: ${(s.merger_reasons||[]).join(', ')}. 인수가 부근에 가격이 고정돼 상방은 막히고 하방은 딜 무산 시 급락하는 비대칭 리스크. 추세매매 부적합 — 차트의 깔끔한 횡보가 강세 신호가 아님.">🤝 M&A의심</span>` : ''}${s.ud_weak ? ` <span class="merger-tag" title="U/D Volume ${s.ud} (50일 기준, 1 미만). 하락일 거래량이 상승일보다 많아 아직 분산 우세 = 기관 매집 미확증. 가격은 전환 신호를 냈지만 거래량 확증 전이라 관찰 권장." style="background:#3a1a1a;color:#ff8888">📉 매집미확증</span>` : ''}<span class="mkt">${s.market}</span></div>
         <div class="tick mono">${s.ticker}${s.sector && s.sector !== '기타' ? ` · ${s.sector}` : ''}</div>
       </div>
       <div style="margin-left:auto;display:flex;flex-direction:column;align-items:center;gap:2px">
@@ -1369,6 +1369,14 @@ function renderCalcLine(elId, entry, stop, market) {
   const c = calcShares(entry, stop, market);
   if (!c) { el.innerHTML = '진입가·손절가를 입력하면 주식수가 계산됩니다 (손절 < 진입)'; return; }
   const fx = market === 'KR' ? '' : ` · 환율 ${rSettings.usd_krw}`;
+  // 피벗 대비 추격 정도 (미너비니: 피벗 +2% 이상 추격 금지 — BHE 교훈)
+  let chase = '';
+  const pv = pendingStock ? parseFloat(pendingStock.pivot) : null;
+  if (elId === 'jmCalc' && pv && entry) {
+    const chasePct = (entry / pv - 1) * 100;
+    if (chasePct > 2) chase = ` · <span style="color:#ff6b6b;font-weight:700">⚠️ 피벗 +${chasePct.toFixed(1)}% 추격 — 다음 기회 권장</span>`;
+    else if (chasePct > 0.5) chase = ` · <span style="color:var(--amber)">피벗 +${chasePct.toFixed(1)}%</span>`;
+  }
   const cut = c.reduced ? ` <span style="color:var(--amber)">⚠️ 연속 ${consecLosses()}패 → R 절반 축소</span>` : '';
   const gate = entryGate();
   let gateLine = '';
@@ -1377,7 +1385,7 @@ function renderCalcLine(elId, entry, stop, market) {
     gateLine = `<div style="margin-top:4px;color:#ff9b9b">${gate.reason}<br>→ 저장은 <b style="color:#ffd98a">관찰(대기)</b>로만 가능</div>`;
   }
   el.innerHTML =
-    `1R = <b>${c.rKrw.toLocaleString()}원</b>${cut} · 리스크폭 ${c.riskPct}%${fx}<br>` +
+    `1R = <b>${c.rKrw.toLocaleString()}원</b>${cut} · 리스크폭 ${c.riskPct}%${fx}${chase}<br>` +
     `→ <b style="font-size:14px">${c.shares.toLocaleString()}주</b> ` +
     `(진입금액 약 ${(c.posKrw / 10000).toLocaleString(undefined, {maximumFractionDigits: 0})}만원)` + gateLine;
 }
@@ -1968,6 +1976,19 @@ function renderJournal() {
   const _pct = _cap > 0 ? Math.min(100, _open / _cap * 100) : (_open > 0 ? 100 : 0);
   const _fillCls = _pct >= 100 ? 'max' : _pct >= 70 ? 'hot' : '';
   const _gateLabel = { confirmed: '🟢 확인된 상승', pressure: '🟡 조정 압박', correction: '🔴 조정' }[rSettings.gate] || rSettings.gate;
+  // 투입금액 합계 (진입중 × 주식수 × 진입가, US는 환율 환산) — 구버전(주식수 없음) 항목은 제외
+  let _invested = 0, _investedUnknown = 0;
+  for (const r of all) {
+    if ((r.status || 'entered') !== 'entered' || r.result_r !== '') continue;
+    const e = parseFloat(r.entry);
+    if (r.shares && e) {
+      const fx = /\.(KS|KQ)$/i.test(r.ticker || '') ? 1 : (rSettings.usd_krw || 1400);
+      _invested += r.shares * e * fx;
+    } else if (e) { _investedUnknown++; }
+  }
+  const _cash = Math.max(0, (rSettings.equity || 0) - _invested);
+  const _investPct = rSettings.equity ? Math.round(_invested / rSettings.equity * 100) : 0;
+  const _fmtM = v => (v / 10000).toLocaleString(undefined, {maximumFractionDigits: 0}) + '만';
   const _rv = v => `<span style="color:${v > 0 ? 'var(--up)' : v < 0 ? 'var(--down)' : 'var(--muted)'}">${v > 0 ? '+' : ''}${v}R</span>`;
   const riskbar = rSettings.equity ? `
     <div class="riskbar">
@@ -1977,6 +1998,7 @@ function renderJournal() {
       <div class="rb-item"><span class="rb-t">주간</span><span class="rb-v">${_rv(_p.week)} <span style="font-size:10px;color:var(--muted)">/ -${rSettings.weekly_stop_r}R</span></span></div>
       <div class="rb-item"><span class="rb-t">월간</span><span class="rb-v">${_rv(_p.month)} <span style="font-size:10px;color:var(--muted)">/ -${rSettings.monthly_stop_r}R</span></span></div>
       <div class="rb-item"><span class="rb-t">연속손실</span><span class="rb-v" style="${_consec >= 3 ? 'color:var(--amber)' : ''}">${_consec}패${_consec >= 3 ? ' (R½)' : ''}</span></div>
+      <div class="rb-item"><span class="rb-t">투입 / 현금</span><span class="rb-v">${_fmtM(_invested)} / ${_fmtM(_cash)} <span style="font-size:10px;color:var(--muted)">(${_investPct}%${_investedUnknown ? ` · 수량미기록 ${_investedUnknown}건 제외` : ''})</span></span></div>
       <div class="rb-item"><span class="rb-t">시장 게이트</span><span class="rb-v">${_gateLabel}</span></div>
       <button class="exp" onclick="openRSettings()" style="margin-left:auto">⚙️ R 설정</button>
     </div>
