@@ -247,7 +247,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.46.0</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.46.1</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1506,11 +1506,14 @@ async function saveManualAdd() {
 })();
 async function saveJournal() {
   const s = pendingStock; if (!s) return;
-  // 중복 방지: 같은 종목이 아직 추적 중(미종료)이면 추가 막기
+  // 중복 확인: 같은 종목이 아직 추적 중이면 — 덮어쓰기가 아니라 '별개의 새 기록'으로 추가할지 확인.
+  // (기존 기록은 절대 수정하지 않음. 과거 매매 이력 보존이 원칙.)
   const existing = getJournal().find(r => r.ticker === s.ticker && r.result_r === '');
   if (existing) {
-    alert(`${s.name}은(는) 이미 추적 중입니다 (${existing.date} 진입).\n종료된 후에 다시 담을 수 있어요.`);
-    return;
+    const exCat = existing.category || '추세추종';
+    if (!confirm(`${s.name}은(는) 이미 추적 중이에요 (${existing.date} · ${exCat}).\n\n기존 기록은 그대로 두고, 별개의 새 기록으로 추가할까요?\n(같은 종목을 매매용 + 관찰용으로 나눠 담을 때 유용해요)`)) {
+      return;
+    }
   }
   const entry = parseFloat(document.getElementById('jmEntry').value) || null;
   const stop = parseFloat(document.getElementById('jmStop').value) || null;
@@ -1865,6 +1868,12 @@ function saveEdit(id) {
   const j = getJournal();
   const r = j.find(x => x.id === id);
   if (!r) return;
+  // 종료된 과거 매매 기록 수정 방어 — 이력 오염 방지
+  if (r.status === 'closed' && r.result_r) {
+    if (!confirm(`⚠️ 종료된 과거 매매 기록(${r.date} · ${r.name})을 수정하려고 해요.\n과거 이력이 바뀌면 통계·복기가 왜곡될 수 있어요.\n\n정말 수정할까요?`)) {
+      editingId = null; renderJournal(); return;
+    }
+  }
   r.category = document.getElementById('e_cat').value;
   const entry = parseFloat(document.getElementById('e_entry').value) || null;
   const stop = parseFloat(document.getElementById('e_stop').value) || null;
