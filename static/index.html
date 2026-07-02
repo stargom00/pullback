@@ -244,7 +244,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.44.2</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.44.3</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -267,6 +267,7 @@ tr.editing{background:rgba(242,179,61,.06)}
     <button class="tab" data-market="kr">한국</button>
     <button class="tab" data-market="us">미국</button>
     <button class="tab" id="strictToggle" title="RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓ 만 표시 (주도주 엄선)">🎯 주도주만</button>
+    <button class="tab" id="riskSortToggle" title="손절폭(리스크%) 좁은 순으로 정렬 — 타이트한 진입 자리가 위로. 단 ATR(일상 변동)보다 좁은 손절은 노이즈에 털릴 수 있어 ⚠️ 표시">↕ 손절좁은순</button>
   </div>
   <button class="refresh" id="refresh">다시 스캔</button>
 </header>
@@ -720,9 +721,15 @@ let sectorFilter = null;
 let searchQuery = '';
 let lastHits = [];
 let strictMode = false;
+let riskSort = false;
 document.getElementById('strictToggle').addEventListener('click', (e) => {
   strictMode = !strictMode;
   e.target.classList.toggle('active', strictMode);
+  renderCards();
+});
+document.getElementById('riskSortToggle').addEventListener('click', (e) => {
+  riskSort = !riskSort;
+  e.target.classList.toggle('active', riskSort);
   renderCards();
 });
 let favorites = [];
@@ -1017,10 +1024,14 @@ function renderCards() {
       return rsOk && volOk && rrOk && riskOk;
     });
   }
+  // 손절 좁은 순 정렬 (토글): 리스크% 오름차순 — 타이트한 진입 자리가 위로
+  if (riskSort) {
+    list.sort((a, b) => (a.risk_pct ?? 999) - (b.risk_pct ?? 999));
+  }
   // 시간대별 시장 우선 정렬 (전체 탭에서만):
   // 사용자 요청: 한국시간 오전 6시~오후 8시는 한국주 먼저(미국장 끝나자마자~한국장),
   //            그 외(오후 8시~오전 6시)는 미국주 먼저(미국장 진행 시간대)
-  if (market === 'all') {
+  if (market === 'all' && !riskSort) {
     const krHour = (new Date().getUTCHours() + 9) % 24;  // 한국시간 (UTC+9)
     const krFirst = (krHour >= 6 && krHour < 20);  // 06~20시: 한국주 먼저, 그 외: 미국주 먼저
     const rank = h => {
