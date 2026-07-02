@@ -244,7 +244,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.44.3</span> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.45.0</span> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1344,8 +1344,8 @@ async function updateTracking(prefetched) {
     //  사용자가 직접 ⏹종료 누를 때까지 현재가·R을 계속 추적한다.)
     const daysHeld = Math.floor((today - new Date(r.date)) / 86400000);
     let closed = false, reason = '', resultR = null;
-    if (px <= stop) { closed = true; reason = '손절'; resultR = -1; }
-    else if (target && px >= target) { closed = true; reason = '목표'; resultR = (target - entry) / oneR; }
+    if (px <= stop) { closed = true; reason = '손절도달'; resultR = -1; }
+    else if (target && px >= target) { closed = true; reason = '목표도달'; resultR = (target - entry) / oneR; }
     // 14일 경과해도 자동종료하지 않음 — 현재가·R 계속 갱신만 함
 
     if (closed) {
@@ -1354,6 +1354,7 @@ async function updateTracking(prefetched) {
       r.result_r = (Math.round(resultR * 100) / 100).toString();
       r.exit = Math.round(px * 100) / 100;
       r.closed_reason = reason;
+      r.exit_reason = reason;
       r.held_days = daysHeld;
     }
     changed = true;
@@ -1672,7 +1673,7 @@ function renderJournal() {
     <div class="jrnl-stats">
       <div class="statcard">
         <div class="statcard-t">📈 추세추종</div>
-        <div class="statcard-v">진입 ${trend.enteredCount} · 대기 ${trend.pendingCount} · 종료 ${trend.closedCount} · 승률 ${trend.winRate}${trend.winRate!=='–'?'%':''} · 평균 ${trend.avgR}R</div>
+        <div class="statcard-v">진입 ${trend.enteredCount} · 대기 ${trend.pendingCount} · 종료 ${trend.closedCount} · 승률 ${trend.winRate}${trend.winRate!=='–'?'%':''} · 평균 ${trend.avgR}R${(() => { const imp = getJournal().filter(x => x.exit_reason === '충동').length; return imp ? ` · <span style="color:#ff6b6b;font-weight:700">충동 ${imp}</span>` : ''; })()}</div>
       </div>
       <div class="statcard">
         <div class="statcard-t">⚡ 단타</div>
@@ -1740,7 +1741,7 @@ function viewRow(r) {
     <td class="mono"${broken?' style="color:#ff6b6b"':''}>${r.stop ?? '-'}</td>
     <td class="mono" style="${r.result_r&&parseFloat(r.result_r)>0?'color:var(--up)':r.result_r?'color:var(--down)':''}">${
       r.result_r
-        ? `${r.result_r}R${r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:''}`
+        ? `${r.result_r}R${r.exit_reason==='충동'?`<div style="font-size:9px;color:#ff6b6b;font-weight:700">⚠️ 충동</div>`:r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:''}`
         : st === 'pending'
             ? `<span style="color:var(--amber);font-size:11px">피벗 대기</span><div style="font-size:9px;color:var(--muted)">${r.last_price?'현재 '+(/\.(KS|KQ)$/i.test(r.ticker||'')?Math.round(parseFloat(r.last_price)).toLocaleString():parseFloat(r.last_price).toFixed(2)):'미진입'}</div>`
         : st === 'missed'
@@ -1804,7 +1805,14 @@ function editRow(r) {
     <td><input id="e_entry" class="ein" value="${r.entry ?? ''}" inputmode="decimal" style="width:70px"></td>
     <td><input id="e_stop" class="ein" value="${r.stop ?? ''}" inputmode="decimal" style="width:70px"></td>
     <td><input id="e_exit" class="ein" value="${r.exit || ''}" placeholder="청산가" style="width:70px" inputmode="decimal" title="청산가를 넣으면 결과R 자동 계산">
-        <input id="e_result" class="ein" value="${r.result_r || ''}" placeholder="또는 R" style="width:70px;margin-top:4px"></td>
+        <input id="e_result" class="ein" value="${r.result_r || ''}" placeholder="또는 R" style="width:70px;margin-top:4px">
+        <select id="e_reason" class="ein" style="width:120px;margin-top:4px" title="종료 사유 — 종료 시 필수. 규칙 안에서 나갔는지 스스로에게 답하는 게이트">
+          <option value="">종료 사유…</option>
+          <option value="손절도달" ${r.exit_reason==='손절도달'?'selected':''}>🔴 손절가 도달</option>
+          <option value="트레일링" ${r.exit_reason==='트레일링'?'selected':''}>📉 트레일링/규칙 익절</option>
+          <option value="목표도달" ${r.exit_reason==='목표도달'?'selected':''}>🎯 목표 도달</option>
+          <option value="충동" ${r.exit_reason==='충동'?'selected':''}>⚠️ 규칙 외(충동)</option>
+        </select></td>
     <td colspan="2">
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start">
         <select id="e_cat" class="ein" style="width:110px">
@@ -1836,15 +1844,30 @@ function saveEdit(id) {
   // 청산가 입력 시 결과R 자동 환산 (R 직접 입력값보다 우선)
   const exitV = parseFloat(document.getElementById('e_exit').value);
   const manualR = document.getElementById('e_result').value.trim();
+  const reasonSel = document.getElementById('e_reason');
+  const exitReason = reasonSel ? reasonSel.value : '';
+  const isClosing = (!isNaN(exitV) && entry && stop && entry > stop) || !!manualR;
+  // ── 종료 사유 게이트: 청산하려면 사유를 반드시 골라야 함 ──
+  // (승인 게이트의 1인용 버전 — 손이 먼저 나가기 전에 "이게 규칙인가 충동인가" 자문)
+  if (isClosing && (r.status === 'entered' || r.status === 'closed' || !r.status) && !exitReason) {
+    alert('종료 사유를 선택해주세요.\n\n🔴 손절가 도달 / 📉 트레일링·규칙 익절 / 🎯 목표 도달 / ⚠️ 규칙 외(충동)\n\n"충동"이어도 괜찮아요 — 기록이 쌓이면 데이터가 됩니다.');
+    return;
+  }
   if (!isNaN(exitV) && entry && stop && entry > stop) {
     r.exit = exitV;
     r.result_r = (Math.round((exitV - entry) / (entry - stop) * 100) / 100).toString();
     r.tracking = false;                  // 수동 청산 → 추적 종료
-    if (!r.closed_reason) r.closed_reason = '수동';
+    r.status = 'closed';
+    r.exit_reason = exitReason;
+    r.closed_reason = exitReason || r.closed_reason || '수동';
   } else if (manualR) {
     r.result_r = manualR;
     r.tracking = false;
-    if (!r.closed_reason) r.closed_reason = '수동';
+    r.status = 'closed';
+    r.exit_reason = exitReason;
+    r.closed_reason = exitReason || r.closed_reason || '수동';
+  } else if (exitReason) {
+    r.exit_reason = exitReason;          // 사유만 나중에 고쳐 저장하는 경우
   }
   r.held_days = document.getElementById('e_held').value.trim();
   r.note = document.getElementById('e_note').value.trim();
