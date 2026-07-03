@@ -892,7 +892,30 @@ async function loadSectors() {
     for (let i = 0; i < maxRows; i++) {
       body += '<tr>' + cols.map(k => cell((p[k] || [])[i])).join('') + '</tr>';
     }
-    content.innerHTML = `<div style="max-width:980px;margin:0 auto;overflow-x:auto">
+    // ── 🏆 주도업종 랭킹 (v4.49): RS 85+ & 3개월 +30% & 200일선 위 생존자 카운트 ──
+    // 하루 등락 평균(아래 표)은 노이즈, 생존자 밀집이 로테이션의 진짜 신호
+    const L = d.leading || {};
+    const ldRow = (mkt, label) => {
+      const rows = L[mkt] || [];
+      if (!rows.length) return `<div style="flex:1;min-width:280px"><div style="font-weight:700;font-size:13px;margin-bottom:6px">${label}</div><div style="color:var(--muted);font-size:12px">조건 통과 종목 없음 — 지금 주도주가 없다는 뜻 (조정장 정상)</div></div>`;
+      const maxN = rows[0].n || 1;
+      return `<div style="flex:1;min-width:280px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:6px">${label}</div>
+        ${rows.map(r => `
+          <div style="display:flex;align-items:center;gap:8px;padding:3px 0" title="${r.top.map(t => `${t.name} RS${t.rs} 3개월+${t.mom3}%`).join(' · ')}">
+            <span style="width:86px;font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.sector}</span>
+            <span style="flex:1;height:8px;background:var(--card);border-radius:4px;overflow:hidden"><span style="display:block;height:100%;width:${Math.round(r.n / maxN * 100)}%;background:var(--green);border-radius:4px"></span></span>
+            <b style="font-size:12px;width:22px;text-align:right">${r.n}</b>
+          </div>`).join('')}
+      </div>`;
+    };
+    const leadingHtml = `
+      <div style="max-width:980px;margin:0 auto 14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:8px">🏆 주도업종 랭킹
+          <span style="color:var(--muted);font-weight:400;font-size:11px">RS 85+ · 3개월 +30% · 200일선 위 생존 종목 수 — 로테이션 감지용 (막대에 마우스: 대표 종목)</span></div>
+        <div style="display:flex;gap:20px;flex-wrap:wrap">${ldRow('KR', '🇰🇷 한국')}${ldRow('US', '🇺🇸 미국')}</div>
+      </div>`;
+    content.innerHTML = leadingHtml + `<div style="max-width:980px;margin:0 auto;overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;table-layout:fixed;min-width:640px">
         <thead><tr>${cols.map(k => `<th style="text-align:left;padding:10px;font-size:14px;border-bottom:2px solid var(--line)">${k === 'US' ? '🇺🇸' : '🇰🇷'} ${panelName[k]}</th>`).join('')}</tr></thead>
         <tbody>${body}</tbody>
