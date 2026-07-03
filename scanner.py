@@ -124,6 +124,84 @@ def late_stage_info(c: pd.Series, lo: pd.Series, h: pd.Series, v: pd.Series,
             "late_flags": flags, "late_level": level}
 
 
+def ftd_state(close: pd.Series, vol: pd.Series) -> dict:
+    """오닐 FTD(팔로우스루 데이) 상태 머신 (v4.50).
+
+    로직:
+    - 조정 판정: 최근 60일 고점 대비 저점이 -6% 이상 하락했을 때만 FTD 개념 적용
+      (조정이 없으면 FTD가 필요 없음 → in_correction=False)
+    - 반등 시도: 최근 40일 내 최저 종가일 = 시도의 저점(rally_low).
+      argmin 정의상 그 이후 종가는 저점을 깨지 않았음이 보장됨
+      (깨졌다면 그 날이 새 argmin → 시도 자동 리셋).
+    - rally_day: 저점일=1일차로 센 경과 거래일 수
+    - FTD: 시도 4일차 이후, 지수 +1.25%↑ 상승 + 거래량 전일比 증가인 날
+    - ftd_valid: FTD 발생 후 저점 미이탈 (argmin 보장) → True 유지
+
+    반환: {in_correction, rally_day, ftd, ftd_days_ago, rally_low, drawdown_pct}
+    """
+    out = {"in_correction": False, "rally_day": 0, "ftd": False,
+           "ftd_days_ago": None, "rally_low": None, "drawdown_pct": 0.0}
+    try:
+        if close is None or len(close) < 45 or vol is None or len(vol) != len(close):
+            return out
+        c60 = close.iloc[-60:].reset_index(drop=True)
+        v60 = vol.iloc[-60:].reset_index(drop=True)
+        n60 = len(c60)
+        # 저점: 최근 40일 내 최저 종가 (60일 프레임 내 위치로 환산)
+        tail = min(40, n60)
+        low_local = int(c60.iloc[-tail:].reset_index(drop=True).idxmin())
+        low_p = n60 - tail + low_local
+        rally_low = float(c60.iloc[low_p])
+        # 조정 깊이 = "저점 이전"의 고점 대비 하락폭
+        # (전체 60일 고점과 비교하면 꾸준한 상승장의 트레일링 저점도
+        #  최신 고점 대비 -6%로 계산돼 조정으로 오판 — T1 회귀로 발견)
+        peak_before = float(c60.iloc[:low_p + 1].max())
+        drawdown = (rally_low / peak_before - 1.0) * 100 if peak_before > 0 else 0.0
+        out["rally_low"] = round(rally_low, 2)
+        out["drawdown_pct"] = round(drawdown, 1)
+        if drawdown > -6.0:
+            return out                      # 조정 아님 — FTD 불필요
+        out["in_correction"] = True
+        last_i = n60 - 1
+        out["rally_day"] = last_i - low_p + 1   # 저점일 = 1일차
+        # FTD 탐색: 4일차(오프셋 3) 이후
+        ret = c60.pct_change()
+        ftd_i = None
+        for i in range(low_p + 3, last_i + 1):
+            if float(ret.iloc[i]) >= 0.0125 and float(v60.iloc[i]) > float(v60.iloc[i - 1]):
+                ftd_i = i
+                break
+        if ftd_i is not None:
+            out["ftd"] = True
+            out["ftd_days_ago"] = last_i - ftd_i
+        return out
+    except Exception:
+        return out
+
+
+def gate_suggest(dist_days: int, ftd: dict, above_ma60: bool) -> tuple[str, str]:
+    """분산일 + FTD 상태 → 시장 게이트 자동 제안 (v4.50).
+    반환: (gate, 이유 한 줄). gate: confirmed|pressure|correction"""
+    if dist_days >= 6:
+        return "correction", f"분산일 {dist_days}개 — 기관 매도 우세"
+    if ftd.get("in_correction"):
+        if not ftd.get("ftd"):
+            d = ftd.get("rally_day", 0)
+            return "correction", (f"조정 중 (고점比 {ftd.get('drawdown_pct')}%) · "
+                                  f"반등 시도 {d}일차 · FTD 대기")
+        # FTD 발생
+        if dist_days <= 3:
+            return "confirmed", (f"FTD 확인 ({ftd.get('ftd_days_ago')}일 전) · "
+                                 f"분산일 {dist_days}개 — 시험 매수 0.5R부터")
+        return "pressure", f"FTD 후 분산일 {dist_days}개 — A급만 1.5R"
+    # 조정 국면 아님 (정상 추세)
+    if not above_ma60:
+        return "pressure", "60일선 아래 — 선별 진입"
+    if dist_days >= 4:
+        return "pressure", f"분산일 {dist_days}개 — 압박 누적"
+    return "confirmed", f"상승 추세 · 분산일 {dist_days}개"
+
+
 def mom_3m(c: pd.Series) -> float | None:
     """3개월(63거래일) 절대 수익률. RS(상대)의 폭락장 맹점 보완용."""
     if len(c) < 64:
@@ -312,6 +390,7 @@ def volume_info(close: float, v: pd.Series) -> dict:
         "volume": round(vol_today),
         "turnover": round(turnover),
         "avg_volume": round(avg50),
+        "avg_turnover": round(close * avg50),   # 평균 거래대금 (v4.49.2 유동성 판정용)
         "vol_vs_avg": vol_vs_avg,   # 오늘/평균 (1.0=평소)
     }
 

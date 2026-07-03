@@ -5,6 +5,26 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.50.0 [신규] FTD 자동화 — 시장 국면 판단을 시스템 안으로 (기능 동결 전 마지막).
+        [상태 머신] scanner.ftd_state(): 조정 판정(저점 이전 고점比 -6%+),
+               반등 시도 일수 카운트(저점 이탈 시 자동 리셋), FTD(4일차+ &
+               +1.25% & 거래량 증가). 구식 "당일 깃발" 방식 폐기. 시나리오 6종 검증.
+        [게이트 제안] gate_suggest(): 분산일+FTD 상태 → 🟢/🟡/🔴 자동 제안.
+               /api/market/gate (KOSPI 기준). 리스크바에 제안 표시 + 불일치 시
+               [적용] 원클릭. R설정 모달에 근거 문구.
+        [봇 연동 v2.2] 30분마다 제안 변경 감시 → 📢 알림 (FTD 발생 시 "시험
+               매수 0.5R" 지침 포함). 일요일 09:00 주간 리포트(주간R·승패·
+               충동·진입중) — 주말 루틴 자동화.
+        ※ 이후 기능 동결. 다음 과제는 코드가 아니라 표본 20건.
+v4.49.3 [신규] /api/watch/positions — 진입중 포지션 노출. 얼마냐봇이 2분마다
+               감시해 R 마일스톤 알림: 💰+2R(절반 익절+본전 이동)·+3R/+4R…·
+               🛑손절 도달. 피벗 감시엔 ⚡-1% 접근 예고 추가 (봇 쪽 구현).
+v4.49.2 [신규] 💧/🚱 유동성 뱃지 — "시총"이 아니라 "내가 나올 수 있느냐" 기준.
+        [판정] 1R 포지션 금액(R설정 역산) ÷ 50일 평균 거래대금(avg_turnover 신설,
+               당일 거래대금은 눌림 후보에서 과소평가되므로 평균 사용).
+               5% 미만 정상 / 5~15% 💧 주의(사이즈 절반·분할 청산) /
+               15%+ 🚱 부적합(관찰만). 계좌가 커지면 기준 자동 강화 (상대 기준).
+        [가이드] 뱃지 사전에 반영.
 v4.49.1 [신규] 📖 활용 가이드 내장 — GUIDE.md를 /guide에서 다크테마로 렌더
                (marked.js CDN, 백엔드 의존성 없음). 헤더 버전 뱃지 옆 📖 버튼.
                12개 챕터: 게이트/섹터/탭별 매매법/R시스템/루틴/절대규칙10.
@@ -685,12 +705,13 @@ def _sector_of(t: str) -> str:
         return US_SECTORS_AUTO.get(t.upper(), "기타")
     return s
 from universe import get_universe, load_alerts
+import scanner as scanner_mod
 import naver_kr
 import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.49.1"
+VERSION = "v4.50.0"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1772,14 +1793,14 @@ def _index_regime(code: str) -> dict | None:
             dist_mask = down & vol_up
             dist_days = int(dist_mask.iloc[-25:].sum())
 
-        # ── FTD (하락 후 반등 신호, 표시용 보너스) ──
-        ftd = False
-        if vol is not None and len(close) >= 5:
-            ret = close.pct_change()
-            up15 = ret.iloc[-1] >= 0.015
-            vol_up_today = bool(vol.iloc[-1] > vol.iloc[-2])
-            recent_low_pos = int(close.iloc[-10:].values.argmin())
-            ftd = bool(up15 and vol_up_today and recent_low_pos <= 6)
+        # ── FTD 상태 머신 (v4.50 — scanner.ftd_state) ──
+        # 구식 "오늘 하루 깃발" 방식 폐기: 반등 시도 일수 카운트 + 저점 이탈 시
+        # 자동 리셋 + 발생 후 유지되는 제대로 된 오닐 로직으로 교체.
+        fs = scanner_mod.ftd_state(close, vol) if vol is not None else {
+            "in_correction": False, "rally_day": 0, "ftd": False,
+            "ftd_days_ago": None, "drawdown_pct": 0.0}
+        ftd = bool(fs.get("ftd"))
+        gate_sug, gate_why = scanner_mod.gate_suggest(dist_days, fs, cur > m60)
 
         # ── 종합 판정 ──
         if cur < m60 or dist_days >= 5:
@@ -1791,13 +1812,49 @@ def _index_regime(code: str) -> dict | None:
         else:
             regime, txt = "neutral", "중립 (선별 진입)"
         if ftd and regime != "good":
-            txt += " · FTD 발생(바닥 신호)"
+            txt += f" · FTD 확인({fs.get('ftd_days_ago')}일 전)"
+        elif fs.get("in_correction"):
+            txt += f" · 반등 {fs.get('rally_day')}일차 FTD 대기"
 
         return {"regime": regime, "regime_txt": txt,
                 "above_ma20": cur > m20, "above_ma60": cur > m60,
-                "dist_days": dist_days, "ftd": ftd}
+                "dist_days": dist_days, "ftd": ftd,
+                "rally_day": fs.get("rally_day", 0),
+                "ftd_days_ago": fs.get("ftd_days_ago"),
+                "in_correction": fs.get("in_correction", False),
+                "drawdown_pct": fs.get("drawdown_pct", 0.0),
+                "gate_suggest": gate_sug, "gate_why": gate_why}
     except Exception:
         return None
+
+
+@app.get("/api/market/gate")
+async def market_gate():
+    """시장 게이트 자동 제안 (v4.50) — KOSPI 기준. 봇이 30분마다 폴링해
+    제안 변경/FTD 발생 시 텔레그램 알림. 프론트 R설정에도 표시."""
+    loop = asyncio.get_event_loop()
+    reg = await loop.run_in_executor(_executor, _index_regime, "KOSPI")
+    if not reg:
+        return JSONResponse({"ok": False}, status_code=503)
+    cur = dict(RSETTINGS_DEFAULT)
+    if os.path.exists(RSETTINGS_PATH):
+        try:
+            with open(RSETTINGS_PATH, encoding="utf-8") as f:
+                saved = _json.load(f)
+                if isinstance(saved, dict):
+                    cur.update(saved)
+        except (ValueError, OSError):
+            pass
+    return JSONResponse({
+        "ok": True,
+        "suggest": reg.get("gate_suggest"),
+        "why": reg.get("gate_why"),
+        "current": cur.get("gate"),
+        "dist_days": reg.get("dist_days"),
+        "ftd": reg.get("ftd"),
+        "rally_day": reg.get("rally_day"),
+        "in_correction": reg.get("in_correction"),
+    })
 
 
 @app.get("/api/krstatus")
@@ -1959,6 +2016,33 @@ async def watch_pending():
             "tab": r.get("tab", ""),
         })
     return JSONResponse({"pending": out, "count": len(out)})
+
+
+@app.get("/api/watch/positions")
+async def watch_positions():
+    """진입중(entered, 미종료) 포지션 노출 — 봇의 R 마일스톤/손절 알림용 (v4.49.3).
+    반환: [{id, ticker, name, entry, stop, shares}, ...]
+    봇이 2분마다 현재가로 R 진행률을 계산해 +2R(절반 익절)·손절 도달을 알림."""
+    out = []
+    for r in load_journal():
+        if (r.get("status") or "entered") != "entered" or r.get("result_r") != "":
+            continue
+        try:
+            e = float(r.get("entry") or 0)
+            s = float(r.get("stop") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not e or not s or s >= e:
+            continue
+        out.append({
+            "id": r.get("id"),
+            "ticker": r.get("ticker"),
+            "name": r.get("name"),
+            "entry": e,
+            "stop": s,
+            "shares": r.get("shares") or "",
+        })
+    return JSONResponse({"positions": out, "count": len(out)})
 
 
 # ── R 기반 리스크 시스템 설정 (v4.47) ──────────────────────
