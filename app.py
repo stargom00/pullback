@@ -5,6 +5,9 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.49.1 [신규] 📖 활용 가이드 내장 — GUIDE.md를 /guide에서 다크테마로 렌더
+               (marked.js CDN, 백엔드 의존성 없음). 헤더 버전 뱃지 옆 📖 버튼.
+               12개 챕터: 게이트/섹터/탭별 매매법/R시스템/루틴/절대규칙10.
 v4.49.0 [신규] 앤트킹 스크린 차용 3종 — 상대RS의 맹점 보완.
         [절대 모멘텀] 대장후보/슈퍼대장에 3개월 +30% 게이트 (슈퍼대장은 베이스
                고려 15%). 폭락장의 "덜 빠져서 RS 높은" 가짜 주도주 차단.
@@ -687,7 +690,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.49.0"
+VERSION = "v4.49.1"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1972,6 +1975,50 @@ RSETTINGS_DEFAULT = {
     "dist_days": 0,        # 분산일 카운트 (수동 입력, 게이트 판단 참고용)
     "usd_krw": 1400.0,     # 환율 (US 종목 사이즈 계산용, 수동 갱신)
 }
+
+
+@app.get("/guide.md")
+async def guide_md():
+    """활용 가이드 원문 (v4.49.1) — /guide 페이지가 fetch해서 렌더."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "GUIDE.md")
+    if not os.path.exists(path):
+        return Response("가이드 파일이 없습니다.", media_type="text/plain")
+    return FileResponse(path, media_type="text/markdown; charset=utf-8")
+
+
+@app.get("/guide")
+async def guide_page():
+    """활용 가이드 뷰어 — 스캐너 다크 테마, 클라이언트 렌더(marked.js)."""
+    html = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>📖 눌림목 스캐너 활용 가이드</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--line:#30363d;--fg:#e6edf3;--muted:#8b949e;--green:#3fb950}
+body{background:var(--bg);color:var(--fg);font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;
+  margin:0;padding:24px 16px;line-height:1.75}
+#doc{max-width:820px;margin:0 auto}
+h1{font-size:24px;border-bottom:2px solid var(--line);padding-bottom:10px}
+h2{font-size:19px;margin-top:36px;border-bottom:1px solid var(--line);padding-bottom:6px;color:var(--green)}
+h3{font-size:15.5px;margin-top:24px}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left}
+th{background:var(--surface)}
+code{background:var(--surface);padding:1px 5px;border-radius:4px;font-size:13px}
+blockquote{border-left:3px solid var(--green);margin:0;padding:2px 14px;color:var(--muted)}
+hr{border:none;border-top:1px solid var(--line);margin:28px 0}
+strong{color:#ffd98a}
+a.back{position:fixed;top:14px;right:14px;background:var(--surface);border:1px solid var(--line);
+  color:var(--fg);text-decoration:none;padding:6px 12px;border-radius:8px;font-size:13px}
+</style></head><body>
+<a class="back" href="/">← 스캐너</a>
+<div id="doc">불러오는 중…</div>
+<script>
+fetch('/guide.md').then(r => r.text()).then(md => {
+  document.getElementById('doc').innerHTML = marked.parse(md);
+}).catch(() => { document.getElementById('doc').textContent = '가이드를 불러오지 못했습니다.'; });
+</script></body></html>"""
+    return Response(html, media_type="text/html; charset=utf-8")
 
 
 @app.get("/api/rsettings")
