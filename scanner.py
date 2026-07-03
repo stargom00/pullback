@@ -124,6 +124,46 @@ def late_stage_info(c: pd.Series, lo: pd.Series, h: pd.Series, v: pd.Series,
             "late_flags": flags, "late_level": level}
 
 
+def trend_grade(c: pd.Series, lo: pd.Series, h: pd.Series, rs_rank) -> dict:
+    """미너비니 Trend Template 8조건 채점 → A/B/C/D 등급 (v4.48.3).
+    이 앱의 이평 체계(20/60/200)에 맞게 150일선 조건은 60일선으로 대응.
+    A = 8/8 + RS 87+ (진짜 주도주) / B = 7+ / C = 5~6 / D = 그 이하.
+    각 카드에 등급 배지로 표시 — '수많은 종목 중 진짜'를 한 글자로."""
+    try:
+        close = float(c.iloc[-1])
+        ma20 = float(c.rolling(20).mean().iloc[-1])
+        ma60 = float(c.rolling(60).mean().iloc[-1])
+        ma200s = c.rolling(200).mean()
+        ma200 = float(ma200s.iloc[-1])
+        ma200_prev = float(ma200s.iloc[-21]) if len(ma200s.dropna()) > 21 else ma200
+        lo52 = float(lo.iloc[-252:].min()) if len(lo) >= 252 else float(lo.min())
+        hi52 = float(h.iloc[-252:].max()) if len(h) >= 252 else float(h.max())
+        rs = rs_rank if rs_rank is not None else 50
+        checks = [
+            ("200일선 위", close > ma200),
+            ("200일선 상승", ma200 > ma200_prev),
+            ("60일선 위", close > ma60),
+            ("60일선>200일선", ma60 > ma200),
+            ("20일선 위", close > ma20),
+            ("52주 저점 +30%↑", lo52 > 0 and close / lo52 - 1 >= 0.30),
+            ("52주 고점 -25% 이내", hi52 > 0 and 1 - close / hi52 <= 0.25),
+            ("RS 70+", rs >= 70),
+        ]
+        passed = sum(1 for _, ok in checks if ok)
+        fails = [name for name, ok in checks if not ok]
+        if passed == 8 and rs >= 87:
+            grade = "A"
+        elif passed >= 7:
+            grade = "B"
+        elif passed >= 5:
+            grade = "C"
+        else:
+            grade = "D"
+        return {"grade": grade, "passed": passed, "fails": fails}
+    except Exception:
+        return {"grade": "?", "passed": 0, "fails": []}
+
+
 def _risk_hard_ok(rrb: dict, is_kr: bool, pivot: float | None = None) -> bool:
     """리스크 기하 하드 게이트: 손절폭이 시장 한도(US 8%/KR 12%)를 넘으면
     베이스가 너무 느슨한 것 → 후보 제외. (risk_warn 표시만 하던 것을 강제화)
@@ -902,6 +942,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     if not _risk_hard_ok(rrb, is_kr, pivot=pivot):
         return None
     _ls = late_stage_info(c, lo, h, v, is_kr)
+    _tt = trend_grade(c, lo, h, rs_rank)
     if _ls["late_level"] == "danger" and cfg.get("late_stage_exclude", True):
         return None
 
@@ -936,6 +977,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         **rrb,
         "late_flags": _ls["late_flags"], "late_level": _ls["late_level"],
         "ext200_pct": _ls["ext200_pct"],
+        "grade": _tt["grade"], "tt_pass": _tt["passed"], "tt_fails": _tt["fails"],
         **volume_info(close, v),
         "avwap": anchored_vwap(h, lo, c, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
@@ -1511,6 +1553,7 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
     if not _risk_hard_ok(rrb, is_kr, pivot=pivot):
         return None
     _ls = late_stage_info(c, lo, h, v, is_kr)
+    _tt = trend_grade(c, lo, h, rs_rank)
     if _ls["late_level"] == "danger" and CONFIG.get("late_stage_exclude", True):
         return None
 
@@ -1518,6 +1561,7 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
         "mode": "breakout",
         "late_flags": _ls["late_flags"], "late_level": _ls["late_level"],
         "ext200_pct": _ls["ext200_pct"],
+        "grade": _tt["grade"], "tt_pass": _tt["passed"], "tt_fails": _tt["fails"],
         **_merger_block(c, h, lo, v),
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
@@ -1667,6 +1711,7 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
     if not _risk_hard_ok(rrb, is_kr, pivot=pivot):
         return None
     _ls = late_stage_info(c, lo, h, v, is_kr)
+    _tt = trend_grade(c, lo, h, rs_rank)
     if _ls["late_level"] == "danger" and CONFIG.get("late_stage_exclude", True):
         return None
 
@@ -1674,6 +1719,7 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
         "mode": "boxbreak",
         "late_flags": _ls["late_flags"], "late_level": _ls["late_level"],
         "ext200_pct": _ls["ext200_pct"],
+        "grade": _tt["grade"], "tt_pass": _tt["passed"], "tt_fails": _tt["fails"],
         **_merger_block(c, h, lo, v),
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
@@ -1834,6 +1880,7 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
     if not _risk_hard_ok(rrb, is_kr, pivot=pivot):
         return None
     _ls = late_stage_info(c, lo, h, v, is_kr)
+    _tt = trend_grade(c, lo, h, rs_rank)
     if _ls["late_level"] == "danger" and CONFIG.get("late_stage_exclude", True):
         return None
 
@@ -1862,6 +1909,7 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
         **rrb,
         "late_flags": _ls["late_flags"], "late_level": _ls["late_level"],
         "ext200_pct": _ls["ext200_pct"],
+        "grade": _tt["grade"], "tt_pass": _tt["passed"], "tt_fails": _tt["fails"],
         **volume_info(close, v),
         "avwap": anchored_vwap(h, lo, c, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
@@ -2229,10 +2277,18 @@ def _pat_htf(c, h, lo, v):
     vol_dry = run_v > 0 and flag_v < run_v * 0.7
     if run_v > 0 and flag_v > run_v * 1.05:
         return None                          # 깃발에서 거래량 확대는 분배 위험
+    # 성숙도 (v4.48.3): 오닐 정석은 깃발 3~5주(15~25봉). 3봉부터 감지는 하되
+    # 15봉 미만이거나 거래량이 안 말랐으면 "미완성" — 형성 중 돌파 추격은 실패 모드.
+    _missing = []
+    if flag_len < 15:
+        _missing.append(f"깃발 {int(flag_len)}/15봉(3주) — {15 - int(flag_len)}봉 더 필요")
+    if not vol_dry:
+        _missing.append("거래량 고갈 전 (급등기 평균의 70% 미만이어야)")
     return {"pattern": "치솟은깃발", "pattern_emoji": "🚩", "pivot": peak,
             "near_lo": -18.0,   # 깃발은 피벗 아래 깊이 매달림(정상)
             "stop_raw": flag_low, "base_len": int(flag_len),
             "depth_pct": round(depth * 100, 1), "vol_dry": vol_dry,
+            "pat_ready": not _missing, "pat_missing": _missing,
             "quality": 20 + (10 if vol_dry else 0) + (5 if depth < 0.15 else 0)}
 
 
@@ -2279,7 +2335,13 @@ def _pat_cup_handle(c, h, lo, v):
     right_v = float(vw.iloc[i_low:i_rec + 1].mean())
     hd_v = float(vw.iloc[i_rec + 1:].mean()) if handle_len >= 2 else right_v
     vol_dry = right_v > 0 and hd_v < right_v * 0.85
+    _missing = []
+    if handle_len < 5:
+        _missing.append(f"손잡이 {int(handle_len)}/5봉(1주) — {5 - int(handle_len)}봉 더 필요")
+    if not vol_dry:
+        _missing.append("손잡이 거래량 고갈 전 (우측회복기의 85% 미만이어야)")
     return {"pattern": "컵앤핸들", "pattern_emoji": "☕", "pivot": hd_high,
+            "pat_ready": not _missing, "pat_missing": _missing,
             "stop_raw": hd_low, "base_len": int(L - 1 - i_rim),
             "depth_pct": round(depth * 100, 1), "vol_dry": vol_dry,
             "quality": 15 + (10 if vol_dry else 0) + (5 if hd_depth < 0.08 else 0)}
@@ -2324,7 +2386,8 @@ def _pat_double_bottom(c, h, lo, v):
     return {"pattern": "더블바닥", "pattern_emoji": "🔻🔻", "pivot": mid,
             "stop_raw": b2, "base_len": int(L - 1 - i1),
             "depth_pct": round((pre_high - min(b1, b2)) / pre_high * 100, 1),
-            "vol_dry": False, "quality": 12}
+            "vol_dry": False, "quality": 12,
+            "pat_ready": True, "pat_missing": []}
 
 
 def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
@@ -2382,8 +2445,10 @@ def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
     )
     score = min(score, 100.0)
 
+    _tt = trend_grade(c, lo, h, rs_rank)
     return {
         "mode": "pattern",
+        "grade": _tt["grade"], "tt_pass": _tt["passed"], "tt_fails": _tt["fails"],
         **_merger_block(c, h, lo, v),
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
@@ -2395,6 +2460,8 @@ def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
         "leader": (rs_rank or 0) >= 90,
         "pattern": best["pattern"],
         "pattern_emoji": best["pattern_emoji"],
+        "pat_ready": best.get("pat_ready", True),
+        "pat_missing": best.get("pat_missing", []),
         "base_len": best["base_len"],
         "depth_pct": best["depth_pct"],
         "pivot": round(pivot, 2),
