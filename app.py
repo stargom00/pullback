@@ -5,6 +5,14 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.49.0 [신규] 앤트킹 스크린 차용 3종 — 상대RS의 맹점 보완.
+        [절대 모멘텀] 대장후보/슈퍼대장에 3개월 +30% 게이트 (슈퍼대장은 베이스
+               고려 15%). 폭락장의 "덜 빠져서 RS 높은" 가짜 주도주 차단.
+               카드에 mom_3m_pct 필드. 탭이 비면 "주도주 없음"이라는 팩트.
+        [주도업종 랭킹] 섹터 탭 상단: RS85+ & 3개월+30% & 200일선 위 생존자를
+               업종별 카운트 (KR/US). 하루 등락 평균 대신 로테이션 감지용.
+        [U/D 등급 반영] U/D ≤0.8(분산) → 등급 한 단계 강등 + 사유 표시,
+               ≥1.5 매집 표기. A/D Rating 근사 — 차트 8/8이어도 분산이면 A 아님.
 v4.48.3 [신규] 등급·성숙도 배지 — "수많은 종목 중 진짜"를 한눈에.
         [A/B/C 등급] 미너비니 트렌드 템플릿 8조건 채점(이 앱 이평 체계로 대응):
                200일선 위/상승 · 60일선 위 · 60>200 · 20일선 위 · 52주저점+30% ·
@@ -679,7 +687,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.48.3"
+VERSION = "v4.49.0"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1449,7 +1457,12 @@ async def api_sectors():
     bundle = await _fetch_market_data("all")
     data = bundle["data"]
     universe = bundle["universe"]
+    rs_ranks = bundle.get("rs_ranks", {})
     panels: dict[str, dict[str, list]] = {"KOSPI": {}, "KOSDAQ": {}, "US": {}}
+    # ── 주도업종 집계 (v4.49, 생존자 카운트 방식) ──
+    # 하루 등락 평균은 노이즈 — "RS 85+ AND 3개월 +30% AND 200일선 위" 생존자가
+    # 어느 업종에 몰렸는지가 로테이션의 진짜 신호. (앤트킹 스크린 방식 차용)
+    leading: dict[str, dict[str, list]] = {"KR": {}, "US": {}}
     for t, df in data.items():
         if df is None or len(df) < 2:
             continue
@@ -1466,7 +1479,34 @@ async def api_sectors():
             continue
         panel = "KOSPI" if t.endswith(".KS") else ("KOSDAQ" if t.endswith(".KQ") else "US")
         panels[panel].setdefault(sec, []).append((t, universe.get(t, t), chg))
-    out = {}
+        # 주도주 판정 (KR/US 통합 패널)
+        try:
+            rs = rs_ranks.get(t)
+            if rs is not None and rs >= 85 and len(c) >= 200:
+                base63 = float(c.iloc[-64]) if len(c) >= 64 else 0.0
+                m3 = last / base63 - 1.0 if base63 > 0 else 0.0
+                ma200 = float(c.rolling(200).mean().iloc[-1])
+                if m3 >= 0.30 and last > ma200:
+                    mkt = "KR" if t.endswith((".KS", ".KQ")) else "US"
+                    leading[mkt].setdefault(sec, []).append(
+                        (t, universe.get(t, t), int(rs), round(m3 * 100, 1)))
+        except Exception:
+            pass
+    # 주도업종 랭킹: 생존자 수 내림차순, 업종당 상위 3종목(RS순)
+    leading_out = {}
+    for mkt, groups in leading.items():
+        rows = []
+        for sec, items in groups.items():
+            items.sort(key=lambda x: x[2], reverse=True)
+            rows.append({
+                "sector": sec, "n": len(items),
+                "top": [{"ticker": tk, "name": nm, "rs": rs, "mom3": m3}
+                        for tk, nm, rs, m3 in items[:3]],
+            })
+        rows.sort(key=lambda r: r["n"], reverse=True)
+        leading_out[mkt] = rows[:8]
+
+    out = {"leading": leading_out}
     for pname, groups in panels.items():
         min_n = 2 if pname != "US" else 3   # 국내는 섹터당 종목 적어 완화
         rows = []

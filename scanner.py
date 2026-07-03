@@ -124,7 +124,16 @@ def late_stage_info(c: pd.Series, lo: pd.Series, h: pd.Series, v: pd.Series,
             "late_flags": flags, "late_level": level}
 
 
-def trend_grade(c: pd.Series, lo: pd.Series, h: pd.Series, rs_rank) -> dict:
+def mom_3m(c: pd.Series) -> float | None:
+    """3개월(63거래일) 절대 수익률. RS(상대)의 폭락장 맹점 보완용."""
+    if len(c) < 64:
+        return None
+    base = float(c.iloc[-64])
+    return float(c.iloc[-1]) / base - 1.0 if base > 0 else None
+
+
+def trend_grade(c: pd.Series, lo: pd.Series, h: pd.Series, rs_rank,
+                ud: float | None = None) -> dict:
     """미너비니 Trend Template 8조건 채점 → A/B/C/D 등급 (v4.48.3).
     이 앱의 이평 체계(20/60/200)에 맞게 150일선 조건은 60일선으로 대응.
     A = 8/8 + RS 87+ (진짜 주도주) / B = 7+ / C = 5~6 / D = 그 이하.
@@ -159,9 +168,21 @@ def trend_grade(c: pd.Series, lo: pd.Series, h: pd.Series, rs_rank) -> dict:
             grade = "C"
         else:
             grade = "D"
-        return {"grade": grade, "passed": passed, "fails": fails}
+        # U/D 반영 (v4.49): 분산(≤0.8) = 기관이 팔고 있다는 뜻 → 한 단계 강등.
+        # 차트가 8/8이어도 하락일에 거래량이 실리면 A급이 아님 (A/D Rating 근사).
+        ud_note = ""
+        if ud is not None:
+            if ud <= 0.8:
+                order = ["A", "B", "C", "D"]
+                if grade in order[:-1]:
+                    grade = order[order.index(grade) + 1]
+                fails.append(f"U/D {ud} 분산")
+                ud_note = "분산"
+            elif ud >= 1.5:
+                ud_note = "매집"
+        return {"grade": grade, "passed": passed, "fails": fails, "ud_note": ud_note}
     except Exception:
-        return {"grade": "?", "passed": 0, "fails": []}
+        return {"grade": "?", "passed": 0, "fails": [], "ud_note": ""}
 
 
 def _risk_hard_ok(rrb: dict, is_kr: bool, pivot: float | None = None) -> bool:
@@ -396,6 +417,10 @@ CONFIG = {
     "late_stage_exclude": True,  # danger 레벨 제외 여부
     # 리스크 기하 하드 게이트: 구조 손절이 한도보다 멀면 "베이스가 느슨" → 제외.
     # (기존 risk_warn은 표시만 했음 — BHE 10.3%가 경고 딱지 달고 통과한 버그)
+    # 절대 모멘텀 (v4.49, 앤트킹 스크린 차용): 3개월 +30% 이상만 주도주로 인정.
+    # RS는 유니버스 내 '상대' 백분위라 폭락장에선 "덜 빠진 종목"도 90이 나오는
+    # 맹점이 있음 — 절대 수익률 조건이 그런 가짜 주도주를 걸러냄.
+    "leader_mom_3m_min": 0.30,
     "risk_hard_kr": 12.0,
     "risk_hard_us": 8.0,
     "risk_hard_enforce": True,
@@ -942,7 +967,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     if not _risk_hard_ok(rrb, is_kr, pivot=pivot):
         return None
     _ls = late_stage_info(c, lo, h, v, is_kr)
-    _tt = trend_grade(c, lo, h, rs_rank)
+    _tt = trend_grade(c, lo, h, rs_rank, ud=up_down_volume(c, v, 50))
     if _ls["late_level"] == "danger" and cfg.get("late_stage_exclude", True):
         return None
 
@@ -1312,6 +1337,13 @@ def analyze_leader(df: pd.DataFrame, rs_rank: int | None = None,
     ma20_dist_pct = (close - m20) / m20 * 100
     vol_ratio = float(v.iloc[-10:].mean()) / float(v.iloc[-50:].mean()) if float(v.iloc[-50:].mean()) > 0 else 0.0
 
+    # ── v4.49: 절대 모멘텀 게이트 — 3개월 +30% 미만이면 주도주 아님 ──
+    # (폭락장에서 "덜 빠져서 RS 높은" 가짜 주도주 차단. 조건 미달로 탭이
+    #  비면 그게 "지금 주도주가 없다"는 팩트임)
+    _mom = mom_3m(c)
+    if _mom is None or _mom < CONFIG.get("leader_mom_3m_min", 0.30):
+        return None
+
     # 점수 = RS 중심 (대장 후보는 강함이 전부)
     score = 0.0
     score += 60 * rs_rank / 99
@@ -1322,6 +1354,7 @@ def analyze_leader(df: pd.DataFrame, rs_rank: int | None = None,
 
     return {
         "mode": "leader",
+        "mom_3m_pct": round(_mom * 100, 1),
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
         "score": round(score, 1),
@@ -1421,12 +1454,20 @@ def analyze_super(df: pd.DataFrame, rs_rank: int | None = None,
         buy_zone_dist = (close - buy_zone) / close   # 음수일 수 있음
         near_buy_zone = False   # 지지선 아래로 빠졌으면 '근접' 아님
 
+    # ── v4.49: 절대 모멘텀 게이트 — 슈퍼대장은 절반 기준 ──
+    # 대장후보(발굴)는 30% 하드지만, 이 탭은 이미 검증된 주도주의 담을곳 추적이라
+    # 3개월 횡보 베이스 중이면 3개월 수익률이 낮아지는 게 정상. 15%로 완화.
+    _mom = mom_3m(c)
+    if _mom is None or _mom < CONFIG.get("leader_mom_3m_min", 0.30) / 2:
+        return None
+
     score = round(60 * rs_rank / 99 + 20 * (1 - min(dist_from_high / 0.15, 1))
                   + (10 if at_new_high else 0)
                   + (10 * max(0.0, min(rs_mom or 0, 30)) / 30), 1)
 
     return {
         "mode": "super",
+        "mom_3m_pct": round(_mom * 100, 1),
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
         "score": score,
@@ -1553,7 +1594,7 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
     if not _risk_hard_ok(rrb, is_kr, pivot=pivot):
         return None
     _ls = late_stage_info(c, lo, h, v, is_kr)
-    _tt = trend_grade(c, lo, h, rs_rank)
+    _tt = trend_grade(c, lo, h, rs_rank, ud=up_down_volume(c, v, 50))
     if _ls["late_level"] == "danger" and CONFIG.get("late_stage_exclude", True):
         return None
 
@@ -1711,7 +1752,7 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
     if not _risk_hard_ok(rrb, is_kr, pivot=pivot):
         return None
     _ls = late_stage_info(c, lo, h, v, is_kr)
-    _tt = trend_grade(c, lo, h, rs_rank)
+    _tt = trend_grade(c, lo, h, rs_rank, ud=up_down_volume(c, v, 50))
     if _ls["late_level"] == "danger" and CONFIG.get("late_stage_exclude", True):
         return None
 
@@ -1880,7 +1921,7 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
     if not _risk_hard_ok(rrb, is_kr, pivot=pivot):
         return None
     _ls = late_stage_info(c, lo, h, v, is_kr)
-    _tt = trend_grade(c, lo, h, rs_rank)
+    _tt = trend_grade(c, lo, h, rs_rank, ud=up_down_volume(c, v, 50))
     if _ls["late_level"] == "danger" and CONFIG.get("late_stage_exclude", True):
         return None
 
@@ -2445,7 +2486,7 @@ def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
     )
     score = min(score, 100.0)
 
-    _tt = trend_grade(c, lo, h, rs_rank)
+    _tt = trend_grade(c, lo, h, rs_rank, ud=up_down_volume(c, v, 50))
     return {
         "mode": "pattern",
         "grade": _tt["grade"], "tt_pass": _tt["passed"], "tt_fails": _tt["fails"],
