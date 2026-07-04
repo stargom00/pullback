@@ -5,6 +5,9 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.50.1 [신규] /api/vol/{ticker} — 종목 50/20일 평균 거래량 참조.
+        봇이 돌파 시 네이버 실시간 누적 거래량 ÷ 시간경과율 ÷ 평균 →
+        예상 거래량비 계산. 돌파 알림에 🟢확증/🟡애매/🔴부족 표시.
 v4.50.0 [신규] FTD 자동화 — 시장 국면 판단을 시스템 안으로 (기능 동결 전 마지막).
         [상태 머신] scanner.ftd_state(): 조정 판정(저점 이전 고점比 -6%+),
                반등 시도 일수 카운트(저점 이탈 시 자동 리셋), FTD(4일차+ &
@@ -711,7 +714,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.50.0"
+VERSION = "v4.50.1"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2016,6 +2019,37 @@ async def watch_pending():
             "tab": r.get("tab", ""),
         })
     return JSONResponse({"pending": out, "count": len(out)})
+
+
+@app.get("/api/vol/{ticker}")
+async def vol_reference(ticker: str):
+    """종목의 평균 거래량 참조값 (v4.50.1) — 봇의 돌파 거래량 확증용.
+    캐시된 일봉에서 50일 평균 거래량을 반환. 네이버 실시간 누적 거래량과
+    나눠서 봇이 '예상 거래량비'를 계산한다 (시간 보정은 봇에서)."""
+    ticker = ticker.upper().strip()
+    # 캐시된 전 시장 데이터에서 탐색 (없으면 개별 fetch)
+    df = None
+    for key in ("data:all", "data:KR", "data:US"):
+        bundle = _data_cache.get(key)
+        if bundle and ticker in bundle.get("data", {}):
+            df = bundle["data"][ticker]
+            break
+    if df is None:
+        try:
+            df = await asyncio.get_event_loop().run_in_executor(_executor, _fetch, ticker)
+        except Exception:
+            df = None
+    if df is None or "Volume" not in df or len(df) < 5:
+        return JSONResponse({"ok": False}, status_code=404)
+    try:
+        vol = df["Volume"]
+        avg50 = float(vol.iloc[-50:].mean())
+        avg20 = float(vol.iloc[-20:].mean())
+        return JSONResponse({"ok": True, "ticker": ticker,
+                             "avg_volume_50": round(avg50),
+                             "avg_volume_20": round(avg20)})
+    except Exception:
+        return JSONResponse({"ok": False}, status_code=500)
 
 
 @app.get("/api/watch/positions")
