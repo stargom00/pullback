@@ -124,6 +124,83 @@ def late_stage_info(c: pd.Series, lo: pd.Series, h: pd.Series, v: pd.Series,
             "late_flags": flags, "late_level": level}
 
 
+def distribution_check(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series) -> dict:
+    """보유 종목의 분산(매도) 신호 감지 (v4.51) — 진입 후 위험 경보용.
+    오닐/미너비니 기준: 기관이 팔기 시작하는 신호를 조합.
+    반환: {level: none|caution|danger, signals: [...], detail: {...}}
+
+    신호:
+    - 고점대량반전: 신고가 부근에서 대량거래 + 종가 저가권 마감 (BHE 패턴)
+    - 최대급락일: 최근 하락이 60일 중 최대급 + 대량거래
+    - UD악화: U/D 비율 1.0 미만 (매집→분산 전환)
+    - 이평이탈: 종가가 21일선 아래 마감 (단기 추세 훼손)
+    - 50일선이탈: 종가가 50일선 아래 (중기 추세 훼손 — 더 심각)
+    """
+    out = {"level": "none", "signals": [], "detail": {}}
+    try:
+        if c is None or len(c) < 55:
+            return out
+        close = float(c.iloc[-1])
+        prev = float(c.iloc[-2])
+        vol_today = float(v.iloc[-1])
+        avg50v = float(v.iloc[-50:].mean())
+        vol_ratio = vol_today / avg50v if avg50v > 0 else 1.0
+        day_ret = close / prev - 1 if prev > 0 else 0.0
+
+        signals, danger = [], False
+
+        # 1) 고점 대량 반전: 최근 20봉 고가 근처(-3% 이내)에서 대량거래 + 종가가
+        #    당일 레인지 하위 40%에 마감 (윗꼬리 = 매도 소화)
+        hi20 = float(h.iloc[-20:].max())
+        near_high = close >= hi20 * 0.97
+        day_hi, day_lo = float(h.iloc[-1]), float(lo.iloc[-1])
+        rng = day_hi - day_lo
+        close_pos = (close - day_lo) / rng if rng > 0 else 0.5
+        if near_high and vol_ratio >= 1.5 and close_pos <= 0.4:
+            signals.append("고점대량반전")
+            danger = True
+
+        # 2) 최대 급락일 + 대량거래
+        daily = c.pct_change()
+        if (day_ret <= float(daily.iloc[-60:].min()) and day_ret < -0.04
+                and vol_ratio >= 1.3):
+            signals.append("최대급락일")
+            danger = True
+
+        # 3) U/D 악화 (매집→분산)
+        ud = up_down_volume(c, v, 50)
+        if ud is not None and ud < 1.0:
+            signals.append(f"U/D {ud} 분산")
+
+        # 4) 이평 이탈
+        ma21 = float(c.rolling(21).mean().iloc[-1])
+        ma50 = float(c.rolling(50).mean().iloc[-1])
+        if close < ma50:
+            signals.append("50일선이탈")
+            danger = True
+        elif close < ma21:
+            signals.append("21일선이탈")
+
+        # 5) 클라이맥스(소진) 연계
+        cx = climax_warning(c, h, lo, v)
+        if cx.get("climax") and cx.get("level") == "danger":
+            for r in cx.get("reasons", []):
+                if r not in signals:
+                    signals.append(r)
+            danger = True
+
+        if not signals:
+            return out
+        out["signals"] = signals
+        out["level"] = "danger" if danger else "caution"
+        out["detail"] = {"vol_ratio": round(vol_ratio, 2),
+                         "day_ret_pct": round(day_ret * 100, 1),
+                         "ud": ud}
+        return out
+    except Exception:
+        return out
+
+
 def ftd_state(close: pd.Series, vol: pd.Series) -> dict:
     """오닐 FTD(팔로우스루 데이) 상태 머신 (v4.50).
 

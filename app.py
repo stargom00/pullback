@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.51.0 [신규] 보유 종목 분산 경고 — 진입 후 매도 신호 감지.
+        scanner.distribution_check(): 고점대량반전·최대급락일·U/D악화·
+        이평이탈(21/50일선)·소진성거래량 조합으로 level(none/caution/danger)
+        판정. /api/dist/{ticker}. 봇이 진입 종목마다 하루 1회 체크해 danger 시
+        ⚠️ 알림. BHE 패턴(신고가 대량반전) 정확히 danger로 검증.
 v4.50.4 [근본수정] MQ +316% 유령 등락 원인 규명 및 제거.
         [원인] 야후가 종목의 최근 거래일들을 통째로 결측 처리하면, 유효한
                옛날 가격(MQ의 2022년 4.18달러)이 iloc[-2](전일종가) 자리로
@@ -728,7 +733,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.50.4"
+VERSION = "v4.51.0"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2095,6 +2100,31 @@ async def vol_reference(ticker: str):
         return JSONResponse({"ok": True, "ticker": ticker,
                              "avg_volume_50": round(avg50),
                              "avg_volume_20": round(avg20)})
+    except Exception:
+        return JSONResponse({"ok": False}, status_code=500)
+
+
+@app.get("/api/dist/{ticker}")
+async def distribution_signal(ticker: str):
+    """보유 종목 분산(매도) 신호 (v4.51) — 봇이 진입 종목마다 하루 1회 체크.
+    캐시된 일봉으로 distribution_check 실행."""
+    ticker = ticker.upper().strip()
+    df = None
+    for key in ("data:all", "data:KR", "data:US"):
+        bundle = _data_cache.get(key)
+        if bundle and ticker in bundle.get("data", {}):
+            df = bundle["data"][ticker]
+            break
+    if df is None:
+        try:
+            df = await asyncio.get_event_loop().run_in_executor(_executor, _fetch, ticker)
+        except Exception:
+            df = None
+    if df is None or len(df) < 55:
+        return JSONResponse({"ok": False}, status_code=404)
+    try:
+        r = scanner_mod.distribution_check(df["Close"], df["High"], df["Low"], df["Volume"])
+        return JSONResponse({"ok": True, "ticker": ticker, **r})
     except Exception:
         return JSONResponse({"ok": False}, status_code=500)
 
