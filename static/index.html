@@ -880,18 +880,20 @@ async function loadSectors() {
     const p = d.panels || {};
     const cols = ['KOSPI', 'KOSDAQ', 'US'];
     const maxRows = Math.max(...cols.map(k => (p[k] || []).length), 1);
-    const cell = r => r ? `
-      <td style="padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top" title="${r.top.map(t => `${t.name} ${t.chg > 0 ? '+' : ''}${t.chg}%`).join(' · ')}">
+    // 미국은 티커(짧고 명확), 한국은 종목명. 상위 5개까지 줄바꿈 허용.
+    const nameOf = (t, isUS) => isUS ? (t.ticker || t.name) : t.name;
+    const cell = (r, isUS) => r ? `
+      <td style="padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top" title="${r.top.map(t => `${nameOf(t, isUS)} ${t.chg > 0 ? '+' : ''}${t.chg}%`).join(' · ')}">
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
           <b style="font-size:13px">${r.sector}</b>
           <span class="mono" style="${chgColor(r.avg_chg)};font-weight:700;white-space:nowrap">${r.avg_chg > 0 ? '+' : ''}${r.avg_chg}%</span>
         </div>
         <div style="font-size:11px;color:var(--muted)">${r.n}종목 · 상승 ${r.up_pct}%</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.top.slice(0, 2).map(t => `${t.name} <span style="${chgColor(t.chg)}">${t.chg > 0 ? '+' : ''}${t.chg}%</span>`).join(' · ')}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.6">${r.top.slice(0, 5).map(t => `${nameOf(t, isUS)} <span style="${chgColor(t.chg)}">${t.chg > 0 ? '+' : ''}${t.chg}%</span>`).join(' · ')}</div>
       </td>` : '<td style="border-bottom:1px solid var(--line)"></td>';
     let body = '';
     for (let i = 0; i < maxRows; i++) {
-      body += '<tr>' + cols.map(k => cell((p[k] || [])[i])).join('') + '</tr>';
+      body += '<tr>' + cols.map(k => cell((p[k] || [])[i], k === 'US')).join('') + '</tr>';
     }
     // ── 🏆 주도업종 랭킹 (v4.49): RS 85+ & 3개월 +30% & 200일선 위 생존자 카운트 ──
     // 하루 등락 평균(아래 표)은 노이즈, 생존자 밀집이 로테이션의 진짜 신호
@@ -903,7 +905,7 @@ async function loadSectors() {
       return `<div style="flex:1;min-width:280px">
         <div style="font-weight:700;font-size:13px;margin-bottom:6px">${label}</div>
         ${rows.map(r => `
-          <div style="display:flex;align-items:center;gap:8px;padding:3px 0" title="${r.top.map(t => `${t.name} RS${t.rs} 3개월+${t.mom3}%`).join(' · ')}">
+          <div style="display:flex;align-items:center;gap:8px;padding:3px 0" title="${r.top.map(t => `${mkt === 'US' ? (t.ticker || t.name) : t.name} RS${t.rs} 3개월+${t.mom3}%`).join(' · ')}">
             <span style="width:86px;font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.sector}</span>
             <span style="flex:1;height:8px;background:var(--card);border-radius:4px;overflow:hidden"><span style="display:block;height:100%;width:${Math.round(r.n / maxN * 100)}%;background:var(--green);border-radius:4px"></span></span>
             <b style="font-size:12px;width:22px;text-align:right">${r.n}</b>
