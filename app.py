@@ -5,6 +5,8 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.50.2 [개선] 섹터 탭 가독성 — 미국 종목은 티커 표시(이름 잘림 해결),
+               상위 종목 2→5개, 줄바꿈 허용. 주도업종 랭킹 툴팁도 미국 티커.
 v4.50.1 [신규] /api/vol/{ticker} — 종목 50/20일 평균 거래량 참조.
         봇이 돌파 시 네이버 실시간 누적 거래량 ÷ 시간경과율 ÷ 평균 →
         예상 거래량비 계산. 돌파 알림에 🟢확증/🟡애매/🔴부족 표시.
@@ -714,7 +716,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.50.1"
+VERSION = "v4.50.2"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1543,7 +1545,7 @@ async def api_sectors():
             chgs = [x[2] for x in items]
             avg = sum(chgs) / len(chgs)
             up = sum(1 for x in chgs if x > 0) * 100 // len(chgs)
-            top = sorted(items, key=lambda x: x[2], reverse=True)[:3]
+            top = sorted(items, key=lambda x: x[2], reverse=True)[:5]
             rows.append({
                 "sector": sec, "n": len(items),
                 "avg_chg": round(avg, 2), "up_pct": up,
