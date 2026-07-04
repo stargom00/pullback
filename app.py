@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.50.4 [근본수정] MQ +316% 유령 등락 원인 규명 및 제거.
+        [원인] 야후가 종목의 최근 거래일들을 통째로 결측 처리하면, 유효한
+               옛날 가격(MQ의 2022년 4.18달러)이 iloc[-2](전일종가) 자리로
+               밀려와 17.41/4.18 = +316% 발생. 결측이 부분적이면 dropna(how=all)로
+               안 걸러짐. 실제 재현으로 정확히 316.5% 확인.
+        [수정] ① _downcast에 Close NaN 행 제거 (전 데이터 경로 공통)
+               ② 섹터 집계에서 전일종가 날짜갭 >7일이면 제외 (옛날값 밀림 차단)
+               ③ 기존 물리범위 필터(±31%/±100%)는 최후 안전망으로 유지
+v4.50.3 [수정] 섹터 유령 등락 차단 — 야후 분할/조정 불일치로 전일종가가
+               엉뚱하게 들어와 +316% 같은 유령 등락 발생(MQ 사례).
+               개별 종목 하루 등락이 물리 범위(KR ±31% / US +100%~-60%)를
+               벗어나면 섹터·주도업종 집계에서 제외.
 v4.50.2 [개선] 섹터 탭 가독성 — 미국 종목은 티커 표시(이름 잘림 해결),
                상위 종목 2→5개, 줄바꿈 허용. 주도업종 랭킹 툴팁도 미국 티커.
 v4.50.1 [신규] /api/vol/{ticker} — 종목 50/20일 평균 거래량 참조.
@@ -716,7 +728,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.50.2"
+VERSION = "v4.50.4"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -729,9 +741,16 @@ _executor = ThreadPoolExecutor(max_workers=8)  # v4.39.x 원복(동시성 과다
 
 
 def _downcast(df):
-    """가격/거래량을 float32로 다운캐스트 (v4.48.1).
-    유니버스 3,570개 × float64 DF는 300MB+로 Railway 메모리를 압박 → 절반으로.
-    가격 정밀도 손실은 소수 5~6자리 수준이라 스캔 판정에 영향 없음."""
+    """가격 정규화 + float32 다운캐스트 (v4.48.1 / v4.50.4).
+    ① Close가 NaN인 행 제거 — 모든 데이터 경로(야후 개별·배치·네이버)에서
+       전일종가 자리에 결측이 끼어 유령 등락(+316% 등)이 나오는 걸 원천 차단.
+    ② float32 다운캐스트 — 유니버스 3,570개 float64는 300MB+라 절반으로.
+    """
+    try:
+        if "Close" in df.columns:
+            df = df[df["Close"].notna()]
+    except Exception:
+        pass
     try:
         for col in ("Open", "High", "Low", "Close", "Volume"):
             if col in df.columns:
@@ -793,6 +812,14 @@ def _fetch_us_batch(tickers: list[str]) -> dict:
                 continue
             # 전부 NaN인 종목(상장폐지/데이터없음) 제외
             if df["Close"].dropna().empty:
+                continue
+            # ── 근본 수정 (v4.50.4): Close가 NaN인 행 제거 ──
+            # 야후 배치는 종목마다 거래일이 달라(거래정지·상장일 차이) 특정 종목의
+            # 중간에 NaN 행이 생김. dropna(how="all")은 '전 컬럼 NaN'만 지우므로
+            # Close만 NaN인 행이 남고, 그 행이 iloc[-2](전일종가) 자리에 오면
+            # 유령 등락 발생(MQ +316%). Close 기준으로 결측행을 확실히 제거.
+            df = df[df["Close"].notna()]
+            if len(df) < 2:
                 continue
             out[t] = _downcast(df)
         except Exception:
@@ -1497,12 +1524,30 @@ async def api_sectors():
             continue
         try:
             c = df["Close"]
+            # v4.50.4: 전일종가가 '실제 최근 거래일'인지 확인.
+            # 야후가 최근 데이터를 통째로 결측 처리하면 옛날 유효값(예: MQ 2022년
+            # 4.18)이 iloc[-2]로 밀려와 +316% 유령 등락 발생. 인덱스 날짜로 검증.
             last, prev = float(c.iloc[-1]), float(c.iloc[-2])
+            try:
+                gap_days = (c.index[-1] - c.index[-2]).days
+                if gap_days > 7:      # 전일종가가 7일 넘게 과거 → 데이터 공백
+                    continue
+            except Exception:
+                pass
         except Exception:
             continue
         if prev <= 0:
             continue
         chg = (last / prev - 1) * 100
+        # 안전망 (v4.50.3, 근본원인은 v4.50.4 _downcast에서 해결).
+        # Close 결측행 제거로 유령 등락은 원천 차단됐지만, 야후가 조정 전/후
+        # 가격을 섞어 보내는 등 예상 못한 데이터 오염이 재발할 수 있으므로
+        # 물리적으로 불가능한 등락(KR ±31% / US +100%~-60%)은 집계에서 배제.
+        is_kr_t = t.endswith((".KS", ".KQ"))
+        hi_lim = 31.0 if is_kr_t else 100.0
+        lo_lim = -31.0 if is_kr_t else -60.0
+        if chg > hi_lim or chg < lo_lim:
+            continue
         sec = _sector_of(t)
         if sec == "기타":
             continue
