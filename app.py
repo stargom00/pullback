@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.51.1 [수정] 분산 경고 오탐 제거 — 네이처셀 +8.9% 양봉에 매도신호 오발생.
+        [원인] 이평이탈 판정이 단순 close<ma50이라, 이미 오래전 하락해 바닥에서
+               반등 중인 종목(50일선 아래)도 매일 danger로 오탐. 오른 날에도 알림.
+        [수정] '어제 이평 위 → 오늘 이평 아래'로 새로 깨는 하락일만 신호 인정.
+               반등 양봉은 제외. 진짜 하향돌파는 정상 감지 확인.
 v4.51.0 [신규] 보유 종목 분산 경고 — 진입 후 매도 신호 감지.
         scanner.distribution_check(): 고점대량반전·최대급락일·U/D악화·
         이평이탈(21/50일선)·소진성거래량 조합으로 level(none/caution/danger)
@@ -733,7 +738,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.51.0"
+VERSION = "v4.51.1"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

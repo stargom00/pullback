@@ -172,13 +172,21 @@ def distribution_check(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series) 
         if ud is not None and ud < 1.0:
             signals.append(f"U/D {ud} 분산")
 
-        # 4) 이평 이탈
+        # 4) 이평 '이탈' — 위에서 아래로 깨는 순간만 분산 신호.
+        # (버그 수정: 단순히 'close < ma50'이면 이미 한참 전 하락해 바닥에서
+        #  반등 중인 종목도 매일 danger로 오탐. 네이처셀 +8.9% 양봉 사례.
+        #  '어제는 이평 위 → 오늘 이평 아래'로 새로 깨는 하락일만 신호로 인정.)
+        prev_close = float(c.iloc[-2])
         ma21 = float(c.rolling(21).mean().iloc[-1])
         ma50 = float(c.rolling(50).mean().iloc[-1])
-        if close < ma50:
+        ma21_prev = float(c.rolling(21).mean().iloc[-2])
+        ma50_prev = float(c.rolling(50).mean().iloc[-2])
+        is_down_day = day_ret < 0
+        # 오늘 하락하며 50일선을 새로 깬 경우만 (어제는 위 or 근처)
+        if is_down_day and close < ma50 and prev_close >= ma50_prev:
             signals.append("50일선이탈")
             danger = True
-        elif close < ma21:
+        elif is_down_day and close < ma21 and prev_close >= ma21_prev:
             signals.append("21일선이탈")
 
         # 5) 클라이맥스(소진) 연계
