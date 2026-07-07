@@ -1082,22 +1082,18 @@ async def _fetch_market_data_inner(market: str, cache_key: str) -> dict:
     kr, us = {}, {}
     kr3, us3, kr12, us12 = {}, {}, {}, {}
     for t, df in data.items():
-        try:
-            is_kr = t.endswith((".KS", ".KQ"))
-            raw = rs_raw_score(df["Close"])
-            if raw is not None:
-                # 한국은 코스피/코스닥 구분, 미국은 나스닥 기준 초과성과
-                if is_kr:
-                    bench_score = b_kospi if t.endswith(".KS") else b_kosdaq
-                else:
-                    bench_score = b_us
-                rel = raw - bench_score   # 지수 대비 초과성과
-                (kr if is_kr else us)[t] = rel
-            (kr3 if is_kr else us3)[t] = _ret_pct(df["Close"], 63)
-            (kr12 if is_kr else us12)[t] = _ret_pct(df["Close"], 252)
-        except Exception as e:
-            print(f"[RS skip] {t}: {type(e).__name__} {e}", flush=True)
-            continue
+        is_kr = t.endswith((".KS", ".KQ"))
+        raw = rs_raw_score(df["Close"])
+        if raw is not None:
+            # 한국은 코스피/코스닥 구분, 미국은 나스닥 기준 초과성과
+            if is_kr:
+                bench_score = b_kospi if t.endswith(".KS") else b_kosdaq
+            else:
+                bench_score = b_us
+            rel = raw - bench_score   # 지수 대비 초과성과
+            (kr if is_kr else us)[t] = rel
+        (kr3 if is_kr else us3)[t] = _ret_pct(df["Close"], 63)
+        (kr12 if is_kr else us12)[t] = _ret_pct(df["Close"], 252)
     rs_ranks = {**to_rs_rank(kr), **to_rs_rank(us)}
     rank3 = {**to_rs_rank(kr3), **to_rs_rank(us3)}
     rank12 = {**to_rs_rank(kr12), **to_rs_rank(us12)}
