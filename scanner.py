@@ -786,36 +786,42 @@ def significant_support(lo: pd.Series, window: int, min_touches: int = 2,
     return None
 
 
-def significant_resistance(h: pd.Series, window: int, min_touches: int = 2,
-                           band: float = 0.02, exclude: int = 2):
-    """'여러 번 부딪힌' 의미있는 저항 가격을 찾는다.
-    단순 최고가(=긴 꼬리 하나=오버슈팅)를 천장으로 잡는 문제를 막기 위함.
-
-    방법: 구간 내 각 봉의 고가를 후보로, 그 가격 ±band 안에 고가가
-    들어온 봉이 min_touches개 이상이면 '진짜 저항'으로 인정.
-    그런 저항 중 가장 높은 값을 반환. 없으면 None (호출부에서 max로 폴백).
-    exclude: 최근 N봉(신고가 갱신 중일 수 있는 봉) 제외.
-    """
+def significant_resistance_near(h, lo, close, window, min_touches=2,
+                                band=0.02, exclude=2, max_dist=0.12):
+    """'현재가에서 가장 가까운' 의미있는 저항 (돌파임박 전용, v4.52).
+    기존 significant_resistance는 '가장 높은' 저항을 골라 6월 스파이크 같은
+    먼 고점을 피벗으로 잡는 문제가 있음(더블유게임즈 76,500 오인). 이 함수는:
+      ① 현재가 위쪽(+0.2%~+max_dist) 저항만 후보로
+      ② 고가 반응(저항) + 저가 반응(지지) 합산 → 지지→저항 역전 자리도 인식
+      ③ 그중 '가장 가까운(낮은)' 유효 저항을 반환 → 리테스트 중인 실제 저항
+    없으면 None(호출부에서 기존 로직으로 폴백)."""
     if exclude > 0 and len(h) > window + exclude:
-        seg = h.iloc[-(window + exclude):-exclude]
+        hi_seg = h.iloc[-(window + exclude):-exclude]
+        lo_seg = lo.iloc[-(window + exclude):-exclude]
     elif exclude > 0 and len(h) > exclude:
-        seg = h.iloc[:-exclude]
+        hi_seg = h.iloc[:-exclude]
+        lo_seg = lo.iloc[:-exclude]
     else:
-        seg = h.iloc[-window:]
-    seg = seg.dropna()
-    if len(seg) < min_touches:
+        hi_seg = h.iloc[-window:]
+        lo_seg = lo.iloc[-window:]
+    hi_seg = hi_seg.dropna()
+    lo_seg = lo_seg.dropna()
+    if len(hi_seg) < min_touches:
         return None
-    highs = seg.tolist()
-    for level in sorted(highs, reverse=True):   # 높은 가격부터
+    highs = hi_seg.tolist()
+    lows = lo_seg.tolist()
+    cand = sorted(set(x for x in highs if close * 1.002 < x <= close * (1 + max_dist)))
+    for level in cand:
         if level <= 0:
             continue
-        touches = sum(1 for x in highs if abs(x - level) / level <= band)
-        if touches >= min_touches:
-            return level    # 가장 높은 '유효 저항'(2번+ 닿음)
+        hi_touch = sum(1 for x in highs if abs(x - level) / level <= band)
+        lo_touch = sum(1 for x in lows if abs(x - level) / level <= band)
+        if hi_touch + lo_touch >= min_touches:
+            return level
     return None
 
 
-def select_pivot(h, lo, c, close, recent_high_window: int, is_kr: bool = False):
+def select_pivot(h, lo, c, close, recent_high_window: int, is_kr: bool = False, use_near: bool = False):
     """
     피벗 후보 중 현재가 위에서 가장 가까운 것 선택.
     ★ 핵심: 피벗은 '베이스(횡보 구간)의 저항선'이라 고정돼야 한다.
@@ -837,9 +843,14 @@ def select_pivot(h, lo, c, close, recent_high_window: int, is_kr: bool = False):
     # 전고(중기) — '여러 번 닿은 의미있는 저항' 우선. 긴 꼬리(오버슈팅) 하나는
     # 천장으로 안 침. 그런 저항이 없으면(진짜 신고가 추세) 단순 최고가로 폴백.
     if len(h) > EXCLUDE + recent_high_window:
+        sig_near = significant_resistance_near(h, lo, close, recent_high_window,
+                                               min_touches=2, band=0.02,
+                                               exclude=EXCLUDE) if use_near else None
         sig = significant_resistance(h, recent_high_window, min_touches=2,
                                      band=0.02, exclude=EXCLUDE)
-        if sig is not None:
+        if sig_near is not None:
+            cands.append((float(sig_near), "전고"))   # 리테스트 저항 우선 (돌파임박)
+        elif sig is not None:
             cands.append((float(sig), "전고"))
         else:
             base_long = float(h.iloc[-(recent_high_window + EXCLUDE):-EXCLUDE].max())
@@ -1048,7 +1059,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
 
     # ── 8) 피벗 / 손절 / 리스크 ──
     pw = cfg["pivot_window"]
-    pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, pw, is_kr=is_kr)
+    pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, cfg["pivot_window"], is_kr=is_kr, use_near=True)
 
     # 손절 후보 (미너비니식: 의미있는 지지 기준, spike 꼬리 제외):
     #  1) 현재가 아래의 지지 이평선 중 가장 가까운(=손절폭 작은) 것
