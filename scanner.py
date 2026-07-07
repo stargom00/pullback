@@ -1059,7 +1059,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
 
     # ── 8) 피벗 / 손절 / 리스크 ──
     pw = cfg["pivot_window"]
-    pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, cfg["pivot_window"], is_kr=is_kr, use_near=True)
+    pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, cfg["pivot_window"], is_kr=is_kr)
 
     # 손절 후보 (미너비니식: 의미있는 지지 기준, spike 꼬리 제외):
     #  1) 현재가 아래의 지지 이평선 중 가장 가까운(=손절폭 작은) 것
@@ -2019,7 +2019,7 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
         return None
 
     # ── 2) 피벗 근접 (천장 코앞이지만 아직 안 뚫음) ──
-    pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, cfg["pivot_window"], is_kr=is_kr)
+    pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, cfg["pivot_window"], is_kr=is_kr, use_near=True)
     near = (close - pivot) / pivot if pivot > 0 else -1.0   # 음수면 피벗 아래
     if not (cfg["near_min"] <= near <= cfg["near_max"]):
         return None   # -5%~0% 밖이면 탈락 (멀거나 이미 돌파)
