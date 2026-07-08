@@ -786,6 +786,43 @@ def significant_support(lo: pd.Series, window: int, min_touches: int = 2,
     return None
 
 
+def significant_resistance_near(h, lo, close, window, min_touches=2,
+                                band=0.02, exclude=2, max_dist=0.12):
+    """'현재가에서 가장 가까운' 의미있는 저항 (돌파임박 전용, v4.52).
+    기존 significant_resistance는 '가장 높은' 저항을 골라 먼 스파이크 고점을
+    피벗으로 잡는 문제가 있음(더블유게임즈 76,500 오인). 이 함수는:
+      ① 현재가 위쪽(+0.2%~+max_dist) 저항만 후보로
+      ② 고가 반응(저항) + 저가 반응(지지) 합산 → 지지가 저항으로 바뀐
+         자리(polarity flip)도 인식 — 리테스트 셋업의 핵심
+      ③ 그중 '가장 가까운(낮은)' 유효 저항 반환 → 실제 리테스트 대상
+    없으면 None(호출부에서 기존 로직으로 폴백)."""
+    n = len(h)
+    if n < window + exclude:
+        return None
+    hi = h.iloc[-(window + exclude):-exclude] if exclude > 0 else h.iloc[-window:]
+    lw = lo.iloc[-(window + exclude):-exclude] if exclude > 0 else lo.iloc[-window:]
+    hi = hi.dropna(); lw = lw.dropna()
+    if len(hi) < min_touches:
+        return None
+    highs = hi.tolist()
+    lows = lw.tolist()
+    # 현재가 위 +0.2%~+max_dist 범위의 고가만 후보
+    lo_b = close * 1.002
+    hi_b = close * (1.0 + max_dist)
+    cands = sorted({x for x in highs if lo_b <= x <= hi_b})
+    best = None
+    for level in cands:                 # 가까운(낮은) 것부터
+        if level <= 0:
+            continue
+        # 고가 터치(저항) + 저가 터치(지지→저항 역전) 합산
+        hit = sum(1 for x in highs if abs(x - level) / level <= band)
+        hit += sum(1 for x in lows if abs(x - level) / level <= band)
+        if hit >= min_touches:
+            best = level                # 가장 가까운 유효 저항에서 멈춤
+            break
+    return best
+
+
 def significant_resistance(h: pd.Series, window: int, min_touches: int = 2,
                            band: float = 0.02, exclude: int = 2):
     """'여러 번 부딪힌' 의미있는 저항 가격을 찾는다.
@@ -815,7 +852,8 @@ def significant_resistance(h: pd.Series, window: int, min_touches: int = 2,
     return None
 
 
-def select_pivot(h, lo, c, close, recent_high_window: int, is_kr: bool = False):
+def select_pivot(h, lo, c, close, recent_high_window: int, is_kr: bool = False,
+                 use_near: bool = False):
     """
     피벗 후보 중 현재가 위에서 가장 가까운 것 선택.
     ★ 핵심: 피벗은 '베이스(횡보 구간)의 저항선'이라 고정돼야 한다.
@@ -825,11 +863,20 @@ def select_pivot(h, lo, c, close, recent_high_window: int, is_kr: bool = False):
     - 베이스 천장(단기): 최근 5봉 고가, 단 직전 2봉(오늘·어제 신고가) 제외
     - 전고(중기): 최근 N봉 고가, 단 직전 2봉 제외
     - 추세선: 하락 추세선의 오늘 값
+    use_near(v4.52): True면 '현재가에서 가장 가까운 의미있는 저항'을 우선.
+       돌파임박 탭에서 먼 스파이크 고점 대신 리테스트 중인 실제 저항을 잡기 위함.
     반환: (pivot, pivot_type, tl_break, tl_break_intraday)
     """
     EXCLUDE = 2   # 오늘·어제(신고가 갱신 중일 수 있는 봉) 제외
 
     cands = []
+    # v4.52: 가까운 저항 우선 (돌파임박) — 지지→저항 역전 자리까지 인식
+    if use_near and len(h) > EXCLUDE + recent_high_window:
+        near = significant_resistance_near(h, lo, close, recent_high_window,
+                                           min_touches=2, band=0.02,
+                                           exclude=EXCLUDE, max_dist=0.12)
+        if near is not None:
+            cands.append((float(near), "리테스트저항"))
     # 베이스 천장 — 직전 2봉 빼고 그 앞 5봉의 고가 (고정된 단기 저항)
     if len(h) > EXCLUDE + 5:
         base_short = float(h.iloc[-(5 + EXCLUDE):-EXCLUDE].max())
@@ -2008,7 +2055,7 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
         return None
 
     # ── 2) 피벗 근접 (천장 코앞이지만 아직 안 뚫음) ──
-    pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, cfg["pivot_window"], is_kr=is_kr)
+    pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, cfg["pivot_window"], is_kr=is_kr, use_near=True)
     near = (close - pivot) / pivot if pivot > 0 else -1.0   # 음수면 피벗 아래
     if not (cfg["near_min"] <= near <= cfg["near_max"]):
         return None   # -5%~0% 밖이면 탈락 (멀거나 이미 돌파)

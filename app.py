@@ -5,6 +5,14 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.52.1 [신규] 돌파임박 피벗 리테스트 인식 — 먼 스파이크 고점 오인 수정.
+        [원인] select_pivot이 significant_resistance(가장 높은 저항)를 써서
+               더블유게임즈 6월 스파이크(76,500)를 피벗으로 잡음 → 실제
+               리테스트 중인 가까운 저항(67,500)을 놓쳐 돌파임박 탈락.
+        [수정] significant_resistance_near() 신설 — 현재가에서 가장 가까운
+               유효 저항 + 지지→저항 역전(polarity flip) 인식. 돌파임박
+               (analyze_imminent)만 use_near=True로 적용. 다른 탭은 기존 유지.
+               더블유게임즈 시나리오로 76,500→67,500 검증 완료.
 v4.52.0 [신규] 📅 활동 달력 (내일지) — 날짜별 분석·등록 종목명 표시,
                월 이동, 셀 마우스오버로 전체 목록. 지난 숙제 한눈에.
         [신규] 저유동성 하드 필터 — 평균 거래대금 KR 3억/일, US $2M/일 미만
@@ -743,7 +751,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.52.0"
+VERSION = "v4.52.1"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
