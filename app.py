@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.52.0 [신규] 📅 활동 달력 (내일지) — 날짜별 분석·등록 종목명 표시,
+               월 이동, 셀 마우스오버로 전체 목록. 지난 숙제 한눈에.
+        [신규] 저유동성 하드 필터 — 평균 거래대금 KR 3억/일, US $2M/일 미만
+               스캔 결과 제외 (급등 탭 예외). 시총 대신 거래대금 기준:
+               "호가 얇아 매매 불가"의 직접 지표. 수렴만 하는 초소형주 제거.
 v4.51.1 [수정] 분산 경고 오탐 제거 — 네이처셀 +8.9% 양봉에 매도신호 오발생.
         [원인] 이평이탈 판정이 단순 close<ma50이라, 이미 오래전 하락해 바닥에서
                반등 중인 종목(50일선 아래)도 매일 danger로 오탐. 오른 날에도 알림.
@@ -738,7 +743,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.51.1"
+VERSION = "v4.52.0"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1160,6 +1165,17 @@ async def run_scan(market: str, mode: str) -> dict:
         if result is None:
             continue
         mkt = "KR" if is_kr else "US"
+        # ── 저유동성 하드 필터 (v4.52) ──
+        # 호가가 얇아 진입/청산 자체가 힘든 종목 제외. 시총이 아니라
+        # 평균 거래대금 기준 (매매 가능성의 직접 지표).
+        # KR 3억원/일, US $2M/일 미만은 스캔 결과에서 탈락.
+        # 급등 탭은 제외 (단타 탭은 당일 거래대금이 이미 조건).
+        avg_turn = result.get("avg_turnover") or 0
+        if mode != "surge" and avg_turn > 0:
+            floor_ = 3e8 if is_kr else 2e6
+            if avg_turn < floor_:
+                diag["liquidity_dropped"] = diag.get("liquidity_dropped", 0) + 1
+                continue
         alert_kind = alerts.get(t.upper())
         # 미너비니식 클라이맥스(과열/매도) 경고 — 모든 모드에 부착
         cw = climax_warning(df["Close"], df["High"], df["Low"], df["Volume"])
