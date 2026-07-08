@@ -5,6 +5,8 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.52.2 [신규] 종목 티커 클릭 → 트레이딩뷰 차트 새 탭 (한국 KRX:코드, 미국 티커).
+               카드의 티커 옆 📈, 모든 탭 카드에 적용.
 v4.52.1 [신규] 돌파임박 피벗 리테스트 인식 — 먼 스파이크 고점 오인 수정.
         [원인] select_pivot이 significant_resistance(가장 높은 저항)를 써서
                더블유게임즈 6월 스파이크(76,500)를 피벗으로 잡음 → 실제
@@ -751,7 +753,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.52.1"
+VERSION = "v4.52.2"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
