@@ -276,7 +276,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.49.1</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.52.0</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1731,6 +1731,63 @@ const MODE_TAB_LABEL = {
   super: '슈퍼대장',
   surge: '급등',
 };
+// ── 📅 활동 달력 (v4.52): 날짜별 분석/등록 종목 한눈에 ──
+let _jcal = null;   // {y, m} 표시 중인 달
+function jcalNav(d) {
+  if (!_jcal) return;
+  _jcal.m += d;
+  if (_jcal.m < 0) { _jcal.m = 11; _jcal.y--; }
+  if (_jcal.m > 11) { _jcal.m = 0; _jcal.y++; }
+  renderJournal();
+}
+function renderJCal(all) {
+  // 날짜별 종목명 그룹 (등록일 기준, 모든 카테고리 포함 — "그날 뭘 봤나")
+  const byDay = {};
+  for (const r of all) {
+    const d = (r.date || '').slice(0, 10);
+    if (!d) continue;
+    (byDay[d] = byDay[d] || []).push(r.name || r.ticker || '?');
+  }
+  if (!Object.keys(byDay).length) return '';
+  const now = new Date();
+  if (!_jcal) _jcal = { y: now.getFullYear(), m: now.getMonth() };
+  const { y, m } = _jcal;
+  const first = new Date(y, m, 1);
+  const startDow = first.getDay();                 // 0=일
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const todayStr = now.toISOString().slice(0, 10);
+  let cells = '';
+  for (let i = 0; i < startDow; i++) cells += '<div></div>';
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const names = byDay[ds] || [];
+    const isToday = ds === todayStr;
+    const dow = (startDow + d - 1) % 7;
+    const shown = names.slice(0, 3);
+    const more = names.length - shown.length;
+    cells += `<div style="min-height:52px;border:1px solid var(--line);border-radius:6px;padding:3px 4px;${isToday ? 'border-color:var(--green);' : ''}${names.length ? 'background:var(--surface);cursor:help' : 'opacity:.45'}" title="${names.join(', ')}">
+      <div style="font-size:10px;color:${dow === 0 ? '#f87171' : dow === 6 ? '#7fb8e0' : 'var(--muted)'};font-weight:${isToday ? '800' : '400'}">${d}</div>
+      ${shown.map(n => `<div style="font-size:9.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.35">${n}</div>`).join('')}
+      ${more > 0 ? `<div style="font-size:9px;color:var(--muted)">+${more}</div>` : ''}
+    </div>`;
+  }
+  return `
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:13px;font-weight:700">📅 활동 달력 <span style="color:var(--muted);font-weight:400;font-size:11px">날짜별 분석·등록 종목 (셀에 마우스: 전체 목록)</span></div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="btn" style="padding:2px 10px" onclick="jcalNav(-1)">‹</button>
+        <b style="font-size:13px">${y}.${String(m + 1).padStart(2, '0')}</b>
+        <button class="btn" style="padding:2px 10px" onclick="jcalNav(1)">›</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:10px;color:var(--muted);text-align:center;margin-bottom:4px">
+      <div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">${cells}</div>
+  </div>`;
+}
+
 // ── R 누적 곡선 (v4.48.2): 종료 매매를 시간순으로 누적 — 시스템의 에쿼티 커브 ──
 // 우상향이면 시스템이 작동 중, 꺾이면 규칙 위반이나 시장 역행을 의심.
 function renderRCurve(all) {
@@ -2161,6 +2218,7 @@ function renderJournal() {
         <div class="statcard-v">총 ${scalp.total} · 종료 ${scalp.closedCount} · 승률 ${scalp.winRate}${scalp.winRate!=='–'?'%':''} · 평균 ${scalp.avgR}R</div>
       </div>
     </div>
+    ${renderJCal(all)}
     ${renderRCurve(all)}
     ${renderSignalValidation(all)}
     <div class="jrnl-filter">
