@@ -5,6 +5,12 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.53.3 [수정] 급등일 눌림목 오분류 — 우뚝 솟은 양봉이 눌림목에 뜨던 버그.
+        [원인] breakout_day 예외가 '얕게 눌렸다 출발하는' 종목을 눌림목에
+               남기려 넣은 건데, VLO처럼 이미 오른 상태에서 또 급등하면
+               '얕은 눌림'이 아니라 '연장(추격)'인데도 눌림목에 남음.
+        [수정] breakout_day 시 AVWAP이 extended(+8%)/overheated면 눌림목 제외.
+               건강한 눌림(0~8%)은 유지. VLO(+10.7%) 제외 확인, 정상 눌림 통과.
 v4.53.2 [수정] tvUrl 함수 중복 정의 통합 — 일지 종목 클릭 시 트레이딩뷰 연결
                안 되던 버그. 카드(객체)·일지(ticker+market) 양쪽 시그니처 모두
                처리하도록 단일 함수로 통합.
@@ -776,7 +782,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.53.2"
+VERSION = "v4.53.3"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

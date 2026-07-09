@@ -1056,6 +1056,15 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     if breakout_day:
         high60_ref = float(h.iloc[-61:-1].max())
         pullback = (high60_ref - prev_close) / high60_ref
+        # ── 급등 연장 가드 (v4.53.3) ──
+        # breakout_day 예외는 '얕게 눌렸다 막 출발하는' 종목을 눌림목에
+        # 남기려는 것. 근데 VLO처럼 이미 한참 오른 상태에서 또 급등하면
+        # '얕은 눌림'이 아니라 '연장(추격)'임. AVWAP이 extended(+8%)를
+        # 넘으면 눌림목에서 제외 — 급등 당일 우뚝 솟은 봉을 눌림으로 오분류 방지.
+        _av = anchored_vwap(h, lo, c, v)
+        _avz = _av.get("zone")
+        if _avz in ("extended", "overheated"):
+            return None
     else:
         pullback = (high60 - close) / high60
     pullback_ok = pb_min <= pullback <= pb_max
