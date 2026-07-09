@@ -280,7 +280,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.53.1</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.53.2</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1609,14 +1609,21 @@ async function loadJournalFromServer() {
 const TRACK_DAYS = 14;   // 추적 기간 2주
 const WATCH_DAYS = 14;   // 대기 유효기간 (돌파 셋업은 이 안에 터져야 유효, 지나면 자동 무산)
 // 트레이딩뷰 차트 URL — 한국주는 KRX, 미국주는 거래소 자동판별 대신 심볼만
-function tvUrl(ticker, market) {
+function tvUrl(tickerOrObj, market) {
+  // 카드는 객체(s)를, 일지는 (ticker, market)을 넘김 — 둘 다 처리
+  let ticker = tickerOrObj;
+  if (tickerOrObj && typeof tickerOrObj === 'object') {
+    ticker = tickerOrObj.ticker;
+    market = tickerOrObj.market;
+  }
   if (!ticker) return '#';
-  if (market === 'kr' || /\.(KS|KQ)$/.test(ticker)) {
+  ticker = String(ticker).toUpperCase();
+  if (market === 'kr' || market === 'KR' || /\.(KS|KQ)$/.test(ticker)) {
     const code = ticker.replace(/\.(KS|KQ)$/, '');
     return `https://www.tradingview.com/chart/?symbol=KRX:${code}`;
   }
   // 미국주: 거래소 접두어 없이 심볼만 줘도 트레이딩뷰가 자동 해석
-  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(ticker)}`;
+  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(ticker.replace(/\./g, ''))}`;
 }
 
 // 수동 현재가 갱신: 추적을 즉시 돌리고 성공/실패를 사용자에게 알림.
@@ -1854,15 +1861,6 @@ function renderRCurve(all) {
 
 function modeTab(mode) { return MODE_TAB_LABEL[mode] || mode || '-'; }
 // 트레이딩뷰 차트 URL (v4.52.2): 한국은 KRX:6자리코드, 미국은 티커
-function tvUrl(s) {
-  const t = (s.ticker || '').toUpperCase();
-  if (!t) return '';
-  let sym;
-  const m = t.match(/^(\d{6})(\.KS|\.KQ)?$/);
-  if (m) sym = 'KRX:' + m[1];              // 한국: KRX:094840
-  else sym = t.replace(/\./g, '');          // 미국: 티커 그대로
-  return 'https://www.tradingview.com/chart/?symbol=' + encodeURIComponent(sym);
-}
 function modeCategory(mode) { return mode === 'surge' ? '단타' : '추세추종'; }
 function openJournal(ticker) {
   const s = lastHits.find(h => h.ticker === ticker);
