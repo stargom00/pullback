@@ -280,7 +280,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.53.2</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.53.4</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -348,7 +348,8 @@ tr.editing{background:rgba(242,179,61,.06)}
     <select id="jmCat" style="width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;font-size:13px">
       <option value="추세추종">📈 추세추종 (실제 매매)</option>
       <option value="단타">⚡ 단타 (실제 매매)</option>
-      <option value="관찰">👁 관찰만 — 매매 안 함, 추세 지켜보기</option>
+      <option value="대기">⏳ 대기 — 피벗 돌파 알림 받기 (봇 감시)</option>
+      <option value="관찰">👁 관찰만 — 매매 안 함, 알림 없음</option>
     </select>
     <label>진입 근거 (한 줄)</label>
     <textarea id="jmNote" placeholder="예: 추세선 돌파 + 섹터 동조, 피벗 코앞"></textarea>
@@ -2024,7 +2025,7 @@ async function saveJournal() {
   // ── R 시스템: 진입(entered)으로 저장될 경우 게이트 검사 ──
   // 관찰 카테고리·돌파 계열(pending)은 항상 허용. 즉시 진입만 게이트 통과 필요.
   const _cat = (document.getElementById('jmCat') && document.getElementById('jmCat').value) || '';
-  const wouldEnter = _cat !== '관찰' && !['breakout', 'imminent', 'boxbreak'].includes(s.mode);
+  const wouldEnter = _cat !== '관찰' && _cat !== '대기' && !['breakout', 'imminent', 'boxbreak'].includes(s.mode);
   let forcePending = false;
   if (wouldEnter && rSettings.equity) {
     const gate = entryGate();
@@ -2064,10 +2065,12 @@ async function saveJournal() {
     //  entered(진입): 실제 매수 → 여기서부터 손절/목표 자동추적
     //  missed(무산): 셋업 깨짐 → 손익 0, 통계 제외
     //  closed(종료): result_r 확정
-    // 돌파 계열은 '아직 안 산 추적관찰'로 보고 기본 pending, 그 외는 즉시 entered
+    // 돌파 계열은 '아직 안 산 추적관찰'로 보고 기본 pending, 그 외는 즉시 entered.
+    // '대기' 카테고리 = 명시적 피벗 감시 요청 → pending (봇이 돌파 알림).
+    // '관찰' 카테고리 = 그냥 지켜보기 → watch (봇 알림 없음, 통계 제외).
     status: forcePending ? 'pending'
-      : ((document.getElementById('jmCat') && document.getElementById('jmCat').value) === '관찰')
-      ? 'pending'
+      : _cat === '대기' ? 'pending'
+      : _cat === '관찰' ? 'watch'
       : ['breakout', 'imminent', 'boxbreak'].includes(s.mode) ? 'pending' : 'entered',
     // ── R 시스템 사이즈 스냅샷 (v4.47): 오픈 리스크 정확 계산용 ──
     shares: sized ? sized.shares : '',
