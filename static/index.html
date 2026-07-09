@@ -42,6 +42,8 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .idxbar{display:flex;gap:10px;flex-wrap:wrap;padding:10px 24px;
   border-bottom:1px solid var(--line);background:var(--surface);align-items:center}
 .mkt-banner{padding:6px 14px;border-radius:10px;font-size:13px;font-weight:700;border:1px solid var(--line)}
+.gate-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.gate-row .mkt-banner{flex:1;min-width:200px}
 .mkt-banner.mkt-good{background:rgba(40,180,120,.1);border-color:rgba(40,180,120,.45);color:#28b478}
 .mkt-banner.mkt-neutral{background:rgba(230,170,40,.1);border-color:rgba(230,170,40,.45);color:#e6aa28}
 .mkt-banner.mkt-bad{background:rgba(255,90,110,.1);border-color:rgba(255,90,110,.45);color:#FF5A6E}
@@ -278,7 +280,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.52.5</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.53.1</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -2544,29 +2546,32 @@ async function loadIndices() {
       const [emoji] = map[rg] || ['',''];
       return emoji;
     };
-    // 국내(코스피/코스닥) 레짐으로 전체 시장 판정 배너
-    const kr = list.filter(ix => ix.name === '코스피' || ix.name === '코스닥');
-    const nasdaqIx = list.find(ix => ix.name === '나스닥');
-    const regimes = kr.map(ix => ix.regime).filter(Boolean);
-    let banner = '';
-    if (regimes.length) {
-      const bad = regimes.filter(r => r === 'bad').length;
-      const good = regimes.filter(r => r === 'good').length;
-      // 분산일: 코스피·나스닥 각각 표시 (게이트 판정은 국내 기준)
-      const kospiIx = list.find(ix => ix.name === '코스피');
-      const kospiDist = kospiIx ? (kospiIx.dist_days || 0) : 0;
-      const nasdaqDist = nasdaqIx ? (nasdaqIx.dist_days || 0) : 0;
-      const distParts = [];
-      if (kospiDist >= 1) distParts.push(`코스피 ${kospiDist}`);
-      if (nasdaqDist >= 1) distParts.push(`나스닥 ${nasdaqDist}`);
-      const distTxt = distParts.length ? ` · 분산일 ${distParts.join(' / ')}개` : '';
-      const anyFtd = kr.some(ix => ix.ftd);
-      const ftdTxt = anyFtd ? ' · FTD 발생(바닥 신호)' : '';
+    // ── 지수별 게이트 배너 (v4.53.1): 코스피·코스닥·나스닥 각각 판정 ──
+    // 각 지수의 분산일·레짐·FTD로 개별 신호. 한국 종목은 코스피/코스닥,
+    // 미국 종목은 나스닥 게이트를 보고 판단.
+    const gateOf = (ix) => {
+      if (!ix) return null;
+      const dist = ix.dist_days || 0;
+      const rg = ix.regime;   // good | weakening | ok | bad ...
       let lv, txt;
-      if (bad >= 1) { lv = 'bad'; txt = '🔴 시장 비우호 — 신규 진입 자제'; }
-      else if (good === regimes.length) { lv = 'good'; txt = '🟢 시장 우호 — 진입 환경 양호'; }
-      else { lv = 'neutral'; txt = '🟡 시장 중립 — 선별 진입'; }
-      banner = `<div class="mkt-banner mkt-${lv}" title="오닐 M factor: 분산일(기관 매도일) 카운트 + 20·60일선. 게이트 판정은 국내(코스피) 기준, 나스닥은 참고. 빠지는 장에선 돌파 성공률이 급락해요.">${txt}${distTxt}${ftdTxt}</div>`;
+      if (rg === 'bad' || dist >= 6) { lv = 'bad'; txt = '🔴 신규 진입 자제'; }
+      else if (rg === 'good' && dist <= 3) { lv = 'good'; txt = '🟢 진입 환경 양호'; }
+      else { lv = 'neutral'; txt = '🟡 선별 진입'; }
+      const distTxt = dist >= 1 ? ` · 분산일 ${dist}개` : '';
+      const ftdTxt = ix.ftd ? ' · FTD(바닥 신호)' : '';
+      return { lv, html: `${txt}${distTxt}${ftdTxt}` };
+    };
+    const gateNames = ['코스피', '코스닥', '나스닥'];
+    let banner = '';
+    const gateBoxes = gateNames.map(nm => {
+      const ix = list.find(x => x.name === nm);
+      const g = gateOf(ix);
+      if (!g) return '';
+      return `<div class="mkt-banner mkt-${g.lv}" title="${nm} 게이트: 분산일(기관 매도일) + 레짐 판정. 한국 종목은 코스피/코스닥, 미국 종목은 나스닥 기준으로 진입 판단.">
+        <b>${nm}</b> ${g.html}</div>`;
+    }).filter(Boolean);
+    if (gateBoxes.length) {
+      banner = `<div class="gate-row">${gateBoxes.join('')}</div>`;
     }
     bar.innerHTML = banner + list.map(ix => {
       const pct = ix.change_pct;
