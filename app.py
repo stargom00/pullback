@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.53.0 [신규] /api/ma/{ticker} — 종목 10/20/50일선 값 + 이탈 여부. 봇 이평 알림용.
+        봇 v2.5: ① 보유 종목 이평 이탈(종가 기준, 15:20) → 트레일링 손절 신호
+                 ② 관찰 종목 이평 접근(장중 2분, ±1%) → 눌림목 진입 준비 알림.
+                 이탈은 종가라 정확, 접근은 참고용(반등 확인은 사용자).
 v4.52.5 [근본수정] 스캔 반반 실패 해결 — 장중 프리로드 부재가 원인.
         [원인] 스케줄러의 _warm_market이 daykey(장 마감 후에만 생성) 없으면
                return → 장중엔 프리로드를 안 함. 캐시 10분 TTL 만료 후 열면
@@ -766,7 +770,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.52.5"
+VERSION = "v4.53.0"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2142,6 +2146,45 @@ async def watch_pending():
             "tab": r.get("tab", ""),
         })
     return JSONResponse({"pending": out, "count": len(out)})
+
+
+@app.get("/api/ma/{ticker}")
+async def moving_averages(ticker: str):
+    """종목의 오늘 이평선 값 (v4.53) — 봇의 이평 알림용.
+    캐시된 일봉에서 10/20/50일선 + 현재가 + 오늘 종가가 각 이평 위/아래인지.
+    이평은 매일 바뀌므로 봇이 매번 최신값을 받아 현재가와 비교."""
+    ticker = ticker.upper().strip()
+    df = None
+    for key in ("data:all", "data:KR", "data:US"):
+        bundle = _data_cache.get(key)
+        if bundle and ticker in bundle.get("data", {}):
+            df = bundle["data"][ticker]
+            break
+    if df is None:
+        try:
+            df = await asyncio.get_event_loop().run_in_executor(_executor, _fetch, ticker)
+        except Exception:
+            df = None
+    if df is None or len(df) < 50:
+        return JSONResponse({"ok": False}, status_code=404)
+    try:
+        c = df["Close"]
+        close = float(c.iloc[-1])
+        prev = float(c.iloc[-2])
+        out = {"ok": True, "ticker": ticker, "close": round(close, 2),
+               "prev_close": round(prev, 2)}
+        for w in (10, 20, 50):
+            if len(c) >= w:
+                ma = float(c.rolling(w).mean().iloc[-1])
+                ma_prev = float(c.rolling(w).mean().iloc[-2])
+                out[f"ma{w}"] = round(ma, 2)
+                # 오늘 종가가 이평 위/아래 + 어제 대비 방금 이탈했는지
+                out[f"below{w}"] = close < ma
+                out[f"broke{w}"] = (close < ma and prev >= ma_prev)   # 오늘 하향 이탈
+                out[f"dist{w}_pct"] = round((close / ma - 1) * 100, 2) if ma > 0 else None
+        return JSONResponse(out)
+    except Exception:
+        return JSONResponse({"ok": False}, status_code=500)
 
 
 @app.get("/api/vol/{ticker}")
