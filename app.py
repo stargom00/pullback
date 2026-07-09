@@ -5,6 +5,16 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.52.5 [근본수정] 스캔 반반 실패 해결 — 장중 프리로드 부재가 원인.
+        [원인] 스케줄러의 _warm_market이 daykey(장 마감 후에만 생성) 없으면
+               return → 장중엔 프리로드를 안 함. 캐시 10분 TTL 만료 후 열면
+               콜드 스캔(3~4분) 실행 → 브라우저 타임아웃 → '스캔 실패'.
+               로그상 컨테이너는 안 죽음(OOM 아님) 확인 후 이 원인 특정.
+        [수정] ① 장중에도 8분마다 프리로드 (스케줄러 4분 주기) → 사용자는
+               항상 캐시 히트. ② 프론트: 스캔 실패 시 15초 후 1회 자동 재시도
+               (워밍 대기). 프리로드(근본)+재시도(안전망) 이중 방어.
+v4.52.4 [개선] 시장 배너 분산일을 코스피/나스닥 각각 표시 (기존 최댓값 1개).
+               게이트 판정은 국내(코스피) 기준 유지, 나스닥은 참고용.
 v4.52.3 [개선] 수동 추가 시 상태 선택 (대기/진입/관찰). 기존엔 대기 고정이라
                이미 매수한 종목을 기록 못 함. 진입 선택 시 손절 필수(R·손절
                알림), 관찰은 통계 제외. 진입가/피벗가 라벨 자동 전환.
@@ -756,7 +766,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.52.3"
+VERSION = "v4.52.5"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1389,28 +1399,55 @@ async def inverse_scan(market: str = "all", refresh: bool = False):
 _warmed: dict = {}  # {"kr:daykey": True} 중복 워밍 방지
 
 
+_warm_intraday_ts: dict = {}   # {market: 마지막 장중 워밍 시각}
+
+
 async def _warm_market(market: str):
-    """해당 시장 데이터+주요 모드 결과를 미리 빌드(디스크 캐시 저장)."""
+    """해당 시장 데이터+주요 모드 결과를 미리 빌드(캐시 저장).
+    v4.52.5: 장 마감 후뿐 아니라 '장중에도' 프리로드.
+    장중엔 콜드 스캔(3~4분)이 사용자 요청 때 실행되면 브라우저 타임아웃으로
+    '스캔 실패'가 뜸 → 스케줄러가 미리 데워두면 사용자는 항상 캐시 히트."""
     daykey = _market_session_key(market)
-    if not daykey:
-        return  # 아직 마감 전
-    wkey = f"{market}:{daykey}"
-    if _warmed.get(wkey):
+    if daykey:
+        # ── 장 마감 후: 하루 1회만 데우면 됨 (데이터 고정) ──
+        wkey = f"{market}:{daykey}"
+        if _warmed.get(wkey):
+            return
+        try:
+            await _fetch_market_data(market)
+            for mode in ("imminent", "pullback", "turnaround", "breakout"):
+                res = await run_scan(market, mode)
+                res["daykey"] = daykey
+                _cache[f"{market}:{mode}"] = res
+            _warmed[wkey] = True
+            print(f"[scheduler] warmed {market} for {daykey}")
+        except Exception as e:
+            print(f"[scheduler] warm {market} failed: {e}")
+        return
+    # ── 장중: 캐시가 8분 이상 묵었으면 미리 갱신 (사용자 요청 전에) ──
+    # DATA_TTL(10분)보다 짧은 주기로 데워, 사용자가 열 때 항상 신선한 캐시 확보.
+    now = time.time()
+    last = _warm_intraday_ts.get(market, 0)
+    if now - last < 480:      # 8분
         return
     try:
-        await _fetch_market_data(market)               # 원본 데이터 + 디스크 저장
+        await _fetch_market_data(market)
         for mode in ("imminent", "pullback", "turnaround", "breakout"):
             res = await run_scan(market, mode)
-            res["daykey"] = daykey
+            res["daykey"] = None
+            res["ts"] = time.time()
             _cache[f"{market}:{mode}"] = res
-        _warmed[wkey] = True
-        print(f"[scheduler] warmed {market} for {daykey}")
+        _warm_intraday_ts[market] = now
+        print(f"[scheduler] intraday-warmed {market}")
     except Exception as e:
-        print(f"[scheduler] warm {market} failed: {e}")
+        print(f"[scheduler] intraday warm {market} failed: {e}")
 
 
 async def _scheduler_loop():
-    """5분마다 깨어나 각 시장이 마감했는데 아직 안 데운 상태면 워밍."""
+    """4분마다 깨어나 각 시장을 워밍.
+    - 장 마감 후: 하루 1회 (데이터 고정)
+    - 장중: 8분 이상 묵은 캐시를 미리 갱신 → 사용자는 항상 캐시 히트,
+            콜드 스캔으로 인한 '스캔 실패'가 사라짐."""
     await asyncio.sleep(20)  # 부팅 직후 잠깐 대기
     while True:
         try:
@@ -1418,7 +1455,7 @@ async def _scheduler_loop():
                 await _warm_market(market)
         except Exception as e:
             print(f"[scheduler] loop error: {e}")
-        await asyncio.sleep(300)  # 5분
+        await asyncio.sleep(240)  # 4분
 
 
 @app.on_event("startup")
