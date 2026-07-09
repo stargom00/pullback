@@ -5,6 +5,12 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.53.6 [신규] 하향 목표가 도달 알림 (봇 v2.6) — 눌림목 대기 완성.
+        진입 목표가가 현재가보다 낮게 설정된 대기 종목(RCUS $30인데 목표
+        $26)이 목표까지 눌려 내려오면 🎯 알림. 피벗 돌파(상향)와 반대 방향.
+        상향/하향은 목표가 위치로 자동 구분. pending API에 target_below 추가.
+        [수정] 일지 수정 폼에 '대기' 옵션 추가(기존 3개→4개) + 카테고리
+               변경 시 status 자동 동기화(대기→pending, 관찰→watch).
 v4.53.5 [수정] 관찰 종목 R 오알림 — 관찰인데 진입가 넣으면 봇이 진입으로
                착각해 +2R 알림 발송(RCUS 사례: 관찰+진입가26 → 현재가30에서
                +2.13R 오알림).
@@ -793,7 +799,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.53.5"
+VERSION = "v4.53.6"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2166,6 +2172,10 @@ async def watch_pending():
             "pivot": pivot,
             "entry": r.get("entry"),
             "stop": r.get("stop"),
+            # 하향 목표가 (v4.53.6): 진입가가 있으면 봇이 '이 가격까지 내려오면'
+            # 알림. 눌림목 대기(RCUS $30→$26)용. 봇에서 현재가와 비교.
+            "target_below": r.get("entry"),
+            "category": r.get("category") or r.get("cat") or "",
             "tab": r.get("tab", ""),
         })
     return JSONResponse({"pending": out, "count": len(out)})
