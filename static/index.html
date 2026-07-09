@@ -278,7 +278,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.52.3</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.52.5</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -846,6 +846,7 @@ async function load(refresh = false) {
   try {
     // 시장 구분 없이 항상 전체를 받아옴 → 한국/미국 탭은 클라이언트에서 필터(재스캔 0초)
     const res = await fetch(`/api/scan?market=all&mode=${mode}${refresh ? '&refresh=true' : ''}`);
+    if (!res.ok) throw new Error('status ' + res.status);
     const data = await res.json();
     if (data.version) { const vb = document.getElementById('verBadge'); if (vb) vb.textContent = data.version; }
     const _tm = data.timing;
@@ -869,8 +870,18 @@ async function load(refresh = false) {
     renderSectors(data.sector_summary || []);
     renderCards();
   } catch (e) {
-    content.innerHTML = '<div class="empty">스캔에 실패했습니다. 서버 로그를 확인한 뒤 다시 시도해 주세요.</div>';
+    // 콜드 스캔(캐시 워밍 중)일 수 있음 — 15초 후 1회 자동 재시도.
+    // 서버는 백그라운드로 계속 스캔 중이라, 잠시 뒤엔 캐시가 채워져 성공.
+    if (!load._retried) {
+      load._retried = true;
+      content.innerHTML = '<div class="loading"><div class="spinner"></div>첫 스캔은 시간이 걸려요 — 데이터 준비 중… (자동 재시도)</div>';
+      setTimeout(() => { load(false); }, 15000);
+      return;
+    }
+    load._retried = false;
+    content.innerHTML = '<div class="empty">스캔에 실패했습니다. 잠시 후 다시 스캔을 눌러주세요 (첫 스캔은 2~4분 소요).</div>';
   }
+  load._retried = false;
 }
 
 
@@ -2535,21 +2546,27 @@ async function loadIndices() {
     };
     // 국내(코스피/코스닥) 레짐으로 전체 시장 판정 배너
     const kr = list.filter(ix => ix.name === '코스피' || ix.name === '코스닥');
+    const nasdaqIx = list.find(ix => ix.name === '나스닥');
     const regimes = kr.map(ix => ix.regime).filter(Boolean);
     let banner = '';
     if (regimes.length) {
       const bad = regimes.filter(r => r === 'bad').length;
       const good = regimes.filter(r => r === 'good').length;
-      // 분산일 최댓값 (국내 지수 중) + FTD 여부
-      const maxDist = Math.max(...kr.map(ix => ix.dist_days || 0), 0);
+      // 분산일: 코스피·나스닥 각각 표시 (게이트 판정은 국내 기준)
+      const kospiIx = list.find(ix => ix.name === '코스피');
+      const kospiDist = kospiIx ? (kospiIx.dist_days || 0) : 0;
+      const nasdaqDist = nasdaqIx ? (nasdaqIx.dist_days || 0) : 0;
+      const distParts = [];
+      if (kospiDist >= 1) distParts.push(`코스피 ${kospiDist}`);
+      if (nasdaqDist >= 1) distParts.push(`나스닥 ${nasdaqDist}`);
+      const distTxt = distParts.length ? ` · 분산일 ${distParts.join(' / ')}개` : '';
       const anyFtd = kr.some(ix => ix.ftd);
-      const distTxt = maxDist >= 3 ? ` · 분산일 ${maxDist}개` : '';
       const ftdTxt = anyFtd ? ' · FTD 발생(바닥 신호)' : '';
       let lv, txt;
       if (bad >= 1) { lv = 'bad'; txt = '🔴 시장 비우호 — 신규 진입 자제'; }
       else if (good === regimes.length) { lv = 'good'; txt = '🟢 시장 우호 — 진입 환경 양호'; }
       else { lv = 'neutral'; txt = '🟡 시장 중립 — 선별 진입'; }
-      banner = `<div class="mkt-banner mkt-${lv}" title="오닐 M factor: 분산일(기관 매도일) 카운트 + 20·60일선. 분산일 5개+ 또는 60일선 아래면 비우호. 빠지는 장에선 돌파 성공률이 급락해요.">${txt}${distTxt}${ftdTxt}</div>`;
+      banner = `<div class="mkt-banner mkt-${lv}" title="오닐 M factor: 분산일(기관 매도일) 카운트 + 20·60일선. 게이트 판정은 국내(코스피) 기준, 나스닥은 참고. 빠지는 장에선 돌파 성공률이 급락해요.">${txt}${distTxt}${ftdTxt}</div>`;
     }
     bar.innerHTML = banner + list.map(ix => {
       const pct = ix.change_pct;
