@@ -280,7 +280,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.53.4</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.53.6</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -2437,6 +2437,7 @@ function editRow(r) {
         <select id="e_cat" class="ein" style="width:110px">
           <option value="추세추종" ${cat==='추세추종'?'selected':''}>📈 추세추종</option>
           <option value="단타" ${cat==='단타'?'selected':''}>⚡ 단타</option>
+          <option value="대기" ${cat==='대기'?'selected':''}>⏳ 대기</option>
           <option value="관찰" ${cat==='관찰'?'selected':''}>👁 관찰</option>
         </select>
         <input id="e_held" class="ein" value="${r.held_days || ''}" placeholder="보유일" style="width:60px">
@@ -2462,6 +2463,15 @@ function saveEdit(id) {
     }
   }
   r.category = document.getElementById('e_cat').value;
+  // 카테고리 변경 시 status 동기화 (종료된 건 제외).
+  // 대기→pending(봇 피벗 감시), 관찰→watch(알림 없음), 매매→entered.
+  if (r.status !== 'closed') {
+    if (r.category === '대기') r.status = 'pending';
+    else if (r.category === '관찰') r.status = 'watch';
+    else if (r.category === '추세추종' || r.category === '단타') {
+      if (r.status !== 'entered') r.status = 'entered';
+    }
+  }
   const entry = parseFloat(document.getElementById('e_entry').value) || null;
   const stop = parseFloat(document.getElementById('e_stop').value) || null;
   r.entry = entry; r.stop = stop;
