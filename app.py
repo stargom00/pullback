@@ -5,6 +5,13 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.53.5 [수정] 관찰 종목 R 오알림 — 관찰인데 진입가 넣으면 봇이 진입으로
+               착각해 +2R 알림 발송(RCUS 사례: 관찰+진입가26 → 현재가30에서
+               +2.13R 오알림).
+        [원인] /api/watch/positions가 (status or 'entered') 폴백이라 status
+               없는/관찰 종목을 진입으로 오인.
+        [수정] category=관찰이면 status·진입가 무관하게 R 감시 제외. status
+               있으면 entered만. status 없는 구 레코드는 하위호환 유지.
 v4.53.4 [개선] 일지 추가 모달에 '대기' 옵션 신설 — 눌림목 등 비돌파 종목도
                피벗 감시받게. 기존엔 돌파 계열만 자동 pending이라, 눌림목
                종목은 관찰(watch)로만 저장돼 봇 알림을 못 받았음.
@@ -786,7 +793,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.53.4"
+VERSION = "v4.53.5"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2266,7 +2273,23 @@ async def watch_positions():
     봇이 2분마다 현재가로 R 진행률을 계산해 +2R(절반 익절)·손절 도달을 알림."""
     out = []
     for r in load_journal():
-        if (r.get("status") or "entered") != "entered" or r.get("result_r") != "":
+        # ── 진입 상태 판정 (v4.53.5) ──
+        # 기존 (status or "entered")는 status 없는 관찰 종목을 진입으로 오인해
+        # R 알림을 잘못 보냄(RCUS 사례: 관찰인데 진입가 넣어서 +2R 오알림).
+        # 명시적으로 'entered'인 것만 R 감시. watch/pending/missed/closed 제외.
+        # category가 '관찰'이면 status와 무관하게 제외 (이중 안전장치).
+        status = r.get("status") or ""
+        cat = r.get("category") or r.get("cat") or ""
+        # 관찰은 status 무관하게 항상 제외 (진입가를 적어놔도 R 감시 안 함)
+        if cat == "관찰":
+            continue
+        # status가 있으면 그걸로 판정 (entered만). status 없는 구 레코드는
+        # 관찰이 아니고 진입가·손절이 있으면 진입으로 간주(하위호환).
+        if status:
+            if status != "entered":
+                continue
+        # status 없는 구 레코드: 아래 entry/stop 검증으로 걸러짐
+        if r.get("result_r") not in ("", None):
             continue
         try:
             e = float(r.get("entry") or 0)
