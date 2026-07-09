@@ -278,7 +278,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.52.2</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.52.3</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -398,22 +398,31 @@ tr.editing{background:rgba(242,179,61,.06)}
 <div class="modal-bg" id="manualModal">
   <div class="modal">
     <h3 class="drag-handle">➕ 수동 종목 추가 <span style="font-size:11px;color:var(--muted);font-weight:400">스캐너에 없는 종목 직접 담기</span></h3>
-    <div class="sub" style="color:var(--muted);font-size:12px;margin-bottom:8px">관찰 종목을 대기 상태로 담아요. 피벗 돌파 시 텔레그램 알림이 와요.</div>
+    <div class="sub" style="color:var(--muted);font-size:12px;margin-bottom:8px">스캐너에 없는 종목을 직접 담아요. <b>대기</b>는 피벗 돌파 알림, <b>진입</b>은 R·손절 알림, <b>관찰</b>은 통계 제외.</div>
     <div class="row">
       <div><label>종목코드 *</label><input id="maTicker" placeholder="예: V, AAPL, 005930.KS"></div>
       <div><label>종목명</label><input id="maName" placeholder="예: 비자"></div>
     </div>
     <div class="row">
+      <div><label>상태 *</label>
+        <select id="maStatus" onchange="onMaStatusChange()" style="width:100%;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:inherit">
+          <option value="pending">⏳ 대기 (피벗 돌파 알림 받기)</option>
+          <option value="entered">▶ 진입 (이미 매수함)</option>
+          <option value="watch">👁 관찰 (통계 제외)</option>
+        </select>
+      </div>
       <div><label>시장</label>
         <select id="maMarket" style="width:100%;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:inherit">
           <option value="US">미국 (US)</option>
           <option value="KR">한국 (KR)</option>
         </select>
       </div>
+    </div>
+    <div class="row">
       <div><label>섹터 (선택)</label><input id="maSector" placeholder="예: 결제인프라"></div>
     </div>
     <div class="row">
-      <div><label>피벗가 (돌파 알림 기준) *</label><input id="maPivot" inputmode="decimal" placeholder="예: 337"></div>
+      <div><label id="maPivotLabel">피벗가 (돌파 알림 기준) *</label><input id="maPivot" inputmode="decimal" placeholder="예: 337"></div>
       <div><label>손절가</label><input id="maStop" inputmode="decimal" placeholder="예: 320"></div>
     </div>
     <div id="maCalc" class="rcalc"></div>
@@ -421,7 +430,7 @@ tr.editing{background:rgba(242,179,61,.06)}
     <textarea id="maNote" placeholder="예: 역H&S 넥라인+200일선 돌파 대기"></textarea>
     <div class="actions">
       <button class="cancel" onclick="closeManualAdd()">취소</button>
-      <button class="save" onclick="saveManualAdd()">대기로 추가</button>
+      <button class="save ma-save-btn" onclick="saveManualAdd()">대기로 추가</button>
     </div>
   </div>
 </div>
@@ -1895,26 +1904,37 @@ function closeManualAdd() {
 }
 async function saveManualAdd() {
   const ticker = document.getElementById('maTicker').value.trim().toUpperCase();
+  const status = document.getElementById('maStatus').value;   // pending | entered | watch
   const pivot = parseFloat(document.getElementById('maPivot').value);
   if (!ticker) { alert('종목코드를 입력하세요'); return; }
-  if (!pivot || isNaN(pivot)) { alert('피벗가를 입력하세요 (돌파 알림 기준)'); return; }
+  const isEntered = status === 'entered';
+  // 진입이면 '진입가', 그 외엔 '피벗가'가 필수
+  if (!pivot || isNaN(pivot)) {
+    alert(isEntered ? '진입가를 입력하세요' : '피벗가를 입력하세요 (돌파 알림 기준)');
+    return;
+  }
   const stop = parseFloat(document.getElementById('maStop').value) || null;
-  // 손절 검증: 있으면 피벗보다 낮아야 함
-  if (stop && stop >= pivot) { alert('손절가는 피벗가보다 낮아야 해요'); return; }
+  // 진입 상태면 손절 필수 (R 계산·손절 알림에 필요)
+  if (isEntered && !stop) { alert('진입 종목은 손절가가 필요해요 (R 계산·손절 알림)'); return; }
+  // 손절 검증: 있으면 기준가보다 낮아야 함
+  if (stop && stop >= pivot) { alert('손절가는 ' + (isEntered ? '진입가' : '피벗가') + '보다 낮아야 해요'); return; }
   const market = document.getElementById('maMarket').value;
   const name = document.getElementById('maName').value.trim() || ticker;
   const sector = document.getElementById('maSector').value.trim();
   const note = document.getElementById('maNote').value.trim();
   const today = new Date().toISOString().slice(0, 10);
+  // 관찰은 category='관찰'로 표시해 통계에서 제외됨
+  const cat = status === 'watch' ? '관찰' : '';
+  const tab = status === 'watch' ? '수동관찰' : (isEntered ? '수동진입' : '수동관찰');
   const rec = {
     id: Date.now(), date: today, ticker, name, market,
-    cat: '', tab: '수동관찰', signal: '', pivot_type: '수동', setup_score: '',
-    rs: '', entry: pivot, stop, pivot,           // entry=pivot(돌파 시 진입), 피벗 알림 기준
+    cat, category: cat, tab, signal: '', pivot_type: '수동', setup_score: '',
+    rs: '', entry: pivot, stop, pivot,           // entry: 진입이면 진입가, 아니면 피벗
     risk_pct: stop ? Math.round((pivot - stop) / pivot * 1000) / 10 : '',
     sig_level: '', sig_flags: '', avwap_zone: '', rr_at_entry: '',
     tracking: true, target: stop ? Math.round((pivot + (pivot - stop) * 2) * 100) / 100 : '',
     last_price: pivot, last_checked: today, closed_reason: '',
-    status: 'pending',                            // 항상 대기로 시작
+    status,                                       // 선택한 상태 (대기/진입/관찰)
     manual: true,                                 // 수동 추가 표시
     sector, alert: '', note,
     exit: '', result_r: '', held_days: '', review: ''
@@ -1924,6 +1944,23 @@ async function saveManualAdd() {
   closeManualAdd();
   const ok = await _saveJournalToServer(j);
   if (ok !== false) renderJournal();
+}
+
+// 상태 선택에 따라 라벨·저장 버튼 텍스트 조정
+function onMaStatusChange() {
+  const status = document.getElementById('maStatus').value;
+  const lbl = document.getElementById('maPivotLabel');
+  const btn = document.querySelector('#manualAddModal .save, #journalModal .save');
+  if (status === 'entered') {
+    if (lbl) lbl.textContent = '진입가 *';
+  } else {
+    if (lbl) lbl.textContent = '피벗가 (돌파 알림 기준) *';
+  }
+  const saveBtn = document.querySelector('.ma-save-btn');
+  if (saveBtn) {
+    saveBtn.textContent = status === 'entered' ? '진입으로 추가'
+                        : status === 'watch' ? '관찰로 추가' : '대기로 추가';
+  }
 }
 
 // ── 모달 드래그 (헤더 잡고 이동) ──
