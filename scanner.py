@@ -2651,6 +2651,155 @@ def _pat_double_bottom(c, h, lo, v):
             "pat_ready": True, "pat_missing": []}
 
 
+def _pat_abc(c, h, lo, v):
+    """A-B-C 상한가 패턴 (v4.55) — 급등구간 분리 + 동적 A/B 탐지.
+
+    실데이터(광주·금호·삼화·디벨로먼트·마녀공장)로 배운 핵심:
+    - 오늘 재폭발하면 close가 곧 최고가라, 최근 급등봉을 빼고 '상승 1파 고점'을
+      찾아야 A-B-C 구조(peak=B상단)가 보인다.
+    - C는 여러 상한가 국면. 첫 상한가=첫폭발, B후 재폭발=폭발초입, 3번째+=폭발진행.
+    - B가 peak 대비 -30% 넘게 깊으면 컵앤핸들(마녀공장)이지 A-B-C 아님.
+
+    스테이지: 첫폭발 / 수렴중 / 폭발초입 / 폭발진행.
+    """
+    n = len(c)
+    if n < 120:
+        return None
+    try:
+        close = float(c.iloc[-1])
+        vol = float(v.iloc[-1])
+        vol60 = float(v.iloc[-60:-1].mean())
+        vol_ratio = vol / vol60 if vol60 > 0 else 0.0
+        prev = float(c.iloc[-2])
+        change = (close / prev - 1) * 100 if prev else 0
+
+        rets = c.pct_change()
+
+        # ── 1) 최근 연속 급등 구간(C) 식별 ──
+        # 뒤에서부터 훑어 +18%↑ 봉들이 모인 구간을 C로 본다.
+        # C 구간을 빼야 그 이전 '상승 1파 고점'이 보인다.
+        surge_days = int((rets.iloc[-15:] >= 0.18).sum())
+        # C 시작 지점: 최근 15봉 중 첫 급등봉 위치
+        recent = rets.iloc[-15:]
+        surge_positions = [i for i, r in enumerate(recent.values) if r >= 0.18]
+        if surge_positions:
+            first_surge_rel = surge_positions[0]          # 15봉 window 내 위치
+            c_start_abs = len(c) - 15 + first_surge_rel   # 절대 위치
+            pre_c = c.iloc[:c_start_abs]                  # C 이전 데이터
+        else:
+            c_start_abs = len(c)
+            pre_c = c
+
+        if len(pre_c) < 90:
+            return None
+
+        # ── 2) 상승 1파 고점 = C 이전 구간의 최고가 ──
+        pre_window = pre_c.iloc[-90:] if len(pre_c) >= 90 else pre_c
+        peak_rel = int(pre_window.values.argmax())
+        peak_val = float(pre_window.iloc[peak_rel])
+        peak_abs = len(pre_c) - len(pre_window) + peak_rel
+        bars_since_peak = len(c) - 1 - peak_abs
+
+        # ── 3) A 구간: 상승 1파 시작 전 수렴 (상승폭 감안해 peak에서 충분히 앞) ──
+        # 상승 1파가 A~peak 사이에 있으므로, A는 그 이전이어야 순수 수렴.
+        a_end = max(peak_abs - 10, 20)
+        a_start = max(a_end - 55, 0)
+        a_seg = c.iloc[a_start:a_end]
+        if len(a_seg) < 25:
+            return None
+        a_hi, a_lo = float(a_seg.max()), float(a_seg.min())
+        a_mid = (a_hi + a_lo) / 2
+        a_range = (a_hi - a_lo) / a_mid if a_mid > 0 else 1.0
+        if a_range > 0.25:
+            return None
+
+        # ── 4) 상승 1파 확인: peak가 A 상단 +15%↑ ──
+        first_wave = peak_val >= a_hi * 1.15
+
+        # ── 5) B 구간: peak 이후 ~ C 시작 전 (되밀린 수렴) ──
+        has_b = False
+        b_lo = a_lo
+        b_depth = 0.0
+        if first_wave and c_start_abs - peak_abs >= 4:
+            # peak와 C 사이에 수렴 구간(B) 존재
+            b_seg = c.iloc[peak_abs + 1:c_start_abs]
+            if len(b_seg) >= 3:
+                b_lo = float(b_seg.min())
+                b_depth = (peak_val - b_lo) / peak_val
+                if b_depth > 0.30:                       # 컵앤핸들 제외
+                    return None
+                has_b = True
+
+        # ── 6) 장기선 위 ──
+        ma60 = float(c.rolling(60).mean().iloc[-1])
+        if close < ma60 * 0.95:
+            return None
+
+        # ── 7) 거래량 선행 유입 ──
+        vol5 = float(v.iloc[-5:].mean())
+        vol_building = vol5 > vol60 * 1.2
+
+        # ── 8) 스테이지 판정 ──
+        is_blast_today = vol_ratio >= 3.0 and change >= 18
+
+        if is_blast_today:
+            if has_b:
+                # B 후 재폭발 = 정석 A-B-C의 C
+                pivot = peak_val
+                if surge_days <= 2:
+                    stage = "폭발초입"; quality = 32
+                else:
+                    stage = "폭발진행"; quality = 18
+            elif first_wave:
+                # 상승 1파는 있으나 B 없이 바로 재급등 = 폭발진행 취급
+                pivot = peak_val
+                stage = "폭발진행"; quality = 20
+            else:
+                # A만 있고 첫 급등 = 첫폭발
+                pivot = a_hi
+                stage = "첫폭발"; quality = 26
+            stop_raw = b_lo if has_b else a_lo
+        elif has_b:
+            # B 수렴 중 (폭발 전 대기)
+            pivot = peak_val
+            near = (close - pivot) / pivot * 100
+            if not (-25 <= near < -1.5 and vol_ratio < 2.5):
+                return None
+            stage = "수렴중"
+            quality = 20 + int((1 - abs(near) / 25) * 8)
+            if vol_building:
+                quality += 4
+            stop_raw = b_lo
+        else:
+            return None
+
+        near = (close - pivot) / pivot * 100
+
+        return {
+            "pattern": "ABC상한가",
+            "pattern_emoji": "🎆",
+            "pivot": round(pivot, 2),
+            "stop_raw": round(stop_raw, 2),
+            "quality": quality,
+            "stage": stage,
+            "surge_days": surge_days,
+            "vol_ratio": round(vol_ratio, 1),
+            "vol_building": vol_building,
+            "a_range": round(a_range * 100, 1),
+            "b_depth": round(b_depth * 100, 1),
+            "has_b": has_b,
+            "bars_since_peak": bars_since_peak,
+            "base_len": len(a_seg),
+            "depth_pct": round(b_depth * 100, 1),
+            "vol_dry": vol_ratio < 0.8,
+            "pat_ready": stage.startswith("폭발") or stage == "첫폭발",
+            "pat_missing": [] if "폭발" in stage else ["거래량 폭발 대기"],
+            "near_lo": -25.0,
+        }
+    except Exception:
+        return None
+
+
 def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
                     rs_mom: int | None = None,
                     cfg: dict = PATTERN_CONFIG) -> dict | None:
@@ -2666,7 +2815,7 @@ def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
         return None
 
     hits = []
-    for det in (_pat_htf, _pat_cup_handle, _pat_double_bottom):
+    for det in (_pat_htf, _pat_cup_handle, _pat_double_bottom, _pat_abc):
         try:
             r = det(c, h, lo, v)
         except Exception:
@@ -2675,12 +2824,14 @@ def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
             hits.append(r)
     if not hits:
         return None
-    # 피벗 근접 조건: -6% ~ +1.5%
+    # 피벗 근접 조건: -6% ~ +1.5% (단 ABC 폭발은 돌파 당일이라 상한 예외 +35%)
     best = None
     for r in hits:
         near = (close - r["pivot"]) / r["pivot"] * 100
         near_lo = r.get("near_lo", cfg["near_lo"])
-        if near_lo <= near <= cfg["near_hi"]:
+        _stg = r.get("stage") or ""
+        near_hi = 35.0 if ("폭발" in _stg) else cfg["near_hi"]
+        if near_lo <= near <= near_hi:
             r["_near"] = near
             if best is None or r["quality"] > best["quality"]:
                 best = r
@@ -2721,6 +2872,7 @@ def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
         "leader": (rs_rank or 0) >= 90,
         "pattern": best["pattern"],
         "pattern_emoji": best["pattern_emoji"],
+        "pattern_stage": best.get("stage"),   # ABC: 폭발/수렴완성
         "pat_ready": best.get("pat_ready", True),
         "pat_missing": best.get("pat_missing", []),
         "base_len": best["base_len"],
