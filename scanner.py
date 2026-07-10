@@ -2769,11 +2769,24 @@ def _pat_abc(c, h, lo, v):
             quality = 20 + int((1 - abs(near) / 25) * 8)
             if vol_building:
                 quality += 4
-            stop_raw = b_lo
+            # ── 매수 타점 (v4.55.1): 피벗(B상단) 추격 대신 B 하단 지지 반등 진입.
+            b_seg_now = c.iloc[peak_abs + 1:c_start_abs]
+            b_lo_now = float(b_seg_now.min())
+            b_hi_now = float(b_seg_now.max())
+            # 매수존: B 하단 ~ 하단+B폭의 30% (지지 근처에서 반등 시 진입)
+            buy_zone_lo = b_lo_now
+            buy_zone_hi = b_lo_now + (b_hi_now - b_lo_now) * 0.30
+            # 손절: 매수타점(B하단)보다 아래 = B하단 -3% (지지 이탈 확인선)
+            stop_raw = b_lo_now * 0.97
         else:
             return None
 
         near = (close - pivot) / pivot * 100
+
+        # 수렴중이면 매수타점/목표 계산 (그 외는 None)
+        _buy_lo = round(buy_zone_lo, 2) if stage == "수렴중" else None
+        _buy_hi = round(buy_zone_hi, 2) if stage == "수렴중" else None
+        _target = round(peak_val, 2) if stage == "수렴중" else None
 
         return {
             "pattern": "ABC상한가",
@@ -2792,6 +2805,9 @@ def _pat_abc(c, h, lo, v):
             "base_len": len(a_seg),
             "depth_pct": round(b_depth * 100, 1),
             "vol_dry": vol_ratio < 0.8,
+            "buy_zone_lo": _buy_lo,          # 수렴중 매수 타점 하단 (B 하단)
+            "buy_zone_hi": _buy_hi,          # 수렴중 매수 타점 상단
+            "abc_target": _target,           # 수렴중 목표 (B 상단=피벗)
             "pat_ready": stage.startswith("폭발") or stage == "첫폭발",
             "pat_missing": [] if "폭발" in stage else ["거래량 폭발 대기"],
             "near_lo": -25.0,
@@ -2873,6 +2889,9 @@ def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
         "pattern": best["pattern"],
         "pattern_emoji": best["pattern_emoji"],
         "pattern_stage": best.get("stage"),   # ABC: 폭발/수렴완성
+        "abc_buy_lo": best.get("buy_zone_lo"),   # ABC 수렴중 매수타점
+        "abc_buy_hi": best.get("buy_zone_hi"),
+        "abc_target": best.get("abc_target"),    # ABC 수렴중 목표(피벗)
         "pat_ready": best.get("pat_ready", True),
         "pat_missing": best.get("pat_missing", []),
         "base_len": best["base_len"],
