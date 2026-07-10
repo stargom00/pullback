@@ -280,7 +280,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.55.0</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.55.1</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -748,6 +748,7 @@ function card(s) {
     <div class="badges">
       <span class="badge on">${s.pattern_emoji} ${s.pattern} 형성 ${s.base_len}일째 (≈${Math.max(1, Math.round(s.base_len / 5))}주)</span>
       ${s.pattern_stage ? `<span class="badge ${s.pattern_stage === '폭발초입' ? 'warn' : s.pattern_stage === '폭발진행' ? '' : 'on'}" title="${s.pattern_stage === '첫폭발' ? '긴 수렴 후 첫 상한가 — 빠르나 미확인' : s.pattern_stage === '수렴중' ? 'B 다지기 중, 폭발 대기 — 미리 담을 자리' : s.pattern_stage === '폭발초입' ? 'B 후 재폭발 1~2번째 — 진입 이상적' : '3번째+ 상한가 — 추격 주의'}">${s.pattern_stage === '폭발초입' ? '🔥 폭발초입' : s.pattern_stage === '폭발진행' ? '⚠️ 폭발진행(추격)' : s.pattern_stage === '첫폭발' ? '💥 첫폭발' : '⏳ 수렴중'}</span>` : ''}
+      ${s.pattern_stage === '수렴중' && s.abc_buy_lo ? `<span class="badge on" title="A-B-C 수렴중 매수 타점 — 피벗(B상단) 추격 대신 B 하단 지지 반등에서 담아야 손절폭이 작다. 이 구간까지 눌리면 반등(양봉+거래량) 확인 후 진입. 목표는 B상단 ${s.abc_target ? s.abc_target.toLocaleString() : ''}.">🎯 매수타점 ${s.abc_buy_lo.toLocaleString()}~${s.abc_buy_hi.toLocaleString()}</span>` : ''}
       <span class="badge ${Math.abs(s.pivot_dist_pct) <= 2 ? 'warn' : 'on'}">피벗 ${s.pivot_dist_pct >= 0 ? '+' : ''}${s.pivot_dist_pct}%</span>
       <span class="badge">패턴 깊이 ${s.depth_pct}%</span>
       <span class="badge ${s.vol_dry ? 'on' : ''}">거래량 수축</span>
