@@ -12,6 +12,8 @@
   --bg:#0C111B; --surface:#141C2B; --surface2:#1A2436; --line:#233047;
   --text:#E6ECF5; --muted:#8A97AC; --dim:#5A6578;
   --up:#FF5A6E; --down:#4D8DFF; --amber:#F2B33D; --green:#3DD68C;
+  /* 가격/등락 '방향' 전용 색 — 상승=연두, 하락=빨강 (경고용 --up/--down 과 분리) */
+  --px-up:#3DD68C; --px-down:#FF5A6E;
 }
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans KR',sans-serif;min-height:100vh}
@@ -52,7 +54,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .idx .nm{color:var(--muted);font-weight:500}
 .idx .vl{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
 .idx .ch{font-size:12px;font-variant-numeric:tabular-nums}
-.idx .ch.up{color:var(--up)} .idx .ch.down{color:var(--down)} .idx .ch.flat{color:var(--muted)}
+.idx .ch.up{color:var(--px-up)} .idx .ch.down{color:var(--px-down)} .idx .ch.flat{color:var(--muted)}
 .entry-sig{margin-top:10px;padding:9px 11px;border-radius:9px;border:1px solid var(--line)}
 .entry-sig.sig-ok{background:rgba(40,180,120,.08);border-color:rgba(40,180,120,.4)}
 .entry-sig.sig-warn{background:rgba(230,170,40,.08);border-color:rgba(230,170,40,.4)}
@@ -77,9 +79,9 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
   border:1px solid var(--line);font-variant-numeric:tabular-nums}
 .fund-box .fchip b{color:var(--text);font-weight:600}
 .fund-box .vd{font-weight:700;padding:3px 10px;border-radius:7px}
-.fund-box .vd.cheap{color:var(--up);border:1px solid var(--up)}
+.fund-box .vd.cheap{color:var(--px-up);border:1px solid var(--px-up)}
 .fund-box .vd.fair{color:var(--muted);border:1px solid var(--line)}
-.fund-box .vd.exp{color:var(--down);border:1px solid var(--down)}
+.fund-box .vd.exp{color:var(--px-down);border:1px solid var(--px-down)}
 .fund-box .note{display:block;margin-top:4px;font-size:11px;opacity:.75}
 .journal-btn{width:100%;margin-top:10px;padding:7px;background:transparent;
   border:1px dashed var(--line);color:var(--muted);border-radius:8px;font-size:12px;
@@ -251,7 +253,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 .price-row{display:flex;align-items:baseline;gap:8px}
 .price{font-size:17px;font-weight:600}
 .chg{font-size:13px;font-weight:500}
-.chg.up{color:var(--up)}.chg.down{color:var(--down)}
+.chg.up{color:var(--px-up)}.chg.down{color:var(--px-down)}
 
 .spark{width:100%;height:64px;display:block}
 
@@ -659,7 +661,7 @@ function card(s) {
       <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
     </div>` : s.mode === 'surge' ? `
     <div class="metrics mono">
-      <div class="metric"><div class="k">당일</div><div class="v" style="color:var(--up)">+${s.change_pct}%</div></div>
+      <div class="metric"><div class="k">당일</div><div class="v" style="color:var(--px-up)">+${s.change_pct}%</div></div>
       <div class="metric"><div class="k">거래량</div><div class="v">${s.vol_mult}×</div></div>
       <div class="metric"><div class="k">위꼬리</div><div class="v" style="${s.upper_wick_pct > 3 ? 'color:var(--up)' : ''}">${s.upper_wick_pct}%</div></div>
       <div class="metric"><div class="k">RSI</div><div class="v" style="${s.rsi > 80 ? 'color:var(--up)' : ''}">${s.rsi}</div></div>
@@ -903,7 +905,7 @@ async function loadSectors() {
     if (d.version) { const vb = document.getElementById('verBadge'); if (vb) vb.textContent = d.version; }
     status.innerHTML = `<span>기준 ${d.asof}</span><span>마지막 봉 대비 등락 · 섹터 매핑 종목 기준</span>`;
     const panelName = {KOSPI: '코스피', KOSDAQ: '코스닥', US: '나스닥·NYSE'};
-    const chgColor = v => v > 0 ? 'color:#FF6B6B' : v < 0 ? 'color:#5B9BFF' : 'color:var(--muted)';
+    const chgColor = v => v > 0 ? 'color:var(--px-up)' : v < 0 ? 'color:var(--px-down)' : 'color:var(--muted)';
     const p = d.panels || {};
     const cols = ['KOSPI', 'KOSDAQ', 'US'];
     const maxRows = Math.max(...cols.map(k => (p[k] || []).length), 1);
@@ -992,7 +994,7 @@ function renderInverseCards(hits) {
     // 기초지수 5일 등락 (인버스가 왜 오르는지)
     const idx5 = s.index_5d_pct;
     const idx5Str = idx5 != null ? `${idx5>=0?'+':''}${idx5}%` : '–';
-    const idx5Color = idx5 != null ? (idx5 < 0 ? 'var(--down)' : 'var(--up)') : 'var(--muted)';
+    const idx5Color = idx5 != null ? (idx5 < 0 ? 'var(--px-down)' : 'var(--px-up)') : 'var(--muted)';
     return `<div class="card">
       <div class="card-top">
         <div>
@@ -1007,7 +1009,7 @@ function renderInverseCards(hits) {
       <div style="margin:8px 0;display:flex;gap:6px;flex-wrap:wrap">${strengthBadge(s.strength)} ${levBadge}</div>
       <div class="metrics">
         <div class="metric"><div class="k">${s.underlying} 5일</div><div class="v mono" style="color:${idx5Color}">${idx5Str}</div></div>
-        <div class="metric"><div class="k">인버스 5일</div><div class="v mono" style="color:${s.ret5_pct>=0?'var(--up)':'var(--down)'}">${s.ret5_pct>=0?'+':''}${s.ret5_pct}%</div></div>
+        <div class="metric"><div class="k">인버스 5일</div><div class="v mono" style="color:${s.ret5_pct>=0?'var(--px-up)':'var(--px-down)'}">${s.ret5_pct>=0?'+':''}${s.ret5_pct}%</div></div>
         <div class="metric"><div class="k">연속 상승</div><div class="v mono">${s.up_streak>0?s.up_streak+'일↑':'–'}</div></div>
         <div class="metric"><div class="k">RSI</div><div class="v mono">${s.rsi}</div></div>
       </div>
@@ -1073,7 +1075,7 @@ function renderLookupCard(d) {
   const content = document.getElementById('content');
   const isKr = d.market === 'KR';
   const fmtPx = isKr ? Math.round(d.close).toLocaleString() : Number(d.close).toFixed(2);
-  const chgCls = d.change_pct >= 0 ? 'var(--up)' : 'var(--down)';
+  const chgCls = d.change_pct >= 0 ? 'var(--px-up)' : 'var(--px-down)';
   const chgSign = d.change_pct >= 0 ? '+' : '';
   const turnoverStr = isKr
     ? (d.turnover >= 1e8 ? Math.round(d.turnover/1e8).toLocaleString()+'억' : Math.round(d.turnover/1e4).toLocaleString()+'만')
@@ -1092,11 +1094,11 @@ function renderLookupCard(d) {
         <div style="font-size:22px;font-weight:700;margin-bottom:12px">${fmtPx} <span style="font-size:14px;color:${chgCls}">${chgSign}${d.change_pct}%</span></div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:13px">
           <div><div style="color:var(--muted);font-size:11px">정배열</div><div style="color:${d.aligned?'var(--green)':'var(--muted)'}">${d.aligned?'정배열 ✓':'역배열'}</div></div>
-          <div><div style="color:var(--muted);font-size:11px">200일선 대비</div><div style="color:${(d.ma200_dist??0)>=0?'var(--up)':'var(--down)'}">${d.ma200_dist!=null?(d.ma200_dist>=0?'+':'')+d.ma200_dist+'%':'-'}</div></div>
+          <div><div style="color:var(--muted);font-size:11px">200일선 대비</div><div style="color:${(d.ma200_dist??0)>=0?'var(--px-up)':'var(--px-down)'}">${d.ma200_dist!=null?(d.ma200_dist>=0?'+':'')+d.ma200_dist+'%':'-'}</div></div>
           <div><div style="color:var(--muted);font-size:11px">RSI</div><div>${d.rsi??'-'}</div></div>
           <div><div style="color:var(--muted);font-size:11px">거래량비</div><div>${d.vol_mult!=null?d.vol_mult+'×':'-'} <span style="font-size:10px;color:${(d.ud??0)>=1?'var(--green)':'var(--down)'}">U/D ${d.ud??'-'}</span></div></div>
           <div><div style="color:var(--muted);font-size:11px">거래대금</div><div>${turnoverStr}</div></div>
-          <div><div style="color:var(--muted);font-size:11px">52주 고점대비</div><div style="color:${(d.from_high??0)>=-5?'var(--up)':'var(--muted)'}">${d.from_high!=null?d.from_high+'%':'-'}</div></div>
+          <div><div style="color:var(--muted);font-size:11px">52주 고점대비</div><div style="color:${(d.from_high??0)>=-5?'var(--px-up)':'var(--muted)'}">${d.from_high!=null?d.from_high+'%':'-'}</div></div>
         </div>
         <div style="margin-top:10px;font-size:11px;color:var(--muted)">52주 저점 대비 ${d.from_low!=null?'+'+d.from_low+'%':'-'} · 20일선 ${d.ma20?.toLocaleString?.()??d.ma20} · 60일선 ${d.ma60?.toLocaleString?.()??d.ma60}</div>
       </div>
@@ -2164,12 +2166,12 @@ function renderSignalValidation(all) {
   const v = signalValidation(all);
   if (!v) return `<div class="sigval-hint">📊 신호 검증: 종료된 매매가 3건 이상 쌓이면 신호별 승률이 여기 표시돼요. (진입 시 신호등·AVWAP 상태가 자동 기록됩니다)</div>`;
   const rowsOf = (obj) => Object.values(obj).map(g =>
-    `<tr><td>${g.label}</td><td>${g.n}건</td><td>${g.win}%</td><td style="color:${parseFloat(g.avgR)>=0?'var(--green)':'var(--up)'}">${g.avgR}R</td></tr>`
+    `<tr><td>${g.label}</td><td>${g.n}건</td><td>${g.win}%</td><td style="color:${parseFloat(g.avgR)>=0?'var(--px-up)':'var(--px-down)'}">${g.avgR}R</td></tr>`
   ).join('');
   const lvlRows = rowsOf(v.byLevel);
   const zoneRows = rowsOf(v.byZone);
   const flagRows = (v.byFlag || []).map(g =>
-    `<tr><td>${g.label}</td><td>${g.n}건</td><td>${g.win}%</td><td style="color:${parseFloat(g.avgR)>=0?'var(--green)':'var(--up)'}">${g.avgR}R</td></tr>`
+    `<tr><td>${g.label}</td><td>${g.n}건</td><td>${g.win}%</td><td style="color:${parseFloat(g.avgR)>=0?'var(--px-up)':'var(--px-down)'}">${g.avgR}R</td></tr>`
   ).join('');
   return `
     <div class="sigval">
@@ -2237,7 +2239,7 @@ function renderJournal() {
   const _cash = Math.max(0, (rSettings.equity || 0) - _invested);
   const _investPct = rSettings.equity ? Math.round(_invested / rSettings.equity * 100) : 0;
   const _fmtM = v => (v / 10000).toLocaleString(undefined, {maximumFractionDigits: 0}) + '만';
-  const _rv = v => `<span style="color:${v > 0 ? 'var(--up)' : v < 0 ? 'var(--down)' : 'var(--muted)'}">${v > 0 ? '+' : ''}${v}R</span>`;
+  const _rv = v => `<span style="color:${v > 0 ? 'var(--px-up)' : v < 0 ? 'var(--px-down)' : 'var(--muted)'}">${v > 0 ? '+' : ''}${v}R</span>`;
   const riskbar = rSettings.equity ? `
     <div class="riskbar">
       <div class="rb-item"><span class="rb-t">오픈 리스크</span>
@@ -2341,13 +2343,13 @@ function viewRow(r) {
         const px = parseFloat(r.last_price);
         const pxStr = isKr ? Math.round(px).toLocaleString() : px.toFixed(2);
         const up = px >= parseFloat(r.entry);
-        const col = up ? 'var(--up)' : 'var(--down)';
+        const col = up ? 'var(--px-up)' : 'var(--px-down)';
         return `${entryStr}<div style="font-size:10px;color:${col};margin-top:1px">→ ${pxStr}</div>`;
       }
       return entryStr;
     })()}</td>
     <td class="mono"${broken?' style="color:#ff6b6b"':''}>${r.stop ?? '-'}</td>
-    <td class="mono" style="${r.result_r&&parseFloat(r.result_r)>0?'color:var(--up)':r.result_r?'color:var(--down)':''}">${
+    <td class="mono" style="${r.result_r&&parseFloat(r.result_r)>0?'color:var(--px-up)':r.result_r?'color:var(--px-down)':''}">${
       r.result_r
         ? `${r.result_r}R${r.exit_reason==='충동'?`<div style="font-size:9px;color:#ff6b6b;font-weight:700">⚠️ 충동</div>`:r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:''}`
         : st === 'pending'
@@ -2358,7 +2360,7 @@ function viewRow(r) {
             ? (() => {
                 const liveR = (parseFloat(r.last_price) - parseFloat(r.entry)) / (parseFloat(r.entry) - parseFloat(r.stop));
                 const dheld = Math.floor((Date.now() - new Date(r.date)) / 86400000);
-                const col = liveR >= 0 ? 'var(--up)' : 'var(--down)';
+                const col = liveR >= 0 ? 'var(--px-up)' : 'var(--px-down)';
                 return `<span style="color:${col};font-weight:600">${liveR>=0?'+':''}${liveR.toFixed(1)}R</span>`
                      + `<div style="font-size:9px;color:var(--muted)">D+${dheld}</div>`;
               })()
