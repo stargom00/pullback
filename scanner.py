@@ -176,26 +176,53 @@ def distribution_check(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series) 
         # (버그 수정: 단순히 'close < ma50'이면 이미 한참 전 하락해 바닥에서
         #  반등 중인 종목도 매일 danger로 오탐. 네이처셀 +8.9% 양봉 사례.
         #  '어제는 이평 위 → 오늘 이평 아래'로 새로 깨는 하락일만 신호로 인정.)
+        #
+        # v4.56 [수정] 거래량 게이트 + 리클레임 억제 추가.
+        #  [원인] 신호 1·2는 거래량 조건(1.5배/1.3배)이 있는데 이평이탈만 없었음.
+        #         분산 = 기관 매도 = 거래량 동반. 거래량 없는 이탈은 분산이 아니라
+        #         흔들기(shakeout). 슈피겐 사례: 지지 언더컷 후 종가 레인지 상단
+        #         회복 + 거래량 0.57배였는데 danger로 오탐.
+        #  [수정] 이평이탈이 danger가 되려면 (거래량 >= DIST_VOL_MIN) AND (종가가
+        #         레인지 하위권 마감). 저거래량이거나 종가를 되찾았으면 caution으로
+        #         강등하고 '흔들기 가능' 라벨을 붙인다.
+        DIST_VOL_MIN = 1.2        # 분산 인정 최소 거래량 배수
         prev_close = float(c.iloc[-2])
         ma21 = float(c.rolling(21).mean().iloc[-1])
         ma50 = float(c.rolling(50).mean().iloc[-1])
         ma21_prev = float(c.rolling(21).mean().iloc[-2])
         ma50_prev = float(c.rolling(50).mean().iloc[-2])
         is_down_day = day_ret < 0
+        vol_confirms = vol_ratio >= DIST_VOL_MIN
+        reclaimed = close_pos >= 0.5      # 장중 깨고 종가는 상단 회복 = 흔들기
+        dist_ok = vol_confirms and not reclaimed
+
         # 오늘 하락하며 50일선을 새로 깬 경우만 (어제는 위 or 근처)
         if is_down_day and close < ma50 and prev_close >= ma50_prev:
-            signals.append("50일선이탈")
-            danger = True
+            if dist_ok:
+                signals.append("50일선이탈(대량)")
+                danger = True
+            else:
+                signals.append(f"50일선이탈(거래량 {vol_ratio:.2f}배 — 흔들기 가능)")
         elif is_down_day and close < ma21 and prev_close >= ma21_prev:
-            signals.append("21일선이탈")
+            if dist_ok:
+                signals.append("21일선이탈(대량)")
+            else:
+                signals.append(f"21일선이탈(거래량 {vol_ratio:.2f}배 — 흔들기 가능)")
 
         # 5) 클라이맥스(소진) 연계
+        # v4.56 [수정] climax_warning의 '최대급락일'은 거래량 조건이 없는 '가격 기반'
+        #   신호다(scanner.py:53). 이걸 분산 판정에 danger로 그대로 상속하면
+        #   저거래량 급락(= 흔들기)도 '기관 매도'로 오탐한다.
+        #   '소진성거래량'은 정의상 60봉 최대 거래량이라 그 자체로 확증 → danger 유지.
+        #   '최대급락일'은 거래량 확증(vol_confirms)이 있을 때만 danger로 승격.
         cx = climax_warning(c, h, lo, v)
         if cx.get("climax") and cx.get("level") == "danger":
-            for r in cx.get("reasons", []):
+            cx_reasons = cx.get("reasons", [])
+            for r in cx_reasons:
                 if r not in signals:
                     signals.append(r)
-            danger = True
+            if "소진성거래량" in cx_reasons or vol_confirms:
+                danger = True
 
         if not signals:
             return out
