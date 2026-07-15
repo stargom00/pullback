@@ -1371,6 +1371,8 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "base_depth_pct": _bq["depth_pct"],
         "base_vcp": _bq["vcp"],
         "base_vol_dry": _bq["vol_dry"],
+        "base_discontinuity": _bq["discontinuity"],
+        "base_gap_ago": _bq["gap_ago"],
         "pivot": round(pivot, 2),
         "pivot_type": pivot_type,
         "tl_break": tl_break,
@@ -1421,11 +1423,30 @@ def base_quality(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series,
       length_wk, depth_pct, vcp, vol_dry : 원시 측정값 (툴팁/디버그용)
     """
     out = {"score_adj": 0.0, "badge": None, "badge_lv": None,
-           "length_wk": None, "depth_pct": None, "vcp": False, "vol_dry": False}
+           "length_wk": None, "depth_pct": None, "vcp": False, "vol_dry": False,
+           "discontinuity": False, "gap_ago": None}
     try:
         n = len(c)
         if n < 25:
             return out
+
+        # ── 데이터 불연속(가격 갭) 감지 — 스핀오프/병합/액면변경/재상장 ──
+        # NVRI 케이스: yfinance가 상폐된 구 회사 + 재상장된 신 회사를 같은
+        # 티커로 이어붙여 210봉을 채웠다. 티커는 같아도 6/1 이전은 다른 회사.
+        # 이런 코퍼레이트 액션은 하루 새 극단적 갭(±25%+)을 남긴다. 그 지점
+        # 이전 데이터는 '다른 회사'이므로 RS·베이스·이평이 전부 오염된다.
+        # 최근 130봉(약 6개월) 내에 그런 갭이 있으면 데이터 신뢰 불가로 본다.
+        try:
+            recent = c.iloc[-130:] if n >= 130 else c
+            rr = recent.pct_change().abs()
+            gap_hits = rr[rr >= 0.25]           # 일간 ±25%+ = 코퍼레이트 액션 의심
+            if len(gap_hits) > 0:
+                # 가장 최근 갭이 끝에서 몇 봉 뒤인지
+                last_gap_pos = list(recent.index).index(gap_hits.index[-1])
+                out["gap_ago"] = len(recent) - 1 - last_gap_pos
+                out["discontinuity"] = True
+        except Exception:
+            pass
 
         # ── 베이스 시작점 = 최근 스윙 고점 봉 ──
         # 최근 60봉 내 최고가 봉을 베이스 천장으로 본다. 단 오늘·어제(신고가
@@ -1469,12 +1490,26 @@ def base_quality(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series,
         out["vol_dry"] = vol_dry
 
         # ── 점수 가감 + 배지 (가장 문제/강점 하나만 노출) ──
-        # 우선순위: 없음(bad) > 짧음(warn) > 깊이과다(warn) > 탄탄(good)
+        # 우선순위: 데이터불연속(bad) > 없음(bad) > 짧음(warn) > 깊이과다(warn) > 탄탄(good)
         MIN_WK = 5.0                    # 오닐 최소 베이스 = 5주
         adj = 0.0
         badge, lv = None, None
 
-        if length_wk < 1.0:
+        if out["discontinuity"]:
+            # 스핀오프/병합/재상장 등으로 가격이 튄 종목 = 데이터 오염.
+            # RS·베이스·이평 전부 다른 회사 데이터 섞여 신뢰 불가.
+            # 갭이 최근일수록 위험(신생주 구간), 오래됐으면 경고만.
+            ga = out["gap_ago"]
+            wk = round(ga / 5.0, 1) if ga is not None else None
+            if ga is not None and ga <= 65:      # 13주 이내 갭 = 데이터의 절반이 다른 회사
+                adj = -20.0
+                badge = f"데이터불연속 {wk}주전"
+                lv = "bad"
+            else:                                 # 오래된 갭 = 조정됐을 수도, 경고만
+                adj = -6.0
+                badge = f"과거불연속 {wk}주전" if wk else "과거불연속"
+                lv = "warn"
+        elif length_wk < 1.0:
             # 며칠짜리 = 베이스라 부를 수 없음
             adj = -12.0
             badge, lv = "베이스없음", "bad"
