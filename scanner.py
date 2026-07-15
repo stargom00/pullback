@@ -237,46 +237,46 @@ def distribution_check(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series) 
 
 
 def ftd_state(close: pd.Series, vol: pd.Series) -> dict:
-    """오닐 FTD(팔로우스루 데이) 상태 머신 (v4.50).
+    """오닐 FTD(팔로우스루 데이) 상태 머신 (v4.57).
 
     로직:
-    - 조정 판정: 최근 60일 고점 대비 저점이 -6% 이상 하락했을 때만 FTD 개념 적용
-      (조정이 없으면 FTD가 필요 없음 → in_correction=False)
+    - 조정 판정: 저점 이전 고점 대비 -6% 이상 하락했을 때만 FTD 개념 적용
     - 반등 시도: 최근 40일 내 최저 종가일 = 시도의 저점(rally_low).
-      argmin 정의상 그 이후 종가는 저점을 깨지 않았음이 보장됨
-      (깨졌다면 그 날이 새 argmin → 시도 자동 리셋).
+      argmin 정의상 그 이후 종가는 저점을 깨지 않았음이 보장됨.
     - rally_day: 저점일=1일차로 센 경과 거래일 수
     - FTD: 시도 4일차 이후, 지수 +1.25%↑ 상승 + 거래량 전일比 증가인 날
-    - ftd_valid: FTD 발생 후 저점 미이탈 (argmin 보장) → True 유지
 
-    반환: {in_correction, rally_day, ftd, ftd_days_ago, rally_low, drawdown_pct}
+    v4.57 추가 — 조정 종료 조건:
+      지수가 (a) 저점 대비 조정폭의 절반 이상 회복했고 (b) 조정 이전 고점의
+      -3% 이내면 조정 국면 종료(in_correction=False). FTD 발생 여부는 조건에
+      넣지 않는다 — FTD 없이 완만히 회복한 시장이 40일 창에 저점이 남은 한
+      영원히 조정 모드로 갇히는 버그를 막기 위함.
+
+    반환에 추가: ftd_idx_back(FTD가 끝에서 몇 번째 뒤), peak_before, recovered
     """
     out = {"in_correction": False, "rally_day": 0, "ftd": False,
-           "ftd_days_ago": None, "rally_low": None, "drawdown_pct": 0.0}
+           "ftd_days_ago": None, "ftd_idx_back": None,
+           "rally_low": None, "peak_before": None,
+           "drawdown_pct": 0.0, "recovered": False}
     try:
         if close is None or len(close) < 45 or vol is None or len(vol) != len(close):
             return out
         c60 = close.iloc[-60:].reset_index(drop=True)
         v60 = vol.iloc[-60:].reset_index(drop=True)
         n60 = len(c60)
-        # 저점: 최근 40일 내 최저 종가 (60일 프레임 내 위치로 환산)
         tail = min(40, n60)
         low_local = int(c60.iloc[-tail:].reset_index(drop=True).idxmin())
         low_p = n60 - tail + low_local
         rally_low = float(c60.iloc[low_p])
-        # 조정 깊이 = "저점 이전"의 고점 대비 하락폭
-        # (전체 60일 고점과 비교하면 꾸준한 상승장의 트레일링 저점도
-        #  최신 고점 대비 -6%로 계산돼 조정으로 오판 — T1 회귀로 발견)
         peak_before = float(c60.iloc[:low_p + 1].max())
         drawdown = (rally_low / peak_before - 1.0) * 100 if peak_before > 0 else 0.0
         out["rally_low"] = round(rally_low, 2)
+        out["peak_before"] = round(peak_before, 2)
         out["drawdown_pct"] = round(drawdown, 1)
         if drawdown > -6.0:
             return out                      # 조정 아님 — FTD 불필요
-        out["in_correction"] = True
         last_i = n60 - 1
         out["rally_day"] = last_i - low_p + 1   # 저점일 = 1일차
-        # FTD 탐색: 4일차(오프셋 3) 이후
         ret = c60.pct_change()
         ftd_i = None
         for i in range(low_p + 3, last_i + 1):
@@ -286,32 +286,154 @@ def ftd_state(close: pd.Series, vol: pd.Series) -> dict:
         if ftd_i is not None:
             out["ftd"] = True
             out["ftd_days_ago"] = last_i - ftd_i
+            out["ftd_idx_back"] = last_i - ftd_i
+        # ── v4.57: 조정 종료 판정 (FTD 유무와 무관) ──
+        cur = float(c60.iloc[-1])
+        recovered = False
+        if peak_before > rally_low:
+            retrace = (cur - rally_low) / (peak_before - rally_low)
+            near_peak = cur >= peak_before * 0.97
+            recovered = (retrace >= 0.50) and near_peak
+        out["recovered"] = recovered
+        out["in_correction"] = not recovered
         return out
     except Exception:
         return out
 
 
-def gate_suggest(dist_days: int, ftd: dict, above_ma60: bool) -> tuple[str, str]:
-    """분산일 + FTD 상태 → 시장 게이트 자동 제안 (v4.50).
-    반환: (gate, 이유 한 줄). gate: confirmed|pressure|correction"""
-    if dist_days >= 6:
-        return "correction", f"분산일 {dist_days}개 — 기관 매도 우세"
+def dist_count(close: pd.Series, vol: pd.Series, ftd: dict | None = None,
+               window: int = 25, drop_pct: float = -0.002,
+               expire_gain: float = 0.05) -> dict:
+    """분산일 카운트 — 오닐 제거 규칙 포함 (v4.57 신규).
+
+    분산일 = 지수가 전일 대비 drop_pct(-0.2%)↓ + 거래량이 전일보다 증가한 날.
+    기존 코드(app._index_regime 인라인)는 순수 25일 롤링 합만 써서 두 가지
+    제거 규칙이 없었다 → "늘어나기만 하고 안 빠지는" 카운트. 두 규칙 추가:
+      (a) FTD 리셋: FTD 이전 분산일은 '이전 조정'의 것 → 제외
+      (b) 5% 만료: 현재가가 그 분산일 종가 대비 +5%↑면 소화된 매도 → 만료
+
+    Volume이 없거나 전부 0이면 days=None (판정 불가). 0을 반환하면 "분산일
+    없음=건강한 시장"이라는 반대 신호가 되므로 절대 0으로 위장하지 않는다.
+
+    반환: {days, raw, expired, pre_ftd, dates, vol_ok}
+    """
+    out = {"days": None, "raw": None, "expired": 0, "pre_ftd": 0,
+           "dates": [], "vol_ok": False}
+    try:
+        if close is None or len(close) < window + 2:
+            return out
+        if vol is None or len(vol) != len(close):
+            return out
+        v_win = vol.iloc[-(window + 1):]
+        if float(v_win.fillna(0).sum()) <= 0:
+            return out
+        if int(v_win.isna().sum()) > window * 0.3:
+            return out
+        out["vol_ok"] = True
+
+        ret = close.pct_change()
+        vol_up = vol > vol.shift(1)
+        down = ret <= drop_pct
+        mask = (down & vol_up).iloc[-window:]
+        raw = int(mask.sum())
+        out["raw"] = raw
+
+        cur = float(close.iloc[-1])
+        ftd_back = (ftd or {}).get("ftd_idx_back")
+        kept, expired, pre_ftd = [], 0, 0
+        n = len(close)
+        for pos, flag in enumerate(mask.tolist()):
+            if not flag:
+                continue
+            idx_back = (window - 1) - pos
+            abs_i = n - 1 - idx_back
+            d_close = float(close.iloc[abs_i])
+            if ftd_back is not None and idx_back > ftd_back:
+                pre_ftd += 1
+                continue
+            if d_close > 0 and (cur / d_close - 1.0) >= expire_gain:
+                expired += 1
+                continue
+            kept.append({
+                "idx_back": idx_back,
+                "ret_pct": round(float(ret.iloc[abs_i]) * 100, 2),
+                "vol_x": round(float(vol.iloc[abs_i]) / float(vol.iloc[abs_i - 1]), 2)
+                          if float(vol.iloc[abs_i - 1]) > 0 else None,
+            })
+        out["days"] = len(kept)
+        out["expired"] = expired
+        out["pre_ftd"] = pre_ftd
+        out["dates"] = kept
+        return out
+    except Exception:
+        return out
+
+
+def gate_suggest(dist, ftd: dict, above_ma60: bool) -> tuple[str, str]:
+    """분산일 + FTD 상태 → 시장 게이트 자동 제안 (v4.57).
+
+    ⚠️ 시그니처 변경: dist_days(int) → dist(dict, dist_count()의 반환).
+       거래량 없어 판정 불가(days=None)를 구분하기 위함. app._index_regime이
+       dist_count() 결과를 넘기도록 함께 수정됨.
+
+    [v4.57 핵심] FTD 분기를 분산일 임계보다 먼저 평가. 기존엔
+    `if dist_days >= 6: return correction`이 맨 위라 FTD 분기가 죽은 코드였음
+    (FTD는 조정 뒤에 나오므로 분산일이 큰 게 정상인데 그걸 먼저 걸러버림).
+
+    반환: (gate, 이유). gate: confirmed|pressure|correction
+    노출 %는 만들지 않는다 — R 설정(3R/1.5R/0)이 유일한 근거 있는 규칙.
+    """
+    # dict 아닌 int가 들어오면(구 호출부 잔존) 방어적으로 감싸기
+    if isinstance(dist, int):
+        dist = {"days": dist, "raw": dist}
+    d = dist.get("days")
+
+    # 0) 거래량 없어 판정 불가 — 0으로 위장 금지
+    if d is None:
+        if not above_ma60:
+            return "correction", "60일선 아래 · 거래량 데이터 없어 분산일 판정 불가"
+        return "pressure", "거래량 데이터 없어 분산일 판정 불가 — 보수적 판정"
+
+    # 1) FTD 먼저 (v4.57: 순서가 핵심)
+    if ftd.get("ftd"):
+        ago = ftd.get("ftd_days_ago")
+        if ftd.get("recovered"):
+            if d >= 6:
+                return "correction", f"FTD 후 회복했으나 분산일 재차 {d}개 — 신규 매도 압력"
+            if d >= 4:
+                return "pressure", f"FTD 후 회복 · 분산일 {d}개 누적 — A급만"
+            return "confirmed", f"FTD 후 회복 완료 · 분산일 {d}개"
+        if d >= 5:
+            return "correction", f"FTD({ago}일 전) 후 분산일 {d}개 — 랠리 실패 조짐"
+        if d >= 3:
+            return "pressure", f"FTD({ago}일 전) 후 분산일 {d}개 — A급만 1.5R"
+        return "confirmed", (f"FTD 확인 ({ago}일 전) · 분산일 {d}개 — "
+                             f"시험 매수 0.5R 1~2건부터")
+
+    # 2) 조정 중인데 FTD 아직 없음
     if ftd.get("in_correction"):
-        if not ftd.get("ftd"):
-            d = ftd.get("rally_day", 0)
-            return "correction", (f"조정 중 (고점比 {ftd.get('drawdown_pct')}%) · "
-                                  f"반등 시도 {d}일차 · FTD 대기")
-        # FTD 발생
-        if dist_days <= 3:
-            return "confirmed", (f"FTD 확인 ({ftd.get('ftd_days_ago')}일 전) · "
-                                 f"분산일 {dist_days}개 — 시험 매수 0.5R부터")
-        return "pressure", f"FTD 후 분산일 {dist_days}개 — A급만 1.5R"
-    # 조정 국면 아님 (정상 추세)
+        day = ftd.get("rally_day", 0)
+        dd = ftd.get("drawdown_pct")
+        return "correction", (f"조정 중 (고점比 {dd}%) · 반등 시도 {day}일차 · FTD 대기")
+
+    # 3) FTD 없이 회복한 경우 (조정은 끝났으나 매수 확증 없음)
+    if ftd.get("recovered") and not ftd.get("ftd"):
+        if not above_ma60:
+            return "pressure", "60일선 아래 — 선별 진입"
+        if d >= 5:
+            return "correction", f"FTD 없이 회복 · 분산일 {d}개 — 매도 압력 우세"
+        if d >= 3:
+            return "pressure", f"FTD 없이 회복 · 분산일 {d}개 — 매수 확증 부족"
+        return "confirmed", f"조정 회복 (FTD 미발생) · 분산일 {d}개"
+
+    # 4) 정상 추세
     if not above_ma60:
         return "pressure", "60일선 아래 — 선별 진입"
-    if dist_days >= 4:
-        return "pressure", f"분산일 {dist_days}개 — 압박 누적"
-    return "confirmed", f"상승 추세 · 분산일 {dist_days}개"
+    if d >= 6:
+        return "correction", f"분산일 {d}개 — 기관 매도 우세"
+    if d >= 4:
+        return "pressure", f"분산일 {d}개 — 압박 누적"
+    return "confirmed", f"상승 추세 · 분산일 {d}개"
 
 
 def mom_3m(c: pd.Series) -> float | None:

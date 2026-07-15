@@ -1929,27 +1929,63 @@ def _fetch_yf_index(symbol: str, label: str, decimals: int = 2) -> dict | None:
         return None
 
 
-def _index_regime(code: str) -> dict | None:
-    """지수 일봉으로 시장 레짐 판정 (오닐/미너비니 M factor).
-    code: 'KOSPI'|'KOSDAQ'|'^IXIC'.
+# ── v4.57: 지수별 거래량 소스. 지수 Volume이 무효면 대표 ETF로 폴백 ──
+INDEX_SPEC = {
+    "KOSPI":  {"label": "코스피",  "vol_proxy": None},
+    "KOSDAQ": {"label": "코스닥",  "vol_proxy": None},
+    "^IXIC":  {"label": "나스닥",  "vol_proxy": "QQQ"},
+    "^GSPC":  {"label": "S&P500", "vol_proxy": "SPY"},
+}
 
-    핵심 = 분산일(Distribution Day) 카운트:
-      분산일 = 지수가 전일 대비 -0.2%↓ 하락 + 거래량이 전일보다 증가한 날
-              (기관이 파는 날). 최근 25거래일 내:
-        - 분산일 5개+ → 'bad'  (하락 압력 큼, 신규진입 자제)
-        - 분산일 3~4개 → 'neutral' (주의, 선별 진입)
-        - 분산일 0~2개 → 추세 보고 good/neutral
-    추세 필터: 20/60일선 위치도 함께 본다 (분산일 적어도 60일선 아래면 bad).
-    FTD(Follow-Through Day): 하락 후 반등 4일+에 +1.5%↑ & 거래량 증가 →
-      바닥 신호(보너스, 표시용).
+
+def _volume_valid(vol) -> bool:
+    """지수 거래량이 분산일 판정에 쓸 만한가. 전부 0/NaN이거나 결측 30%↑면 무효."""
+    try:
+        if vol is None or len(vol) < 30:
+            return False
+        tail = vol.iloc[-30:]
+        if float(tail.fillna(0).sum()) <= 0:
+            return False
+        if int(tail.isna().sum()) > 9:
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _fetch_proxy_volume(ticker: str, n: int):
+    """대표 ETF(SPY/QQQ) 거래량. 지수 Volume 무효 시 폴백."""
+    try:
+        df = yf.Ticker(ticker).history(period="6mo", interval="1d", auto_adjust=False)
+        if df is None or df.empty or "Volume" not in df:
+            return None
+        v = df["Volume"].dropna()
+        return v if len(v) >= n else None
+    except Exception:
+        return None
+
+
+def _index_regime(code: str) -> dict | None:
+    """지수 일봉으로 시장 레짐 판정 (오닐/미너비니 M factor). v4.57 전면 개편.
+    code: 'KOSPI'|'KOSDAQ'|'^IXIC'|'^GSPC'.
+
+    [v4.57 근본수정]
+      ① 분산일 카운트를 scanner.dist_count()로 분리 — FTD 리셋 + 5% 만료 적용
+         (기존 순수 25일 롤링은 늘어나기만 하고 안 빠져 한 달간 correction에 갇힘)
+      ② gate_suggest가 FTD를 분산일보다 먼저 평가 (기존 early return이 FTD 분기를
+         죽은 코드로 만듦)
+      ③ 지수 Volume 유효성 검증 + ETF 폴백 + 실패 시 dist_days=None(판정 불가).
+         0으로 위장하면 "분산일 없음=건강"이라는 반대 신호가 됨.
     """
     try:
-        if code == "^IXIC":
-            df = yf.Ticker("^IXIC").history(period="6mo", interval="1d", auto_adjust=False)
+        spec = INDEX_SPEC.get(code, {})
+        close, vol = None, None
+        if code in ("^IXIC", "^GSPC"):
+            df = yf.Ticker(code).history(period="6mo", interval="1d", auto_adjust=False)
             if df is None or df.empty:
                 return None
-            close = df["Close"]
-            vol = df["Volume"]
+            close = df["Close"].dropna()
+            vol = df["Volume"] if "Volume" in df.columns else None
         else:
             hist = naver_kr.fetch_index_history(code, days=160)
             if hist is None or hist.empty:
@@ -1959,6 +1995,27 @@ def _index_regime(code: str) -> dict | None:
         if close is None or len(close) < 60:
             return None
 
+        # ── 거래량 소스 결정 (검증 → 폴백 → 포기) ──
+        vol_source = "none"
+        if _volume_valid(vol):
+            vol_source = "index"
+            vol = vol.reindex(close.index)
+        else:
+            proxy = spec.get("vol_proxy")
+            if proxy:
+                pv = _fetch_proxy_volume(proxy, len(close))
+                if pv is not None and _volume_valid(pv):
+                    aligned = pv.reindex(close.index)
+                    if _volume_valid(aligned):
+                        vol = aligned
+                        vol_source = proxy
+                    else:
+                        vol = None
+                else:
+                    vol = None
+            else:
+                vol = None
+
         ma20 = close.rolling(20).mean()
         ma60 = close.rolling(60).mean()
         cur = float(close.iloc[-1])
@@ -1966,59 +2023,108 @@ def _index_regime(code: str) -> dict | None:
         m60 = float(ma60.iloc[-1])
         m20_prev = float(ma20.iloc[-6])
         rising20 = m20 > m20_prev
+        above60 = cur > m60
 
-        # ── 분산일 카운트 (최근 25거래일) ──
-        dist_days = 0
-        if vol is not None and len(close) >= 26:
-            ret = close.pct_change()
-            vol_up = vol > vol.shift(1)
-            down = ret <= -0.002          # -0.2%↓ 하락
-            dist_mask = down & vol_up
-            dist_days = int(dist_mask.iloc[-25:].sum())
-
-        # ── FTD 상태 머신 (v4.50 — scanner.ftd_state) ──
-        # 구식 "오늘 하루 깃발" 방식 폐기: 반등 시도 일수 카운트 + 저점 이탈 시
-        # 자동 리셋 + 발생 후 유지되는 제대로 된 오닐 로직으로 교체.
-        fs = scanner_mod.ftd_state(close, vol) if vol is not None else {
-            "in_correction": False, "rally_day": 0, "ftd": False,
-            "ftd_days_ago": None, "drawdown_pct": 0.0}
-        ftd = bool(fs.get("ftd"))
-        gate_sug, gate_why = scanner_mod.gate_suggest(dist_days, fs, cur > m60)
-
-        # ── 종합 판정 ──
-        if cur < m60 or dist_days >= 5:
-            regime, txt = "bad", "비우호 (신규진입 자제)"
-        elif dist_days >= 3:
-            regime, txt = "neutral", f"주의 (분산일 {dist_days}개 — 선별 진입)"
-        elif cur > m20 and rising20:
-            regime, txt = "good", "우호 (진입 환경 양호)"
+        # ── FTD 상태 머신 ──
+        if vol is not None:
+            fs = scanner_mod.ftd_state(close, vol)
         else:
-            regime, txt = "neutral", "중립 (선별 진입)"
-        if ftd and regime != "good":
-            txt += f" · FTD 확인({fs.get('ftd_days_ago')}일 전)"
-        elif fs.get("in_correction"):
-            txt += f" · 반등 {fs.get('rally_day')}일차 FTD 대기"
+            fs = {"in_correction": False, "rally_day": 0, "ftd": False,
+                  "ftd_days_ago": None, "ftd_idx_back": None, "rally_low": None,
+                  "peak_before": None, "drawdown_pct": 0.0, "recovered": False}
+
+        # ── 분산일 (FTD 리셋 + 5% 만료 적용) ──
+        dc = scanner_mod.dist_count(close, vol, fs)
+        ftd = bool(fs.get("ftd"))
+        gate_sug, gate_why = scanner_mod.gate_suggest(dc, fs, above60)
+
+        # ── 배너 표시용 레짐 (게이트 3색과 정합) ──
+        d = dc.get("days")
+        if gate_sug == "correction":
+            regime, txt = "bad", "비우호 (신규진입 자제)"
+        elif gate_sug == "pressure":
+            regime, txt = "neutral", "주의 (선별 진입)"
+        else:
+            regime, txt = "good", "우호 (진입 환경 양호)"
+        txt += f" · {gate_why}"
 
         return {"regime": regime, "regime_txt": txt,
-                "above_ma20": cur > m20, "above_ma60": cur > m60,
-                "dist_days": dist_days, "ftd": ftd,
-                "rally_day": fs.get("rally_day", 0),
+                "above_ma20": cur > m20, "above_ma60": above60,
+                "ma20_rising": rising20,
+                "dist_days": d,
+                "dist_raw": dc.get("raw"),
+                "dist_expired": dc.get("expired"),
+                "dist_pre_ftd": dc.get("pre_ftd"),
+                "vol_source": vol_source,
+                "ftd": ftd,
                 "ftd_days_ago": fs.get("ftd_days_ago"),
+                "rally_day": fs.get("rally_day", 0),
                 "in_correction": fs.get("in_correction", False),
+                "recovered": fs.get("recovered", False),
                 "drawdown_pct": fs.get("drawdown_pct", 0.0),
                 "gate_suggest": gate_sug, "gate_why": gate_why}
     except Exception:
         return None
 
 
+# 게이트 강도 순서. 여러 지수 중 '가장 나쁜' 쪽 채택용.
+_GATE_RANK = {"confirmed": 0, "pressure": 1, "correction": 2}
+# 게이트별 신규 진입 오픈 리스크 배수 (max_open_r 대비). v4.47 R설정에 이미 정의된 규칙.
+_GATE_R = {"confirmed": 1.0, "pressure": 0.5, "correction": 0.0}
+
+
+def _worst_gate(gates) -> str:
+    valid = [g for g in gates if g]
+    if not valid:
+        return "correction"
+    return max(valid, key=lambda g: _GATE_RANK.get(g, 2))
+
+
 @app.get("/api/market/gate")
 async def market_gate():
-    """시장 게이트 자동 제안 (v4.50) — KOSPI 기준. 봇이 30분마다 폴링해
-    제안 변경/FTD 발생 시 텔레그램 알림. 프론트 R설정에도 표시."""
+    """시장 게이트 자동 제안 (v4.57) — 4개 지수(KOSPI/KOSDAQ/^GSPC/^IXIC).
+    기존엔 KOSPI 하나만 봐서 미국 종목 알림에 쓸 게이트가 없었다."""
     loop = asyncio.get_event_loop()
-    reg = await loop.run_in_executor(_executor, _index_regime, "KOSPI")
-    if not reg:
-        return JSONResponse({"ok": False}, status_code=503)
+    codes = ["KOSPI", "KOSDAQ", "^GSPC", "^IXIC"]
+    regs = await asyncio.gather(*[
+        loop.run_in_executor(_executor, _index_regime, c) for c in codes
+    ], return_exceptions=True)
+
+    out_idx = {}
+    for code, reg in zip(codes, regs):
+        if isinstance(reg, BaseException) or not reg:
+            out_idx[code] = None
+            continue
+        out_idx[code] = {
+            "label": INDEX_SPEC[code]["label"],
+            "gate": reg.get("gate_suggest"), "why": reg.get("gate_why"),
+            "dist_days": reg.get("dist_days"), "dist_raw": reg.get("dist_raw"),
+            "dist_expired": reg.get("dist_expired"), "dist_pre_ftd": reg.get("dist_pre_ftd"),
+            "vol_source": reg.get("vol_source"),
+            "ftd": reg.get("ftd"), "ftd_days_ago": reg.get("ftd_days_ago"),
+            "rally_day": reg.get("rally_day"), "in_correction": reg.get("in_correction"),
+            "recovered": reg.get("recovered"), "drawdown_pct": reg.get("drawdown_pct"),
+            "above_ma60": reg.get("above_ma60"),
+        }
+
+    if not any(out_idx.values()):
+        return JSONResponse({"ok": False, "error": "전 지수 조회 실패"}, status_code=503)
+
+    def g(code):
+        v = out_idx.get(code)
+        return v.get("gate") if v else None
+
+    gate_kr = _worst_gate([g("KOSPI"), g("KOSDAQ")])
+    gate_us = _worst_gate([g("^GSPC"), g("^IXIC")])
+    suggest = _worst_gate([gate_kr, gate_us])
+
+    why = ""
+    for code in codes:
+        v = out_idx.get(code)
+        if v and v.get("gate") == suggest:
+            why = f"{v['label']}: {v['why']}"
+            break
+
     cur = dict(RSETTINGS_DEFAULT)
     if os.path.exists(RSETTINGS_PATH):
         try:
@@ -2028,16 +2134,20 @@ async def market_gate():
                     cur.update(saved)
         except (ValueError, OSError):
             pass
-    return JSONResponse({
+
+    base_r = float(cur.get("max_open_r", 3.0))
+    ftd_any = any(v.get("ftd") for v in out_idx.values() if v)
+
+    return JSONResponse(_clean_nan({
         "ok": True,
-        "suggest": reg.get("gate_suggest"),
-        "why": reg.get("gate_why"),
-        "current": cur.get("gate"),
-        "dist_days": reg.get("dist_days"),
-        "ftd": reg.get("ftd"),
-        "rally_day": reg.get("rally_day"),
-        "in_correction": reg.get("in_correction"),
-    })
+        "indices": out_idx,
+        "gate_kr": gate_kr, "gate_us": gate_us,
+        "max_open_r_kr": round(base_r * _GATE_R.get(gate_kr, 0.0), 2),
+        "max_open_r_us": round(base_r * _GATE_R.get(gate_us, 0.0), 2),
+        # 기존 봇 호환 필드
+        "suggest": suggest, "why": why,
+        "current": cur.get("gate"), "ftd": ftd_any,
+    }))
 
 
 @app.get("/api/krstatus")
@@ -2089,18 +2199,22 @@ async def _indices_impl():
         loop.run_in_executor(_executor, _index_regime, "^IXIC"),
         loop.run_in_executor(_executor, _fetch_yf_index, "^N225", "닛케이"),
         loop.run_in_executor(_executor, _fetch_yf_index, "BTC-USD", "비트코인"),
+        # v4.57: S&P500 추가 (게이트 4개 지수 확장 — 배너에도 표시)
+        loop.run_in_executor(_executor, _fetch_yf_index, "^GSPC", "S&P500"),
+        loop.run_in_executor(_executor, _index_regime, "^GSPC"),
         return_exceptions=True,
     )
     # 예외로 돌아온 결과는 None으로 정규화 (개별 실패가 전체를 죽이지 않게)
-    nasdaq, kospi, kosdaq, r_kospi, r_kosdaq, r_nasdaq, nikkei, btc = [
+    nasdaq, kospi, kosdaq, r_kospi, r_kosdaq, r_nasdaq, nikkei, btc, sp500, r_sp500 = [
         (None if isinstance(x, BaseException) else x) for x in results
     ]
     # 레짐 정보 병합 (둘 다 dict일 때만)
     if isinstance(kospi, dict) and isinstance(r_kospi, dict): kospi.update(r_kospi)
     if isinstance(kosdaq, dict) and isinstance(r_kosdaq, dict): kosdaq.update(r_kosdaq)
     if isinstance(nasdaq, dict) and isinstance(r_nasdaq, dict): nasdaq.update(r_nasdaq)
-    # 순서: 코스피, 코스닥, 나스닥, 닛케이, 비트코인 (국내 → 해외 → 코인)
-    data = {"indices": [x for x in (kospi, kosdaq, nasdaq, nikkei, btc) if isinstance(x, dict)]}
+    if isinstance(sp500, dict) and isinstance(r_sp500, dict): sp500.update(r_sp500)
+    # 순서: 코스피, 코스닥, S&P500, 나스닥, 닛케이, 비트코인
+    data = {"indices": [x for x in (kospi, kosdaq, sp500, nasdaq, nikkei, btc) if isinstance(x, dict)]}
     data = _clean_nan(data)   # NaN/Inf 제거 (휴장일 빈 데이터로 인한 JSON 직렬화 실패 방지)
     _indices_cache["ts"] = now
     _indices_cache["data"] = data
