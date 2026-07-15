@@ -282,7 +282,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.60</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.61</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -630,13 +630,11 @@ function card(s) {
       <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기 (최상단 고정)'}">${fav ? '★' : '☆'}</button>
       <div>
         <div class="name">${s.triggered ? '🔥 ' : ''}${s.leader ? '👑 ' : ''}${s.name}${s.alert ? ` <span class="alert-tag" title="시장경보">⚠️ ${s.alert}</span>` : ''}${s.climax ? ` <span class="climax-tag ${s.climax_level}" title="미너비니 클라이맥스/과열 신호: ${(s.climax_reasons||[]).join(', ')}. 매수보다 매도·경계 구간일 수 있음.">${s.climax_level === 'danger' ? '🛑' : '🔆'} 과열</span>` : ''}${(() => { const lq = liquidityCheck(s); return lq ? ` <span class="pmat ${lq.cls === 'bad' ? 'wait' : 'ok'}" style="${lq.cls === 'bad' ? 'background:#341418;color:#f87171;border:1px solid #6b2028' : 'background:#152535;color:#7fb8e0;border:1px dashed #2d5a8c'}" title="${lq.tip}">${lq.label}</span>` : ''; })()}${s.grade && s.grade !== '?' ? ` <span class="gbadge g${s.grade}" title="트렌드 템플릿 ${s.tt_pass}/8 통과${(s.tt_fails && s.tt_fails.length) ? ` · 미충족: ${s.tt_fails.join(', ')}` : ' · 전 조건 충족'}${s.grade === 'A' ? ' + RS 87+ — 진짜 주도주 등급' : ''}. A=8/8+RS87 · B=7+ · C=5~6 · D=4↓">${s.grade}급</span>` : ''}${s.mode === 'pattern' ? (s.pat_ready ? ` <span class="pmat ok" title="패턴 성립 요건 전부 충족 — 기간·거래량 고갈 OK. 피벗 돌파(거래량 150%+)만 남음">✅ 요건충족</span>` : ` <span class="pmat wait" title="패턴 형성 중 — 미충족: ${(s.pat_missing || []).join(' · ')}. 요건 채우기 전 돌파 추격은 실패 확률 높음 (특히 치솟은깃발)">⏳ 미완성</span>`) : ''}${(s.late_flags && s.late_flags.length) ? ` <span class="climax-tag ${s.late_level}" title="후기 스테이지/과확장 (v4.48): ${s.late_flags.join(', ')}${s.ext200_pct ? ` · 200일선 이격 +${s.ext200_pct}%` : ''}. 큰 시세 이후의 베이스일수록 실패 확률이 높음 — 사이즈 축소 또는 관망 권장.">${s.late_level === 'danger' ? '🛑' : '🏔'} 후기</span>` : ''}${s.merger ? ` <span class="merger-tag" title="M&A/특수상황 의심: ${(s.merger_reasons||[]).join(', ')}. 인수가 부근에 가격이 고정돼 상방은 막히고 하방은 딜 무산 시 급락하는 비대칭 리스크. 추세매매 부적합 — 차트의 깔끔한 횡보가 강세 신호가 아님.">🤝 M&A의심</span>` : ''}${s.ud_weak ? ` <span class="merger-tag" title="U/D Volume ${s.ud} (50일 기준, 1 미만). 하락일 거래량이 상승일보다 많아 아직 분산 우세 = 기관 매집 미확증. 가격은 전환 신호를 냈지만 거래량 확증 전이라 관찰 권장." style="background:#3a1a1a;color:#ff8888">📉 매집미확증</span>` : ''}${s.base_badge ? ` <span class="climax-tag ${s.base_badge_lv === 'good' ? '' : (s.base_badge_lv === 'bad' ? 'danger' : '')}" style="${s.base_badge_lv === 'good' ? 'background:#12351f;color:#4ade80;border:1px solid #1d6b3a' : (s.base_badge_lv === 'bad' ? 'background:#341418;color:#f87171;border:1px solid #6b2028' : (s.base_badge_lv === 'neutral' ? 'background:#26262e;color:#9ca3af;border:1px solid #3f3f4a' : 'background:#33270f;color:#fbbf24;border:1px solid #6b5518'))}" title="${s.base_discontinuity ? '⚠️ 데이터 불연속: 최근 ±25%+ 가격 갭 감지 — 스핀오프/합병/재상장/액면변경 의심. 티커는 같아도 갭 이전은 다른 회사일 수 있어 RS·베이스·이평이 오염됨. 점수·등급 신뢰 불가. 반드시 공시 직접 확인.' : '베이스 품질 (오닐/미너비니): 길이 ' + (s.base_length_wk ?? '?') + '주 · 깊이 ' + (s.base_depth_pct ?? '?') + '%' + (s.base_vcp ? ' · VCP수축✓' : '') + (s.base_vol_dry ? ' · 거래량건조✓' : '') + '. 5주+ 탄탄한 베이스일수록 돌파 성공률 높음. 며칠짜리 얕은 조정은 베이스 아님.'}">${s.base_discontinuity ? '⚠️' : (s.base_badge_lv === 'good' ? '🧱' : (s.base_badge_lv === 'bad' ? '⛔' : (s.base_badge_lv === 'neutral' ? '📊' : '📏')))} ${s.base_badge}</span>` : ''}${(() => {
-          // v4.60: 상시 손절폭 배지 (US 5% / KR 7%). 게이트 무관 항상 표시.
-          // Seulki 반복 실패의 근본 = 돌파 추격으로 손절폭 6~10% → +1R 목표가
-          // 너무 멀어 도달 전 손절. 이 배지로 진입 전에 손절폭을 각인.
-          if (s.stop_wide) {
-            return ` <span class="climax-tag danger" style="background:#341418;color:#f87171;border:1px solid #6b2028" title="손절폭 넓음 (${s.risk_pct ?? '?'}% > 기준 ${s.stop_limit_pct}%). +1R 목표=손절폭만큼 상승이라, 손절폭이 넓으면 +1R 도달 전에 힘 빠져 손절될 확률↑. 돌파 추격 대신 지지 근처(눌림목)에서 진입해 손절폭을 좁히세요. 이 자리는 진입 비권장.">🚫 손절폭 ${s.risk_pct}%</span>`;
-          }
-          return ` <span class="climax-tag" style="background:#0f2a1a;color:#34d399;border:1px solid #1d6b3a" title="손절폭 적정 (${s.risk_pct ?? '?'}% ≤ ${s.stop_limit_pct}%). +1R 목표가 가까워 도달 확률 높음. 좋은 진입 위치.">✅ 손절폭 ${s.risk_pct}%</span>`;
+          // v4.61: 손절폭 배지 — 넓은 것만 🚫 표시. 좁은 건 정상이라 배지 없음
+          // (대부분이 좁아야 정상 → ✅를 모든 카드에 다는 건 노이즈이자 하단
+          //  '리스크 %'와 숫자 중복). 나쁜 것에만 시선이 가게 한다.
+          if (!s.stop_wide) return '';
+          return ` <span class="climax-tag danger" style="background:#341418;color:#f87171;border:1px solid #6b2028" title="손절폭 넓음 (${s.risk_pct ?? '?'}% > 기준 ${s.stop_limit_pct}%). +1R 목표=손절폭만큼 상승이라, 넓으면 +1R 도달 전에 손절될 확률↑. 돌파 추격 대신 지지 근처(눌림목)에서 진입해 손절폭을 좁히세요. 이 자리는 진입 비권장.">🚫 손절폭넓음</span>`;
         })()}${(() => {
           // v4.59: 약세장(🟡🔴) 진입 적격 배지. 게이트가 pressure/correction일 때만 노출.
           // 강세장(🟢)에선 굳이 옥석 안 가려도 되므로 표시 안 함.
