@@ -1373,6 +1373,21 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "base_vol_dry": _bq["vol_dry"],
         "base_discontinuity": _bq["discontinuity"],
         "base_gap_ago": _bq["gap_ago"],
+        # v4.59: 약세장(pressure/correction) 진입 적격 — 3조건 전부 만족해야 True.
+        # 탄탄한 베이스(good) + RS90+ + 손절폭 적정(risk_warn 아님).
+        # 프론트가 게이트 🟡🔴일 때만 이 배지를 노출한다(강세장엔 불필요).
+        # 근거: Seulki가 pressure 국면에서 손절폭 넓은(9.9%,8.3%) 종목 2개를
+        # 동시 진입해 둘 다 손절. 약세장에선 이 3개를 다 갖춘 것만 살아남는다.
+        "bear_ok": bool(
+            _bq["badge_lv"] == "good"
+            and (rs_rank is not None and rs_rank >= 90)
+            and not rrb.get("risk_warn", True)
+        ),
+        "bear_ok_reasons": {
+            "base": _bq["badge_lv"] == "good",
+            "rs90": (rs_rank is not None and rs_rank >= 90),
+            "risk_tight": not rrb.get("risk_warn", True),
+        },
         "pivot": round(pivot, 2),
         "pivot_type": pivot_type,
         "tl_break": tl_break,

@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.59 [신규] 약세장 진입 적격 배지 — pressure/correction 국면 옥석 가리기.
+        [배경] pressure에서 손절폭 넓은 종목 2개 동시 진입해 둘 다 손절.
+        [해결] bear_ok = 탄탄한베이스 + RS90+ + 손절폭적정, 3조건 AND.
+               게이트 🟡🔴일 때만 카드에 💎약세장적격/△부적격 배지 표시.
 v4.58 [신규] 베이스 품질 배지 + 데이터 불연속 감지.
         [문제] MEC(며칠짜리 얕은 눌림)·NVRI(스핀오프로 두 회사 데이터가 한
                티커에 섞임)가 돌파임박에 떠서 진입 유도. 베이스 품질을 안 봄.
@@ -837,7 +841,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.58"
+VERSION = "v4.59"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
