@@ -1532,6 +1532,10 @@ def base_quality(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series,
                 badge, lv = "탄탄한베이스", "good"
             elif good >= 1:
                 badge, lv = "베이스양호", "good"
+            else:
+                # 5주+이지만 품질요소 0 = 평범한 베이스. 그래도 길이는 보여준다
+                # (배지가 아예 안 뜨면 "기능이 안 되나?" 오해를 주므로 항상 표시)
+                badge, lv = f"베이스 {length_wk}주", "neutral"
 
         out["score_adj"] = adj
         out["badge"] = badge
