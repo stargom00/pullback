@@ -5,6 +5,12 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.60 [신규] 상시 손절폭 배지 (US 5% / KR 7%) — 전 탭 항상 표시.
+        [배경] 반복 실패 근본원인 = 돌파임박 추격 진입으로 손절폭 6~10%.
+               +1R(=손절폭) 목표가 멀어 도달 전 손절. 한 번도 +1R 못 감.
+        [해결] stop_wide = risk_pct > (KR 7% / US 5%). 🚫손절폭N% (넓음) /
+               ✅손절폭N% (적정) 배지. 게이트 무관 항상. 돌파 탭에서 특히
+               "지지 근처(눌림목)에서 사라" 각인.
 v4.59 [신규] 약세장 진입 적격 배지 — pressure/correction 국면 옥석 가리기.
         [배경] pressure에서 손절폭 넓은 종목 2개 동시 진입해 둘 다 손절.
         [해결] bear_ok = 탄탄한베이스 + RS90+ + 손절폭적정, 3조건 AND.
@@ -841,7 +847,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.59"
+VERSION = "v4.60"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

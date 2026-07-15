@@ -1388,6 +1388,13 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
             "rs90": (rs_rank is not None and rs_rank >= 90),
             "risk_tight": not rrb.get("risk_warn", True),
         },
+        # v4.60: 상시 손절폭 적정 판정 (US 5% / KR 7%). risk_warn(8%/12%)보다 빡셈.
+        # Seulki의 반복 실패 원인이 손절폭 6~10% → +1R(=손절폭) 목표가 너무 멀어
+        # 도달 전에 힘 빠져 손절. 돌파임박 탭 추격 진입이 지지에서 멀어 손절폭을
+        # 넓힌 것이 근본. 이 배지를 전 탭 상시 표시해 "여기 사면 손절폭 넓어진다"를
+        # 진입 전에 보여준다. 5%/7% 초과면 stop_wide=True.
+        "stop_wide": bool(risk_pct > (7.0 if is_kr else 5.0)),
+        "stop_limit_pct": (7.0 if is_kr else 5.0),
         "pivot": round(pivot, 2),
         "pivot_type": pivot_type,
         "tl_break": tl_break,
