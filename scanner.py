@@ -1309,7 +1309,12 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     # RS 곱셈 반영: 힘(RS) × 모양 — 둘 다 좋아야 고득점
     if rs_rank is not None:
         score *= 0.7 + 0.3 * rs_rank / 99
-    score = min(score, 100.0)   # 0~100 만점 캡
+    # ── v4.58: 베이스 품질 가감 (오닐/미너비니) ──
+    # 좋은 베이스(길이 5주+, VCP 수축, 거래량 건조)엔 가점, 며칠짜리 얕은
+    # 조정(MEC 케이스)엔 감점 + 배지. 곱셈 RS 반영 뒤에 더해서 순수 가감으로.
+    _bq = base_quality(c, h, lo, v, pivot=pivot, is_kr=is_kr)
+    score += _bq["score_adj"]
+    score = max(0.0, min(score, 100.0))   # 0~100 만점 캡
 
     # 🔥 트리거 발동: 당일 강한 양봉 + (추세선 돌파 or 피벗 코앞/돌파)
     triggered = change_pct >= 4.0 and (tl_break or pivot_dist_pct <= 2.0)
@@ -1359,6 +1364,13 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "rsi": round(cur_rsi, 1),
         "tightening": tightening,
         "recent_high_ok": recent_high_ok,
+        # v4.58: 베이스 품질
+        "base_badge": _bq["badge"],
+        "base_badge_lv": _bq["badge_lv"],
+        "base_length_wk": _bq["length_wk"],
+        "base_depth_pct": _bq["depth_pct"],
+        "base_vcp": _bq["vcp"],
+        "base_vol_dry": _bq["vol_dry"],
         "pivot": round(pivot, 2),
         "pivot_type": pivot_type,
         "tl_break": tl_break,
@@ -1380,6 +1392,118 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
             for x in ma20.iloc[-60:].tolist()
         ],
     }
+
+
+
+
+# ══════════════════════════════════════════════════════
+# 베이스 품질 평가 (v4.58) — 오닐/미너비니 기준
+# "베이스가 종목의 성격을 말한다": 길이·깊이·수축·거래량건조로
+# 좋은 베이스를 만드는 종목에 가점, 짧거나 얕은 조정엔 감점 + 배지.
+# ══════════════════════════════════════════════════════
+def base_quality(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series,
+                 pivot: float | None = None, is_kr: bool = False) -> dict:
+    """현재 베이스(눌림/횡보 구간)의 품질을 평가.
+
+    측정 요소 (전부 근거 있는 오닐/미너비니 기준):
+      · length_wk : 베이스 길이(주). 오닐 최소 5주. 미만이면 '짧음'.
+      · depth_pct : 베이스 깊이(고점→저점 %). 12~33% 정상, 그 이상 결함.
+      · vcp       : 변동성 수축 — 베이스 전반부 대비 후반부 진폭이 줄었는가.
+      · vol_dry   : 거래량 건조 — 후반부 거래량이 전반부보다 마르는가(매도 소진).
+
+    베이스 정의: 현재가에서 거슬러 올라가며 '직전 스윙 고점'까지를 한 베이스로
+    본다. 스윙 고점 = 최근 최고가 봉. 그 봉부터 현재까지가 조정/횡보 구간.
+
+    반환:
+      score_adj : 점수 가감 (-12 ~ +8)
+      badge     : 대표 배지 1개 (가장 중요한 것만). '탄탄'/'짧음'/'깊이과다'/'없음'/None
+      badge_lv  : 'good'|'warn'|'bad'|None
+      length_wk, depth_pct, vcp, vol_dry : 원시 측정값 (툴팁/디버그용)
+    """
+    out = {"score_adj": 0.0, "badge": None, "badge_lv": None,
+           "length_wk": None, "depth_pct": None, "vcp": False, "vol_dry": False}
+    try:
+        n = len(c)
+        if n < 25:
+            return out
+
+        # ── 베이스 시작점 = 최근 스윙 고점 봉 ──
+        # 최근 60봉 내 최고가 봉을 베이스 천장으로 본다. 단 오늘·어제(신고가
+        # 갱신 중)는 제외해 '눌림 없이 계속 오르는 중'을 베이스로 오인하지 않게.
+        win = min(60, n - 2)
+        seg_h = h.iloc[-win:-1] if win >= 3 else h.iloc[-win:]
+        peak_local = int(seg_h.reset_index(drop=True).idxmax())
+        # 전체 인덱스로 환산 (끝에서 몇 번째 뒤)
+        peak_back = (len(seg_h) - peak_local)   # 스윙 고점이 끝에서 몇 봉 뒤
+        base_bars = peak_back                    # 고점부터 현재까지 봉 수
+
+        # ── 길이 (거래일 → 주). 한국이든 미국이든 주5일 기준 ──
+        length_wk = round(base_bars / 5.0, 1)
+        out["length_wk"] = length_wk
+
+        # ── 깊이: 베이스 천장 → 이후 최저 저가 ──
+        base_top = float(h.iloc[-base_bars-1:].max()) if base_bars + 1 <= n else float(h.iloc[-base_bars:].max())
+        base_bot = float(lo.iloc[-base_bars:].min()) if base_bars >= 1 else float(lo.iloc[-1])
+        depth_pct = (base_top - base_bot) / base_top * 100 if base_top > 0 else 0.0
+        out["depth_pct"] = round(depth_pct, 1)
+
+        # ── VCP: 베이스 전반부 vs 후반부 봉 진폭(고-저) 평균 비교 ──
+        vcp = False
+        if base_bars >= 8:
+            rng = (h.iloc[-base_bars:] - lo.iloc[-base_bars:]).abs()
+            half = base_bars // 2
+            early = float(rng.iloc[:half].mean())
+            late = float(rng.iloc[half:].mean())
+            if early > 0:
+                vcp = late < early * 0.75      # 후반 진폭이 전반의 75% 미만 = 수축
+        out["vcp"] = vcp
+
+        # ── 거래량 건조: 후반부 평균 거래량이 전반부보다 낮은가 ──
+        vol_dry = False
+        if base_bars >= 8 and v is not None:
+            half = base_bars // 2
+            ve = float(v.iloc[-base_bars:-base_bars+half].mean()) if half > 0 else 0.0
+            vl = float(v.iloc[-half:].mean()) if half > 0 else 0.0
+            if ve > 0:
+                vol_dry = vl < ve * 0.85       # 후반 거래량이 전반의 85% 미만
+        out["vol_dry"] = vol_dry
+
+        # ── 점수 가감 + 배지 (가장 문제/강점 하나만 노출) ──
+        # 우선순위: 없음(bad) > 짧음(warn) > 깊이과다(warn) > 탄탄(good)
+        MIN_WK = 5.0                    # 오닐 최소 베이스 = 5주
+        adj = 0.0
+        badge, lv = None, None
+
+        if length_wk < 1.0:
+            # 며칠짜리 = 베이스라 부를 수 없음
+            adj = -12.0
+            badge, lv = "베이스없음", "bad"
+        elif length_wk < MIN_WK:
+            adj = -6.0
+            badge, lv = f"베이스짧음 {length_wk}주", "warn"
+        elif depth_pct > 35.0:
+            # 너무 깊은 조정 = 손상된 베이스
+            adj = -5.0
+            badge, lv = f"깊이과다 {int(depth_pct)}%", "warn"
+        else:
+            # 길이 충족 → 품질 요소로 가점
+            good = 0
+            if vcp: good += 1
+            if vol_dry: good += 1
+            if 5.0 <= depth_pct <= 33.0: good += 1     # 정상 깊이 (얕은 5~12%도 강세 신호)
+            if length_wk >= 7.0: good += 1              # 넉넉한 길이
+            adj = 2.0 * good                            # 최대 +8
+            if good >= 3:
+                badge, lv = "탄탄한베이스", "good"
+            elif good >= 1:
+                badge, lv = "베이스양호", "good"
+
+        out["score_adj"] = adj
+        out["badge"] = badge
+        out["badge_lv"] = lv
+        return out
+    except Exception:
+        return out
 
 
 # ══════════════════════════════════════════════════════
