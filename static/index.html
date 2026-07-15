@@ -43,19 +43,17 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .statusbar b{color:var(--text)}
 .idxbar{display:flex;gap:10px;flex-wrap:wrap;padding:10px 24px;
   border-bottom:1px solid var(--line);background:var(--surface);align-items:center}
-.mkt-banner{padding:12px 16px;border-radius:12px;font-size:15px;font-weight:700;border:1px solid var(--line);line-height:1.35}
-.mkt-banner .mkt-sub{display:block;font-size:12px;font-weight:500;opacity:.85;margin-top:3px}
-.gate-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
-.gate-row .mkt-banner{flex:1;min-width:240px}
+.mkt-banner{padding:6px 14px;border-radius:10px;font-size:13px;font-weight:700;border:1px solid var(--line)}
+.gate-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.gate-row .mkt-banner{flex:1;min-width:200px}
 .mkt-banner.mkt-good{background:rgba(40,180,120,.1);border-color:rgba(40,180,120,.45);color:#28b478}
 .mkt-banner.mkt-neutral{background:rgba(230,170,40,.1);border-color:rgba(230,170,40,.45);color:#e6aa28}
 .mkt-banner.mkt-bad{background:rgba(255,90,110,.1);border-color:rgba(255,90,110,.45);color:#FF5A6E}
-.idx-row{display:flex;gap:6px;flex-wrap:wrap}
-.idx{display:flex;align-items:baseline;gap:6px;padding:4px 10px;font-size:12px;
-  background:var(--bg);border:1px solid var(--line);border-radius:8px}
-.idx .nm{color:var(--muted);font-weight:500;font-size:11px}
+.idx{display:flex;align-items:baseline;gap:8px;padding:6px 14px;
+  background:var(--bg);border:1px solid var(--line);border-radius:10px;font-size:13px}
+.idx .nm{color:var(--muted);font-weight:500}
 .idx .vl{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
-.idx .ch{font-size:11px;font-variant-numeric:tabular-nums}
+.idx .ch{font-size:12px;font-variant-numeric:tabular-nums}
 .idx .ch.up{color:var(--px-up)} .idx .ch.down{color:var(--px-down)} .idx .ch.flat{color:var(--muted)}
 .entry-sig{margin-top:10px;padding:9px 11px;border-radius:9px;border:1px solid var(--line)}
 .entry-sig.sig-ok{background:rgba(40,180,120,.08);border-color:rgba(40,180,120,.4)}
@@ -191,13 +189,7 @@ tr.editing{background:rgba(242,179,61,.06)}
   padding:1px 4px;border-radius:4px;margin-left:4px;vertical-align:middle;font-weight:700}
 .surge-warn{background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.3);
   border-radius:8px;padding:8px 11px;font-size:11px;color:#c084fc;margin-top:8px;line-height:1.5}
-.legend{display:flex;gap:18px;flex-wrap:wrap;padding:8px 24px 10px;font-size:12px}
-.legend-box{padding:0 24px}
-.legend-sum{cursor:pointer;color:var(--muted);font-size:12px;padding:6px 0;list-style:none;user-select:none}
-.legend-sum::-webkit-details-marker{display:none}
-.legend-sum:hover{color:var(--text)}
-.legend-hint{opacity:.6;font-size:11px}
-.legend-box[open] .legend-hint{display:none}
+.legend{display:flex;gap:18px;flex-wrap:wrap;padding:0 24px 10px;font-size:12px}
 .legend .lg{color:var(--muted);cursor:help;display:inline-flex;align-items:center;gap:5px}
 .legend .lg-h{color:var(--text);opacity:.7}
 .legend .lg:hover{color:var(--text)}
@@ -321,8 +313,6 @@ tr.editing{background:rgba(242,179,61,.06)}
 <div class="idxbar" id="idxbar"></div>
 
 <div class="statusbar" id="status"></div>
-<details class="legend-box" id="legendBox">
-<summary class="legend-sum">❓ 아이콘 설명 <span class="legend-hint">(펼치기)</span></summary>
 <div class="legend" id="legend">
   <span class="lg" title="RS 90 이상 주도주. 시장 상위 10% 안에 드는 강자.">👑 주도주<span class="lg-h">RS 90+</span></span>
   <span class="lg" title="당일 +4% 이상 + (추세선 돌파 또는 피벗 2% 이내). 지금 진입 구간에서 출발 중이라는 신호.">🔥 트리거<span class="lg-h">오늘 출발</span></span>
@@ -330,7 +320,6 @@ tr.editing{background:rgba(242,179,61,.06)}
   <span class="lg" title="점수 링 아래 '전일 NN' = 🔥 발동 전날의 셋업 점수. 높을수록 좋은 자리에서 출발한 것.">⭕ 점수<span class="lg-h">셋업 완성도</span></span>
   <span class="lg" title="인수가 부근에 가격이 고정된 M&A/특수상황 의심 종목. 상방 막힘+하방 비대칭 리스크로 추세매매 부적합. 깔끔한 횡보가 강세 신호가 아님.">🤝 M&A의심<span class="lg-h">추세매매 부적합</span></span>
 </div>
-</details>
 <div class="sectorbar" id="sectorbar"></div>
 <div class="alert-panel" id="alertPanel">
   <input id="alertTicker" placeholder="티커 (예: 347850.KQ)" style="width:180px">
@@ -640,7 +629,7 @@ function card(s) {
     <div class="card-top">
       <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기 (최상단 고정)'}">${fav ? '★' : '☆'}</button>
       <div>
-        <div class="name">${s.triggered ? '🔥 ' : ''}${s.leader ? '👑 ' : ''}${s.name}${s.alert ? ` <span class="alert-tag" title="시장경보">⚠️ ${s.alert}</span>` : ''}${s.climax ? ` <span class="climax-tag ${s.climax_level}" title="미너비니 클라이맥스/과열 신호: ${(s.climax_reasons||[]).join(', ')}. 매수보다 매도·경계 구간일 수 있음.">${s.climax_level === 'danger' ? '🛑' : '🔆'} 과열</span>` : ''}${(() => { const lq = liquidityCheck(s); return lq ? ` <span class="pmat ${lq.cls === 'bad' ? 'wait' : 'ok'}" style="${lq.cls === 'bad' ? 'background:#341418;color:#f87171;border:1px solid #6b2028' : 'background:#152535;color:#7fb8e0;border:1px dashed #2d5a8c'}" title="${lq.tip}">${lq.label}</span>` : ''; })()}${s.grade && s.grade !== '?' ? ` <span class="gbadge g${s.grade}" title="트렌드 템플릿 ${s.tt_pass}/8 통과${(s.tt_fails && s.tt_fails.length) ? ` · 미충족: ${s.tt_fails.join(', ')}` : ' · 전 조건 충족'}${s.grade === 'A' ? ' + RS 87+ — 진짜 주도주 등급' : ''}. A=8/8+RS87 · B=7+ · C=5~6 · D=4↓">${s.grade}급</span>` : ''}${s.mode === 'pattern' ? (s.pat_ready ? ` <span class="pmat ok" title="패턴 성립 요건 전부 충족 — 기간·거래량 고갈 OK. 피벗 돌파(거래량 150%+)만 남음">✅ 요건충족</span>` : ` <span class="pmat wait" title="패턴 형성 중 — 미충족: ${(s.pat_missing || []).join(' · ')}. 요건 채우기 전 돌파 추격은 실패 확률 높음 (특히 치솟은깃발)">⏳ 미완성</span>`) : ''}${(s.late_flags && s.late_flags.length) ? ` <span class="climax-tag ${s.late_level}" title="후기 스테이지/과확장 (v4.48): ${s.late_flags.join(', ')}${s.ext200_pct ? ` · 200일선 이격 +${s.ext200_pct}%` : ''}. 큰 시세 이후의 베이스일수록 실패 확률이 높음 — 사이즈 축소 또는 관망 권장.">${s.late_level === 'danger' ? '🛑' : '🏔'} 후기</span>` : ''}${s.merger ? ` <span class="merger-tag" title="M&A/특수상황 의심: ${(s.merger_reasons||[]).join(', ')}. 인수가 부근에 가격이 고정돼 상방은 막히고 하방은 딜 무산 시 급락하는 비대칭 리스크. 추세매매 부적합 — 차트의 깔끔한 횡보가 강세 신호가 아님.">🤝 M&A의심</span>` : ''}${s.ud_weak ? ` <span class="merger-tag" title="U/D Volume ${s.ud} (50일 기준, 1 미만). 하락일 거래량이 상승일보다 많아 아직 분산 우세 = 기관 매집 미확증. 가격은 전환 신호를 냈지만 거래량 확증 전이라 관찰 권장." style="background:#3a1a1a;color:#ff8888">📉 매집미확증</span>` : ''}<span class="mkt">${s.market}</span></div>
+        <div class="name">${s.triggered ? '🔥 ' : ''}${s.leader ? '👑 ' : ''}${s.name}${s.alert ? ` <span class="alert-tag" title="시장경보">⚠️ ${s.alert}</span>` : ''}${s.climax ? ` <span class="climax-tag ${s.climax_level}" title="미너비니 클라이맥스/과열 신호: ${(s.climax_reasons||[]).join(', ')}. 매수보다 매도·경계 구간일 수 있음.">${s.climax_level === 'danger' ? '🛑' : '🔆'} 과열</span>` : ''}${(() => { const lq = liquidityCheck(s); return lq ? ` <span class="pmat ${lq.cls === 'bad' ? 'wait' : 'ok'}" style="${lq.cls === 'bad' ? 'background:#341418;color:#f87171;border:1px solid #6b2028' : 'background:#152535;color:#7fb8e0;border:1px dashed #2d5a8c'}" title="${lq.tip}">${lq.label}</span>` : ''; })()}${s.grade && s.grade !== '?' ? ` <span class="gbadge g${s.grade}" title="트렌드 템플릿 ${s.tt_pass}/8 통과${(s.tt_fails && s.tt_fails.length) ? ` · 미충족: ${s.tt_fails.join(', ')}` : ' · 전 조건 충족'}${s.grade === 'A' ? ' + RS 87+ — 진짜 주도주 등급' : ''}. A=8/8+RS87 · B=7+ · C=5~6 · D=4↓">${s.grade}급</span>` : ''}${s.mode === 'pattern' ? (s.pat_ready ? ` <span class="pmat ok" title="패턴 성립 요건 전부 충족 — 기간·거래량 고갈 OK. 피벗 돌파(거래량 150%+)만 남음">✅ 요건충족</span>` : ` <span class="pmat wait" title="패턴 형성 중 — 미충족: ${(s.pat_missing || []).join(' · ')}. 요건 채우기 전 돌파 추격은 실패 확률 높음 (특히 치솟은깃발)">⏳ 미완성</span>`) : ''}${(s.late_flags && s.late_flags.length) ? ` <span class="climax-tag ${s.late_level}" title="후기 스테이지/과확장 (v4.48): ${s.late_flags.join(', ')}${s.ext200_pct ? ` · 200일선 이격 +${s.ext200_pct}%` : ''}. 큰 시세 이후의 베이스일수록 실패 확률이 높음 — 사이즈 축소 또는 관망 권장.">${s.late_level === 'danger' ? '🛑' : '🏔'} 후기</span>` : ''}${s.merger ? ` <span class="merger-tag" title="M&A/특수상황 의심: ${(s.merger_reasons||[]).join(', ')}. 인수가 부근에 가격이 고정돼 상방은 막히고 하방은 딜 무산 시 급락하는 비대칭 리스크. 추세매매 부적합 — 차트의 깔끔한 횡보가 강세 신호가 아님.">🤝 M&A의심</span>` : ''}${s.ud_weak ? ` <span class="merger-tag" title="U/D Volume ${s.ud} (50일 기준, 1 미만). 하락일 거래량이 상승일보다 많아 아직 분산 우세 = 기관 매집 미확증. 가격은 전환 신호를 냈지만 거래량 확증 전이라 관찰 권장." style="background:#3a1a1a;color:#ff8888">📉 매집미확증</span>` : ''}${s.base_badge ? ` <span class="climax-tag ${s.base_badge_lv === 'good' ? '' : (s.base_badge_lv === 'bad' ? 'danger' : '')}" style="${s.base_badge_lv === 'good' ? 'background:#12351f;color:#4ade80;border:1px solid #1d6b3a' : (s.base_badge_lv === 'bad' ? 'background:#341418;color:#f87171;border:1px solid #6b2028' : 'background:#33270f;color:#fbbf24;border:1px solid #6b5518')}" title="${s.base_discontinuity ? '⚠️ 데이터 불연속: 최근 ±25%+ 가격 갭 감지 — 스핀오프/합병/재상장/액면변경 의심. 티커는 같아도 갭 이전은 다른 회사일 수 있어 RS·베이스·이평이 오염됨. 점수·등급 신뢰 불가. 반드시 공시 직접 확인.' : '베이스 품질 (오닐/미너비니): 길이 ' + (s.base_length_wk ?? '?') + '주 · 깊이 ' + (s.base_depth_pct ?? '?') + '%' + (s.base_vcp ? ' · VCP수축✓' : '') + (s.base_vol_dry ? ' · 거래량건조✓' : '') + '. 5주+ 탄탄한 베이스일수록 돌파 성공률 높음. 며칠짜리 얕은 조정은 베이스 아님.'}">${s.base_discontinuity ? '⚠️' : (s.base_badge_lv === 'good' ? '🧱' : (s.base_badge_lv === 'bad' ? '⛔' : '📏'))} ${s.base_badge}</span>` : ''}<span class="mkt">${s.market}</span></div>
         <div class="tick mono">${s.ticker ? `<a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a>` : ''}${s.sector && s.sector !== '기타' ? ` · ${s.sector}` : ''}</div>
       </div>
       <div style="margin-left:auto;display:flex;flex-direction:column;align-items:center;gap:2px">
@@ -2572,27 +2561,34 @@ async function loadIndices() {
       const [emoji] = map[rg] || ['',''];
       return emoji;
     };
-    // ── 지수별 게이트 배너 (v4.57): 백엔드 gate_suggest/gate_why 사용 ──
-    // 기존엔 프론트에서 dist>=6 같은 규칙을 재계산했으나(백엔드와 이중 로직),
-    // 이제 백엔드 _index_regime이 FTD 리셋·5% 만료까지 반영한 gate를 주므로
-    // 그 값을 그대로 표시한다. 라벨=gate 3색, 서브텍스트=gate_why.
-    const gateLv = (g) => g === 'correction' ? 'bad' : (g === 'pressure' ? 'neutral' : 'good');
-    const gateHead = (g) => g === 'correction' ? '🔴 신규 진입 자제'
-                          : (g === 'pressure' ? '🟡 선별 진입' : '🟢 진입 환경 양호');
-    const gateNames = ['코스피', '코스닥', 'S&P500', '나스닥'];
+    // ── 지수별 게이트 배너 (v4.53.1): 코스피·코스닥·나스닥 각각 판정 ──
+    // 각 지수의 분산일·레짐·FTD로 개별 신호. 한국 종목은 코스피/코스닥,
+    // 미국 종목은 나스닥 게이트를 보고 판단.
+    const gateOf = (ix) => {
+      if (!ix) return null;
+      const dist = ix.dist_days || 0;
+      const rg = ix.regime;   // good | weakening | ok | bad ...
+      let lv, txt;
+      if (rg === 'bad' || dist >= 6) { lv = 'bad'; txt = '🔴 신규 진입 자제'; }
+      else if (rg === 'good' && dist <= 3) { lv = 'good'; txt = '🟢 진입 환경 양호'; }
+      else { lv = 'neutral'; txt = '🟡 선별 진입'; }
+      const distTxt = dist >= 1 ? ` · 분산일 ${dist}개` : '';
+      const ftdTxt = ix.ftd ? ' · FTD(바닥 신호)' : '';
+      return { lv, html: `${txt}${distTxt}${ftdTxt}` };
+    };
+    const gateNames = ['코스피', '코스닥', '나스닥'];
     let banner = '';
     const gateBoxes = gateNames.map(nm => {
       const ix = list.find(x => x.name === nm);
-      if (!ix || !ix.gate_suggest) return '';
-      const lv = gateLv(ix.gate_suggest);
-      const why = ix.gate_why || '';
-      return `<div class="mkt-banner mkt-${lv}" title="${nm} 게이트: 분산일(기관 매도일, FTD 리셋·5%만료 반영) + FTD + 60일선. 한국 종목은 코스피/코스닥, 미국 종목은 S&P500/나스닥 중 나쁜 쪽으로 진입 판단.">
-        <b>${nm}</b> ${gateHead(ix.gate_suggest)}<span class="mkt-sub">${why}</span></div>`;
+      const g = gateOf(ix);
+      if (!g) return '';
+      return `<div class="mkt-banner mkt-${g.lv}" title="${nm} 게이트: 분산일(기관 매도일) + 레짐 판정. 한국 종목은 코스피/코스닥, 미국 종목은 나스닥 기준으로 진입 판단.">
+        <b>${nm}</b> ${g.html}</div>`;
     }).filter(Boolean);
     if (gateBoxes.length) {
       banner = `<div class="gate-row">${gateBoxes.join('')}</div>`;
     }
-    const idxHtml = list.map(ix => {
+    bar.innerHTML = banner + list.map(ix => {
       const pct = ix.change_pct;
       const chg = ix.change;
       // 한국식 색: 상승=빨강(up), 하락=파랑(down)
@@ -2607,7 +2603,6 @@ async function loadIndices() {
         + `<span class="vl">${val}</span>`
         + `<span class="ch ${dir}">${chgStr}</span></div>`;
     }).join('');
-    bar.innerHTML = banner + `<div class="idx-row">${idxHtml}</div>`;
   } catch (e) {
     bar.style.display = 'none';
   }
