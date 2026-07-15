@@ -1364,37 +1364,8 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "rsi": round(cur_rsi, 1),
         "tightening": tightening,
         "recent_high_ok": recent_high_ok,
-        # v4.58: 베이스 품질
-        "base_badge": _bq["badge"],
-        "base_badge_lv": _bq["badge_lv"],
-        "base_length_wk": _bq["length_wk"],
-        "base_depth_pct": _bq["depth_pct"],
-        "base_vcp": _bq["vcp"],
-        "base_vol_dry": _bq["vol_dry"],
-        "base_discontinuity": _bq["discontinuity"],
-        "base_gap_ago": _bq["gap_ago"],
-        # v4.59: 약세장(pressure/correction) 진입 적격 — 3조건 전부 만족해야 True.
-        # 탄탄한 베이스(good) + RS90+ + 손절폭 적정(risk_warn 아님).
-        # 프론트가 게이트 🟡🔴일 때만 이 배지를 노출한다(강세장엔 불필요).
-        # 근거: Seulki가 pressure 국면에서 손절폭 넓은(9.9%,8.3%) 종목 2개를
-        # 동시 진입해 둘 다 손절. 약세장에선 이 3개를 다 갖춘 것만 살아남는다.
-        "bear_ok": bool(
-            _bq["badge_lv"] == "good"
-            and (rs_rank is not None and rs_rank >= 90)
-            and not rrb.get("risk_warn", True)
-        ),
-        "bear_ok_reasons": {
-            "base": _bq["badge_lv"] == "good",
-            "rs90": (rs_rank is not None and rs_rank >= 90),
-            "risk_tight": not rrb.get("risk_warn", True),
-        },
-        # v4.60: 상시 손절폭 적정 판정 (US 5% / KR 7%). risk_warn(8%/12%)보다 빡셈.
-        # Seulki의 반복 실패 원인이 손절폭 6~10% → +1R(=손절폭) 목표가 너무 멀어
-        # 도달 전에 힘 빠져 손절. 돌파임박 탭 추격 진입이 지지에서 멀어 손절폭을
-        # 넓힌 것이 근본. 이 배지를 전 탭 상시 표시해 "여기 사면 손절폭 넓어진다"를
-        # 진입 전에 보여준다. 5%/7% 초과면 stop_wide=True.
-        "stop_wide": bool(risk_pct > (7.0 if is_kr else 5.0)),
-        "stop_limit_pct": (7.0 if is_kr else 5.0),
+        # v4.61: 베이스/손절폭/약세장 배지 (공통 헬퍼 — 전 탭 일관)
+        **badge_fields(c, h, lo, v, pivot, is_kr, rs_rank, rrb),
         "pivot": round(pivot, 2),
         "pivot_type": pivot_type,
         "tl_break": tl_break,
@@ -1425,6 +1396,38 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
 # "베이스가 종목의 성격을 말한다": 길이·깊이·수축·거래량건조로
 # 좋은 베이스를 만드는 종목에 가점, 짧거나 얕은 조정엔 감점 + 배지.
 # ══════════════════════════════════════════════════════
+def badge_fields(c, h, lo, v, pivot, is_kr, rs_rank, rrb) -> dict:
+    """베이스 품질 + 손절폭 + 약세장 적격 배지 필드를 한 번에 생성 (v4.61).
+    analyze / analyze_imminent / analyze_breakout 등 여러 탭에서 공통 사용.
+    (기존엔 analyze에만 있어 돌파임박 탭에 베이스 배지가 안 떴음.)
+    rrb: _rr_block 반환 (risk_pct/risk_warn 사용). 카드 하단 '리스크 %'와 동일값.
+    """
+    _bq = base_quality(c, h, lo, v, pivot=pivot, is_kr=is_kr)
+    risk_pct = float(rrb.get("risk_pct", 0.0))
+    return {
+        "base_badge": _bq["badge"],
+        "base_badge_lv": _bq["badge_lv"],
+        "base_length_wk": _bq["length_wk"],
+        "base_depth_pct": _bq["depth_pct"],
+        "base_vcp": _bq["vcp"],
+        "base_vol_dry": _bq["vol_dry"],
+        "base_discontinuity": _bq["discontinuity"],
+        "base_gap_ago": _bq["gap_ago"],
+        "stop_wide": bool(risk_pct > (7.0 if is_kr else 5.0)),
+        "stop_limit_pct": (7.0 if is_kr else 5.0),
+        "bear_ok": bool(
+            _bq["badge_lv"] == "good"
+            and (rs_rank is not None and rs_rank >= 90)
+            and not rrb.get("risk_warn", True)
+        ),
+        "bear_ok_reasons": {
+            "base": _bq["badge_lv"] == "good",
+            "rs90": (rs_rank is not None and rs_rank >= 90),
+            "risk_tight": not rrb.get("risk_warn", True),
+        },
+    }
+
+
 def base_quality(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series,
                  pivot: float | None = None, is_kr: bool = False) -> dict:
     """현재 베이스(눌림/횡보 구간)의 품질을 평가.
@@ -2154,6 +2157,7 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
 
     return {
         "mode": "breakout",
+        **badge_fields(c, h, lo, v, pivot, is_kr, rs_rank, rrb),
         "late_flags": _ls["late_flags"], "late_level": _ls["late_level"],
         "ext200_pct": _ls["ext200_pct"],
         "grade": _tt["grade"], "tt_pass": _tt["passed"], "tt_fails": _tt["fails"],
@@ -2481,6 +2485,7 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
 
     return {
         "mode": "imminent",
+        **badge_fields(c, h, lo, v, pivot, is_kr, rs_rank, rrb),
         **_merger_block(c, h, lo, v),
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),

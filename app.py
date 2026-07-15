@@ -5,6 +5,12 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.61 [수정] 손절폭 배지 2건 + 베이스 배지 전탭 확대.
+        [버그1] stop_wide를 analyze 로컬 risk_pct(피벗기준)로 판정 → 카드
+                하단 '리스크%'(rrb값)와 달라 11.32%인데 ✅로 뜸. rrb.risk_pct로 통일.
+        [버그2] 베이스 배지가 analyze(눌림목)에만 있어 돌파임박 탭엔 안 뜸.
+                badge_fields() 공통 헬퍼로 analyze/imminent/breakout 전부 적용.
+        [개선] 손절폭 배지는 넓은 것만 🚫 표시(좁은 ✅ 제거 — 숫자중복·노이즈).
 v4.60 [신규] 상시 손절폭 배지 (US 5% / KR 7%) — 전 탭 항상 표시.
         [배경] 반복 실패 근본원인 = 돌파임박 추격 진입으로 손절폭 6~10%.
                +1R(=손절폭) 목표가 멀어 도달 전 손절. 한 번도 +1R 못 감.
@@ -847,7 +853,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.60"
+VERSION = "v4.61"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
