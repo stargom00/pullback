@@ -43,17 +43,19 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .statusbar b{color:var(--text)}
 .idxbar{display:flex;gap:10px;flex-wrap:wrap;padding:10px 24px;
   border-bottom:1px solid var(--line);background:var(--surface);align-items:center}
-.mkt-banner{padding:6px 14px;border-radius:10px;font-size:13px;font-weight:700;border:1px solid var(--line)}
-.gate-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
-.gate-row .mkt-banner{flex:1;min-width:200px}
+.mkt-banner{padding:12px 16px;border-radius:12px;font-size:15px;font-weight:700;border:1px solid var(--line);line-height:1.35}
+.mkt-banner .mkt-sub{display:block;font-size:12px;font-weight:500;opacity:.85;margin-top:3px}
+.gate-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.gate-row .mkt-banner{flex:1;min-width:240px}
 .mkt-banner.mkt-good{background:rgba(40,180,120,.1);border-color:rgba(40,180,120,.45);color:#28b478}
 .mkt-banner.mkt-neutral{background:rgba(230,170,40,.1);border-color:rgba(230,170,40,.45);color:#e6aa28}
 .mkt-banner.mkt-bad{background:rgba(255,90,110,.1);border-color:rgba(255,90,110,.45);color:#FF5A6E}
-.idx{display:flex;align-items:baseline;gap:8px;padding:6px 14px;
-  background:var(--bg);border:1px solid var(--line);border-radius:10px;font-size:13px}
-.idx .nm{color:var(--muted);font-weight:500}
+.idx-row{display:flex;gap:6px;flex-wrap:wrap}
+.idx{display:flex;align-items:baseline;gap:6px;padding:4px 10px;font-size:12px;
+  background:var(--bg);border:1px solid var(--line);border-radius:8px}
+.idx .nm{color:var(--muted);font-weight:500;font-size:11px}
 .idx .vl{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
-.idx .ch{font-size:12px;font-variant-numeric:tabular-nums}
+.idx .ch{font-size:11px;font-variant-numeric:tabular-nums}
 .idx .ch.up{color:var(--px-up)} .idx .ch.down{color:var(--px-down)} .idx .ch.flat{color:var(--muted)}
 .entry-sig{margin-top:10px;padding:9px 11px;border-radius:9px;border:1px solid var(--line)}
 .entry-sig.sig-ok{background:rgba(40,180,120,.08);border-color:rgba(40,180,120,.4)}
@@ -189,7 +191,13 @@ tr.editing{background:rgba(242,179,61,.06)}
   padding:1px 4px;border-radius:4px;margin-left:4px;vertical-align:middle;font-weight:700}
 .surge-warn{background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.3);
   border-radius:8px;padding:8px 11px;font-size:11px;color:#c084fc;margin-top:8px;line-height:1.5}
-.legend{display:flex;gap:18px;flex-wrap:wrap;padding:0 24px 10px;font-size:12px}
+.legend{display:flex;gap:18px;flex-wrap:wrap;padding:8px 24px 10px;font-size:12px}
+.legend-box{padding:0 24px}
+.legend-sum{cursor:pointer;color:var(--muted);font-size:12px;padding:6px 0;list-style:none;user-select:none}
+.legend-sum::-webkit-details-marker{display:none}
+.legend-sum:hover{color:var(--text)}
+.legend-hint{opacity:.6;font-size:11px}
+.legend-box[open] .legend-hint{display:none}
 .legend .lg{color:var(--muted);cursor:help;display:inline-flex;align-items:center;gap:5px}
 .legend .lg-h{color:var(--text);opacity:.7}
 .legend .lg:hover{color:var(--text)}
@@ -313,6 +321,8 @@ tr.editing{background:rgba(242,179,61,.06)}
 <div class="idxbar" id="idxbar"></div>
 
 <div class="statusbar" id="status"></div>
+<details class="legend-box" id="legendBox">
+<summary class="legend-sum">❓ 아이콘 설명 <span class="legend-hint">(펼치기)</span></summary>
 <div class="legend" id="legend">
   <span class="lg" title="RS 90 이상 주도주. 시장 상위 10% 안에 드는 강자.">👑 주도주<span class="lg-h">RS 90+</span></span>
   <span class="lg" title="당일 +4% 이상 + (추세선 돌파 또는 피벗 2% 이내). 지금 진입 구간에서 출발 중이라는 신호.">🔥 트리거<span class="lg-h">오늘 출발</span></span>
@@ -320,6 +330,7 @@ tr.editing{background:rgba(242,179,61,.06)}
   <span class="lg" title="점수 링 아래 '전일 NN' = 🔥 발동 전날의 셋업 점수. 높을수록 좋은 자리에서 출발한 것.">⭕ 점수<span class="lg-h">셋업 완성도</span></span>
   <span class="lg" title="인수가 부근에 가격이 고정된 M&A/특수상황 의심 종목. 상방 막힘+하방 비대칭 리스크로 추세매매 부적합. 깔끔한 횡보가 강세 신호가 아님.">🤝 M&A의심<span class="lg-h">추세매매 부적합</span></span>
 </div>
+</details>
 <div class="sectorbar" id="sectorbar"></div>
 <div class="alert-panel" id="alertPanel">
   <input id="alertTicker" placeholder="티커 (예: 347850.KQ)" style="width:180px">
@@ -2561,34 +2572,27 @@ async function loadIndices() {
       const [emoji] = map[rg] || ['',''];
       return emoji;
     };
-    // ── 지수별 게이트 배너 (v4.53.1): 코스피·코스닥·나스닥 각각 판정 ──
-    // 각 지수의 분산일·레짐·FTD로 개별 신호. 한국 종목은 코스피/코스닥,
-    // 미국 종목은 나스닥 게이트를 보고 판단.
-    const gateOf = (ix) => {
-      if (!ix) return null;
-      const dist = ix.dist_days || 0;
-      const rg = ix.regime;   // good | weakening | ok | bad ...
-      let lv, txt;
-      if (rg === 'bad' || dist >= 6) { lv = 'bad'; txt = '🔴 신규 진입 자제'; }
-      else if (rg === 'good' && dist <= 3) { lv = 'good'; txt = '🟢 진입 환경 양호'; }
-      else { lv = 'neutral'; txt = '🟡 선별 진입'; }
-      const distTxt = dist >= 1 ? ` · 분산일 ${dist}개` : '';
-      const ftdTxt = ix.ftd ? ' · FTD(바닥 신호)' : '';
-      return { lv, html: `${txt}${distTxt}${ftdTxt}` };
-    };
-    const gateNames = ['코스피', '코스닥', '나스닥'];
+    // ── 지수별 게이트 배너 (v4.57): 백엔드 gate_suggest/gate_why 사용 ──
+    // 기존엔 프론트에서 dist>=6 같은 규칙을 재계산했으나(백엔드와 이중 로직),
+    // 이제 백엔드 _index_regime이 FTD 리셋·5% 만료까지 반영한 gate를 주므로
+    // 그 값을 그대로 표시한다. 라벨=gate 3색, 서브텍스트=gate_why.
+    const gateLv = (g) => g === 'correction' ? 'bad' : (g === 'pressure' ? 'neutral' : 'good');
+    const gateHead = (g) => g === 'correction' ? '🔴 신규 진입 자제'
+                          : (g === 'pressure' ? '🟡 선별 진입' : '🟢 진입 환경 양호');
+    const gateNames = ['코스피', '코스닥', 'S&P500', '나스닥'];
     let banner = '';
     const gateBoxes = gateNames.map(nm => {
       const ix = list.find(x => x.name === nm);
-      const g = gateOf(ix);
-      if (!g) return '';
-      return `<div class="mkt-banner mkt-${g.lv}" title="${nm} 게이트: 분산일(기관 매도일) + 레짐 판정. 한국 종목은 코스피/코스닥, 미국 종목은 나스닥 기준으로 진입 판단.">
-        <b>${nm}</b> ${g.html}</div>`;
+      if (!ix || !ix.gate_suggest) return '';
+      const lv = gateLv(ix.gate_suggest);
+      const why = ix.gate_why || '';
+      return `<div class="mkt-banner mkt-${lv}" title="${nm} 게이트: 분산일(기관 매도일, FTD 리셋·5%만료 반영) + FTD + 60일선. 한국 종목은 코스피/코스닥, 미국 종목은 S&P500/나스닥 중 나쁜 쪽으로 진입 판단.">
+        <b>${nm}</b> ${gateHead(ix.gate_suggest)}<span class="mkt-sub">${why}</span></div>`;
     }).filter(Boolean);
     if (gateBoxes.length) {
       banner = `<div class="gate-row">${gateBoxes.join('')}</div>`;
     }
-    bar.innerHTML = banner + list.map(ix => {
+    const idxHtml = list.map(ix => {
       const pct = ix.change_pct;
       const chg = ix.change;
       // 한국식 색: 상승=빨강(up), 하락=파랑(down)
@@ -2603,6 +2607,7 @@ async function loadIndices() {
         + `<span class="vl">${val}</span>`
         + `<span class="ch ${dir}">${chgStr}</span></div>`;
     }).join('');
+    bar.innerHTML = banner + `<div class="idx-row">${idxHtml}</div>`;
   } catch (e) {
     bar.style.display = 'none';
   }
