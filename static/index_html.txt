@@ -1,0 +1,2620 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>눌림목 스캐너</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0C111B; --surface:#141C2B; --surface2:#1A2436; --line:#233047;
+  --text:#E6ECF5; --muted:#8A97AC; --dim:#5A6578;
+  --up:#FF5A6E; --down:#4D8DFF; --amber:#F2B33D; --green:#3DD68C;
+  /* 가격/등락 '방향' 전용 색 — 상승=연두, 하락=빨강 (경고용 --up/--down 과 분리) */
+  --px-up:#3DD68C; --px-down:#FF5A6E;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans KR',sans-serif;min-height:100vh}
+.mono{font-family:'IBM Plex Mono',monospace}
+
+header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+  padding:20px 24px;border-bottom:1px solid var(--line);
+  position:sticky;top:0;z-index:100;background:var(--bg)}
+h1{font-size:18px;font-weight:700;letter-spacing:-.3px}
+h1 .dot{color:var(--amber)}
+h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(--line);border-radius:99px;padding:2px 8px;vertical-align:2px}
+.sub{font-size:12px;color:var(--muted)}
+
+.tabs{display:flex;gap:4px;margin-left:auto;background:var(--surface);
+  border:1px solid var(--line);border-radius:8px;padding:3px}
+.tab{border:none;background:none;color:var(--muted);font:inherit;font-size:13px;
+  padding:6px 14px;border-radius:6px;cursor:pointer}
+.tab.active{background:var(--surface2);color:var(--text);font-weight:500}
+.tab:focus-visible,button:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+
+.refresh{border:1px solid var(--line);background:var(--surface);color:var(--text);
+  font:inherit;font-size:13px;padding:8px 16px;border-radius:8px;cursor:pointer}
+.refresh:hover{border-color:var(--amber)}
+
+.statusbar{padding:12px 24px;font-size:12px;color:var(--muted);
+  display:flex;gap:16px;flex-wrap:wrap}
+.statusbar b{color:var(--text)}
+.idxbar{display:flex;gap:10px;flex-wrap:wrap;padding:10px 24px;
+  border-bottom:1px solid var(--line);background:var(--surface);align-items:center}
+.mkt-banner{padding:6px 14px;border-radius:10px;font-size:13px;font-weight:700;border:1px solid var(--line)}
+.gate-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.gate-row .mkt-banner{flex:1;min-width:200px}
+.mkt-banner.mkt-good{background:rgba(40,180,120,.1);border-color:rgba(40,180,120,.45);color:#28b478}
+.mkt-banner.mkt-neutral{background:rgba(230,170,40,.1);border-color:rgba(230,170,40,.45);color:#e6aa28}
+.mkt-banner.mkt-bad{background:rgba(255,90,110,.1);border-color:rgba(255,90,110,.45);color:#FF5A6E}
+.idx{display:flex;align-items:baseline;gap:8px;padding:6px 14px;
+  background:var(--bg);border:1px solid var(--line);border-radius:10px;font-size:13px}
+.idx .nm{color:var(--muted);font-weight:500}
+.idx .vl{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+.idx .ch{font-size:12px;font-variant-numeric:tabular-nums}
+.idx .ch.up{color:var(--px-up)} .idx .ch.down{color:var(--px-down)} .idx .ch.flat{color:var(--muted)}
+.entry-sig{margin-top:10px;padding:9px 11px;border-radius:9px;border:1px solid var(--line)}
+.entry-sig.sig-ok{background:rgba(40,180,120,.08);border-color:rgba(40,180,120,.4)}
+.entry-sig.sig-warn{background:rgba(230,170,40,.08);border-color:rgba(230,170,40,.4)}
+.entry-sig.sig-danger{background:rgba(255,90,110,.08);border-color:rgba(255,90,110,.4)}
+.entry-sig .sig-head{font-size:13px;font-weight:700;margin-bottom:6px}
+.entry-sig.sig-ok .sig-head{color:#28b478}
+.entry-sig.sig-warn .sig-head{color:#e6aa28}
+.entry-sig.sig-danger .sig-head{color:var(--up)}
+.entry-sig .sig-list{display:flex;flex-direction:column;gap:3px}
+.entry-sig .chk{font-size:11.5px;color:var(--muted)}
+.entry-sig .chk-ok{color:var(--muted)}
+.entry-sig .chk-warn{color:#e6aa28}
+.entry-sig .chk-danger{color:var(--up)}
+.fund-btn{width:100%;margin-top:10px;padding:7px;background:transparent;
+  border:1px solid var(--line);color:var(--muted);border-radius:8px;font-size:12px;
+  cursor:pointer;font-family:inherit;transition:all .12s}
+.fund-btn:hover{border-color:var(--accent,#4D8DFF);color:var(--text)}
+.fund-btn:disabled{opacity:.6;cursor:default}
+.fund-box{margin-top:8px;font-size:12px;color:var(--muted);line-height:1.7}
+.fund-box .row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.fund-box .fchip{padding:3px 9px;border-radius:7px;background:var(--bg);
+  border:1px solid var(--line);font-variant-numeric:tabular-nums}
+.fund-box .fchip b{color:var(--text);font-weight:600}
+.fund-box .vd{font-weight:700;padding:3px 10px;border-radius:7px}
+.fund-box .vd.cheap{color:var(--px-up);border:1px solid var(--px-up)}
+.fund-box .vd.fair{color:var(--muted);border:1px solid var(--line)}
+.fund-box .vd.exp{color:var(--px-down);border:1px solid var(--px-down)}
+.fund-box .note{display:block;margin-top:4px;font-size:11px;opacity:.75}
+.journal-btn{width:100%;margin-top:10px;padding:7px;background:transparent;
+  border:1px dashed var(--line);color:var(--muted);border-radius:8px;font-size:12px;
+  cursor:pointer;font-family:inherit;transition:all .12s}
+.journal-btn:hover{border-color:var(--amber);color:var(--amber)}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;
+  align-items:center;justify-content:center;z-index:100}
+.modal-bg.open{display:flex}
+.drag-handle{cursor:grab;user-select:none}
+.drag-handle:active{cursor:grabbing}
+.modal{background:var(--surface);border:1px solid var(--line);border-radius:16px;
+  padding:24px;width:min(440px,92vw);max-height:90vh;overflow:auto}
+.modal h3{margin:0 0 4px;font-size:17px}
+.modal .sub{color:var(--muted);font-size:13px;margin-bottom:16px}
+.modal .auto{background:var(--bg);border-radius:10px;padding:12px;margin-bottom:16px;
+  font-size:12px;color:var(--muted);line-height:1.7}
+.modal .auto b{color:var(--text)}
+.modal label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
+.modal input,.modal textarea{width:100%;background:var(--bg);border:1px solid var(--line);
+  color:var(--text);padding:9px 11px;border-radius:8px;font-size:14px;font-family:inherit;
+  box-sizing:border-box}
+.modal textarea{resize:vertical;min-height:48px}
+.modal .row{display:flex;gap:10px}
+.modal .row>div{flex:1}
+.modal .actions{display:flex;gap:10px;margin-top:18px}
+.modal .actions button{flex:1;padding:10px;border-radius:8px;font-size:14px;font-weight:600;
+  cursor:pointer;border:none;font-family:inherit}
+.modal .save{background:var(--amber);color:#000}
+.modal .cancel{background:var(--surface2);color:var(--text)}
+.jrnl-wrap{padding:0 24px 40px}
+.jrnl-tools{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+.jrnl-tools button{padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer;
+  border:1px solid var(--line);background:var(--surface);color:var(--text);font-family:inherit}
+.jrnl-tools .exp{background:var(--amber);color:#000;border:none;font-weight:600}
+.jrnl-tools .stat{color:var(--muted);font-size:13px;margin-left:auto}
+.jtable{width:100%;border-collapse:collapse;font-size:12.5px}
+.jtable th,.jtable td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);
+  white-space:nowrap}
+.jtable th{color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase}
+.jtable td.mono{font-family:var(--mono)}
+.jtable .del{color:#FF6B6B;cursor:pointer}
+.jtable tr.open-pos{background:rgba(242,179,61,.04)}
+.jtable tbody tr:nth-child(even){background:rgba(255,255,255,.015)}
+.jtable td:nth-child(3) a{font-size:13.5px;font-weight:600}
+.note-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.merger-tag{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;background:rgba(147,112,219,.14);color:#b794f6;border:1px solid rgba(147,112,219,.4);white-space:nowrap;cursor:help}
+.st-badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px;white-space:nowrap}
+.st-act{display:inline-block;font-size:9px;padding:2px 5px;border-radius:5px;cursor:pointer;background:#222;color:#bbb;border:1px solid #333}
+.st-act:hover{background:#2e2e2e;color:#fff}
+.jtable input.result{width:70px;background:var(--bg);border:1px solid var(--line);
+  color:var(--text);padding:4px 6px;border-radius:6px;font-size:12px;font-family:var(--mono)}
+.jrnl-empty{color:var(--muted);text-align:center;padding:60px 20px;line-height:1.7}
+.jrnl-stats{display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+.sigval{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.sigval-head{font-size:14px;font-weight:700;color:var(--text);margin-bottom:10px}
+.sigval-subhead{font-size:13px;font-weight:700;color:var(--text);margin:14px 0 8px}
+.sigval-tables{display:flex;gap:16px;flex-wrap:wrap}
+.sigval-t{flex:1;min-width:260px;border-collapse:collapse;font-size:12px}
+.sigval-t th{text-align:left;padding:5px 8px;color:var(--muted);border-bottom:1px solid var(--line);font-weight:600}
+.sigval-t td{padding:5px 8px;border-bottom:1px solid var(--line);color:var(--text);font-variant-numeric:tabular-nums}
+.sigval-note{margin-top:10px;font-size:11px;color:var(--muted);line-height:1.5}
+.sigval-hint{background:var(--surface);border:1px dashed var(--line);border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:12px;color:var(--muted)}
+.statcard{flex:1;min-width:240px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px}
+/* ── R 시스템 (v4.47) ── */
+.rcalc{margin:6px 0 10px;padding:8px 10px;border-radius:8px;background:var(--surface);
+  border:1px dashed var(--line);font-size:12px;line-height:1.5;min-height:16px}
+.rcalc b{color:var(--green)}
+.rcalc.warn{border-color:#8c6d2d;background:#2a2417}
+.rcalc.lock{border-color:#8c2d2d;background:#2a1717}
+.riskbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 12px;
+  padding:10px 14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;font-size:12px}
+.riskbar .rb-item{display:flex;flex-direction:column;gap:2px;min-width:90px}
+.riskbar .rb-t{font-size:10px;color:var(--muted)}
+.riskbar .rb-v{font-weight:700;font-size:13px}
+.riskbar .rb-gauge{flex:1;min-width:140px;height:8px;background:var(--card);border-radius:4px;overflow:hidden;position:relative}
+.riskbar .rb-fill{height:100%;border-radius:4px;background:var(--green);transition:width .3s}
+.riskbar .rb-fill.hot{background:var(--amber)}
+.riskbar .rb-fill.max{background:#ff6b6b}
+.rlock-banner{margin:0 0 12px;padding:10px 14px;border-radius:10px;font-size:12.5px;font-weight:600;
+  background:#2a1717;border:1px solid #8c2d2d;color:#ff9b9b}
+.rlock-banner.soft{background:#2a2417;border-color:#8c6d2d;color:#ffd98a}
+/* ── 등급/성숙도 배지 (v4.48.3) ── */
+.gbadge{display:inline-block;font-size:10.5px;font-weight:800;padding:1px 7px;border-radius:6px;
+  margin-left:4px;vertical-align:1px;cursor:help;letter-spacing:.2px}
+.gbadge.gA{background:#12351f;color:#4ade80;border:1px solid #1d6b3a}
+.gbadge.gB{background:#33270f;color:#fbbf24;border:1px solid #6b5518}
+.gbadge.gC{background:#26262e;color:#9ca3af;border:1px solid #3f3f4a}
+.gbadge.gD{background:#341418;color:#f87171;border:1px solid #6b2028}
+.pmat{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:6px;
+  margin-left:4px;cursor:help;vertical-align:1px}
+.pmat.wait{background:#33270f;color:#ffd98a;border:1px dashed #8c6d2d}
+.pmat.ok{background:#12351f;color:#7fe0a7;border:1px solid #1d6b3a}
+.statcard-t{font-size:13px;font-weight:700;margin-bottom:4px}
+.statcard-v{font-size:12px;color:var(--muted)}
+.jrnl-filter{display:flex;gap:8px;margin-bottom:14px}
+.fbtn{padding:6px 14px;border-radius:20px;font-size:12px;cursor:pointer;background:var(--surface);border:1px solid var(--line);color:var(--muted)}
+.fbtn.on{background:var(--amber);color:#000;border-color:var(--amber);font-weight:600}
+.ein{background:#0d1420;border:1px solid var(--line);border-radius:6px;color:var(--text);
+  padding:5px 7px;font-size:12px;font-family:inherit;width:64px}
+textarea.ein{line-height:1.5;resize:vertical}
+.edit-btn,.save-btn{cursor:pointer;font-size:13px;margin-right:6px}
+tr.editing{background:rgba(242,179,61,.06)}
+.tab-exp{position:relative}
+.exp-tag{font-size:8px;background:rgba(168,85,247,.25);color:#c084fc;
+  padding:1px 4px;border-radius:4px;margin-left:4px;vertical-align:middle;font-weight:700}
+.surge-warn{background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.3);
+  border-radius:8px;padding:8px 11px;font-size:11px;color:#c084fc;margin-top:8px;line-height:1.5}
+.legend{display:flex;gap:18px;flex-wrap:wrap;padding:0 24px 10px;font-size:12px}
+.legend .lg{color:var(--muted);cursor:help;display:inline-flex;align-items:center;gap:5px}
+.legend .lg-h{color:var(--text);opacity:.7}
+.legend .lg:hover{color:var(--text)}
+@media (max-width:600px){.legend{padding:0 16px 10px;gap:12px}}
+.sectorbar{display:flex;gap:8px;flex-wrap:wrap;padding:0 24px 12px}
+.sectorbar:empty{padding:0}
+.alert-tag{font-size:11px;color:#FF6B6B;background:rgba(255,107,107,.12);
+  padding:2px 7px;border-radius:6px;font-weight:600;vertical-align:middle}
+.climax-tag{font-size:11px;padding:2px 7px;border-radius:6px;font-weight:600;
+  vertical-align:middle;margin-left:4px}
+.climax-tag.danger{color:#FF6B6B;background:rgba(255,107,107,.15)}
+.climax-tag.caution{color:#f5c451;background:rgba(245,196,81,.12)}
+.alert-mgr{margin-left:12px;font-size:12px;color:var(--muted);cursor:pointer;
+  text-decoration:underline;text-underline-offset:3px}
+.alert-mgr:hover{color:var(--amber)}
+.alert-panel{padding:12px 24px;background:var(--surface);border-bottom:1px solid var(--line);
+  display:none;gap:8px;align-items:center;flex-wrap:wrap}
+.alert-panel.open{display:flex}
+.alert-panel input,.alert-panel select{background:var(--bg);border:1px solid var(--line);
+  color:var(--text);padding:6px 10px;border-radius:8px;font-size:13px;font-family:inherit}
+.alert-panel button{background:var(--amber);color:#000;border:none;padding:6px 14px;
+  border-radius:8px;font-size:13px;font-weight:600;cursor:pointer}
+.alert-list{display:flex;gap:6px;flex-wrap:wrap;margin-left:8px}
+.alert-list .chip{font-size:11px;background:rgba(255,107,107,.12);color:#FF6B6B;
+  padding:3px 8px;border-radius:6px;cursor:pointer}
+.alert-list .chip:hover{text-decoration:line-through}
+@media (max-width:600px){.alert-panel{padding:12px 16px}}
+.schip{font-size:12px;padding:5px 11px;border-radius:99px;background:var(--surface);
+  border:1px solid var(--line);color:var(--muted);cursor:pointer;transition:all .12s}
+.schip:hover{border-color:var(--amber);color:var(--text)}
+.schip.on{background:var(--surface2);color:var(--text);border-color:var(--amber)}
+.schip b{color:var(--amber);margin-left:5px}
+.schip .clear{color:var(--muted)}
+@media (max-width:600px){.sectorbar{padding:0 16px 12px}}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));
+  gap:14px;padding:0 24px 40px}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;
+  padding:16px;display:flex;flex-direction:column;gap:12px}
+.card:hover{border-color:#33455F}
+.card.fired{border-color:rgba(242,179,61,.55)}
+.card.fav{border-color:rgba(245,196,81,.5);box-shadow:0 0 0 1px rgba(245,196,81,.25)}
+.fav-btn{background:none;border:none;cursor:pointer;font-size:20px;line-height:1;
+  color:var(--muted);padding:0;margin-top:1px;transition:color .15s;flex-shrink:0}
+.fav-btn:hover{color:#f5c451}
+.fav-btn.on{color:#f5c451}
+.card-top{display:flex;align-items:flex-start;gap:12px}
+.name{font-size:15px;font-weight:700;line-height:1.2}
+.tick{font-size:11px;color:var(--muted);margin-top:2px}
+.tv-link{color:var(--muted);text-decoration:none;cursor:pointer}
+.tv-link:hover{color:#7fb8e0;text-decoration:underline}
+.mkt{font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;
+  border:1px solid var(--line);color:var(--muted);margin-left:6px;vertical-align:1px}
+
+.score-ring{position:relative;width:46px;height:46px;flex:none}
+.score-ring svg{transform:rotate(-90deg)}
+.score-num{position:absolute;inset:0;display:flex;align-items:center;
+  justify-content:center;font-size:13px;font-weight:600}
+
+.price-row{display:flex;align-items:baseline;gap:8px}
+.price{font-size:17px;font-weight:600}
+.chg{font-size:13px;font-weight:500}
+.chg.up{color:var(--px-up)}.chg.down{color:var(--px-down)}
+
+.spark{width:100%;height:64px;display:block}
+
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;
+  border-top:1px solid var(--line);padding-top:12px}
+.metric .k{font-size:10px;color:var(--muted);margin-bottom:3px}
+.metric .v{font-size:13px;font-weight:500}
+
+.badges{display:flex;gap:6px;flex-wrap:wrap}
+.badge{font-size:10px;padding:3px 8px;border-radius:99px;
+  background:var(--surface2);color:var(--muted);border:1px solid var(--line)}
+.badge.on{color:var(--green);border-color:rgba(61,214,140,.35)}
+.badge.warn{color:#f5c451;border-color:rgba(245,196,81,.45);background:rgba(245,196,81,.08)}
+
+.empty{padding:80px 24px;text-align:center;color:var(--muted);font-size:14px}
+.loading{padding:80px 24px;text-align:center;color:var(--muted)}
+.spinner{width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--amber);
+  border-radius:50%;margin:0 auto 16px;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spinner{animation:none}}
+@media (max-width:600px){header{padding:16px}.grid{padding:0 16px 32px;grid-template-columns:1fr}}
+@media (max-width:600px){#searchBar{padding:0 16px}}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.55.1</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
+  </div>
+  <div class="tabs" role="tablist" id="modeTabs">
+    <button class="tab active" data-mode="imminent">🎯 돌파임박</button>
+    <button class="tab" data-mode="pullback">눌림목</button>
+    <button class="tab" data-mode="breakout">🚀 돌파</button>
+    <button class="tab" data-mode="boxbreak">📦 박스돌파</button>
+    <button class="tab tab-exp" data-mode="pattern">🧩 패턴<span class="exp-tag">실험</span></button>
+    <button class="tab" data-mode="turnaround">추세전환</button>
+    <button class="tab" data-mode="leader">대장후보</button>
+    <button class="tab" data-mode="super">⭐슈퍼대장</button>
+    <button class="tab tab-exp" data-mode="surge">⚡급등<span class="exp-tag">실험</span></button>
+    <button class="tab tab-exp" data-mode="inverse">🔻인버스<span class="exp-tag">하락</span></button>
+    <button class="tab tab-exp" data-mode="breakdown">🩸붕괴<span class="exp-tag">숏</span></button>
+    <button class="tab" data-mode="sectors">📊 섹터</button>
+    <button class="tab" data-mode="journal">📒 내 일지</button>
+  </div>
+  <div class="tabs" role="tablist">
+    <button class="tab active" data-market="all">전체</button>
+    <button class="tab" data-market="kr">한국</button>
+    <button class="tab" data-market="us">미국</button>
+    <button class="tab" id="strictToggle" title="RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓ 만 표시 (주도주 엄선)">🎯 주도주만</button>
+    <button class="tab" id="riskSortToggle" title="손절폭(리스크%) 좁은 순으로 정렬 — 타이트한 진입 자리가 위로. 단 ATR(일상 변동)보다 좁은 손절은 노이즈에 털릴 수 있어 ⚠️ 표시">↕ 손절좁은순</button>
+  </div>
+  <button class="refresh" id="refresh">다시 스캔</button>
+</header>
+
+<div class="idxbar" id="idxbar"></div>
+
+<div class="statusbar" id="status"></div>
+<div class="legend" id="legend">
+  <span class="lg" title="RS 90 이상 주도주. 시장 상위 10% 안에 드는 강자.">👑 주도주<span class="lg-h">RS 90+</span></span>
+  <span class="lg" title="당일 +4% 이상 + (추세선 돌파 또는 피벗 2% 이내). 지금 진입 구간에서 출발 중이라는 신호.">🔥 트리거<span class="lg-h">오늘 출발</span></span>
+  <span class="lg" title="시장경보(투경/투주/정지) 종목. 경보종목 관리에서 직접 등록한 것.">⚠️ 경보/리스크<span class="lg-h">주의</span></span>
+  <span class="lg" title="점수 링 아래 '전일 NN' = 🔥 발동 전날의 셋업 점수. 높을수록 좋은 자리에서 출발한 것.">⭕ 점수<span class="lg-h">셋업 완성도</span></span>
+  <span class="lg" title="인수가 부근에 가격이 고정된 M&A/특수상황 의심 종목. 상방 막힘+하방 비대칭 리스크로 추세매매 부적합. 깔끔한 횡보가 강세 신호가 아님.">🤝 M&A의심<span class="lg-h">추세매매 부적합</span></span>
+</div>
+<div class="sectorbar" id="sectorbar"></div>
+<div class="alert-panel" id="alertPanel">
+  <input id="alertTicker" placeholder="티커 (예: 347850.KQ)" style="width:180px">
+  <select id="alertKind">
+    <option>투경</option><option>투주</option><option>정지</option><option>단기과열</option>
+  </select>
+  <button id="alertAdd">추가</button>
+  <div class="alert-list" id="alertList"></div>
+</div>
+<div id="searchBar" style="display:none;padding:0 24px;margin:0 0 14px">
+  <input id="cardSearch" type="text" placeholder="🔍 종목명 또는 코드로 찾기 (예: 삼성, 005930)"
+    style="width:100%;box-sizing:border-box;padding:10px 14px;border-radius:10px;
+    background:var(--surface);border:1px solid var(--line);color:var(--text);font-size:14px;outline:none">
+</div>
+<div id="content"><div class="loading"><div class="spinner"></div>스캔 중…</div></div>
+<div class="jrnl-wrap" id="journalView" style="display:none"></div>
+
+<div class="modal-bg" id="journalModal">
+  <div class="modal">
+    <h3 id="jmTitle" class="drag-handle">일지에 추가 <span style="font-size:11px;color:var(--muted);font-weight:400">⠿ 드래그</span></h3>
+    <div class="sub" id="jmSub"></div>
+    <div class="auto" id="jmAuto"></div>
+    <div class="row">
+      <div><label id="jmEntryLabel">진입 가정가</label><input id="jmEntry" inputmode="decimal" placeholder="예: 167000"></div>
+      <div><label>손절가</label><input id="jmStop" inputmode="decimal"></div>
+    </div>
+    <label>기록 목적</label>
+    <select id="jmCat" style="width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;font-size:13px">
+      <option value="추세추종">📈 추세추종 (실제 매매)</option>
+      <option value="단타">⚡ 단타 (실제 매매)</option>
+      <option value="대기">⏳ 대기 — 피벗 돌파 알림 받기 (봇 감시)</option>
+      <option value="관찰">👁 관찰만 — 매매 안 함, 알림 없음</option>
+    </select>
+    <label>진입 근거 (한 줄)</label>
+    <textarea id="jmNote" placeholder="예: 추세선 돌파 + 섹터 동조, 피벗 코앞"></textarea>
+    <div id="jmCalc" class="rcalc"></div>
+    <div class="actions">
+      <button class="cancel" onclick="closeJournal()">취소</button>
+      <button class="save" onclick="saveJournal()">저장</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="rSettingsModal">
+  <div class="modal">
+    <h3 class="drag-handle">⚙️ R 시스템 설정</h3>
+    <div class="sub" style="color:var(--muted);font-size:12px;margin-bottom:8px">
+      모든 결정은 매수 전에. 사이즈는 공식이, 진입 허용은 게이트가 정합니다.</div>
+    <div class="row">
+      <div><label>총자산 (원)</label><input id="rsEquity" inputmode="numeric" placeholder="예: 50000000"></div>
+      <div><label>1R = 자산의 % <span style="color:var(--muted);font-size:10px">(검증 전 0.5 권장)</span></label>
+        <input id="rsRpct" inputmode="decimal" placeholder="0.5"></div>
+    </div>
+    <div class="row">
+      <div><label>동시 오픈 상한 (R)</label><input id="rsMaxOpen" inputmode="decimal" placeholder="3"></div>
+      <div><label>환율 USD/KRW <span style="color:var(--muted);font-size:10px">(US 사이즈용)</span></label>
+        <input id="rsFx" inputmode="decimal" placeholder="1400"></div>
+    </div>
+    <div class="row">
+      <div><label>주간 손실 한도 (R)</label><input id="rsWeekStop" inputmode="decimal" placeholder="3"></div>
+      <div><label>월간 손실 한도 (R)</label><input id="rsMonthStop" inputmode="decimal" placeholder="6"></div>
+    </div>
+    <div class="row">
+      <div><label>시장 게이트</label>
+        <select id="rsGate" style="width:100%;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:inherit">
+          <option value="confirmed">🟢 확인된 상승 (분산일≤3) — 최대 3R</option>
+          <option value="pressure">🟡 조정 압박 (분산일 4~5) — A급만, 1.5R</option>
+          <option value="correction">🔴 조정 (분산일 6+ / FTD 무효) — 신규 0</option>
+        </select>
+      </div>
+      <div><label>분산일 카운트 (참고)</label><input id="rsDist" inputmode="numeric" placeholder="0">
+        <div id="rsGateSug" style="font-size:11px;color:var(--muted);margin-top:4px"></div></div>
+    </div>
+    <div class="actions">
+      <button class="cancel" onclick="document.getElementById('rSettingsModal').classList.remove('open')">취소</button>
+      <button class="save" onclick="saveRSettings()">저장</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="manualModal">
+  <div class="modal">
+    <h3 class="drag-handle">➕ 수동 종목 추가 <span style="font-size:11px;color:var(--muted);font-weight:400">스캐너에 없는 종목 직접 담기</span></h3>
+    <div class="sub" style="color:var(--muted);font-size:12px;margin-bottom:8px">스캐너에 없는 종목을 직접 담아요. <b>대기</b>는 피벗 돌파 알림, <b>진입</b>은 R·손절 알림, <b>관찰</b>은 통계 제외.</div>
+    <div class="row">
+      <div><label>종목코드 *</label><input id="maTicker" placeholder="예: V, AAPL, 005930.KS"></div>
+      <div><label>종목명</label><input id="maName" placeholder="예: 비자"></div>
+    </div>
+    <div class="row">
+      <div><label>상태 *</label>
+        <select id="maStatus" onchange="onMaStatusChange()" style="width:100%;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:inherit">
+          <option value="pending">⏳ 대기 (피벗 돌파 알림 받기)</option>
+          <option value="entered">▶ 진입 (이미 매수함)</option>
+          <option value="watch">👁 관찰 (통계 제외)</option>
+        </select>
+      </div>
+      <div><label>시장</label>
+        <select id="maMarket" style="width:100%;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:inherit">
+          <option value="US">미국 (US)</option>
+          <option value="KR">한국 (KR)</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div><label>섹터 (선택)</label><input id="maSector" placeholder="예: 결제인프라"></div>
+    </div>
+    <div class="row">
+      <div><label id="maPivotLabel">피벗가 (돌파 알림 기준) *</label><input id="maPivot" inputmode="decimal" placeholder="예: 337"></div>
+      <div><label>손절가</label><input id="maStop" inputmode="decimal" placeholder="예: 320"></div>
+    </div>
+    <div id="maCalc" class="rcalc"></div>
+    <label>메모 (한 줄)</label>
+    <textarea id="maNote" placeholder="예: 역H&S 넥라인+200일선 돌파 대기"></textarea>
+    <div class="actions">
+      <button class="cancel" onclick="closeManualAdd()">취소</button>
+      <button class="save ma-save-btn" onclick="saveManualAdd()">대기로 추가</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const fmtPrice = (p, mkt) => mkt === 'KR'
+  ? Math.round(p).toLocaleString('ko-KR') + '원'
+  : '$' + p.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+// 손익비 R 표시: 2R 이상이면 좋음(초록), 1.5 미만이면 나쁨(빨강)
+const fmtRR = (rr) => {
+  if (rr == null) return '<span class="v">-</span>';
+  const color = rr >= 2 ? 'var(--green)' : (rr < 1.5 ? 'var(--up)' : '');
+  const warn = rr < 1.5 ? ' ⚠️' : '';
+  return `<span class="v" style="${color ? 'color:'+color : ''}">${rr}R${warn}</span>`;
+};
+
+// 거래량: 한국은 만/억 주, 미국은 K/M
+const fmtVolume = (vol, mkt) => {
+  if (!vol) return '-';
+  if (mkt === 'KR') {
+    if (vol >= 1e8) return (vol/1e8).toFixed(1) + '억주';
+    if (vol >= 1e4) return (vol/1e4).toFixed(0) + '만주';
+    return Math.round(vol).toLocaleString('ko-KR') + '주';
+  }
+  if (vol >= 1e6) return (vol/1e6).toFixed(1) + 'M';
+  if (vol >= 1e3) return (vol/1e3).toFixed(0) + 'K';
+  return Math.round(vol).toString();
+};
+
+// 거래대금: 한국은 억/조 원, 미국은 $M/$B
+const fmtTurnover = (t, mkt) => {
+  if (!t) return '-';
+  if (mkt === 'KR') {
+    if (t >= 1e12) return (t/1e12).toFixed(2) + '조원';
+    if (t >= 1e8) return (t/1e8).toFixed(0) + '억원';
+    return Math.round(t/1e4).toLocaleString('ko-KR') + '만원';
+  }
+  if (t >= 1e9) return '$' + (t/1e9).toFixed(2) + 'B';
+  if (t >= 1e6) return '$' + (t/1e6).toFixed(1) + 'M';
+  return '$' + Math.round(t).toLocaleString('en-US');
+};
+
+function sparkSVG(closes, ma20) {
+  const W = 300, H = 64, PAD = 4;
+  const vals = closes.concat(ma20.filter(v => v != null));
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const x = i => PAD + i * (W - 2 * PAD) / (closes.length - 1);
+  const y = v => H - PAD - (v - min) / (max - min || 1) * (H - 2 * PAD);
+  const path = arr => arr.map((v, i) => v == null ? '' :
+    `${arr.slice(0, i).every(p => p == null) ? 'M' : 'L'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
+
+  // 눌림 구간 음영: 60봉 내 최고점 이후 구간
+  const hiIdx = closes.indexOf(Math.max(...closes));
+  const zone = hiIdx < closes.length - 1
+    ? `<rect x="${x(hiIdx)}" y="0" width="${x(closes.length - 1) - x(hiIdx)}" height="${H}"
+        fill="rgba(242,179,61,.07)"/>` : '';
+  const last = closes.length - 1;
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+    ${zone}
+    <path d="${path(ma20)}" fill="none" stroke="#4D8DFF" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/>
+    <path d="${path(closes)}" fill="none" stroke="#E6ECF5" stroke-width="1.5"/>
+    <circle cx="${x(last)}" cy="${y(closes[last])}" r="3" fill="#F2B33D"/>
+  </svg>`;
+}
+
+function scoreRing(score) {
+  const r = 19, c = 2 * Math.PI * r, off = c * (1 - score / 100);
+  const color = score >= 75 ? 'var(--green)' : score >= 55 ? 'var(--amber)' : 'var(--muted)';
+  return `<div class="score-ring" title="눌림목 점수 ${score}">
+    <svg width="46" height="46"><circle cx="23" cy="23" r="${r}" fill="none" stroke="var(--line)" stroke-width="4"/>
+    <circle cx="23" cy="23" r="${r}" fill="none" stroke="${color}" stroke-width="4"
+      stroke-dasharray="${c}" stroke-dashoffset="${off}" stroke-linecap="round"/></svg>
+    <div class="score-num mono">${Math.round(score)}</div></div>`;
+}
+
+// 진입 신호등: 거래량·RS·손익비·리스크 종합 → 진입 양호/주의/자제 + 체크리스트
+function entrySignal(s) {
+  // 돌파류는 vol_mult, 눌림/임박은 vol_ratio 사용
+  const volBreakout = s.vol_mult != null ? s.vol_mult : null;
+  const volPullback = s.vol_ratio != null ? s.vol_ratio : null;
+  const checks = [];
+  let warn = 0, danger = 0;
+
+  // 1) 거래량 동반 (한올 교훈: 거래량 없는 돌파임박은 가짜 위험)
+  if (volBreakout != null) {
+    if (volBreakout >= 1.5) checks.push(['ok', `거래량 ${volBreakout}× 동반`, 'vol']);
+    else { checks.push(['warn', `거래량 ${volBreakout}× — 동력 부족`, 'vol_weak']); warn++; }
+  } else if (volPullback != null) {
+    if (volPullback <= 0.8) checks.push(['ok', `거래량 ${volPullback}× 수축(눌림 양호)`, 'vol']);
+    else if (volPullback < 1.5) checks.push(['warn', `거래량 ${volPullback}× — 애매`, 'vol_mid']);
+    else { checks.push(['ok', `거래량 ${volPullback}× 증가`, 'vol']); }
+  }
+  // 2) RS (주도주 여부)
+  if (s.rs != null) {
+    if (s.rs >= 90) checks.push(['ok', `RS ${s.rs} 주도주급`, 'rs']);
+    else if (s.rs >= 70) checks.push(['warn', `RS ${s.rs} — 주도주는 아님`, 'rs_mid']);
+    else { checks.push(['danger', `RS ${s.rs} 약함`, 'rs_weak']); danger++; }
+  }
+  // 3) 손익비
+  if (s.rr != null) {
+    if (s.rr >= 2) checks.push(['ok', `손익비 ${s.rr}R`, 'rr']);
+    else { checks.push(['danger', `손익비 ${s.rr}R — 가성비 낮음`, 'rr_low']); danger++; }
+  }
+  // 4) 리스크(손절폭) — 한국 중소형주는 변동성이 커서 손절폭이 넓은 게 정상.
+  //    시장별 기준 분리: 한국 12%, 미국 8%.
+  if (s.risk_pct != null) {
+    const riskLimit = (s.market === 'kr') ? 12 : 8;
+    if (s.risk_pct <= riskLimit) checks.push(['ok', `리스크 ${s.risk_pct}%`, 'risk']);
+    else { checks.push(['warn', `리스크 ${s.risk_pct}% — 손절폭 넓음`, 'risk_wide']); warn++; }
+  }
+  // 5) Anchored VWAP (거래량 최대 봉 이후 평균 매입가 대비 위치)
+  if (s.avwap && s.avwap.zone) {
+    const z = s.avwap.zone, d = s.avwap.dist_pct;
+    if (z === 'healthy') checks.push(['ok', `AVWAP 위 +${d}% — 건강한 우위`, 'avwap']);
+    else if (z === 'extended') { checks.push(['warn', `AVWAP +${d}% — 연장(추격주의)`, 'avwap_ext']); warn++; }
+    else if (z === 'overheated') { checks.push(['warn', `AVWAP +${d}% — 과열(평균가서 멀어짐)`, 'avwap_hot']); warn++; }
+    else if (z === 'near') { checks.push(['warn', `AVWAP ${d}% — 살짝 아래(애매)`, 'avwap_near']); warn++; }
+    else if (z === 'below') { checks.push(['danger', `AVWAP ${d}% — 매물 부담 큼`, 'avwap_below']); danger++; }
+  }
+  // 6) 변동성(ATR%) — 미너비니: 손절폭은 종목 변동성에 맞춰라.
+  //    고변동 종목은 하루 정상 변동이 커서 타이트한 손절이 노이즈에 털린다.
+  if (s.atr_pct != null && s.vol_high) {
+    if (s.atr_tight) {
+      checks.push(['danger', `변동성 ATR ${s.atr_pct}% — 손절 대비 큼(노이즈 손절 위험)`, 'atr_tight']); danger++;
+    } else {
+      checks.push(['warn', `고변동 ATR ${s.atr_pct}% — 비중 축소 권장`, 'atr_high']); warn++;
+    }
+  }
+
+  let level, label;
+  if (danger > 0) { level = 'danger'; label = '🔴 진입 자제'; }
+  else if (warn >= 2) { level = 'danger'; label = '🔴 진입 자제'; }
+  else if (warn === 1) { level = 'warn'; label = '🟡 주의'; }
+  else { level = 'ok'; label = '🟢 진입 양호'; }
+  // 경고/위험이었던 항목 태그만 추출 (검증용 — 어떤 경고가 과했는지 집계)
+  const flags = checks.filter(c => c[0] === 'warn' || c[0] === 'danger').map(c => c[2]).filter(Boolean);
+  return { level, label, checks, flags };
+}
+
+function breakdownCard(s) {
+  const chgCls = s.change_pct >= 0 ? 'up' : 'down';
+  const chgSign = s.change_pct >= 0 ? '+' : '';
+  const fav = favorites.includes((s.ticker || '').toUpperCase());
+  const krWarn = s.market === 'KR';
+  return `<div class="card${s.triggered ? ' fired' : ''}${fav ? ' fav' : ''}">
+    <div class="card-top">
+      <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="즐겨찾기">${fav ? '★' : '☆'}</button>
+      <div>
+        <div class="name">🩸 ${s.name}${s.triggered ? ' <span style="color:#ff6b6b;font-size:11px">이탈+거래량</span>' : ''}<span class="mkt">${s.market}</span></div>
+        <div class="tick mono">${s.ticker ? `<a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a>` : ''}${s.sector && s.sector !== '기타' ? ` · ${s.sector}` : ''}</div>
+      </div>
+      <div style="margin-left:auto;display:flex;flex-direction:column;align-items:center;gap:2px">
+        ${scoreRing(s.score)}
+        <div class="mono" style="font-size:10px;color:#ff6b6b">숏</div>
+      </div>
+    </div>
+    <div class="price-row mono">
+      <span class="price">${fmtPrice(s.close, s.market)}</span>
+      <span class="chg ${chgCls}">${chgSign}${s.change_pct}%</span>
+    </div>
+    ${sparkSVG(s.spark, s.spark_ma20)}
+    <div class="metrics" style="margin-top:10px">
+      <div class="metric"><div class="k">지지선</div><div class="v mono">${fmtPrice(s.support, s.market)}</div></div>
+      <div class="metric"><div class="k">지지대비</div><div class="v mono" style="color:${s.near_pct<0?'#ff6b6b':'var(--muted)'}">${s.near_pct>0?'+':''}${s.near_pct}%</div></div>
+      <div class="metric"><div class="k">RS</div><div class="v mono">${s.rs}</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v mono">${s.rsi}</div></div>
+    </div>
+    <div class="metrics" style="margin-top:6px">
+      <div class="metric"><div class="k">숏 진입</div><div class="v mono">${fmtPrice(s.entry, s.market)}</div></div>
+      <div class="metric"><div class="k">손절(위)</div><div class="v mono" style="color:#ff6b6b">${fmtPrice(s.stop, s.market)}</div></div>
+      <div class="metric"><div class="k">목표(아래)</div><div class="v mono" style="color:var(--green)">${fmtPrice(s.target, s.market)}</div></div>
+      <div class="metric"><div class="k">손익비</div><div class="v mono">${s.rr != null ? s.rr + 'R' : '-'}</div></div>
+    </div>
+    <div style="margin-top:8px;display:flex;gap:4px;flex-wrap:wrap">
+      ${(s.reasons || []).map(r => `<span class="st-badge" style="background:#2a1a1a;color:#ff9b9b;font-size:10px">${r}</span>`).join('')}
+    </div>
+    ${s.oversold ? '<div class="surge-warn" style="background:rgba(242,179,61,.08);border-color:rgba(242,179,61,.3);margin-top:8px">⚠️ RSI ' + s.rsi + ' 과매도 — 단기 반등(숏 스퀴즈) 위험. 추격 숏 금지, 반등 후 진입.</div>' : ''}
+    ${krWarn ? '<div class="surge-warn" style="margin-top:8px">⚠️ 한국 종목 — 개인 공매도 제약. 인버스 ETF나 관찰용으로 활용.</div>' : ''}
+    <div class="surge-warn" style="background:rgba(255,107,107,.06);border-color:rgba(255,107,107,.25);margin-top:8px">🩸 숏은 손실 무한·숏스퀴즈 위험. 손절(위쪽 저항) 칼같이, 소액만. 미너비니式 본래 현금 우선.</div>
+    ${s.ticker ? `<button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button>` : ''}
+  </div>`;
+}
+
+function card(s) {
+  if (s.mode === 'breakdown') return breakdownCard(s);
+  const chgCls = s.change_pct >= 0 ? 'up' : 'down';
+  const chgSign = s.change_pct >= 0 ? '+' : '';
+  const fav = favorites.includes((s.ticker || '').toUpperCase());
+  return `<div class="card${s.triggered ? ' fired' : ''}${fav ? ' fav' : ''}">
+    <div class="card-top">
+      <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기 (최상단 고정)'}">${fav ? '★' : '☆'}</button>
+      <div>
+        <div class="name">${s.triggered ? '🔥 ' : ''}${s.leader ? '👑 ' : ''}${s.name}${s.alert ? ` <span class="alert-tag" title="시장경보">⚠️ ${s.alert}</span>` : ''}${s.climax ? ` <span class="climax-tag ${s.climax_level}" title="미너비니 클라이맥스/과열 신호: ${(s.climax_reasons||[]).join(', ')}. 매수보다 매도·경계 구간일 수 있음.">${s.climax_level === 'danger' ? '🛑' : '🔆'} 과열</span>` : ''}${(() => { const lq = liquidityCheck(s); return lq ? ` <span class="pmat ${lq.cls === 'bad' ? 'wait' : 'ok'}" style="${lq.cls === 'bad' ? 'background:#341418;color:#f87171;border:1px solid #6b2028' : 'background:#152535;color:#7fb8e0;border:1px dashed #2d5a8c'}" title="${lq.tip}">${lq.label}</span>` : ''; })()}${s.grade && s.grade !== '?' ? ` <span class="gbadge g${s.grade}" title="트렌드 템플릿 ${s.tt_pass}/8 통과${(s.tt_fails && s.tt_fails.length) ? ` · 미충족: ${s.tt_fails.join(', ')}` : ' · 전 조건 충족'}${s.grade === 'A' ? ' + RS 87+ — 진짜 주도주 등급' : ''}. A=8/8+RS87 · B=7+ · C=5~6 · D=4↓">${s.grade}급</span>` : ''}${s.mode === 'pattern' ? (s.pat_ready ? ` <span class="pmat ok" title="패턴 성립 요건 전부 충족 — 기간·거래량 고갈 OK. 피벗 돌파(거래량 150%+)만 남음">✅ 요건충족</span>` : ` <span class="pmat wait" title="패턴 형성 중 — 미충족: ${(s.pat_missing || []).join(' · ')}. 요건 채우기 전 돌파 추격은 실패 확률 높음 (특히 치솟은깃발)">⏳ 미완성</span>`) : ''}${(s.late_flags && s.late_flags.length) ? ` <span class="climax-tag ${s.late_level}" title="후기 스테이지/과확장 (v4.48): ${s.late_flags.join(', ')}${s.ext200_pct ? ` · 200일선 이격 +${s.ext200_pct}%` : ''}. 큰 시세 이후의 베이스일수록 실패 확률이 높음 — 사이즈 축소 또는 관망 권장.">${s.late_level === 'danger' ? '🛑' : '🏔'} 후기</span>` : ''}${s.merger ? ` <span class="merger-tag" title="M&A/특수상황 의심: ${(s.merger_reasons||[]).join(', ')}. 인수가 부근에 가격이 고정돼 상방은 막히고 하방은 딜 무산 시 급락하는 비대칭 리스크. 추세매매 부적합 — 차트의 깔끔한 횡보가 강세 신호가 아님.">🤝 M&A의심</span>` : ''}${s.ud_weak ? ` <span class="merger-tag" title="U/D Volume ${s.ud} (50일 기준, 1 미만). 하락일 거래량이 상승일보다 많아 아직 분산 우세 = 기관 매집 미확증. 가격은 전환 신호를 냈지만 거래량 확증 전이라 관찰 권장." style="background:#3a1a1a;color:#ff8888">📉 매집미확증</span>` : ''}${s.base_badge ? ` <span class="climax-tag ${s.base_badge_lv === 'good' ? '' : (s.base_badge_lv === 'bad' ? 'danger' : '')}" style="${s.base_badge_lv === 'good' ? 'background:#12351f;color:#4ade80;border:1px solid #1d6b3a' : (s.base_badge_lv === 'bad' ? 'background:#341418;color:#f87171;border:1px solid #6b2028' : 'background:#33270f;color:#fbbf24;border:1px solid #6b5518')}" title="베이스 품질 (오닐/미너비니): 길이 ${s.base_length_wk ?? '?'}주 · 깊이 ${s.base_depth_pct ?? '?'}%${s.base_vcp ? ' · VCP수축✓' : ''}${s.base_vol_dry ? ' · 거래량건조✓' : ''}. 5주+ 탄탄한 베이스일수록 돌파 성공률 높음. 며칠짜리 얕은 조정은 베이스 아님.">${s.base_badge_lv === 'good' ? '🧱' : (s.base_badge_lv === 'bad' ? '⛔' : '📏')} ${s.base_badge}</span>` : ''}<span class="mkt">${s.market}</span></div>
+        <div class="tick mono">${s.ticker ? `<a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a>` : ''}${s.sector && s.sector !== '기타' ? ` · ${s.sector}` : ''}</div>
+      </div>
+      <div style="margin-left:auto;display:flex;flex-direction:column;align-items:center;gap:2px">
+        ${scoreRing(s.score)}
+        ${s.setup_score != null ? `<div class="mono" style="font-size:10px;color:var(--amber)">전일 ${Math.round(s.setup_score)}</div>` : ''}
+      </div>
+    </div>
+    <div class="price-row mono">
+      <span class="price">${fmtPrice(s.close, s.market)}</span>
+      <span class="chg ${chgCls}">${chgSign}${s.change_pct}%</span>
+    </div>
+    ${sparkSVG(s.spark, s.spark_ma20)}
+    ${(s.mode === 'pullback' || s.mode === 'turnaround' || s.mode === 'breakout' || s.mode === 'imminent' || s.mode === 'boxbreak' || s.mode === 'pattern') && (s.volume || s.turnover) ? `
+    <div class="metrics mono" style="padding-bottom:0;border-bottom:none">
+      <div class="metric"><div class="k">거래량 ${s.vol_vs_avg != null ? `<span style="font-size:9px;opacity:.6">(평균 ${s.vol_vs_avg}×)</span>` : ''}</div><div class="v">${fmtVolume(s.volume, s.market)}</div></div>
+      <div class="metric"><div class="k">거래대금</div><div class="v">${fmtTurnover(s.turnover, s.market)}</div></div>
+    </div>` : ''}
+    ${s.mode === 'pattern' ? `
+    <div class="metrics mono">
+      <div class="metric"><div class="k">피벗까지</div><div class="v" style="color:${Math.abs(s.pivot_dist_pct) <= 2 ? 'var(--up)' : 'var(--amber)'}">${s.pivot_dist_pct >= 0 ? '+' : ''}${s.pivot_dist_pct}%</div></div>
+      <div class="metric"><div class="k">거래량비</div><div class="v" style="${s.vol_dry ? 'color:var(--green)' : ''}">${s.vol_ratio}×</div></div>
+      <div class="metric"><div class="k">RS</div><div class="v" style="color:var(--rs)">${s.rs ?? '-'}</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}${s.ud_vol != null ? ` <span style="color:${s.ud_vol >= 1 ? 'var(--green)' : '#e0a030'};font-size:11px" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집, 1.0↓ 분산">U/D ${s.ud_vol}</span>` : ''}</div></div>
+    </div>
+    <div class="metrics mono" style="border-top:none;padding-top:0">
+      <div class="metric"><div class="k">피벗 (${s.pattern})</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
+      <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
+      <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(${s.entry_basis ?? '피벗'}진입)</span></div><div class="v">${s.risk_pct}%</div></div>
+      <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
+    </div>` : s.mode === 'surge' ? `
+    <div class="metrics mono">
+      <div class="metric"><div class="k">당일</div><div class="v" style="color:var(--px-up)">+${s.change_pct}%</div></div>
+      <div class="metric"><div class="k">거래량</div><div class="v">${s.vol_mult}×</div></div>
+      <div class="metric"><div class="k">위꼬리</div><div class="v" style="${s.upper_wick_pct > 3 ? 'color:var(--up)' : ''}">${s.upper_wick_pct}%</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v" style="${s.rsi > 80 ? 'color:var(--up)' : ''}">${s.rsi}</div></div>
+    </div>
+    <div class="surge-warn">⚡ 단타 신호 · 추세 아님 — 오늘 막 터진 급등 첫날. 하루이틀 모멘텀일 수 있고 다음날 꺼질 수 있어요. RS 무관.</div>` : s.mode === 'imminent' ? `
+    <div class="metrics mono">
+      <div class="metric"><div class="k">피벗까지</div><div class="v" style="color:${s.pivot_dist_pct <= 2 ? 'var(--up)' : 'var(--amber)'}">+${s.pivot_dist_pct}%</div></div>
+      <div class="metric"><div class="k">거래량비</div><div class="v" style="${s.vol_dry ? 'color:var(--green)' : ''}">${s.vol_ratio}×</div></div>
+      <div class="metric"><div class="k">RS</div><div class="v" style="color:var(--rs)">${s.rs}</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}${s.ud_vol != null ? ` <span style="color:${s.ud_vol >= 1 ? 'var(--green)' : '#e0a030'};font-size:11px" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집, 1.0↓ 분산">U/D ${s.ud_vol}</span>` : ''}</div></div>
+    </div>
+    <div class="metrics mono" style="border-top:none;padding-top:0">
+      <div class="metric"><div class="k">피벗 (${s.pivot_type ?? '천장'})</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
+      <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
+      <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(${s.entry_basis ?? '피벗'}진입)</span></div><div class="v">${s.risk_pct}%</div></div>
+      <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
+    </div>` : s.mode === 'breakout' ? `
+    <div class="metrics mono">
+      <div class="metric"><div class="k">연장도</div><div class="v" style="${s.in_valid_zone ? 'color:var(--green)' : 'color:var(--up)'}">+${s.ext_pct}%</div></div>
+      <div class="metric"><div class="k">거래량</div><div class="v">${s.vol_mult}×</div></div>
+      <div class="metric"><div class="k">베이스</div><div class="v">${s.base_days}일</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}${s.ud_vol != null ? ` <span style="color:${s.ud_vol >= 1 ? 'var(--green)' : '#e0a030'};font-size:11px" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집, 1.0↓ 분산">U/D ${s.ud_vol}</span>` : ''}</div></div>
+    </div>
+    <div class="metrics mono" style="border-top:none;padding-top:0">
+      <div class="metric"><div class="k">피벗 (베이스 천장)</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
+      <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
+      <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(${s.entry_basis ?? '피벗'}진입)</span></div><div class="v">${s.risk_pct}%</div></div>
+      <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
+    </div>` : s.mode === 'boxbreak' ? `
+    <div class="metrics mono">
+      <div class="metric"><div class="k">연장도</div><div class="v" style="${s.ext_pct <= 5 ? 'color:var(--green)' : 'color:var(--up)'}">+${s.ext_pct}%</div></div>
+      <div class="metric"><div class="k">거래량</div><div class="v">${s.vol_mult}×</div></div>
+      <div class="metric"><div class="k">박스폭</div><div class="v">${s.box_range_pct}%</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}${s.ud_vol != null ? ` <span style="color:${s.ud_vol >= 1 ? 'var(--green)' : '#e0a030'};font-size:11px" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집, 1.0↓ 분산">U/D ${s.ud_vol}</span>` : ''}</div></div>
+    </div>
+    <div class="metrics mono" style="border-top:none;padding-top:0">
+      <div class="metric"><div class="k">피벗 (${s.pivot_type})</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
+      <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
+      <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(${s.entry_basis ?? '피벗'}진입)</span></div><div class="v">${s.risk_pct}%</div></div>
+      <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
+    </div>` : s.mode === 'super' ? `
+    <div class="metrics mono">
+      <div class="metric"><div class="k">상태</div><div class="v" style="font-size:12px">${s.status}</div></div>
+      <div class="metric"><div class="k">고점까지</div><div class="v">${s.dist_from_high_pct}%</div></div>
+      <div class="metric"><div class="k">담을곳</div><div class="v">${fmtPrice(s.buy_zone, s.market)}</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
+    </div>` : s.mode === 'leader' ? `
+    <div class="metrics mono">
+      <div class="metric"><div class="k">고점까지</div><div class="v">${s.dist_from_high_pct}%</div></div>
+      <div class="metric"><div class="k">20일선 위</div><div class="v">+${s.ma20_dist_pct}%</div></div>
+      <div class="metric"><div class="k">거래량비</div><div class="v">${s.vol_ratio}×</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
+    </div>` : s.mode === 'turnaround' ? `
+    <div class="metrics mono">
+      <div class="metric"><div class="k">정배열</div><div class="v">D+${s.align_days}${s.ma200_rising ? ' <span style="color:var(--green);font-size:11px">📈장기선↑</span>' : ''}</div></div>
+      <div class="metric"><div class="k">베이스 차수</div><div class="v" style="color:${s.base_count === 1 ? 'var(--green)' : 'inherit'}">${s.base_count === 1 ? '최초기' : (s.base_count || '-') + '차'}${s.bottom_ago != null ? ` <span style="font-size:11px;opacity:.7">바닥${s.bottom_ago}봉전</span>` : ''}</div></div>
+      <div class="metric"><div class="k">200일선 위</div><div class="v">+${s.ma200_dist_pct}%</div></div>
+      <div class="metric"><div class="k">돌파일 거래량</div><div class="v" style="color:${s.breakout_vol ? 'var(--up)' : 'inherit'}">${s.vol_mult_5d}× ${s.breakout_vol ? '🚀' : ''}</div></div>
+      <div class="metric"><div class="k">거래량비</div><div class="v">${s.vol_ratio}× <span style="color:${s.ud >= 1 ? 'var(--green)' : 'var(--up)'};font-size:11px">U/D ${s.ud}</span></div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
+    </div>
+    ${s.ud_weak ? `<div style="margin:8px 0;padding:8px 10px;border:1px solid #c0392b;border-radius:8px;background:#2a1414;color:#ff9b9b;font-size:12px;line-height:1.5">⚠️ <b>매집 미확증</b> — U/D ${s.ud} (1 미만). 하락일 거래량이 상승일보다 많아 <b>아직 분산 우세</b>입니다. 가격은 전환 신호를 냈지만 기관 매집이 확인되지 않았어요. U/D가 1을 넘고 거래량 동반 돌파가 나올 때까지 <b>관찰 권장</b>.</div>` : ''}` : `
+    <div class="metrics mono">
+      <div class="metric"><div class="k">눌림 깊이</div><div class="v">-${s.pullback_pct}%</div></div>
+      <div class="metric"><div class="k">지지선</div><div class="v">${s.support_ma} <span style="color:var(--muted);font-size:11px">${s.ma_dist_pct}%</span></div></div>
+      <div class="metric"><div class="k">거래량비</div><div class="v">${s.vol_ratio}×</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
+    </div>`}
+    ${s.mode === 'surge' ? `
+    <div class="badges">
+      <span class="badge on">⚡ 거래량 ${s.vol_mult}×</span>
+      ${s.new_high ? '<span class="badge on">신고가</span>' : ''}
+      ${s.upper_wick_pct > 3 ? '<span class="badge">윗꼬리 ⚠️</span>' : ''}
+      ${s.rsi > 80 ? '<span class="badge">과열 ⚠️</span>' : ''}
+    </div>` : s.mode === 'breakout' ? `
+    <div class="badges">
+      <span class="badge on">🚀 돌파</span>
+      <span class="badge ${s.in_valid_zone ? 'on' : ''}">${s.in_valid_zone ? '매수 유효구간' : '연장 ⚠️ 추격주의'}</span>
+      <span class="badge ${s.vol_mult >= 2 ? 'on' : ''}">거래량 ${s.vol_mult}×</span>
+    </div>` : s.mode === 'boxbreak' ? `
+    <div class="badges">
+      <span class="badge on">📦 박스돌파 ${s.box_days}일</span>
+      <span class="badge ${s.ext_pct <= 5 ? 'on' : ''}">${s.ext_pct <= 5 ? '매수 유효구간' : '연장 ⚠️ 추격주의'}</span>
+      <span class="badge ${s.vol_mult >= 2 ? 'on' : ''}">거래량 ${s.vol_mult}×</span>${s.tl_break_intraday ? '<span class="badge warn" title="장중에 박스를 넘었지만 종가 확정 전. 마감까지 확인하세요.">장중 돌파 ⚠️</span>' : ''}
+    </div>` : s.mode === 'pattern' ? `
+    <div class="badges">
+      <span class="badge on">${s.pattern_emoji} ${s.pattern} 형성 ${s.base_len}일째 (≈${Math.max(1, Math.round(s.base_len / 5))}주)</span>
+      ${s.pattern_stage ? `<span class="badge ${s.pattern_stage === '폭발초입' ? 'warn' : s.pattern_stage === '폭발진행' ? '' : 'on'}" title="${s.pattern_stage === '첫폭발' ? '긴 수렴 후 첫 상한가 — 빠르나 미확인' : s.pattern_stage === '수렴중' ? 'B 다지기 중, 폭발 대기 — 미리 담을 자리' : s.pattern_stage === '폭발초입' ? 'B 후 재폭발 1~2번째 — 진입 이상적' : '3번째+ 상한가 — 추격 주의'}">${s.pattern_stage === '폭발초입' ? '🔥 폭발초입' : s.pattern_stage === '폭발진행' ? '⚠️ 폭발진행(추격)' : s.pattern_stage === '첫폭발' ? '💥 첫폭발' : '⏳ 수렴중'}</span>` : ''}
+      ${s.pattern_stage === '수렴중' && s.abc_buy_lo ? `<span class="badge on" title="A-B-C 수렴중 매수 타점 — 피벗(B상단) 추격 대신 B 하단 지지 반등에서 담아야 손절폭이 작다. 이 구간까지 눌리면 반등(양봉+거래량) 확인 후 진입. 목표는 B상단 ${s.abc_target ? s.abc_target.toLocaleString() : ''}.">🎯 매수타점 ${s.abc_buy_lo.toLocaleString()}~${s.abc_buy_hi.toLocaleString()}</span>` : ''}
+      <span class="badge ${Math.abs(s.pivot_dist_pct) <= 2 ? 'warn' : 'on'}">피벗 ${s.pivot_dist_pct >= 0 ? '+' : ''}${s.pivot_dist_pct}%</span>
+      <span class="badge">패턴 깊이 ${s.depth_pct}%</span>
+      <span class="badge ${s.vol_dry ? 'on' : ''}">거래량 수축</span>
+    </div>` : s.mode === 'imminent' ? `
+    <div class="badges">
+      <span class="badge ${s.pivot_dist_pct <= 2 ? 'warn' : 'on'}">🎯 돌파 임박 (피벗 +${s.pivot_dist_pct}%)</span>
+      ${s.touch_count >= 2 ? `<span class="badge on" title="박스 상단(피벗)을 ${s.touch_count}번 두드림 — 매물벽이 약해져 돌파 확률↑">👊 ${s.touch_count}번 두드림</span>` : ''}
+      <span class="badge ${s.vol_dry ? 'on' : ''}">거래량 수축</span>
+      <span class="badge ${s.tightening ? 'on' : ''}">변동폭 축소</span>${s.tl_break_intraday ? '<span class="badge warn" title="장중에 추세선을 넘었지만 종가 확정 전. 마감까지 확인하세요.">장중 돌파 ⚠️</span>' : ''}
+    </div>` : s.mode === 'super' ? `
+    <div class="badges">
+      <span class="badge on">RS ${s.rs}</span>
+      ${(() => {
+        if (s.status === '신고가') return '<span class="badge">추격 주의</span>';
+        if (s.status && s.status.includes('지지✓')) return '<span class="badge on">매수 확인✓</span>';
+        if (s.status && s.status.includes('지지')) return '<span class="badge on">매수 확인✓</span>';
+        if (s.status && s.status.includes('테스트')) return '<span class="badge on">지지 테스트중</span>';
+        if (s.near_buy_zone) return '<span class="badge on">담을곳 근접</span>';
+        if (s.status === '조정 깊음') return '<span class="badge">추세 점검</span>';
+        return `<span class="badge">담을곳 -${s.buy_zone_dist_pct}%</span>`;
+      })()}
+      ${s.rs_mom >= 10 ? '<span class="badge on">RS 개선↗</span>' : ''}
+    </div>` : s.mode === 'leader' ? `
+    <div class="badges">
+      <span class="badge on">RS ${s.rs}</span>
+      ${s.at_new_high ? '<span class="badge on">신고가</span>' : '<span class="badge">고점 근접</span>'}
+      <span class="badge">눌림 대기</span>
+    </div>` : `
+    <div class="metrics mono" style="border-top:none;padding-top:0">
+      <div class="metric"><div class="k">RS</div><div class="v" style="color:${s.rs >= 80 ? 'var(--green)' : s.rs >= 65 ? 'var(--amber)' : 'var(--text)'}">${s.rs ?? '-'}${s.rs_mom >= 10 ? ' <span style="color:var(--green)" title="상대강도 개선 중">↗</span>' : ''}</div></div>
+      <div class="metric"><div class="k">피벗 (${s.pivot_type ?? '돌파가'})</div><div class="v">${fmtPrice(s.pivot, s.market)} <span style="color:${s.pivot_dist_pct >= 15 ? 'var(--up)' : 'var(--muted)'};font-size:11px">+${s.pivot_dist_pct}%${s.pivot_dist_pct >= 15 ? ' 관찰' : ''}</span></div></div>
+      <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
+      <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(${s.entry_basis ?? '피벗'}진입)</span></div><div class="v">${s.risk_pct}%</div></div>
+      <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
+    </div>`}
+    ${(s.mode === 'leader' || s.mode === 'super' || s.mode === 'breakout' || s.mode === 'surge' || s.mode === 'imminent' || s.mode === 'boxbreak' || s.mode === 'pattern') ? '' : s.mode === 'turnaround' ? `
+    <div class="badges">
+      <span class="badge on">정배열 전환</span>
+      <span class="badge ${s.rs_mom >= 10 ? 'on' : ''}">RS 개선</span>
+      <span class="badge ${s.vol_ratio >= 1.2 && s.ud >= 1 ? 'on' : ''}">거래량 확장</span>${s.tl_break ? '<span class="badge on">추세선 돌파</span>' : (s.tl_break_intraday ? '<span class="badge warn" title="장중에 추세선을 넘었지만 아직 종가 확정 전. 마감까지 위를 지키는지 + 거래량을 확인하세요.">장중 돌파 ⚠️ 미확정</span>' : '')}
+    </div>` : `
+    <div class="badges">
+      <span class="badge ${s.vol_dry ? 'on' : ''}">거래량 수축</span>
+      <span class="badge ${s.tightening ? 'on' : ''}">변동폭 축소</span>
+      <span class="badge ${s.recent_high_ok ? 'on' : ''}">고점 유지</span>${s.tl_break ? '<span class="badge on">추세선 돌파</span>' : (s.tl_break_intraday ? '<span class="badge warn" title="장중에 추세선을 넘었지만 아직 종가 확정 전. 마감까지 위를 지키는지 + 거래량을 확인하세요.">장중 돌파 ⚠️ 미확정</span>' : '')}
+    </div>`}
+    ${(s.mode === 'pullback' || s.mode === 'turnaround' || s.mode === 'breakout' || s.mode === 'imminent' || s.mode === 'boxbreak' || s.mode === 'pattern') ? (() => {
+      const sig = entrySignal(s);
+      const items = sig.checks.map(([lv, txt]) => `<span class="chk chk-${lv}">${lv==='ok'?'✓':lv==='warn'?'△':'✕'} ${txt}</span>`).join('');
+      return `<div class="entry-sig sig-${sig.level}">
+        <div class="sig-head">${sig.label}</div>
+        <div class="sig-list">${items}</div>
+      </div>`;
+    })() : ''}
+    ${s.ticker ? `
+    <button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button>` : ''}
+  </div>`;
+}
+
+let market = 'all';
+let mode = 'imminent';
+let sectorFilter = null;
+let searchQuery = '';
+let lastHits = [];
+let strictMode = false;
+let riskSort = false;
+document.getElementById('strictToggle').addEventListener('click', (e) => {
+  strictMode = !strictMode;
+  e.target.classList.toggle('active', strictMode);
+  renderCards();
+});
+document.getElementById('riskSortToggle').addEventListener('click', (e) => {
+  riskSort = !riskSort;
+  e.target.classList.toggle('active', riskSort);
+  renderCards();
+});
+let favorites = [];
+const DESC = {
+  pullback: '우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+',
+  turnaround: '⭐첫 번째 베이스 집중 · 추세 전환 직후(역배열→정배열) · 바닥 6개월 이내 + 조정 1회↓(1차 베이스) · 200일선 바닥 상향전환 · 돌파일 거래량 1.5배↑ · RS 개선 중',
+  leader: 'RS 88+ · 신고가 8% 이내 · 아직 눌림 전 — 지금은 못 사도 눌림 오면 1순위',
+  super: 'RS 95+ — 지금 시장에서 가장 강한 종목들 (위치 불문). 상태 라벨로 담을곳/대기 판단',
+  breakout: 'RS 80+ · 베이스 천장을 거래량 동반 돌파 · 피벗 +5% 이내=유효 / +5~12%=연장 추격주의',
+  imminent: '🎯 돌파 직전 · 천장(피벗) 바로 아래(-5%~0%)까지 올라왔지만 아직 안 뚫음 · 거래량 수축=가점 · RS 50+ — 돌파 전날 미리 포착',
+  surge: '⚠️ 단타 신호(추세 아님) · 급등 첫날 포착: 당일 +7%↑ & 거래량 4배↑ & 직전 며칠은 조용 · RS 무관',
+  boxbreak: '📦 박스/하락추세 상단을 거래량(1.5배+) 동반 돌파 · 20/40/60일 박스 모두 확인 · 120일선 위 · RS 70+ — 국장 박스탈출/삼각수렴 돌파',
+  inverse: '🔻 지수 하락 베팅 · 인버스 ETF가 강세(정배열·상승)면 = 시장 하락 국면 · 곱버스는 변동성 극심, 단기·소액만 · 미너비니式 본래 현금 우선',
+  pattern: '🧩 장기 패턴이 거의 완성된 종목 · 컵앤핸들(12~35% U바닥+얕은 손잡이) / 치솟은깃발(45봉내 +90% 후 얕은 깃발) / 더블바닥(W자) · 피벗 근처만 표시 — 돌파임박과 달리 몇 주~몇 달 형태를 인식',
+  sectors: '📊 전일 섹터별 강세 요약 · 코스피/코스닥/미국 각각 섹터 평균 등락·상승비율·상위 종목 · 섹터 매핑된 종목 기준',
+  breakdown: '🩸 Stage 4 숏 셋업 · 역배열(20<60<200)+200일선 하락+지지 이탈+하락 거래량+RS 약세 · ⚠️ 숏은 손실 무한·숏스퀴즈·급반등 위험, 한국은 개인 공매도 제약 · 미국 종목 위주'
+};
+
+async function load(refresh = false) {
+  if (mode === 'inverse') { return loadInverse(refresh); }
+  if (mode === 'sectors') { return loadSectors(); }
+  const content = document.getElementById('content');
+  const status = document.getElementById('status');
+  content.innerHTML = '<div class="loading"><div class="spinner"></div>스캔 중… (유니버스 3,500+ 종목 — 하루 첫 스캔은 2~4분, 이후엔 캐시로 즉시)</div>';
+  status.innerHTML = '';
+  try {
+    // 시장 구분 없이 항상 전체를 받아옴 → 한국/미국 탭은 클라이언트에서 필터(재스캔 0초)
+    const res = await fetch(`/api/scan?market=all&mode=${mode}${refresh ? '&refresh=true' : ''}`);
+    if (!res.ok) throw new Error('status ' + res.status);
+    const data = await res.json();
+    if (data.version) { const vb = document.getElementById('verBadge'); if (vb) vb.textContent = data.version; }
+    const _tm = data.timing;
+    const _tmStr = _tm ? ` · ⏱ KR ${_tm.kr_sec}s / US ${_tm.us_sec}s / RS ${_tm.rs_sec}s (신규 ${_tm.n_fetched_kr+_tm.n_fetched_us}, 재사용 ${_tm.n_reused})` : '';
+    status.innerHTML = `<span><b>${data.fetched ?? data.scanned}</b>/${data.scanned}개 종목 스캔</span>
+      <span>${(typeof MODE_TAB_LABEL !== 'undefined' && MODE_TAB_LABEL[mode]) || modeTab(mode) || '스캔'} 후보 <b>${data.hits.length}</b>개</span>
+      <span>기준 ${data.generated_at}${data.cached ? ' (캐시)' : ''}${_tmStr}</span>
+      ${data.warn_count ? `<span style="color:#FF6B6B">⚠️ 경보/과대리스크 ${data.warn_count}</span>` : ''}
+      <span class="alert-mgr" id="alertToggle">경보종목 관리</span>`;
+    const tg = document.getElementById('alertToggle');
+    if (tg) tg.addEventListener('click', () => {
+      document.getElementById('alertPanel').classList.toggle('open');
+      loadAlertList();
+    });
+    lastHits = data.hits;
+    favorites = data.favorites || [];
+    sectorFilter = null;
+    searchQuery = '';
+    const sb = document.getElementById('cardSearch'); if (sb) sb.value = '';
+    document.getElementById('searchBar').style.display = '';
+    renderSectors(data.sector_summary || []);
+    renderCards();
+  } catch (e) {
+    // 콜드 스캔(캐시 워밍 중)일 수 있음 — 15초 후 1회 자동 재시도.
+    // 서버는 백그라운드로 계속 스캔 중이라, 잠시 뒤엔 캐시가 채워져 성공.
+    if (!load._retried) {
+      load._retried = true;
+      content.innerHTML = '<div class="loading"><div class="spinner"></div>첫 스캔은 시간이 걸려요 — 데이터 준비 중… (자동 재시도)</div>';
+      setTimeout(() => { load(false); }, 15000);
+      return;
+    }
+    load._retried = false;
+    content.innerHTML = '<div class="empty">스캔에 실패했습니다. 잠시 후 다시 스캔을 눌러주세요 (첫 스캔은 2~4분 소요).</div>';
+  }
+  load._retried = false;
+}
+
+
+async function loadSectors() {
+  const content = document.getElementById('content');
+  const status = document.getElementById('status');
+  document.getElementById('searchBar').style.display = 'none';
+  renderSectors([]);
+  content.innerHTML = '<div class="loading"><div class="spinner"></div>섹터 집계 중…</div>';
+  status.innerHTML = '';
+  try {
+    const res = await fetch('/api/sectors');
+    const d = await res.json();
+    if (d.version) { const vb = document.getElementById('verBadge'); if (vb) vb.textContent = d.version; }
+    status.innerHTML = `<span>기준 ${d.asof}</span><span>마지막 봉 대비 등락 · 섹터 매핑 종목 기준</span>`;
+    const panelName = {KOSPI: '코스피', KOSDAQ: '코스닥', US: '나스닥·NYSE'};
+    const chgColor = v => v > 0 ? 'color:var(--px-up)' : v < 0 ? 'color:var(--px-down)' : 'color:var(--muted)';
+    const p = d.panels || {};
+    const cols = ['KOSPI', 'KOSDAQ', 'US'];
+    const maxRows = Math.max(...cols.map(k => (p[k] || []).length), 1);
+    // 미국은 티커(짧고 명확), 한국은 종목명. 상위 5개까지 줄바꿈 허용.
+    const nameOf = (t, isUS) => isUS ? (t.ticker || t.name) : t.name;
+    const cell = (r, isUS) => r ? `
+      <td style="padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top" title="${r.top.map(t => `${nameOf(t, isUS)} ${t.chg > 0 ? '+' : ''}${t.chg}%`).join(' · ')}">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+          <b style="font-size:13px">${r.sector}</b>
+          <span class="mono" style="${chgColor(r.avg_chg)};font-weight:700;white-space:nowrap">${r.avg_chg > 0 ? '+' : ''}${r.avg_chg}%</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted)">${r.n}종목 · 상승 ${r.up_pct}%</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.6">${r.top.slice(0, 5).map(t => `${nameOf(t, isUS)} <span style="${chgColor(t.chg)}">${t.chg > 0 ? '+' : ''}${t.chg}%</span>`).join(' · ')}</div>
+      </td>` : '<td style="border-bottom:1px solid var(--line)"></td>';
+    let body = '';
+    for (let i = 0; i < maxRows; i++) {
+      body += '<tr>' + cols.map(k => cell((p[k] || [])[i], k === 'US')).join('') + '</tr>';
+    }
+    // ── 🏆 주도업종 랭킹 (v4.49): RS 85+ & 3개월 +30% & 200일선 위 생존자 카운트 ──
+    // 하루 등락 평균(아래 표)은 노이즈, 생존자 밀집이 로테이션의 진짜 신호
+    const L = d.leading || {};
+    const ldRow = (mkt, label) => {
+      const rows = L[mkt] || [];
+      if (!rows.length) return `<div style="flex:1;min-width:280px"><div style="font-weight:700;font-size:13px;margin-bottom:6px">${label}</div><div style="color:var(--muted);font-size:12px">조건 통과 종목 없음 — 지금 주도주가 없다는 뜻 (조정장 정상)</div></div>`;
+      const maxN = rows[0].n || 1;
+      return `<div style="flex:1;min-width:280px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:6px">${label}</div>
+        ${rows.map(r => `
+          <div style="display:flex;align-items:center;gap:8px;padding:3px 0" title="${r.top.map(t => `${mkt === 'US' ? (t.ticker || t.name) : t.name} RS${t.rs} 3개월+${t.mom3}%`).join(' · ')}">
+            <span style="width:86px;font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.sector}</span>
+            <span style="flex:1;height:8px;background:var(--card);border-radius:4px;overflow:hidden"><span style="display:block;height:100%;width:${Math.round(r.n / maxN * 100)}%;background:var(--green);border-radius:4px"></span></span>
+            <b style="font-size:12px;width:22px;text-align:right">${r.n}</b>
+          </div>`).join('')}
+      </div>`;
+    };
+    const leadingHtml = `
+      <div style="max-width:980px;margin:0 auto 14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:8px">🏆 주도업종 랭킹
+          <span style="color:var(--muted);font-weight:400;font-size:11px">RS 85+ · 3개월 +30% · 200일선 위 생존 종목 수 — 로테이션 감지용 (막대에 마우스: 대표 종목)</span></div>
+        <div style="display:flex;gap:20px;flex-wrap:wrap">${ldRow('KR', '🇰🇷 한국')}${ldRow('US', '🇺🇸 미국')}</div>
+      </div>`;
+    content.innerHTML = leadingHtml + `<div style="max-width:980px;margin:0 auto;overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;table-layout:fixed;min-width:640px">
+        <thead><tr>${cols.map(k => `<th style="text-align:left;padding:10px;font-size:14px;border-bottom:2px solid var(--line)">${k === 'US' ? '🇺🇸' : '🇰🇷'} ${panelName[k]}</th>`).join('')}</tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+      <div style="color:var(--muted);font-size:11px;padding:10px">강세순 정렬 · 셀에 마우스를 올리면 상위 종목 표시 · 섹터 매핑된 종목 기준</div>
+    </div>`;
+  } catch (e) {
+    content.innerHTML = '<div class="empty">섹터 집계에 실패했습니다.</div>';
+  }
+}
+
+async function loadInverse(refresh = false) {
+  const content = document.getElementById('content');
+  const status = document.getElementById('status');
+  content.innerHTML = '<div class="loading"><div class="spinner"></div>인버스 스캔 중…</div>';
+  status.innerHTML = '';
+  document.getElementById('searchBar').style.display = 'none';
+  try {
+    const res = await fetch(`/api/inverse?market=all${refresh ? '&refresh=true' : ''}`);
+    const data = await res.json();
+    const regimeColor = data.regime === 'bear' ? '#FF6B6B' : (data.regime === 'weakening' ? '#f2b33d' : '#5fd99a');
+    status.innerHTML = `<span style="color:${regimeColor};font-weight:600">${data.regime_txt}</span>
+      <span>인버스 ${data.hits.length}개</span>
+      <span>기준 ${data.generated_at}${data.cached ? ' (캐시)' : ''}</span>`;
+    document.getElementById('sectorRow') && (document.getElementById('sectorRow').innerHTML = '');
+    renderInverseCards(data.hits || []);
+  } catch (e) {
+    content.innerHTML = '<div class="empty">인버스 스캔 실패. 서버 로그를 확인하세요.</div>';
+  }
+}
+
+function renderInverseCards(hits) {
+  const content = document.getElementById('content');
+  if (!hits.length) { content.innerHTML = '<div class="empty">인버스 데이터가 없습니다.</div>'; return; }
+  const strengthBadge = (s) => s === 'strong'
+    ? '<span class="st-badge" style="background:#3a2020;color:#ff6b6b">🔴 본격 하락장</span>'
+    : s === 'building'
+    ? '<span class="st-badge" style="background:#3a3320;color:#f2b33d">🟡 하락 조짐</span>'
+    : '<span class="st-badge" style="background:#1e2a1e;color:#7a8a7a">🟢 부적합</span>';
+  const cards = hits.map(s => {
+    const levBadge = s.leverage >= 2 ? `<span class="st-badge" style="background:#3a2020;color:#ff9b9b">${s.leverage}x 곱버스</span>` : '';
+    // 강도 점수 색
+    const scoreColor = s.inv_score >= 70 ? '#ff6b6b' : (s.inv_score >= 40 ? '#f2b33d' : '#7a8a7a');
+    // 기초지수 5일 등락 (인버스가 왜 오르는지)
+    const idx5 = s.index_5d_pct;
+    const idx5Str = idx5 != null ? `${idx5>=0?'+':''}${idx5}%` : '–';
+    const idx5Color = idx5 != null ? (idx5 < 0 ? 'var(--px-down)' : 'var(--px-up)') : 'var(--muted)';
+    return `<div class="card">
+      <div class="card-top">
+        <div>
+          <div class="name">${s.name}<span class="mkt">${s.market}</span></div>
+          <div class="tick mono"><a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a> · ${s.underlying} 하락 베팅</div>
+        </div>
+        <div style="margin-left:auto;text-align:right">
+          <div style="font-size:9px;color:var(--muted)">강도</div>
+          <div class="mono" style="font-weight:700;font-size:18px;color:${scoreColor}">${s.inv_score != null ? s.inv_score : '–'}</div>
+        </div>
+      </div>
+      <div style="margin:8px 0;display:flex;gap:6px;flex-wrap:wrap">${strengthBadge(s.strength)} ${levBadge}</div>
+      <div class="metrics">
+        <div class="metric"><div class="k">${s.underlying} 5일</div><div class="v mono" style="color:${idx5Color}">${idx5Str}</div></div>
+        <div class="metric"><div class="k">인버스 5일</div><div class="v mono" style="color:${s.ret5_pct>=0?'var(--px-up)':'var(--px-down)'}">${s.ret5_pct>=0?'+':''}${s.ret5_pct}%</div></div>
+        <div class="metric"><div class="k">연속 상승</div><div class="v mono">${s.up_streak>0?s.up_streak+'일↑':'–'}</div></div>
+        <div class="metric"><div class="k">RSI</div><div class="v mono">${s.rsi}</div></div>
+      </div>
+      ${s.overheated ? '<div class="surge-warn" style="background:rgba(255,107,107,.08);border-color:rgba(255,107,107,.3)">⚠️ 인버스 과열(RSI '+s.rsi+') — 지수 과대낙폭 = 반등 시 인버스 급락 위험. 추격 금지.</div>' : ''}
+      <div style="font-size:11px;color:var(--muted);margin-top:8px">${s.strength_txt}${s.derived ? ' · 📐 1x 역산' : ''}</div>
+    </div>`;
+  }).join('');
+  content.innerHTML = `
+    <div class="surge-warn" style="margin-bottom:12px">🔻 인버스 = 지수 하락 베팅. <b>강도 점수(0~100)</b>가 높을수록 인버스 살 만한 국면이에요. <b>기초지수 5일 등락</b>이 마이너스(지수 빠짐)일수록 인버스 유리. 곱버스(2x/3x)는 변동성 극심 → <b>단기·소액만</b>. 미너비니式 본래 하락장엔 현금 우선.<br><span style="font-size:11px;color:var(--muted)">※ 곱버스/미국 ETF의 실시간 정확한 가격은 증권앱에서 확인하세요. 이 탭은 "지금 하락 국면인가" 판단용이에요.</span></div>
+    <div class="grid">${cards}</div>`;
+}
+
+async function loadAlertList() {
+  try {
+    const r = await fetch('/api/alerts'); const data = await r.json();
+    const list = document.getElementById('alertList');
+    const keys = Object.keys(data);
+    list.innerHTML = keys.length
+      ? keys.map(t => `<span class="chip" data-t="${t}" title="클릭하면 삭제">${t} ${data[t]} ✕</span>`).join('')
+      : '<span style="color:var(--muted);font-size:12px">등록된 경보 종목 없음</span>';
+    list.querySelectorAll('.chip').forEach(c => c.addEventListener('click', async () => {
+      await fetch('/api/alerts', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ticker: c.dataset.t, remove: true})});
+      loadAlertList(); load(true);
+    }));
+  } catch(e) {}
+}
+
+document.getElementById('cardSearch').addEventListener('input', (e) => {
+  searchQuery = e.target.value.trim();
+  renderCards();
+});
+
+// 유니버스 전체 종목 조회 (현재 탭에 안 잡힌 종목 검색용)
+let _lookupTimer = null;
+let _lookupLast = '';
+function triggerLookup(query) {
+  // 디바운스: 입력 멈춘 뒤 500ms 후 1회 호출
+  clearTimeout(_lookupTimer);
+  _lookupTimer = setTimeout(async () => {
+    const q = query.trim();
+    if (!q || q.length < 1) return;
+    if (q === _lookupLast) return;   // 중복 호출 방지
+    _lookupLast = q;
+    const hint = document.getElementById('lookupHint');
+    try {
+      const res = await fetch('/api/lookup/' + encodeURIComponent(q));
+      const d = await res.json();
+      // 검색어가 그새 바뀌었으면 무시
+      if (searchQuery.trim() !== q) return;
+      if (d.error) {
+        if (hint) hint.innerHTML = `유니버스에 '${q}'이(가) 없거나 데이터를 못 가져왔어요.`;
+        return;
+      }
+      renderLookupCard(d);
+    } catch (e) {
+      if (hint) hint.textContent = '조회 중 오류가 났어요.';
+    }
+  }, 500);
+}
+
+function renderLookupCard(d) {
+  const content = document.getElementById('content');
+  const isKr = d.market === 'KR';
+  const fmtPx = isKr ? Math.round(d.close).toLocaleString() : Number(d.close).toFixed(2);
+  const chgCls = d.change_pct >= 0 ? 'var(--px-up)' : 'var(--px-down)';
+  const chgSign = d.change_pct >= 0 ? '+' : '';
+  const turnoverStr = isKr
+    ? (d.turnover >= 1e8 ? Math.round(d.turnover/1e8).toLocaleString()+'억' : Math.round(d.turnover/1e4).toLocaleString()+'만')
+    : (d.turnover >= 1e9 ? '$'+(d.turnover/1e9).toFixed(1)+'B' : '$'+Math.round(d.turnover/1e6)+'M');
+  const tvHref = isKr
+    ? `https://www.tradingview.com/chart/?symbol=KRX:${(d.ticker||'').replace(/\.(KS|KQ)$/,'')}`
+    : `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(d.ticker)}`;
+  content.innerHTML = `
+    <div style="max-width:520px;margin:0 auto">
+      <div style="background:#1a1a24;border:1px solid #2d6a8c;border-radius:12px;padding:16px;margin-bottom:12px">
+        <div style="font-size:12px;color:#9fd4ff;margin-bottom:10px">🔍 유니버스 조회 — 이 종목은 현재 어느 시그널에도 안 잡혔어요. 참고용 현재 지표예요.</div>
+        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px">
+          <a href="${tvHref}" target="_blank" rel="noopener" style="font-size:18px;font-weight:700;color:inherit;text-decoration:none">${d.name} <span style="font-size:10px;opacity:.5">↗</span></a>
+          <span style="font-size:11px;color:var(--muted)">${d.ticker} · ${d.market}</span>
+        </div>
+        <div style="font-size:22px;font-weight:700;margin-bottom:12px">${fmtPx} <span style="font-size:14px;color:${chgCls}">${chgSign}${d.change_pct}%</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:13px">
+          <div><div style="color:var(--muted);font-size:11px">정배열</div><div style="color:${d.aligned?'var(--green)':'var(--muted)'}">${d.aligned?'정배열 ✓':'역배열'}</div></div>
+          <div><div style="color:var(--muted);font-size:11px">200일선 대비</div><div style="color:${(d.ma200_dist??0)>=0?'var(--px-up)':'var(--px-down)'}">${d.ma200_dist!=null?(d.ma200_dist>=0?'+':'')+d.ma200_dist+'%':'-'}</div></div>
+          <div><div style="color:var(--muted);font-size:11px">RSI</div><div>${d.rsi??'-'}</div></div>
+          <div><div style="color:var(--muted);font-size:11px">거래량비</div><div>${d.vol_mult!=null?d.vol_mult+'×':'-'} <span style="font-size:10px;color:${(d.ud??0)>=1?'var(--green)':'var(--down)'}">U/D ${d.ud??'-'}</span></div></div>
+          <div><div style="color:var(--muted);font-size:11px">거래대금</div><div>${turnoverStr}</div></div>
+          <div><div style="color:var(--muted);font-size:11px">52주 고점대비</div><div style="color:${(d.from_high??0)>=-5?'var(--px-up)':'var(--muted)'}">${d.from_high!=null?d.from_high+'%':'-'}</div></div>
+        </div>
+        <div style="margin-top:10px;font-size:11px;color:var(--muted)">52주 저점 대비 ${d.from_low!=null?'+'+d.from_low+'%':'-'} · 20일선 ${d.ma20?.toLocaleString?.()??d.ma20} · 60일선 ${d.ma60?.toLocaleString?.()??d.ma60}</div>
+      </div>
+    </div>`;
+}
+
+document.getElementById('alertAdd').addEventListener('click', async () => {
+  const t = document.getElementById('alertTicker').value.trim();
+  const k = document.getElementById('alertKind').value;
+  if (!t) return;
+  await fetch('/api/alerts', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ticker: t, kind: k})});
+  document.getElementById('alertTicker').value = '';
+  loadAlertList(); load(true);
+});
+
+function renderSectors(summary) {
+  const bar = document.getElementById('sectorbar');
+  if (!summary.length) { bar.innerHTML = ''; return; }
+  const chips = summary.map(s =>
+    `<span class="schip" data-sec="${s.sector}">${s.sector}<b>${s.count}</b></span>`
+  ).join('');
+  bar.innerHTML = chips;
+  bar.querySelectorAll('.schip').forEach(ch => ch.addEventListener('click', () => {
+    const sec = ch.dataset.sec;
+    sectorFilter = (sectorFilter === sec) ? null : sec;
+    bar.querySelectorAll('.schip').forEach(x => x.classList.toggle('on', x.dataset.sec === sectorFilter));
+    renderCards();
+  }));
+}
+
+function renderCards() {
+  const content = document.getElementById('content');
+  let list = sectorFilter ? lastHits.filter(h => h.sector === sectorFilter) : lastHits.slice();
+  // 시장 필터 (클라이언트에서 거름 — 재스캔 없음)
+  if (market === 'kr') list = list.filter(h => h.market === 'KR');
+  else if (market === 'us') list = list.filter(h => h.market === 'US');
+  // 종목명/코드 검색 필터
+  if (searchQuery) {
+    const q = searchQuery.toLowerCase().replace(/\s/g, '');
+    list = list.filter(h =>
+      (h.name || '').toLowerCase().replace(/\s/g, '').includes(q) ||
+      (h.ticker || '').toLowerCase().includes(q)
+    );
+  }
+  // 주도주 엄격모드 필터: RS90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓
+  // 주도주(RS90+) 필터는 롱 전용 — 숏(붕괴)은 약한 종목이라 적용하지 않음
+  if (strictMode && mode !== 'breakdown') {
+    list = list.filter(h => {
+      const rsOk = (h.rs ?? 0) >= 90;
+      const volOk = (h.vol_mult ?? 0) >= 1.5 || (h.vol_ratio ?? 0) >= 1.0;
+      const rrOk = (h.rr ?? 0) >= 2;
+      const riskOk = (h.risk_pct ?? 99) <= 8;
+      return rsOk && volOk && rrOk && riskOk;
+    });
+  }
+  // 손절 좁은 순 정렬 (토글): 리스크% 오름차순 — 타이트한 진입 자리가 위로
+  if (riskSort) {
+    list.sort((a, b) => (a.risk_pct ?? 999) - (b.risk_pct ?? 999));
+  }
+  // 시간대별 시장 우선 정렬 (전체 탭에서만):
+  // 사용자 요청: 한국시간 오전 6시~오후 8시는 한국주 먼저(미국장 끝나자마자~한국장),
+  //            그 외(오후 8시~오전 6시)는 미국주 먼저(미국장 진행 시간대)
+  if (market === 'all' && !riskSort) {
+    const krHour = (new Date().getUTCHours() + 9) % 24;  // 한국시간 (UTC+9)
+    const krFirst = (krHour >= 6 && krHour < 20);  // 06~20시: 한국주 먼저, 그 외: 미국주 먼저
+    const rank = h => {
+      const isKr = h.market === 'KR';
+      return krFirst ? (isKr ? 0 : 1) : (isKr ? 1 : 0);
+    };
+    list.sort((a, b) => rank(a) - rank(b));  // 안정 정렬: 시장 내 원래 순서 유지
+  }
+  // 즐겨찾기를 최상단으로 (시장 정렬 위에 얹음)
+  const isFav = h => favorites.includes((h.ticker || '').toUpperCase());
+  list.sort((a, b) => (isFav(b) ? 1 : 0) - (isFav(a) ? 1 : 0));
+  content.innerHTML = list.length
+    ? `<div class="grid">${list.map(card).join('')}</div>`
+    : `<div class="empty">${(strictMode && mode !== 'breakdown') ? `🎯 주도주 조건(RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓)을 모두 충족하는 종목이 없습니다.<br>엄선 필터라 비어있는 게 정상이에요. 해제하려면 '🎯 주도주만'을 다시 누르세요.` : searchQuery ? `'${searchQuery}'은(는) 이 탭의 시그널엔 없어요.<br><span id="lookupHint" style="color:var(--muted);font-size:12px">유니버스 전체에서 찾는 중…</span>` : sectorFilter ? `'${sectorFilter}' 섹터에 해당 종목이 없습니다.` : `현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : mode === 'breakdown' ? 'Stage 4 숏(붕괴)' : '눌림목'} 종목이 없습니다.<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.`}</div>`;
+  // 탭 결과에 없으면 유니버스 전체 조회 (검색어 있을 때만)
+  if (!list.length && searchQuery && !strictMode) {
+    triggerLookup(searchQuery);
+  }
+  // 별 버튼 이벤트 바인딩
+  content.querySelectorAll('.fav-btn').forEach(b => b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const t = b.dataset.ticker;
+    await fetch('/api/favorites', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ticker: t})});
+    // 로컬 즉시 반영 후 재정렬
+    const up = t.toUpperCase();
+    if (favorites.includes(up)) favorites = favorites.filter(f => f !== up);
+    else favorites.push(up);
+    renderCards();
+  }));
+  // 밸류 보기 버튼 바인딩
+  content.querySelectorAll('.fund-btn').forEach(b => b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const t = b.dataset.ticker;
+    const box = document.getElementById('fund-' + t);
+    if (!box) return;
+    // 이미 로드된 종목이면 토글
+    if (fundCache[t]) {
+      if (box.dataset.shown === '1') { box.innerHTML=''; box.dataset.shown='0'; b.textContent='📊 밸류 보기'; }
+      else { box.innerHTML = renderFund(fundCache[t]); box.dataset.shown='1'; b.textContent='📊 밸류 접기'; }
+      return;
+    }
+    b.disabled = true; b.textContent = '불러오는 중…';
+    try {
+      const res = await fetch('/api/fundamentals/' + encodeURIComponent(t));
+      const data = await res.json();
+      fundCache[t] = data;
+      box.innerHTML = renderFund(data);
+      box.dataset.shown = '1';
+      b.textContent = '📊 밸류 접기';
+    } catch (err) {
+      box.innerHTML = '<span class="note">밸류 데이터를 불러오지 못했어요.</span>';
+    } finally {
+      b.disabled = false;
+    }
+  }));
+}
+
+const fundCache = {};
+function renderFund(d) {
+  if (!d || d.error) return '<span class="note">밸류 데이터 없음 (해당 종목 미지원).</span>';
+  const chips = [];
+  if (d.roe != null) chips.push(`<span class="fchip">ROE <b>${d.roe}</b></span>`);
+  if (d.per_flag) chips.push(`<span class="fchip" title="순이익 적자이거나 이익이 매우 작아 PER이 무의미한 상태">PER <b>${d.per_flag}</b></span>`);
+  if (d.trail_pe != null) chips.push(`<span class="fchip">PER <b>${d.trail_pe}</b></span>`);
+  if (d.fwd_pe != null) chips.push(`<span class="fchip">Fwd PER <b>${d.fwd_pe}</b></span>`);
+  if (d.pbr != null) chips.push(`<span class="fchip">PBR <b>${d.pbr}</b></span>`);
+  if (d.growing === true) chips.push(`<span class="fchip" title="선행 PER<후행 PER → 이익 성장 예상">이익성장 ↑</span>`);
+  if (d.per_cheap === true) chips.push(`<span class="fchip" title="선행(추정) PER 8배 미만 = 이익 대비 저평가. 메모리·시클리컬에 특히 유효">PER 8배↓ 싸다</span>`);
+  let vd = '';
+  if (d.verdict) {
+    const cls = d.verdict === '싸다' ? 'cheap' : (d.verdict === '비싸다' ? 'exp' : 'fair');
+    const pos = d.pct_in_band != null ? ` (밴드 ${d.pct_in_band}%)` : '';
+    vd = `<span class="vd ${cls}">${d.verdict}${pos}</span>`;
+  }
+  // 안전마진 진입가 (목표주가 × 0.7~0.8)
+  let smRow = '';
+  if (d.tp != null && d.sm_high != null) {
+    const fmt = (n) => Math.round(n).toLocaleString('ko-KR');
+    const enterCls = d.sm_enter ? 'cheap' : 'exp';
+    const enterTxt = d.sm_enter ? '진입 가능구간 ✓' : '아직 비쌈';
+    const upTxt = d.sm_upside != null ? ` · 목표가까지 ${d.sm_upside > 0 ? '+' : ''}${d.sm_upside}%` : '';
+    smRow = `<span class="note" style="margin-top:6px">안전마진가 (목표 ${fmt(d.tp)} × 0.7~0.8): `
+      + `<b style="color:var(--text)">${fmt(d.sm_low)} ~ ${fmt(d.sm_high)}</b> `
+      + `<span class="vd ${enterCls}" style="font-size:11px;padding:1px 7px">${enterTxt}</span>${upTxt}</span>`;
+  }
+  const bandNote = (d.band_low != null && d.band_high != null)
+    ? `<span class="note">PER밴드 25~75%: ${d.band_low} ~ ${d.band_high}</span>` : '';
+  const krNote = (d.market === 'KR')
+    ? '<span class="note">한국주는 네이버 기준 ROE 미제공 · PER밴드는 최근 1년 근사예요.</span>' : '';
+  const disclaim = '<span class="note">⚠️ 참고용. 진입 판단은 가격·거래량·추세 기준이에요.</span>';
+  return `<div class="row">${chips.join('')}${vd}</div>${smRow}${bandNote}${krNote}${disclaim}`;
+}
+
+document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('[data-market]').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  market = t.dataset.market;
+  renderCards();  // 재스캔 없이 화면만 다시 그림 (lastHits는 전체 보유)
+}));
+document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('[data-mode]').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  mode = t.dataset.mode;
+  const isJournal = mode === 'journal';
+  document.getElementById('content').style.display = isJournal ? 'none' : '';
+  document.getElementById('journalView').style.display = isJournal ? 'block' : 'none';
+  document.getElementById('searchBar').style.display = isJournal ? 'none' : '';
+  document.getElementById('subDesc').textContent = isJournal
+    ? '🔥/추세전환 신호를 기록하고 결과(R)를 추적 — 주말에 CSV로 내보내 구글시트에 백업'
+    : DESC[mode];
+  if (isJournal) { renderJournal(); } else { load(); }
+}));
+
+// ════════════════ R 기반 리스크 시스템 (v4.47) ════════════════
+// 철학: 모든 결정은 매수 전에. 사이즈는 공식이 정하고(확신은 진입 여부에만),
+// 진입 허용량은 게이트가 정하고, 한도 도달 시 시스템이 물리적으로 잠근다.
+let rSettings = { equity: 0, r_pct: 0.5, max_open_r: 3, weekly_stop_r: 3,
+                  monthly_stop_r: 6, gate: 'confirmed', dist_days: 0, usd_krw: 1400 };
+
+let gateSug = null;   // 시장 게이트 자동 제안 (v4.50)
+async function loadGateSuggest() {
+  try {
+    const res = await fetch('/api/market/gate');
+    if (res.ok) {
+      const j = await res.json();
+      if (j.ok) gateSug = j;
+    }
+  } catch (e) { /* 무시 */ }
+}
+async function applyGateSuggest() {
+  if (!gateSug || !gateSug.suggest) return;
+  rSettings.gate = gateSug.suggest;
+  try {
+    await fetch('/api/rsettings', { method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ gate: gateSug.suggest }) });
+  } catch (e) {}
+  renderJournal();
+}
+async function loadRSettings() {
+  try {
+    const res = await fetch('/api/rsettings');
+    if (res.ok) rSettings = { ...rSettings, ...(await res.json()) };
+  } catch (e) { /* 오프라인이면 기본값 유지 */ }
+}
+function openRSettings() {
+  const g = id => document.getElementById(id);
+  g('rsEquity').value = rSettings.equity || '';
+  g('rsRpct').value = rSettings.r_pct;
+  g('rsMaxOpen').value = rSettings.max_open_r;
+  g('rsFx').value = rSettings.usd_krw;
+  g('rsWeekStop').value = rSettings.weekly_stop_r;
+  g('rsMonthStop').value = rSettings.monthly_stop_r;
+  g('rsGate').value = rSettings.gate;
+  g('rsDist').value = rSettings.dist_days;
+  const sugEl = document.getElementById('rsGateSug');
+  if (sugEl) {
+    if (gateSug && gateSug.suggest) {
+      const em = { confirmed: '🟢 확인된 상승', pressure: '🟡 조정 압박', correction: '🔴 조정' }[gateSug.suggest];
+      sugEl.innerHTML = `자동 제안: <b>${em}</b> — ${gateSug.why || ''} (분산일 ${gateSug.dist_days ?? '?'}개${gateSug.ftd ? ' · FTD 확인' : gateSug.in_correction ? ` · 반등 ${gateSug.rally_day}일차` : ''})`;
+    } else sugEl.textContent = '';
+  }
+  document.getElementById('rSettingsModal').classList.add('open');
+}
+async function saveRSettings() {
+  const g = id => parseFloat(document.getElementById(id).value);
+  const body = {
+    equity: g('rsEquity') || 0, r_pct: g('rsRpct') || 0.5,
+    max_open_r: g('rsMaxOpen') || 3, usd_krw: g('rsFx') || 1400,
+    weekly_stop_r: g('rsWeekStop') || 3, monthly_stop_r: g('rsMonthStop') || 6,
+    gate: document.getElementById('rsGate').value,
+    dist_days: g('rsDist') || 0,
+  };
+  try {
+    const res = await fetch('/api/rsettings', { method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+    if (res.ok) rSettings = { ...rSettings, ...(await res.json()) };
+  } catch (e) { alert('저장 실패 — 서버 연결을 확인하세요'); return; }
+  document.getElementById('rSettingsModal').classList.remove('open');
+  if (document.getElementById('journalView').style.display !== 'none') renderJournal();
+}
+
+// 1R 금액 (원). 연속 3패면 0.5배로 축소 (2연승 시 복구).
+function oneRKrw() {
+  const base = (rSettings.equity || 0) * (rSettings.r_pct || 0.5) / 100;
+  return consecLosses() >= 3 ? base * 0.5 : base;
+}
+// 연속 손실 카운트: 종료된 매매를 최신순으로 훑어 연속 음수 R 개수.
+// (양수 만나면 중단. 2연승 복구 규칙은 "최근이 연승이면 카운트 0"으로 자연 충족)
+function consecLosses() {
+  const closed = getJournal()
+    .filter(r => r.result_r !== '' && r.status !== 'missed' && !isBrokenRow(r))
+    .sort((a, b) => {
+      const d = (b.closed_date || b.last_checked || b.date || '')
+        .localeCompare(a.closed_date || a.last_checked || a.date || '');
+      return d !== 0 ? d : (b.id || 0) - (a.id || 0);   // 같은 날짜면 id(타임스탬프)로
+    });
+  let n = 0;
+  for (const r of closed) {
+    if (parseFloat(r.result_r) < 0) n++;
+    else break;
+  }
+  return n;
+}
+
+// 포지션 사이즈: 주식수 = 1R금액 ÷ (진입가-손절가). 확신이 있어도 이 수, 없어도 이 수.
+function calcShares(entry, stop, market) {
+  if (!entry || !stop || entry <= stop) return null;
+  const rKrw = oneRKrw();
+  if (!rKrw) return null;
+  const fx = market === 'KR' ? 1 : (rSettings.usd_krw || 1400);
+  const perShareKrw = (entry - stop) * fx;
+  const shares = Math.floor(rKrw / perShareKrw);
+  return {
+    shares,
+    rKrw: Math.round(rKrw),
+    posKrw: Math.round(shares * entry * fx),
+    riskPct: Math.round((entry - stop) / entry * 1000) / 10,
+    reduced: consecLosses() >= 3,
+  };
+}
+
+// 현재 오픈 리스크 합계 (R). 진입(entered) 상태만.
+// shares가 기록된 신규 항목은 정확 계산, 구버전 항목은 보수적으로 1R 간주.
+// 손절이 본전 위로 올라간(free trade) 항목은 0R.
+function openRiskR() {
+  const rKrwNow = (rSettings.equity || 0) * (rSettings.r_pct || 0.5) / 100;
+  let total = 0;
+  for (const r of getJournal()) {
+    if ((r.status || 'entered') !== 'entered' || r.result_r !== '' || isBrokenRow(r)) continue;
+    const entry = parseFloat(r.entry), stop = parseFloat(r.stop);
+    if (!entry || !stop) continue;
+    if (r.shares && r.r_value_krw) {
+      const fx = /\.(KS|KQ)$/i.test(r.ticker || '') ? 1 : (rSettings.usd_krw || 1400);
+      total += Math.max(0, r.shares * (entry - stop) * fx) / r.r_value_krw;
+    } else if (rKrwNow > 0) {
+      total += stop >= entry ? 0 : 1;   // 구버전: 사이즈 모름 → 1R 가정
+    } else {
+      total += 1;
+    }
+  }
+  return Math.round(total * 100) / 100;
+}
+
+// 기간 실현 R: 이번 주(월~일) / 이번 달 종료 매매의 result_r 합.
+function periodR() {
+  const now = new Date();
+  const day = (now.getDay() + 6) % 7;              // 월=0
+  const weekStart = new Date(now); weekStart.setDate(now.getDate() - day);
+  const wk = weekStart.toISOString().slice(0, 10);
+  const mo = now.toISOString().slice(0, 7);
+  let week = 0, month = 0;
+  for (const r of getJournal()) {
+    if (r.result_r === '' || r.status === 'missed' || isBrokenRow(r)) continue;
+    const d = r.closed_date || r.last_checked || r.date || '';
+    const v = parseFloat(r.result_r); if (isNaN(v)) continue;
+    if (d >= wk) week += v;
+    if (d.slice(0, 7) === mo) month += v;
+  }
+  return { week: Math.round(week * 100) / 100, month: Math.round(month * 100) / 100 };
+}
+
+// 게이트별 오픈 리스크 상한
+function effectiveCapR() {
+  if (rSettings.gate === 'correction') return 0;
+  if (rSettings.gate === 'pressure') return Math.min(rSettings.max_open_r || 3, 1.5);
+  return rSettings.max_open_r || 3;
+}
+
+// 진입 게이트: 신규 '진입(entered)'이 허용되는지. 관찰/대기 추가는 항상 허용.
+function entryGate(newR = 1) {
+  const open = openRiskR();
+  const cap = effectiveCapR();
+  const { week, month } = periodR();
+  if (rSettings.gate === 'correction')
+    return { allowed: false, reason: '🔴 시장 게이트: 조정 — 신규 진입 0, 현금 유지' };
+  if (month <= -(rSettings.monthly_stop_r || 6))
+    return { allowed: false, reason: `🔒 월간 서킷브레이커: ${month}R (한도 -${rSettings.monthly_stop_r}R) — 이 달 신규 진입 종료` };
+  if (week <= -(rSettings.weekly_stop_r || 3))
+    return { allowed: false, reason: `🔒 주간 서킷브레이커: ${week}R (한도 -${rSettings.weekly_stop_r}R) — 이번 주는 관찰만` };
+  if (open + newR > cap + 0.001)
+    return { allowed: false, reason: `🔒 오픈 리스크 상한: 현재 ${open}R + 신규 ${newR}R > 허용 ${cap}R — 기존 포지션 정리 후 진입` };
+  return { allowed: true, reason: '' };
+}
+
+// 진입 폼 실시간 계산줄 렌더
+function renderCalcLine(elId, entry, stop, market) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.classList.remove('warn', 'lock');
+  if (!rSettings.equity) {
+    el.innerHTML = `⚙️ 총자산 미설정 — 일지 탭의 <b style="cursor:pointer;text-decoration:underline" onclick="openRSettings()">R 설정</b>에서 입력하면 주식수가 자동 계산돼요`;
+    el.classList.add('warn');
+    return;
+  }
+  const c = calcShares(entry, stop, market);
+  if (!c) { el.innerHTML = '진입가·손절가를 입력하면 주식수가 계산됩니다 (손절 < 진입)'; return; }
+  const fx = market === 'KR' ? '' : ` · 환율 ${rSettings.usd_krw}`;
+  // 피벗 대비 추격 정도 (미너비니: 피벗 +2% 이상 추격 금지 — BHE 교훈)
+  let chase = '';
+  const pv = pendingStock ? parseFloat(pendingStock.pivot) : null;
+  if (elId === 'jmCalc' && pv && entry) {
+    const chasePct = (entry / pv - 1) * 100;
+    if (chasePct > 2) chase = ` · <span style="color:#ff6b6b;font-weight:700">⚠️ 피벗 +${chasePct.toFixed(1)}% 추격 — 다음 기회 권장</span>`;
+    else if (chasePct > 0.5) chase = ` · <span style="color:var(--amber)">피벗 +${chasePct.toFixed(1)}%</span>`;
+  }
+  const cut = c.reduced ? ` <span style="color:var(--amber)">⚠️ 연속 ${consecLosses()}패 → R 절반 축소</span>` : '';
+  const gate = entryGate();
+  let gateLine = '';
+  if (!gate.allowed) {
+    el.classList.add('lock');
+    gateLine = `<div style="margin-top:4px;color:#ff9b9b">${gate.reason}<br>→ 저장은 <b style="color:#ffd98a">관찰(대기)</b>로만 가능</div>`;
+  }
+  el.innerHTML =
+    `1R = <b>${c.rKrw.toLocaleString()}원</b>${cut} · 리스크폭 ${c.riskPct}%${fx}${chase}<br>` +
+    `→ <b style="font-size:14px">${c.shares.toLocaleString()}주</b> ` +
+    `(진입금액 약 ${(c.posKrw / 10000).toLocaleString(undefined, {maximumFractionDigits: 0})}만원)` + gateLine;
+}
+function hookCalcInputs() {
+  const jm = () => renderCalcLine('jmCalc',
+    parseFloat(document.getElementById('jmEntry').value),
+    parseFloat(document.getElementById('jmStop').value),
+    pendingStock ? pendingStock.market : 'KR');
+  ['jmEntry', 'jmStop'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', jm);
+  });
+  window._jmCalcRefresh = jm;
+  const ma = () => renderCalcLine('maCalc',
+    parseFloat(document.getElementById('maPivot').value),
+    parseFloat(document.getElementById('maStop').value),
+    document.getElementById('maMarket').value);
+  ['maPivot', 'maStop'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', ma);
+  });
+  const sel = document.getElementById('maMarket');
+  if (sel) sel.addEventListener('change', ma);
+  window._maCalcRefresh = ma;
+}
+
+// ── 유동성 판정 (v4.49.2): 내 포지션 ÷ 평균 거래대금 ──
+// 시총이 아니라 "내가 나올 수 있느냐"가 기준. R 설정 기반 상대 비율이라
+// 계좌가 커지면 기준이 자동으로 엄격해짐.
+//   5% 미만 = 문제없음 / 5~15% = 💧 주의(분할 청산 전제) / 15%+ = 🚱 부적합
+function liquidityCheck(s) {
+  if (!rSettings.equity || !s.avg_turnover || !s.risk_pct || s.risk_pct <= 0) return null;
+  const rKrw = (rSettings.equity || 0) * (rSettings.r_pct || 0.5) / 100;
+  const posKrw = rKrw / (s.risk_pct / 100);                      // 1R 기준 포지션 금액
+  const fx = s.market === 'KR' ? 1 : (rSettings.usd_krw || 1400);
+  const avgTurnKrw = s.avg_turnover * fx;
+  if (avgTurnKrw <= 0) return null;
+  const ratio = posKrw / avgTurnKrw;
+  if (ratio < 0.05) return null;                                  // 정상 — 뱃지 없음
+  const pct = Math.round(ratio * 100);
+  const posM = Math.round(posKrw / 10000).toLocaleString();
+  const turnM = Math.round(avgTurnKrw / 10000).toLocaleString();
+  if (ratio >= 0.15) return { cls: 'bad', label: '🚱 유동성부족',
+    tip: `예상 포지션 ${posM}만원 = 평균 거래대금 ${turnM}만원의 ${pct}%. 청산 시 내가 시장을 움직이는 수준 — 매매 부적합. 관찰만.` };
+  return { cls: 'warn', label: '💧 유동성주의',
+    tip: `예상 포지션 ${posM}만원 = 평균 거래대금 ${turnM}만원의 ${pct}%. 급할 때 한 번에 못 나감 — 사이즈 절반 + 분할 청산 전제로만.` };
+}
+
+// ════════════════ 매매 일지 (서버 저장, 기기 간 동기화) ════════════════
+const JKEY = 'pullback_journal_v1';   // 구 localStorage 키 (마이그레이션용)
+let journalCache = [];                 // 메모리 캐시 (서버와 동기화)
+
+function _normalize(arr) {
+  // 구버전 기록 보정: 새 필드가 없으면 기본값 채움
+  return (arr || []).map(r => ({
+    category: (r.tab === '급등') ? '단타' : '추세추종',
+    held_days: '', review: '', exit: '', result_r: '',
+    note: '', signal: '', sector: '', pivot_type: '',
+    ...r
+  }));
+}
+
+function getJournal() { return journalCache; }
+
+function setJournal(arr) {
+  journalCache = arr;
+  return _saveJournalToServer(arr);
+}
+
+// 서버 저장 (성공 확인 + 1회 재시도 + 실패 시 알림)
+async function _saveJournalToServer(arr, _retry = true) {
+  try {
+    const res = await fetch('/api/journal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(arr)
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return true;
+  } catch (e) {
+    if (_retry) {   // 1회 재시도
+      await new Promise(r => setTimeout(r, 800));
+      return _saveJournalToServer(arr, false);
+    }
+    console.error('일지 저장 실패:', e);
+    if (typeof showSaveError === 'function') showSaveError();
+    return false;
+  }
+}
+
+function showSaveError() {
+  let bar = document.getElementById('saveErrorBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'saveErrorBar';
+    bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:var(--up);color:#fff;padding:10px;text-align:center;z-index:9999;font-size:13px';
+    bar.textContent = '⚠️ 일지 저장에 실패했어요. 네트워크 확인 후 다시 시도하세요. (화면 데이터는 유지됨)';
+    document.body.appendChild(bar);
+    setTimeout(() => bar.remove(), 6000);
+  }
+}
+
+// 앱 시작 시 서버에서 일지 로드 + 구 localStorage 데이터 마이그레이션
+async function loadJournalFromServer() {
+  let serverData = [];
+  try {
+    const res = await fetch('/api/journal');
+    serverData = await res.json();
+  } catch(e) { serverData = []; }
+
+  // 마이그레이션: 서버가 비었고 localStorage에 옛 일지가 있으면 한 번 올림
+  let localData = [];
+  try { localData = JSON.parse(localStorage.getItem(JKEY) || '[]'); } catch(e) {}
+  if ((!serverData || serverData.length === 0) && localData.length > 0) {
+    journalCache = _normalize(localData);
+    await fetch('/api/journal', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(journalCache)
+    }).catch(()=>{});
+    console.log('localStorage 일지 ' + localData.length + '건을 서버로 이전했어요.');
+  } else {
+    journalCache = _normalize(serverData);
+  }
+  // 일지 탭이 열려있으면 갱신
+  if (typeof renderJournal === 'function' && document.getElementById('journalView').style.display !== 'none') {
+    renderJournal();
+  }
+  // 로드 후 추적 종목 가격 갱신 (자동 종료 판정)
+  updateTracking();
+}
+
+// ── 페이퍼 추적: 앱 열 때 추적 종목 현재가 갱신 + 자동 종료 판정 ──
+const TRACK_DAYS = 14;   // 추적 기간 2주
+const WATCH_DAYS = 14;   // 대기 유효기간 (돌파 셋업은 이 안에 터져야 유효, 지나면 자동 무산)
+// 트레이딩뷰 차트 URL — 한국주는 KRX, 미국주는 거래소 자동판별 대신 심볼만
+function tvUrl(tickerOrObj, market) {
+  // 카드는 객체(s)를, 일지는 (ticker, market)을 넘김 — 둘 다 처리
+  let ticker = tickerOrObj;
+  if (tickerOrObj && typeof tickerOrObj === 'object') {
+    ticker = tickerOrObj.ticker;
+    market = tickerOrObj.market;
+  }
+  if (!ticker) return '#';
+  ticker = String(ticker).toUpperCase();
+  if (market === 'kr' || market === 'KR' || /\.(KS|KQ)$/.test(ticker)) {
+    const code = ticker.replace(/\.(KS|KQ)$/, '');
+    return `https://www.tradingview.com/chart/?symbol=KRX:${code}`;
+  }
+  // 미국주: 거래소 접두어 없이 심볼만 줘도 트레이딩뷰가 자동 해석
+  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(ticker.replace(/\./g, ''))}`;
+}
+
+// 수동 현재가 갱신: 추적을 즉시 돌리고 성공/실패를 사용자에게 알림.
+// "추적대기"가 안 풀릴 때 원인 진단용.
+async function refreshPrices() {
+  const j = getJournal();
+  const active = j.filter(r => r.result_r === '' && r.status !== 'missed'
+                            && r.entry && r.stop
+                            && (r.tracking || r.status === 'pending' || r.status === 'entered'));
+  if (active.length === 0) { alert('추적할 진입/대기 종목이 없어요.'); return; }
+  let prices = {};
+  let errMsg = '';
+  try {
+    const res = await fetch('/api/prices', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ tickers: active.map(r => r.ticker) })
+    });
+    if (!res.ok) { errMsg = `서버 응답 오류 (${res.status})`; }
+    else { prices = (await res.json()).prices || {}; }
+  } catch(e) { errMsg = '네트워크 오류: ' + e.message; }
+
+  if (errMsg) { alert('현재가 갱신 실패\n' + errMsg); return; }
+
+  const got = Object.keys(prices).length;
+  const missing = active.filter(r => prices[r.ticker] == null).map(r => r.name);
+  // 가격 반영 (updateTracking과 동일 로직 재사용)
+  await updateTracking(prices);
+
+  let msg = `현재가 갱신 완료\n성공: ${got}개`;
+  if (missing.length) msg += `\n실패(가격 못 가져옴): ${missing.join(', ')}`;
+  alert(msg);
+}
+
+async function updateTracking(prefetched) {
+  const j = getJournal();
+  // 추적 대상: 미종료 + entry/stop 있음. 진입(entered)·대기(pending) 모두 가격 갱신.
+  // status==='missed'만 제외. (과거에 tracking 플래그가 꺼진 진입 종목도 포함되게 보강)
+  const active = j.filter(r => r.result_r === '' && r.status !== 'missed'
+                            && r.entry && r.stop
+                            && (r.tracking || r.status === 'pending' || r.status === 'entered'));
+  if (active.length === 0) return;
+  let prices = prefetched || {};
+  if (!prefetched) {
+    try {
+      const res = await fetch('/api/prices', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ tickers: active.map(r => r.ticker) })
+      });
+      prices = (await res.json()).prices || {};
+    } catch(e) { return; }
+  }
+
+  const today = new Date();
+  let changed = false;
+  for (const r of active) {
+    const px = prices[r.ticker];
+    if (px == null) continue;
+    r.last_price = px;
+    r.last_checked = today.toISOString().slice(0, 10);
+    if ((r.status || 'entered') === 'entered') r.tracking = true;  // 진입 종목은 추적 켜기(표시용)
+    const entry = parseFloat(r.entry), stop = parseFloat(r.stop);
+    const target = parseFloat(r.target);
+    const oneR = entry - stop;
+    if (oneR <= 0) { changed = true; continue; }
+
+    // ── 대기(pending): 아직 안 산 추적관찰 ──
+    // 진입가(피벗) 도달 → 자동 '진입'으로 전환, 진입일 갱신.
+    // 자동 무산 2조건: (1) 대기 WATCH_DAYS일 경과(셋업 식음)
+    //                  (2) 현재가가 손절가 아래로 빠짐(베이스/셋업 붕괴)
+    if ((r.status || 'entered') === 'pending') {
+      if (px >= entry) {
+        r.status = 'entered';
+        r.tracking = true;
+        r.date = today.toISOString().slice(0, 10);  // 실제 진입일로 갱신
+        r.closed_reason = '';
+        changed = true;
+        continue;
+      }
+      // 자동 무산 판정
+      const waitDays = Math.floor((today - new Date(r.date)) / 86400000);
+      if (stop && px <= stop) {
+        r.status = 'missed';
+        r.tracking = false;
+        r.closed_reason = '셋업붕괴(손절가 이탈)';
+        changed = true;
+        continue;
+      }
+      if (waitDays >= WATCH_DAYS) {
+        r.status = 'missed';
+        r.tracking = false;
+        r.closed_reason = `대기만료(${WATCH_DAYS}일 미돌파)`;
+        changed = true;
+        continue;
+      }
+      changed = true;
+      continue;  // pending인 동안은 손절/목표/만료 판정 안 함
+    }
+
+    // ── 진입(entered): 실제 매수 → 손절/목표 자동추적, 14일 만료는 자동종료 안 함 ──
+    // (페이퍼 검증 시절엔 14일 자동종료했지만, 실제 매매 기록이 된 후로는
+    //  사용자가 직접 ⏹종료 누를 때까지 현재가·R을 계속 추적한다.)
+    const daysHeld = Math.floor((today - new Date(r.date)) / 86400000);
+    let closed = false, reason = '', resultR = null;
+    if (px <= stop) { closed = true; reason = '손절도달'; resultR = -1; }
+    else if (target && px >= target) { closed = true; reason = '목표도달'; resultR = (target - entry) / oneR; }
+    // 14일 경과해도 자동종료하지 않음 — 현재가·R 계속 갱신만 함
+
+    if (closed) {
+      r.tracking = false;
+      r.status = 'closed';
+      r.result_r = (Math.round(resultR * 100) / 100).toString();
+      r.exit = Math.round(px * 100) / 100;
+      r.closed_reason = reason;
+      r.exit_reason = reason;
+      r.held_days = daysHeld;
+      r.closed_date = new Date().toISOString().slice(0, 10);   // 주간/월간 R 집계 기준
+    }
+    changed = true;
+  }
+  if (changed) {
+    setJournal(j);
+    if (document.getElementById('journalView').style.display !== 'none') renderJournal();
+  }
+}
+
+let pendingStock = null;
+// 모드→탭이름 매핑 (한 곳에서만 관리 — 새 모드 추가시 여기만 수정)
+const MODE_TAB_LABEL = {
+  imminent: '돌파임박',
+  pattern: '패턴',
+  pullback: '눌림목',
+  breakout: '돌파',
+  boxbreak: '박스돌파',
+  turnaround: '추세전환',
+  leader: '대장후보',
+  super: '슈퍼대장',
+  surge: '급등',
+};
+// ── 📅 활동 달력 (v4.52): 날짜별 분석/등록 종목 한눈에 ──
+let _jcal = null;   // {y, m} 표시 중인 달
+function jcalNav(d) {
+  if (!_jcal) return;
+  _jcal.m += d;
+  if (_jcal.m < 0) { _jcal.m = 11; _jcal.y--; }
+  if (_jcal.m > 11) { _jcal.m = 0; _jcal.y++; }
+  renderJournal();
+}
+function renderJCal(all) {
+  // 날짜별 종목명 그룹 (등록일 기준, 모든 카테고리 포함 — "그날 뭘 봤나")
+  const byDay = {};
+  for (const r of all) {
+    const d = (r.date || '').slice(0, 10);
+    if (!d) continue;
+    (byDay[d] = byDay[d] || []).push(r.name || r.ticker || '?');
+  }
+  if (!Object.keys(byDay).length) return '';
+  const now = new Date();
+  if (!_jcal) _jcal = { y: now.getFullYear(), m: now.getMonth() };
+  const { y, m } = _jcal;
+  const first = new Date(y, m, 1);
+  const startDow = first.getDay();                 // 0=일
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const todayStr = now.toISOString().slice(0, 10);
+  let cells = '';
+  for (let i = 0; i < startDow; i++) cells += '<div></div>';
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const names = byDay[ds] || [];
+    const isToday = ds === todayStr;
+    const dow = (startDow + d - 1) % 7;
+    const shown = names.slice(0, 3);
+    const more = names.length - shown.length;
+    cells += `<div style="min-height:52px;border:1px solid var(--line);border-radius:6px;padding:3px 4px;${isToday ? 'border-color:var(--green);' : ''}${names.length ? 'background:var(--surface);cursor:help' : 'opacity:.45'}" title="${names.join(', ')}">
+      <div style="font-size:10px;color:${dow === 0 ? '#f87171' : dow === 6 ? '#7fb8e0' : 'var(--muted)'};font-weight:${isToday ? '800' : '400'}">${d}</div>
+      ${shown.map(n => `<div style="font-size:9.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.35">${n}</div>`).join('')}
+      ${more > 0 ? `<div style="font-size:9px;color:var(--muted)">+${more}</div>` : ''}
+    </div>`;
+  }
+  return `
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:13px;font-weight:700">📅 활동 달력 <span style="color:var(--muted);font-weight:400;font-size:11px">날짜별 분석·등록 종목 (셀에 마우스: 전체 목록)</span></div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="btn" style="padding:2px 10px" onclick="jcalNav(-1)">‹</button>
+        <b style="font-size:13px">${y}.${String(m + 1).padStart(2, '0')}</b>
+        <button class="btn" style="padding:2px 10px" onclick="jcalNav(1)">›</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:10px;color:var(--muted);text-align:center;margin-bottom:4px">
+      <div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">${cells}</div>
+  </div>`;
+}
+
+// ── R 누적 곡선 (v4.48.2): 종료 매매를 시간순으로 누적 — 시스템의 에쿼티 커브 ──
+// 우상향이면 시스템이 작동 중, 꺾이면 규칙 위반이나 시장 역행을 의심.
+function renderRCurve(all) {
+  const closed = all
+    .filter(r => r.result_r !== '' && r.status !== 'missed' && (r.category || '추세추종') !== '관찰')
+    .map(r => ({ d: r.closed_date || r.last_checked || r.date || '', v: parseFloat(r.result_r) }))
+    .filter(x => !isNaN(x.v))
+    .sort((a, b) => a.d.localeCompare(b.d));
+  if (closed.length < 2) return '';
+  let cum = 0;
+  const pts = closed.map(x => (cum += x.v, { d: x.d, c: cum }));
+  const W = 560, H = 120, PAD = 8;
+  const min = Math.min(0, ...pts.map(p => p.c));
+  const max = Math.max(0, ...pts.map(p => p.c));
+  const span = (max - min) || 1;
+  const X = i => PAD + i / (pts.length - 1) * (W - PAD * 2);
+  const Y = v => PAD + (max - v) / span * (H - PAD * 2);
+  const line = pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(p.c).toFixed(1)}`).join(' ');
+  const zero = Y(0);
+  const last = pts[pts.length - 1].c;
+  const col = last >= 0 ? 'var(--green)' : '#ff6b6b';
+  // 최대 낙폭 (R 기준 드로다운)
+  let peak = -1e9, mdd = 0;
+  for (const p of pts) { peak = Math.max(peak, p.c); mdd = Math.min(mdd, p.c - peak); }
+  const dots = pts.map((p, i) =>
+    `<circle cx="${X(i).toFixed(1)}" cy="${Y(p.c).toFixed(1)}" r="2.5" fill="${closed[i].v >= 0 ? 'var(--green)' : '#ff6b6b'}"><title>${p.d} · ${closed[i].v > 0 ? '+' : ''}${closed[i].v}R → 누적 ${p.c.toFixed(2)}R</title></circle>`).join('');
+  return `
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
+      <div style="font-size:13px;font-weight:700">📈 R 누적 곡선 <span style="color:var(--muted);font-weight:400;font-size:11px">종료 ${pts.length}건 · 관찰 제외</span></div>
+      <div style="font-size:12px">누적 <b style="color:${col}">${last > 0 ? '+' : ''}${last.toFixed(2)}R</b> · 최대낙폭 <span style="color:#ff9b9b">${mdd.toFixed(2)}R</span></div>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto;display:block;margin-top:6px">
+      <line x1="${PAD}" y1="${zero.toFixed(1)}" x2="${W - PAD}" y2="${zero.toFixed(1)}" stroke="var(--line)" stroke-dasharray="3,3"/>
+      <path d="${line}" fill="none" stroke="${col}" stroke-width="2"/>
+      ${dots}
+    </svg>
+  </div>`;
+}
+
+function modeTab(mode) { return MODE_TAB_LABEL[mode] || mode || '-'; }
+// 트레이딩뷰 차트 URL (v4.52.2): 한국은 KRX:6자리코드, 미국은 티커
+function modeCategory(mode) { return mode === 'surge' ? '단타' : '추세추종'; }
+function openJournal(ticker) {
+  const s = lastHits.find(h => h.ticker === ticker);
+  if (!s) return;
+  pendingStock = s;
+  document.getElementById('jmSub').textContent = `${s.name} (${s.ticker}) · ${s.market}`;
+  const tab = modeTab(s.mode);
+  const sig = (s.triggered ? '🔥 트리거 ' : '') + (s.leader ? '👑 ' : '');
+  document.getElementById('jmAuto').innerHTML =
+    `<b>${tab}</b> 탭 · 섹터 <b>${s.sector || '-'}</b> · RS <b>${s.rs}</b>` +
+    `${s.setup_score != null ? ` · 전일점수 <b>${Math.round(s.setup_score)}</b>` : ''}<br>` +
+    `${sig ? `신호 <b>${sig}</b> · ` : ''}피벗종류 <b>${s.pivot_type || '-'}</b> · ` +
+    `현재가 <b>${fmtPrice(s.close, s.market)}</b> · 리스크 <b>${s.risk_pct != null ? s.risk_pct + '%' : '-'}</b>` +
+    `${s.alert ? ` · ⚠️ <b>${s.alert}</b>` : ''}`;
+  // 진입가 기본값:
+  //  돌파 계열(돌파/돌파임박/박스돌파)은 피벗 돌파 시 진입이므로 entry = 피벗
+  //  눌림목/추세전환 등은 현재가 근처 진입이므로 entry = 현재가
+  //  (실제 매매한 종목이면 사용자가 직접 수정)
+  const breakoutModes = ['breakout', 'imminent', 'boxbreak'];
+  const entryDefault = (breakoutModes.includes(s.mode) && s.pivot != null)
+    ? s.pivot
+    : s.close;
+  document.getElementById('jmEntry').value = entryDefault != null ? Math.round(entryDefault) : '';
+  document.getElementById('jmStop').value = s.stop != null ? Math.round(s.stop) : '';
+  // 진입가 라벨 힌트 — 돌파 계열이면 피벗 돌파가 기준임을 표시
+  const elLabel = document.getElementById('jmEntryLabel');
+  if (elLabel) elLabel.textContent = breakoutModes.includes(s.mode)
+    ? '진입 가정가 (피벗 돌파가)'
+    : '진입 가정가 (현재가 근처)';
+  document.getElementById('jmNote').value = '';
+  const jc = document.getElementById('jmCat');
+  if (jc) jc.value = modeCategory(s.mode);
+  if (window._resetModalPos) window._resetModalPos();
+  document.getElementById('journalModal').classList.add('open');
+  if (window._jmCalcRefresh) window._jmCalcRefresh();   // R 사이즈 계산줄 즉시 표시
+}
+function closeJournal() {
+  document.getElementById('journalModal').classList.remove('open');
+  pendingStock = null;
+}
+
+// ── 수동 종목 추가 (스캐너에 없는 종목) ──
+function openManualAdd() {
+  ['maTicker','maName','maSector','maPivot','maStop','maNote'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  document.getElementById('maMarket').value = 'US';
+  document.getElementById('manualModal').classList.add('open');
+}
+function closeManualAdd() {
+  document.getElementById('manualModal').classList.remove('open');
+}
+async function saveManualAdd() {
+  const ticker = document.getElementById('maTicker').value.trim().toUpperCase();
+  const status = document.getElementById('maStatus').value;   // pending | entered | watch
+  const pivot = parseFloat(document.getElementById('maPivot').value);
+  if (!ticker) { alert('종목코드를 입력하세요'); return; }
+  const isEntered = status === 'entered';
+  // 진입이면 '진입가', 그 외엔 '피벗가'가 필수
+  if (!pivot || isNaN(pivot)) {
+    alert(isEntered ? '진입가를 입력하세요' : '피벗가를 입력하세요 (돌파 알림 기준)');
+    return;
+  }
+  const stop = parseFloat(document.getElementById('maStop').value) || null;
+  // 진입 상태면 손절 필수 (R 계산·손절 알림에 필요)
+  if (isEntered && !stop) { alert('진입 종목은 손절가가 필요해요 (R 계산·손절 알림)'); return; }
+  // 손절 검증: 있으면 기준가보다 낮아야 함
+  if (stop && stop >= pivot) { alert('손절가는 ' + (isEntered ? '진입가' : '피벗가') + '보다 낮아야 해요'); return; }
+  const market = document.getElementById('maMarket').value;
+  const name = document.getElementById('maName').value.trim() || ticker;
+  const sector = document.getElementById('maSector').value.trim();
+  const note = document.getElementById('maNote').value.trim();
+  const today = new Date().toISOString().slice(0, 10);
+  // 관찰은 category='관찰'로 표시해 통계에서 제외됨
+  const cat = status === 'watch' ? '관찰' : '';
+  const tab = status === 'watch' ? '수동관찰' : (isEntered ? '수동진입' : '수동관찰');
+  const rec = {
+    id: Date.now(), date: today, ticker, name, market,
+    cat, category: cat, tab, signal: '', pivot_type: '수동', setup_score: '',
+    rs: '', entry: pivot, stop, pivot,           // entry: 진입이면 진입가, 아니면 피벗
+    risk_pct: stop ? Math.round((pivot - stop) / pivot * 1000) / 10 : '',
+    sig_level: '', sig_flags: '', avwap_zone: '', rr_at_entry: '',
+    tracking: true, target: stop ? Math.round((pivot + (pivot - stop) * 2) * 100) / 100 : '',
+    last_price: pivot, last_checked: today, closed_reason: '',
+    status,                                       // 선택한 상태 (대기/진입/관찰)
+    manual: true,                                 // 수동 추가 표시
+    sector, alert: '', note,
+    exit: '', result_r: '', held_days: '', review: ''
+  };
+  const j = getJournal(); j.unshift(rec);
+  journalCache = j;
+  closeManualAdd();
+  const ok = await _saveJournalToServer(j);
+  if (ok !== false) renderJournal();
+}
+
+// 상태 선택에 따라 라벨·저장 버튼 텍스트 조정
+function onMaStatusChange() {
+  const status = document.getElementById('maStatus').value;
+  const lbl = document.getElementById('maPivotLabel');
+  const btn = document.querySelector('#manualAddModal .save, #journalModal .save');
+  if (status === 'entered') {
+    if (lbl) lbl.textContent = '진입가 *';
+  } else {
+    if (lbl) lbl.textContent = '피벗가 (돌파 알림 기준) *';
+  }
+  const saveBtn = document.querySelector('.ma-save-btn');
+  if (saveBtn) {
+    saveBtn.textContent = status === 'entered' ? '진입으로 추가'
+                        : status === 'watch' ? '관찰로 추가' : '대기로 추가';
+  }
+}
+
+// ── 모달 드래그 (헤더 잡고 이동) ──
+(function setupModalDrag() {
+  let dragging = false, startX = 0, startY = 0, curX = 0, curY = 0;
+  function onDown(e) {
+    const handle = document.querySelector('#journalModal .drag-handle');
+    if (!handle || !handle.contains(e.target)) return;
+    dragging = true;
+    const pt = e.touches ? e.touches[0] : e;
+    startX = pt.clientX - curX;
+    startY = pt.clientY - curY;
+    e.preventDefault();
+  }
+  function onMove(e) {
+    if (!dragging) return;
+    const pt = e.touches ? e.touches[0] : e;
+    curX = pt.clientX - startX;
+    curY = pt.clientY - startY;
+    const m = document.querySelector('#journalModal .modal');
+    if (m) m.style.transform = `translate(${curX}px, ${curY}px)`;
+  }
+  function onUp() { dragging = false; }
+  document.addEventListener('mousedown', onDown);
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+  document.addEventListener('touchstart', onDown, {passive: false});
+  document.addEventListener('touchmove', onMove, {passive: false});
+  document.addEventListener('touchend', onUp);
+  // 열 때마다 위치 초기화
+  window._resetModalPos = () => { curX = 0; curY = 0;
+    const m = document.querySelector('#journalModal .modal');
+    if (m) m.style.transform = ''; };
+})();
+async function saveJournal() {
+  const s = pendingStock; if (!s) return;
+  // 중복 확인: 같은 종목이 아직 추적 중이면 — 덮어쓰기가 아니라 '별개의 새 기록'으로 추가할지 확인.
+  // (기존 기록은 절대 수정하지 않음. 과거 매매 이력 보존이 원칙.)
+  const existing = getJournal().find(r => r.ticker === s.ticker && r.result_r === '');
+  if (existing) {
+    const exCat = existing.category || '추세추종';
+    if (!confirm(`${s.name}은(는) 이미 추적 중이에요 (${existing.date} · ${exCat}).\n\n기존 기록은 그대로 두고, 별개의 새 기록으로 추가할까요?\n(같은 종목을 매매용 + 관찰용으로 나눠 담을 때 유용해요)`)) {
+      return;
+    }
+  }
+  const entry = parseFloat(document.getElementById('jmEntry').value) || null;
+  const stop = parseFloat(document.getElementById('jmStop').value) || null;
+  const note = document.getElementById('jmNote').value.trim();
+  const riskAmt = (entry && stop && entry > stop) ? ((entry - stop) / entry * 100) : (s.risk_pct ?? null);
+  // ── R 시스템: 진입(entered)으로 저장될 경우 게이트 검사 ──
+  // 관찰 카테고리·돌파 계열(pending)은 항상 허용. 즉시 진입만 게이트 통과 필요.
+  const _cat = (document.getElementById('jmCat') && document.getElementById('jmCat').value) || '';
+  const wouldEnter = _cat !== '관찰' && _cat !== '대기' && !['breakout', 'imminent', 'boxbreak'].includes(s.mode);
+  let forcePending = false;
+  if (wouldEnter && rSettings.equity) {
+    const gate = entryGate();
+    if (!gate.allowed) {
+      if (!confirm(`${gate.reason}\n\n진입 대신 '관찰(대기)'로 저장할까요?`)) return;
+      forcePending = true;
+    }
+  }
+  const sized = calcShares(entry, stop, s.market);   // 사이즈 스냅샷 (설정 없으면 null)
+  // 진입 시점 신호 스냅샷 (나중에 신호별 승률 검증용)
+  const sig = (typeof entrySignal === 'function') ? entrySignal(s) : null;
+  const rec = {
+    id: Date.now(),
+    date: new Date().toISOString().slice(0, 10),
+    ticker: s.ticker, name: s.name, market: s.market, sector: s.sector || '',
+    tab: modeTab(s.mode),
+    mode_raw: s.mode || '',
+    category: (document.getElementById('jmCat') && document.getElementById('jmCat').value) || modeCategory(s.mode),
+    signal: (s.triggered ? '🔥' : '') + (s.leader ? '👑' : ''),
+    pivot_type: s.pivot_type || '', setup_score: s.setup_score != null ? Math.round(s.setup_score) : '',
+    rs: s.rs, entry, stop,
+    pivot: s.pivot ?? null,                    // 피벗가 (대기 종목 돌파 알림용)
+    risk_pct: riskAmt != null ? Math.round(riskAmt * 10) / 10 : '',
+    // ── 진입 시점 신호 스냅샷 (검증용) ──
+    sig_level: sig ? sig.level : '',          // ok | warn | danger
+    sig_flags: sig && sig.flags ? sig.flags.join(',') : '',  // 경고 항목 태그 (검증용)
+    avwap_zone: s.avwap ? (s.avwap.zone || '') : '',
+    rr_at_entry: s.rr ?? '',
+    // ── 페이퍼 추적 (진입 후 자동 가격 추적) ──
+    tracking: (entry && stop) ? true : false,  // 진입가·손절 있으면 추적 시작
+    target: s.target ?? (entry && stop ? Math.round((entry + (entry - stop) * 2) * 100) / 100 : ''),  // 목표가(없으면 2R)
+    last_price: entry,                         // 마지막 확인 가격
+    last_checked: new Date().toISOString().slice(0, 10),
+    closed_reason: '',                         // 손절 | 목표 | 만료 | 수동
+    // ── 진입 상태 ──
+    //  pending(대기): 추적관찰, 아직 진입가 미도달 → 손익통계 제외, 손절가 닿아도 손절 아님
+    //  entered(진입): 실제 매수 → 여기서부터 손절/목표 자동추적
+    //  missed(무산): 셋업 깨짐 → 손익 0, 통계 제외
+    //  closed(종료): result_r 확정
+    // 돌파 계열은 '아직 안 산 추적관찰'로 보고 기본 pending, 그 외는 즉시 entered.
+    // '대기' 카테고리 = 명시적 피벗 감시 요청 → pending (봇이 돌파 알림).
+    // '관찰' 카테고리 = 그냥 지켜보기 → watch (봇 알림 없음, 통계 제외).
+    status: forcePending ? 'pending'
+      : _cat === '대기' ? 'pending'
+      : _cat === '관찰' ? 'watch'
+      : ['breakout', 'imminent', 'boxbreak'].includes(s.mode) ? 'pending' : 'entered',
+    // ── R 시스템 사이즈 스냅샷 (v4.47): 오픈 리스크 정확 계산용 ──
+    shares: sized ? sized.shares : '',
+    r_value_krw: sized ? sized.rKrw : '',
+    alert: s.alert || '', note,
+    exit: '', result_r: '', held_days: '', review: ''
+  };
+  const j = getJournal(); j.unshift(rec);
+  journalCache = j;
+  closeJournal();
+  // 저장 완료를 기다려 누락 방지 (실패 시 알림은 _saveJournalToServer가 처리)
+  const ok = await _saveJournalToServer(j);
+  if (ok && typeof renderJournal === 'function' &&
+      document.getElementById('journalView').style.display !== 'none') {
+    renderJournal();
+  }
+}
+
+// 데이터 오류 판정: 손절가가 진입가보다 높은(또는 같은) 항목은 깨진 데이터.
+// (과거 버그 버전으로 저장된 잔재 — 손절은 항상 진입가보다 낮아야 함)
+// 단 진입/손절이 비어있으면 판정 불가 → false.
+function isBrokenRow(r) {
+  const entry = parseFloat(r.entry);
+  const stop = parseFloat(r.stop);
+  if (!entry || !stop || isNaN(entry) || isNaN(stop)) return false;
+  return stop >= entry;   // 손절 ≥ 진입 = 비정상
+}
+
+function journalStats(list) {
+  // 무산(missed) + 데이터오류(손절≥진입)는 손익통계에서 완전 제외
+  const live = list.filter(r => r.status !== 'missed' && !isBrokenRow(r));
+  const pendingCount = live.filter(r => r.result_r === '' && (r.status || 'entered') === 'pending').length;
+  const enteredCount = live.filter(r => r.result_r === '' && (r.status || 'entered') === 'entered').length;
+  const closed = live.filter(r => r.result_r !== '' && !isNaN(parseFloat(r.result_r)));
+  const avgR = closed.length ? (closed.reduce((a, r) => a + parseFloat(r.result_r), 0) / closed.length).toFixed(2) : '–';
+  const winRate = closed.length ? Math.round(closed.filter(r => parseFloat(r.result_r) > 0).length / closed.length * 100) : '–';
+  return { openCount: pendingCount + enteredCount, pendingCount, enteredCount,
+           closedCount: closed.length, avgR, winRate, total: live.length };
+}
+
+// 신호별 성과 검증: 진입 시점 신호등/AVWAP존별 승률·평균R 집계
+function signalValidation(list) {
+  const closed = list.filter(r => r.result_r !== '' && !isNaN(parseFloat(r.result_r)) && !isBrokenRow(r));
+  if (closed.length < 3) return null;   // 표본 3건 미만이면 의미 없음
+  const group = (keyFn, labels) => {
+    const out = {};
+    for (const key of Object.keys(labels)) {
+      const rows = closed.filter(r => keyFn(r) === key);
+      if (rows.length === 0) continue;
+      const wins = rows.filter(r => parseFloat(r.result_r) > 0).length;
+      const avgR = (rows.reduce((a, r) => a + parseFloat(r.result_r), 0) / rows.length);
+      out[key] = { label: labels[key], n: rows.length, win: Math.round(wins/rows.length*100), avgR: avgR.toFixed(2) };
+    }
+    return out;
+  };
+  return {
+    byLevel: group(r => r.sig_level, {ok:'🟢 진입양호', warn:'🟡 주의', danger:'🔴 자제'}),
+    byZone: group(r => r.avwap_zone, {healthy:'AVWAP 건강', extended:'AVWAP 연장', overheated:'AVWAP 과열', near:'AVWAP 근처', below:'AVWAP 아래'}),
+    byFlag: flagStats(closed),
+    total: closed.length
+  };
+}
+
+// 경고 항목별 성과: 각 경고가 켜졌던 매매들의 승률·평균R.
+// "이 경고가 떴는데도 실제로 잘 됐나"를 보고 기준 보정에 활용.
+function flagStats(closed) {
+  const labels = {
+    vol_weak: '거래량 부족', vol_mid: '거래량 애매', rs_mid: 'RS 중간', rs_weak: 'RS 약함',
+    rr_low: '손익비 낮음', risk_wide: '리스크 넓음',
+    avwap_ext: 'AVWAP 연장', avwap_hot: 'AVWAP 과열', avwap_near: 'AVWAP 근처', avwap_below: 'AVWAP 아래'
+  };
+  const out = [];
+  for (const tag of Object.keys(labels)) {
+    const rows = closed.filter(r => (r.sig_flags || '').split(',').includes(tag));
+    if (rows.length === 0) continue;
+    const wins = rows.filter(r => parseFloat(r.result_r) > 0).length;
+    const avgR = rows.reduce((a, r) => a + parseFloat(r.result_r), 0) / rows.length;
+    out.push({ tag, label: labels[tag], n: rows.length, win: Math.round(wins/rows.length*100), avgR: avgR.toFixed(2) });
+  }
+  // 표본 많은 순 정렬
+  out.sort((a, b) => b.n - a.n);
+  return out;
+}
+
+let journalFilter = 'all';  // all | 추세추종 | 단타
+let editingId = null;
+
+function renderSignalValidation(all) {
+  const v = signalValidation(all);
+  if (!v) return `<div class="sigval-hint">📊 신호 검증: 종료된 매매가 3건 이상 쌓이면 신호별 승률이 여기 표시돼요. (진입 시 신호등·AVWAP 상태가 자동 기록됩니다)</div>`;
+  const rowsOf = (obj) => Object.values(obj).map(g =>
+    `<tr><td>${g.label}</td><td>${g.n}건</td><td>${g.win}%</td><td style="color:${parseFloat(g.avgR)>=0?'var(--px-up)':'var(--px-down)'}">${g.avgR}R</td></tr>`
+  ).join('');
+  const lvlRows = rowsOf(v.byLevel);
+  const zoneRows = rowsOf(v.byZone);
+  const flagRows = (v.byFlag || []).map(g =>
+    `<tr><td>${g.label}</td><td>${g.n}건</td><td>${g.win}%</td><td style="color:${parseFloat(g.avgR)>=0?'var(--px-up)':'var(--px-down)'}">${g.avgR}R</td></tr>`
+  ).join('');
+  return `
+    <div class="sigval">
+      <div class="sigval-head">🔬 신호 검증 <span style="opacity:.6;font-size:11px">— 종료 ${v.total}건 기준. 신호가 실제로 맞는지 데이터로 확인</span></div>
+      <div class="sigval-tables">
+        <table class="sigval-t"><thead><tr><th>진입 신호등</th><th>건수</th><th>승률</th><th>평균</th></tr></thead><tbody>${lvlRows || '<tr><td colspan=4>데이터 없음</td></tr>'}</tbody></table>
+        <table class="sigval-t"><thead><tr><th>AVWAP 존</th><th>건수</th><th>승률</th><th>평균</th></tr></thead><tbody>${zoneRows || '<tr><td colspan=4>데이터 없음</td></tr>'}</tbody></table>
+      </div>
+      ${flagRows ? `
+      <div class="sigval-subhead">⚠️ 경고 항목별 성과 <span style="opacity:.6;font-size:11px">— 이 경고가 떴는데도 잘 됐다면 그 기준이 과한 것</span></div>
+      <table class="sigval-t" style="width:100%"><thead><tr><th>경고 항목</th><th>건수</th><th>승률</th><th>평균R</th></tr></thead><tbody>${flagRows}</tbody></table>
+      ` : ''}
+      <div class="sigval-note">💡 🟢 진입이 🔴보다 성과 좋으면 신호등이 잘 작동하는 거예요. 경고 항목 중 승률·평균R이 높은 게 있으면(예: AVWAP 근처가 +1R) 그 경고는 너무 엄격한 거라 기준을 풀어도 됩니다.</div>
+    </div>`;
+}
+
+function renderJournal() {
+  const wrap = document.getElementById('journalView');
+  const all = getJournal();
+  if (!all.length) {
+    wrap.innerHTML = `
+      <div class="riskbar"><span style="color:var(--muted)">⚙️ R 시스템 — 총자산을 입력하면 사이즈 자동계산·서킷브레이커가 켜져요</span>
+        <button class="exp" onclick="openRSettings()" style="margin-left:auto">⚙️ R 설정</button></div>
+      <div class="jrnl-empty">아직 기록이 없어요.<br>
+      카드에서 <b>"+ 일지에 추가"</b>를 눌러 신호를 기록하세요.<br>
+      진입가·손절·근거만 적으면 나머지는 자동으로 채워집니다.</div>`;
+    return;
+  }
+  // 필터: 상태(진입중/대기/종료) 또는 카테고리(추세/단타/관찰)
+  const isWatch = r => (r.category || '추세추종') === '관찰';
+  const stOf = r => r.status || (r.result_r ? 'closed' : 'entered');
+  let j = all;
+  if (journalFilter === 'entered') j = all.filter(r => stOf(r) === 'entered' && !isWatch(r));
+  else if (journalFilter === 'pending') j = all.filter(r => stOf(r) === 'pending' && !isWatch(r));
+  else if (journalFilter === 'closed') j = all.filter(r => stOf(r) === 'closed' && !isWatch(r));
+  else if (journalFilter !== 'all') j = all.filter(r => (r.category || '추세추종') === journalFilter);
+  // 정렬: 진입중 → 대기 → 관찰 → 종료 → 무산, 각 그룹 안에선 최신순
+  const grp = r => isWatch(r) ? 2 : ({entered: 0, pending: 1, closed: 3, missed: 4}[stOf(r)] ?? 3);
+  j = [...j].sort((a, b) => grp(a) - grp(b) || (b.date || '').localeCompare(a.date || ''));
+  // 카테고리별 통계 (추세추종 / 단타 분리)
+  const trend = journalStats(all.filter(r => (r.category || '추세추종') === '추세추종'));
+  const scalp = journalStats(all.filter(r => (r.category || '추세추종') === '단타'));
+
+  const fbtn = (key, label) => `<button class="fbtn ${journalFilter===key?'on':''}" onclick="journalFilter='${key}';renderJournal()">${label}</button>`;
+
+  // ── R 리스크 대시보드 ──
+  const _open = openRiskR();
+  const _cap = effectiveCapR();
+  const _p = periodR();
+  const _consec = consecLosses();
+  const _gate = entryGate();
+  const _pct = _cap > 0 ? Math.min(100, _open / _cap * 100) : (_open > 0 ? 100 : 0);
+  const _fillCls = _pct >= 100 ? 'max' : _pct >= 70 ? 'hot' : '';
+  const _gateLabel = { confirmed: '🟢 확인된 상승', pressure: '🟡 조정 압박', correction: '🔴 조정' }[rSettings.gate] || rSettings.gate;
+  // 투입금액 합계 (진입중 × 주식수 × 진입가, US는 환율 환산) — 구버전(주식수 없음) 항목은 제외
+  let _invested = 0, _investedUnknown = 0;
+  for (const r of all) {
+    if ((r.status || 'entered') !== 'entered' || r.result_r !== '') continue;
+    const e = parseFloat(r.entry);
+    if (r.shares && e) {
+      const fx = /\.(KS|KQ)$/i.test(r.ticker || '') ? 1 : (rSettings.usd_krw || 1400);
+      _invested += r.shares * e * fx;
+    } else if (e) { _investedUnknown++; }
+  }
+  const _cash = Math.max(0, (rSettings.equity || 0) - _invested);
+  const _investPct = rSettings.equity ? Math.round(_invested / rSettings.equity * 100) : 0;
+  const _fmtM = v => (v / 10000).toLocaleString(undefined, {maximumFractionDigits: 0}) + '만';
+  const _rv = v => `<span style="color:${v > 0 ? 'var(--px-up)' : v < 0 ? 'var(--px-down)' : 'var(--muted)'}">${v > 0 ? '+' : ''}${v}R</span>`;
+  const riskbar = rSettings.equity ? `
+    <div class="riskbar">
+      <div class="rb-item"><span class="rb-t">오픈 리스크</span>
+        <span class="rb-v">${_open}R / ${_cap}R</span></div>
+      <div class="rb-gauge"><div class="rb-fill ${_fillCls}" style="width:${_pct}%"></div></div>
+      <div class="rb-item"><span class="rb-t">주간</span><span class="rb-v">${_rv(_p.week)} <span style="font-size:10px;color:var(--muted)">/ -${rSettings.weekly_stop_r}R</span></span></div>
+      <div class="rb-item"><span class="rb-t">월간</span><span class="rb-v">${_rv(_p.month)} <span style="font-size:10px;color:var(--muted)">/ -${rSettings.monthly_stop_r}R</span></span></div>
+      <div class="rb-item"><span class="rb-t">연속손실</span><span class="rb-v" style="${_consec >= 3 ? 'color:var(--amber)' : ''}">${_consec}패${_consec >= 3 ? ' (R½)' : ''}</span></div>
+      <div class="rb-item"><span class="rb-t">투입 / 현금</span><span class="rb-v">${_fmtM(_invested)} / ${_fmtM(_cash)} <span style="font-size:10px;color:var(--muted)">(${_investPct}%${_investedUnknown ? ` · 수량미기록 ${_investedUnknown}건 제외` : ''})</span></span></div>
+      <div class="rb-item"><span class="rb-t">시장 게이트</span><span class="rb-v">${_gateLabel}</span>${(() => {
+        if (!gateSug || !gateSug.suggest) return '';
+        const em = { confirmed: '🟢', pressure: '🟡', correction: '🔴' }[gateSug.suggest] || '';
+        if (gateSug.suggest === rSettings.gate)
+          return `<span class="rb-t" title="${gateSug.why || ''}">자동 제안 일치 ✓</span>`;
+        return `<span class="rb-t" style="color:var(--amber)" title="${gateSug.why || ''}">제안: ${em} <b style="cursor:pointer;text-decoration:underline" onclick="applyGateSuggest()">적용</b></span>`;
+      })()}</div>
+      <button class="exp" onclick="openRSettings()" style="margin-left:auto">⚙️ R 설정</button>
+    </div>
+    ${!_gate.allowed ? `<div class="rlock-banner">${_gate.reason}</div>`
+      : _consec >= 3 ? `<div class="rlock-banner soft">⚠️ 연속 ${_consec}패 — 다음 진입은 R 절반(0.5×)으로 자동 축소. 2연승 후 복구.</div>` : ''}`
+  : `<div class="riskbar"><span style="color:var(--muted)">⚙️ R 시스템 미설정 — 총자산을 입력하면 사이즈 자동계산·서킷브레이커가 켜져요</span>
+      <button class="exp" onclick="openRSettings()" style="margin-left:auto">⚙️ R 설정</button></div>`;
+
+  wrap.innerHTML = `
+    ${riskbar}
+    <div class="jrnl-tools">
+      <button class="exp" onclick="refreshPrices()" style="background:#1e3a4a;border-color:#2d6a8c;color:#9fd4ff">🔄 현재가 갱신</button>
+      <button class="exp" onclick="openManualAdd()" style="background:#2d6a4a;border-color:#40916c;color:#fff">➕ 수동 추가</button>
+      <button class="exp" onclick="exportCSV()">⬇ CSV 내보내기</button>
+      <button onclick="if(confirm('일지를 모두 지울까요? 되돌릴 수 없어요.')){setJournal([]);renderJournal();}">전체 삭제</button>
+    </div>
+    <div class="jrnl-stats">
+      <div class="statcard">
+        <div class="statcard-t">📈 추세추종</div>
+        <div class="statcard-v">진입 ${trend.enteredCount} · 대기 ${trend.pendingCount} · 종료 ${trend.closedCount} · 승률 ${trend.winRate}${trend.winRate!=='–'?'%':''} · 평균 ${trend.avgR}R${(() => { const imp = getJournal().filter(x => x.exit_reason === '충동').length; return imp ? ` · <span style="color:#ff6b6b;font-weight:700">충동 ${imp}</span>` : ''; })()}</div>
+      </div>
+      <div class="statcard">
+        <div class="statcard-t">👁 관찰</div>
+        <div class="statcard-v">${all.filter(r => (r.category||'추세추종')==='관찰').length}종목 추적 중 · 매매 통계 제외</div>
+      </div>
+      <div class="statcard">
+        <div class="statcard-t">⚡ 단타</div>
+        <div class="statcard-v">총 ${scalp.total} · 종료 ${scalp.closedCount} · 승률 ${scalp.winRate}${scalp.winRate!=='–'?'%':''} · 평균 ${scalp.avgR}R</div>
+      </div>
+    </div>
+    ${renderJCal(all)}
+    ${renderRCurve(all)}
+    ${renderSignalValidation(all)}
+    <div class="jrnl-filter">
+      ${fbtn('all','전체')} ${fbtn('entered','▶ 진입중')} ${fbtn('pending','⏳ 대기')} ${fbtn('closed','✔ 종료')} ${fbtn('추세추종','📈 추세')} ${fbtn('단타','⚡ 단타')} ${fbtn('관찰','👁 관찰')}
+    </div>
+    <div style="overflow-x:auto">
+    <table class="jtable">
+      <thead><tr>
+        <th>날짜</th><th>상태</th><th>종목</th><th>진입가</th><th>손절</th>
+        <th>결과R</th><th>근거/복기</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${j.map(r => r.id === editingId ? editRow(r) : viewRow(r)).join('')}
+      </tbody>
+    </table></div>`;
+}
+
+function viewRow(r) {
+  const cat = r.category || '추세추종';
+  const catColor = cat === '단타' ? 'color:#c084fc' : 'color:var(--green)';
+  const st = r.status || (r.result_r ? 'closed' : 'entered');
+  const stBadge = st === 'pending'
+      ? `<span class="st-badge" style="background:#3b3a2a;color:var(--amber)">⏳대기</span>`
+    : st === 'entered'
+      ? `<span class="st-badge" style="background:#1e3a2a;color:var(--green)">▶진입</span>`
+    : st === 'missed'
+      ? `<span class="st-badge" style="background:#3a2a2a;color:var(--muted)">✖무산</span>`
+      : `<span class="st-badge" style="background:#2a2a3a;color:var(--muted)">✔종료</span>`;
+  const watch = (r.category || '추세추종') === '관찰';
+  const watchBadge = watch ? `<span class="st-badge" style="background:#1a2a3f;color:#7fb8ff">👁관찰</span>` : '';
+  const borderCol = watch ? '#3b6ea5' : st === 'entered' ? '#40916c' : st === 'pending' ? '#a8842c' : st === 'missed' ? '#333' : '#3a3a4a';
+  // 대기 중이면 진입/무산, 진입 중이면 종료 빠른 버튼
+  const stActions = st === 'pending'
+      ? `<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">
+           <span class="st-act" onclick="markEntered(${r.id})" title="실제 진입함">▶진입</span>
+           <span class="st-act" onclick="markMissed(${r.id})" title="돌파 안 옴 · 무산">✖무산</span>
+         </div>`
+    : st === 'entered'
+      ? `<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">
+           <span class="st-act" onclick="markClosed(${r.id})" title="매매 종료 · 청산가 입력" style="background:#2a2a3a;color:#9fb4ff">⏹종료</span>
+         </div>`
+      : '';
+  const broken = isBrokenRow(r);   // 손절≥진입 = 데이터 오류
+  // 종목 셀에 보조정보(탭·RS·섹터) 작게 접어넣기 — 컬럼은 줄이되 정보는 유지
+  const subInfo = [r.tab, r.rs != null ? 'RS '+r.rs : '', r.sector].filter(Boolean).join(' · ');
+  return `<tr class="${r.result_r===''&&st!=='missed'&&!broken?'open-pos':''}" style="border-left:3px solid ${borderCol};${st==='missed'||broken?'opacity:.5':st==='closed'?'opacity:.78':''}">
+    <td class="mono">${r.date}</td>
+    <td style="white-space:nowrap">${watch ? watchBadge : stBadge}${watch ? '' : stActions}${broken?`<div class="st-badge" style="background:#3a2020;color:#ff6b6b;margin-top:3px" title="손절가가 진입가보다 높음 — 과거 버그로 저장된 깨진 데이터. 통계에서 제외됨. 삭제 권장.">⚠️데이터오류</div>`:''}</td>
+    <td><a href="${tvUrl(r.ticker, r.market)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${r.name} <span style="font-size:9px;opacity:.5">↗</span>${r.manual?`<span class="st-badge" style="background:#1e3a2e;color:#5fd99a;margin-left:4px;font-size:9px">수동</span>`:''}<div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div>${subInfo?`<div style="font-size:10px;color:var(--muted);opacity:.8">${subInfo}</div>`:''}</a></td>
+    <td class="mono">${(() => {
+      const isKr = /\.(KS|KQ)$/i.test(r.ticker || '');
+      const entryStr = r.entry ?? '-';
+      // 진입/대기 상태이고 현재가가 있으면 진입가 아래에 현재가 표시 (진입가 → 현재가 비교)
+      if (r.last_price && r.entry && (st === 'entered' || st === 'pending')) {
+        const px = parseFloat(r.last_price);
+        const pxStr = isKr ? Math.round(px).toLocaleString() : px.toFixed(2);
+        const up = px >= parseFloat(r.entry);
+        const col = up ? 'var(--px-up)' : 'var(--px-down)';
+        return `${entryStr}<div style="font-size:10px;color:${col};margin-top:1px">→ ${pxStr}</div>`;
+      }
+      return entryStr;
+    })()}</td>
+    <td class="mono"${broken?' style="color:#ff6b6b"':''}>${r.stop ?? '-'}</td>
+    <td class="mono" style="${r.result_r&&parseFloat(r.result_r)>0?'color:var(--px-up)':r.result_r?'color:var(--px-down)':''}">${
+      r.result_r
+        ? `${r.result_r}R${r.exit_reason==='충동'?`<div style="font-size:9px;color:#ff6b6b;font-weight:700">⚠️ 충동</div>`:r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:''}`
+        : st === 'pending'
+            ? `<span style="color:var(--amber);font-size:11px">피벗 대기</span><div style="font-size:9px;color:var(--muted)">${r.last_price?'현재 '+(/\.(KS|KQ)$/i.test(r.ticker||'')?Math.round(parseFloat(r.last_price)).toLocaleString():parseFloat(r.last_price).toFixed(2)):'미진입'}</div>`
+        : st === 'missed'
+            ? `<span style="color:var(--muted);font-size:11px">무산</span>${r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:''}`
+        : (r.tracking && r.last_price && r.entry && r.stop
+            ? (() => {
+                const liveR = (parseFloat(r.last_price) - parseFloat(r.entry)) / (parseFloat(r.entry) - parseFloat(r.stop));
+                const dheld = Math.floor((Date.now() - new Date(r.date)) / 86400000);
+                const col = liveR >= 0 ? 'var(--px-up)' : 'var(--px-down)';
+                return `<span style="color:${col};font-weight:600">${liveR>=0?'+':''}${liveR.toFixed(1)}R</span>`
+                     + `<div style="font-size:9px;color:var(--muted)">D+${dheld}</div>`;
+              })()
+            : `<span style="color:var(--muted);font-size:11px">추적대기</span><div style="font-size:9px;color:var(--muted)">${r.entry?'앱 새로고침 시 갱신':''}</div>`)
+    }</td>
+    <td style="white-space:normal;max-width:240px;font-size:11px;color:var(--muted)"><div class="note-clamp" title="${(r.note||'').replace(/"/g,'&quot;')}${r.review?' / 복기: '+r.review.replace(/"/g,'&quot;'):''}">${r.note || ''}${r.review?`<br><i style="color:var(--amber)">복기: ${r.review}</i>`:''}</div></td>
+    <td style="white-space:nowrap">
+      <span class="edit-btn" onclick="editingId=${r.id};renderJournal()" title="수정/상세">✏️</span>
+      <span class="del" onclick="delJournal(${r.id})" title="삭제">✕</span>
+    </td>
+  </tr>`;
+}
+
+// 진입 → 종료: 청산가 입력받아 결과R 확정. 수정폼을 펼쳐서 청산가 칸에 포커스.
+function markClosed(id) {
+  editingId = id;
+  renderJournal();
+  setTimeout(() => {
+    const ex = document.getElementById('e_exit');
+    if (ex) { ex.focus(); ex.scrollIntoView({block:'center', behavior:'smooth'}); }
+  }, 50);
+}
+
+// 대기 → 진입: 실제 매수했음. 진입일을 오늘로, 추적 시작.
+async function markEntered(id) {
+  const j = getJournal();
+  const r = j.find(x => x.id === id); if (!r) return;
+  // ── R 시스템: 대기→진입이 실질 진입 시점 → 게이트 검사 + 사이즈 확정 ──
+  if (rSettings.equity) {
+    const gate = entryGate();
+    if (!gate.allowed) { alert(gate.reason + '\n\n대기 상태를 유지합니다.'); return; }
+    const mkt = /\.(KS|KQ)$/i.test(r.ticker || '') ? 'KR' : 'US';
+    const sized = calcShares(parseFloat(r.entry), parseFloat(r.stop), mkt);
+    if (sized) {
+      r.shares = sized.shares;
+      r.r_value_krw = sized.rKrw;
+      const cut = sized.reduced ? '\n⚠️ 연속 3패 → R 절반 축소 적용됨' : '';
+      if (!confirm(`진입 확정: ${sized.shares.toLocaleString()}주 (1R=${sized.rKrw.toLocaleString()}원, 진입금액 약 ${Math.round(sized.posKrw / 10000).toLocaleString()}만원)${cut}\n\n이 수량으로 주문했나요?`)) return;
+    }
+  }
+  r.status = 'entered';
+  r.tracking = true;
+  r.date = new Date().toISOString().slice(0, 10);
+  r.closed_reason = '';
+  setJournal(j); await _saveJournalToServer(j); renderJournal();
+}
+
+// 대기 → 무산: 돌파 안 오고 셋업 깨짐. 손익 0, 통계 제외.
+async function markMissed(id) {
+  const j = getJournal();
+  const r = j.find(x => x.id === id); if (!r) return;
+  r.status = 'missed';
+  r.tracking = false;
+  setJournal(j); await _saveJournalToServer(j); renderJournal();
+}
+
+function editRow(r) {
+  const cat = r.category || '추세추종';
+  // 7컬럼 구조: 날짜 / 상태 / 종목 / 진입가 / 손절 / 결과R(청산가) / [상세입력 colspan]
+  return `<tr class="editing">
+    <td class="mono">${r.date}</td>
+    <td style="font-size:11px;color:var(--muted)">${r.status||'entered'}</td>
+    <td>${r.name}<div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div>
+      <div style="font-size:10px;color:var(--muted);opacity:.8;margin-top:2px">${[r.tab, r.rs!=null?'RS '+r.rs:'', r.sector].filter(Boolean).join(' · ')}</div></td>
+    <td><input id="e_entry" class="ein" value="${r.entry ?? ''}" inputmode="decimal" style="width:70px"></td>
+    <td><input id="e_stop" class="ein" value="${r.stop ?? ''}" inputmode="decimal" style="width:70px"></td>
+    <td><input id="e_exit" class="ein" value="${r.exit || ''}" placeholder="청산가" style="width:70px" inputmode="decimal" title="청산가를 넣으면 결과R 자동 계산">
+        <input id="e_result" class="ein" value="${r.result_r || ''}" placeholder="또는 R" style="width:70px;margin-top:4px">
+        <select id="e_reason" class="ein" style="width:120px;margin-top:4px" title="종료 사유 — 종료 시 필수. 규칙 안에서 나갔는지 스스로에게 답하는 게이트">
+          <option value="">종료 사유…</option>
+          <option value="손절도달" ${r.exit_reason==='손절도달'?'selected':''}>🔴 손절가 도달</option>
+          <option value="트레일링" ${r.exit_reason==='트레일링'?'selected':''}>📉 트레일링/규칙 익절</option>
+          <option value="목표도달" ${r.exit_reason==='목표도달'?'selected':''}>🎯 목표 도달</option>
+          <option value="충동" ${r.exit_reason==='충동'?'selected':''}>⚠️ 규칙 외(충동)</option>
+        </select></td>
+    <td colspan="2">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start">
+        <select id="e_cat" class="ein" style="width:110px">
+          <option value="추세추종" ${cat==='추세추종'?'selected':''}>📈 추세추종</option>
+          <option value="단타" ${cat==='단타'?'selected':''}>⚡ 단타</option>
+          <option value="대기" ${cat==='대기'?'selected':''}>⏳ 대기</option>
+          <option value="관찰" ${cat==='관찰'?'selected':''}>👁 관찰</option>
+        </select>
+        <input id="e_held" class="ein" value="${r.held_days || ''}" placeholder="보유일" style="width:60px">
+        <div style="display:flex;gap:6px;margin-left:auto">
+          <span class="save-btn" onclick="saveEdit(${r.id})" title="저장">💾 저장</span>
+          <span class="del" onclick="editingId=null;renderJournal()" title="취소">↩ 취소</span>
+        </div>
+      </div>
+      <textarea id="e_note" class="ein" style="width:100%;height:70px;margin-top:6px" placeholder="진입 근거">${r.note || ''}</textarea>
+      <textarea id="e_review" class="ein" style="width:100%;height:70px;margin-top:6px" placeholder="복기 (왜 잘됐나/못됐나)">${r.review || ''}</textarea>
+    </td>
+  </tr>`;
+}
+
+function saveEdit(id) {
+  const j = getJournal();
+  const r = j.find(x => x.id === id);
+  if (!r) return;
+  // 종료된 과거 매매 기록 수정 방어 — 이력 오염 방지
+  if (r.status === 'closed' && r.result_r) {
+    if (!confirm(`⚠️ 종료된 과거 매매 기록(${r.date} · ${r.name})을 수정하려고 해요.\n과거 이력이 바뀌면 통계·복기가 왜곡될 수 있어요.\n\n정말 수정할까요?`)) {
+      editingId = null; renderJournal(); return;
+    }
+  }
+  r.category = document.getElementById('e_cat').value;
+  // 카테고리 변경 시 status 동기화 (종료된 건 제외).
+  // 대기→pending(봇 피벗 감시), 관찰→watch(알림 없음), 매매→entered.
+  if (r.status !== 'closed') {
+    if (r.category === '대기') r.status = 'pending';
+    else if (r.category === '관찰') r.status = 'watch';
+    else if (r.category === '추세추종' || r.category === '단타') {
+      if (r.status !== 'entered') r.status = 'entered';
+    }
+  }
+  const entry = parseFloat(document.getElementById('e_entry').value) || null;
+  const stop = parseFloat(document.getElementById('e_stop').value) || null;
+  r.entry = entry; r.stop = stop;
+  // 진입가·손절 바뀌면 리스크% 재계산
+  if (entry && stop && entry > stop) r.risk_pct = Math.round((entry - stop) / entry * 1000) / 10;
+  // 청산가 입력 시 결과R 자동 환산 (R 직접 입력값보다 우선)
+  const exitV = parseFloat(document.getElementById('e_exit').value);
+  const manualR = document.getElementById('e_result').value.trim();
+  const reasonSel = document.getElementById('e_reason');
+  const exitReason = reasonSel ? reasonSel.value : '';
+  const isClosing = (!isNaN(exitV) && entry && stop && entry > stop) || !!manualR;
+  // ── 종료 사유 게이트: 청산하려면 사유를 반드시 골라야 함 ──
+  // (승인 게이트의 1인용 버전 — 손이 먼저 나가기 전에 "이게 규칙인가 충동인가" 자문)
+  if (isClosing && (r.status === 'entered' || r.status === 'closed' || !r.status) && !exitReason) {
+    alert('종료 사유를 선택해주세요.\n\n🔴 손절가 도달 / 📉 트레일링·규칙 익절 / 🎯 목표 도달 / ⚠️ 규칙 외(충동)\n\n"충동"이어도 괜찮아요 — 기록이 쌓이면 데이터가 됩니다.');
+    return;
+  }
+  if (!isNaN(exitV) && entry && stop && entry > stop) {
+    r.exit = exitV;
+    r.result_r = (Math.round((exitV - entry) / (entry - stop) * 100) / 100).toString();
+    r.tracking = false;                  // 수동 청산 → 추적 종료
+    r.status = 'closed';
+    r.exit_reason = exitReason;
+    r.closed_reason = exitReason || r.closed_reason || '수동';
+    if (!r.closed_date) r.closed_date = new Date().toISOString().slice(0, 10);
+  } else if (manualR) {
+    r.result_r = manualR;
+    r.tracking = false;
+    r.status = 'closed';
+    r.exit_reason = exitReason;
+    r.closed_reason = exitReason || r.closed_reason || '수동';
+    if (!r.closed_date) r.closed_date = new Date().toISOString().slice(0, 10);
+  } else if (exitReason) {
+    r.exit_reason = exitReason;          // 사유만 나중에 고쳐 저장하는 경우
+  }
+  r.held_days = document.getElementById('e_held').value.trim();
+  r.note = document.getElementById('e_note').value.trim();
+  r.review = document.getElementById('e_review').value.trim();
+  setJournal(j);
+  editingId = null;
+  renderJournal();
+}
+
+function updateResult(id, val) {
+  const j = getJournal();
+  const r = j.find(x => x.id === id);
+  if (r) { r.result_r = val.trim(); setJournal(j); renderJournal(); }
+}
+function delJournal(id) {
+  if (!confirm('이 기록을 삭제할까요?')) return;
+  setJournal(getJournal().filter(x => x.id !== id));
+  if (editingId === id) editingId = null;
+  renderJournal();
+}
+function exportCSV() {
+  const j = getJournal();
+  if (!j.length) return;
+  const cols = ['date','status','ticker','name','market','sector','tab','mode_raw','category','signal','pivot_type','shares','r_value_krw','closed_date',
+    'setup_score','rs','entry','stop','risk_pct','sig_level','sig_flags','avwap_zone','rr_at_entry','alert','note','exit','result_r','held_days','review'];
+  const head = ['날짜','상태','티커','종목','시장','섹터','탭','모드','구분','신호','피벗종류','주식수','1R금액','종료일','전일점수','RS',
+    '진입가','손절','리스크%','진입신호등','경고항목','AVWAP존','진입시손익비','경보','진입근거','청산가','결과R','보유일','복기'];
+  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const csv = [head.join(','), ...j.map(r => cols.map(c => esc(r[c])).join(','))].join('\r\n');
+  const blob = new Blob(['\uFEFF' + csv], {type: 'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `눌림목일지_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+document.getElementById('refresh').addEventListener('click', () => load(true));
+
+async function loadIndices() {
+  const bar = document.getElementById('idxbar');
+  try {
+    const res = await fetch('/api/indices');
+    const data = await res.json();
+    const list = (data.indices || []);
+    if (!list.length) { bar.style.display = 'none'; return; }
+    bar.style.display = 'flex';
+    const regimeDot = (rg) => {
+      if (!rg) return '';
+      const map = {good:['🟢','#28b478'], neutral:['🟡','#e6aa28'], bad:['🔴','#FF5A6E']};
+      const [emoji] = map[rg] || ['',''];
+      return emoji;
+    };
+    // ── 지수별 게이트 배너 (v4.53.1): 코스피·코스닥·나스닥 각각 판정 ──
+    // 각 지수의 분산일·레짐·FTD로 개별 신호. 한국 종목은 코스피/코스닥,
+    // 미국 종목은 나스닥 게이트를 보고 판단.
+    const gateOf = (ix) => {
+      if (!ix) return null;
+      const dist = ix.dist_days || 0;
+      const rg = ix.regime;   // good | weakening | ok | bad ...
+      let lv, txt;
+      if (rg === 'bad' || dist >= 6) { lv = 'bad'; txt = '🔴 신규 진입 자제'; }
+      else if (rg === 'good' && dist <= 3) { lv = 'good'; txt = '🟢 진입 환경 양호'; }
+      else { lv = 'neutral'; txt = '🟡 선별 진입'; }
+      const distTxt = dist >= 1 ? ` · 분산일 ${dist}개` : '';
+      const ftdTxt = ix.ftd ? ' · FTD(바닥 신호)' : '';
+      return { lv, html: `${txt}${distTxt}${ftdTxt}` };
+    };
+    const gateNames = ['코스피', '코스닥', '나스닥'];
+    let banner = '';
+    const gateBoxes = gateNames.map(nm => {
+      const ix = list.find(x => x.name === nm);
+      const g = gateOf(ix);
+      if (!g) return '';
+      return `<div class="mkt-banner mkt-${g.lv}" title="${nm} 게이트: 분산일(기관 매도일) + 레짐 판정. 한국 종목은 코스피/코스닥, 미국 종목은 나스닥 기준으로 진입 판단.">
+        <b>${nm}</b> ${g.html}</div>`;
+    }).filter(Boolean);
+    if (gateBoxes.length) {
+      banner = `<div class="gate-row">${gateBoxes.join('')}</div>`;
+    }
+    bar.innerHTML = banner + list.map(ix => {
+      const pct = ix.change_pct;
+      const chg = ix.change;
+      // 한국식 색: 상승=빨강(up), 하락=파랑(down)
+      const dir = pct == null ? 'flat' : (pct > 0 ? 'up' : (pct < 0 ? 'down' : 'flat'));
+      const arrow = dir === 'up' ? '▲' : (dir === 'down' ? '▼' : '·');
+      const val = ix.value != null ? Number(ix.value).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}) : '–';
+      const chgStr = (chg != null && pct != null)
+        ? `${arrow} ${Math.abs(chg).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} (${pct > 0 ? '+' : ''}${pct.toFixed(2)}%)`
+        : '–';
+      const dot = regimeDot(ix.regime);
+      return `<div class="idx" title="${ix.regime_txt || '시장 분위기(분산일 기반)'}"><span class="nm">${ix.name}${dot ? ` <span style="font-size:9px" title="시장 분위기">${dot}</span>` : ''}</span>`
+        + `<span class="vl">${val}</span>`
+        + `<span class="ch ${dir}">${chgStr}</span></div>`;
+    }).join('');
+  } catch (e) {
+    bar.style.display = 'none';
+  }
+}
+loadIndices();
+setInterval(loadIndices, 300000);   // 5분마다 갱신 (레짐 포함)
+
+loadJournalFromServer();   // 서버에서 일지 로드 + 구 localStorage 이전
+loadRSettings();           // R 시스템 설정 로드 (v4.47)
+loadGateSuggest();         // 시장 게이트 자동 제안 (v4.50)
+hookCalcInputs();          // 진입 폼 사이즈 자동계산 훅
+load();
+</script>
+</body>
+</html>
