@@ -5,6 +5,14 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.71 [버그수정] ⚡ 감시 버튼이 카드 재렌더링 시 다시 활성화되던 문제.
+        [문제] 감시 버튼 클릭 → /api/watch/quick으로 서버 일지에 pending 등록.
+               하지만 버튼 자체의 disabled 상태는 그 DOM 엘리먼트에만 남아,
+               카드 목록이 다시 렌더링(탭 전환·다시 스캔 등)되면 새 버튼이
+               항상 초기 상태(활성, "⚡ 감시")로 그려짐 → 중복 클릭 유발.
+        [해결] 프론트에 isPendingWatch(ticker) 헬퍼 추가 — 카드 렌더 시
+               journalCache에 해당 티커의 pending 항목이 있으면 버튼을
+               처음부터 disabled + "✓ 감시중"으로 그림.
 v4.70 [수정] 카드/상단 배지 시각적 소음 축소.
         [배지 축소] 등급(A/B/C/D급), 베이스 품질(베이스 짧음 등), 후기 스테이지,
                손절폭 넓음 등 climax-tag/gbadge 계열 배지의 볼드체를 없애고
@@ -916,7 +924,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.70"
+VERSION = "v4.71"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

@@ -282,7 +282,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.70</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.71</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -629,7 +629,7 @@ function breakdownCard(s) {
     ${s.oversold ? '<div class="surge-warn" style="background:rgba(242,179,61,.08);border-color:rgba(242,179,61,.3);margin-top:8px">⚠️ RSI ' + s.rsi + ' 과매도 — 단기 반등(숏 스퀴즈) 위험. 추격 숏 금지, 반등 후 진입.</div>' : ''}
     ${krWarn ? '<div class="surge-warn" style="margin-top:8px">⚠️ 한국 종목 — 개인 공매도 제약. 인버스 ETF나 관찰용으로 활용.</div>' : ''}
     <div class="surge-warn" style="background:rgba(255,107,107,.06);border-color:rgba(255,107,107,.25);margin-top:8px">🩸 숏은 손실 무한·숏스퀴즈 위험. 손절(위쪽 저항) 칼같이, 소액만. 미너비니式 본래 현금 우선.</div>
-    ${s.ticker ? `<button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button><button class="journal-btn" style="margin-left:6px;background:#1d6b3a;border-color:#1d6b3a" onclick="quickWatch(this,'${s.ticker}')" title="원클릭 봇 감시(대기) 등록 — 피벗·손절 자동 입력. 돌파·리테스트 시 텔레그램 알림. (일지의 '관찰' 카테고리와 다름: 관찰=이평 접근 알림용)">⚡ 감시</button>` : ''}
+    ${s.ticker ? `<button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button><button class="journal-btn" style="margin-left:6px;background:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'};border-color:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'}" onclick="quickWatch(this,'${s.ticker}')" ${isPendingWatch(s.ticker) ? 'disabled' : ''} title="원클릭 봇 감시(대기) 등록 — 피벗·손절 자동 입력. 돌파·리테스트 시 텔레그램 알림. (일지의 '관찰' 카테고리와 다름: 관찰=이평 접근 알림용)">${isPendingWatch(s.ticker) ? '✓ 감시중' : '⚡ 감시'}</button>` : ''}
   </div>`;
 }
 
@@ -846,7 +846,7 @@ function card(s) {
       </div>`;
     })() : ''}
     ${s.ticker ? `
-    <button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button><button class="journal-btn" style="margin-left:6px;background:#1d6b3a;border-color:#1d6b3a" onclick="quickWatch(this,'${s.ticker}')" title="원클릭 봇 감시 등록">⚡ 감시</button>` : ''}
+    <button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button><button class="journal-btn" style="margin-left:6px;background:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'};border-color:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'}" onclick="quickWatch(this,'${s.ticker}')" ${isPendingWatch(s.ticker) ? 'disabled' : ''} title="원클릭 봇 감시 등록">${isPendingWatch(s.ticker) ? '✓ 감시중' : '⚡ 감시'}</button>` : ''}
   </div>`;
 }
 
@@ -1596,6 +1596,11 @@ function _normalize(arr) {
 }
 
 function getJournal() { return journalCache; }
+
+// v4.71: 감시 버튼 상태 유지 — 이미 대기(pending) 등록된 티커면 카드 재렌더링 시에도 비활성 표시
+function isPendingWatch(ticker) {
+  return (journalCache || []).some(r => r.ticker === ticker && r.status === 'pending');
+}
 
 function setJournal(arr) {
   journalCache = arr;
