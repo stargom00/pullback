@@ -282,7 +282,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.62</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.63</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -2611,6 +2611,20 @@ async function runDiag() {
     }).join('');
     const reasons = (d['탈락_핵심사유'] || []).map(r =>
       `<li style="margin:4px 0;color:var(--text);font-size:13px">${r}</li>`).join('');
+    // v4.63: 수평 저항/지지 매물대 (터치 횟수 = 진짜 피벗)
+    let hlHtml = '';
+    const hl = d['수평저항'];
+    if (hl && !hl.error) {
+      const resList = (hl['저항'] || []).map(r => `<span style="color:#f87171;font-size:12px;margin-right:10px">${r}</span>`).join('');
+      const supList = (hl['지지'] || []).map(s => `<span style="color:#4ade80;font-size:12px;margin-right:10px">${s}</span>`).join('');
+      hlHtml = `
+        <div style="border-top:1px solid var(--line);padding-top:8px;margin-top:8px">
+          <div style="font-size:13px;font-weight:600;color:#60a5fa;margin-bottom:4px">📊 수평 매물대 (터치횟수=진짜 저항, 스파이크 제외)</div>
+          ${hl['추천피벗'] ? `<div style="font-size:13px;margin-bottom:4px">추천 피벗: <b style="color:#fbbf24">${Number(hl['추천피벗']).toLocaleString()}</b> <span style="color:var(--muted)">(${hl['피벗_터치횟수']}회 터치)</span></div>` : ''}
+          <div style="margin-bottom:3px">저항: ${resList || '<span style="color:var(--muted);font-size:12px">없음</span>'}</div>
+          <div>지지: ${supList || '<span style="color:var(--muted);font-size:12px">없음</span>'}</div>
+        </div>`;
+    }
     const ind = d.indicators || {};
     const keyInd = [
       ['정배열', ind['정배열(20>60>200)'] ? '✅ 정배열' : '❌ 깨짐'],
@@ -2624,6 +2638,7 @@ async function runDiag() {
         <div style="margin-bottom:10px">${modeChips}</div>
         <div style="font-size:13px;font-weight:600;color:#fbbf24;margin-bottom:4px">📋 핵심 사유</div>
         <ul style="margin:0 0 10px;padding-left:18px">${reasons}</ul>
+        ${hlHtml}
         <div style="border-top:1px solid var(--line);padding-top:8px">${keyInd}</div>
       </div>`;
   } catch (e) {
