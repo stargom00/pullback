@@ -5,6 +5,13 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.67 [수정] 손절폭 판정을 고정%에서 ATR 배수로 — 미국주 배제 문제 해결.
+        [문제] 고정 5%(US)/7%(KR)가 종목 변동성을 무시. 미국주는 ATR이 커서
+               (ANAB 7.7%) 정상 손절폭이 5%를 넘어 💎적격에서 통째 탈락,
+               국내만 남던 반복 문제의 뿌리.
+        [해결] 손절폭 > ATR×1.5면 넓음. 변동성 대비 판정. ANAB 6.8%/ATR7.7%
+               =0.88배 통과. 저변동주는 오히려 더 빡세짐(ATR2%→한계3%).
+               stop_wide·bear_ok 공통. ATR 불량시 고정% 폴백.
 v4.66 [수정] 약세장적격(bear_ok) 손절폭 기준을 손절폭배지(stop_wide)와 통일.
         [버그] bear_ok는 risk_warn(8%/12%), stop_wide는 5%/7%를 써서 손절폭
                7.2%짜리가 🚫손절폭넓음 + 💎약세장적격을 동시에 다는 모순
@@ -882,7 +889,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.66"
+VERSION = "v4.67"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

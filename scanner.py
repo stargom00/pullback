@@ -1495,7 +1495,27 @@ def badge_fields(c, h, lo, v, pivot, is_kr, rs_rank, rrb) -> dict:
     """
     _bq = base_quality(c, h, lo, v, pivot=pivot, is_kr=is_kr)
     risk_pct = float(rrb.get("risk_pct", 0.0))
-    _stop_wide = bool(risk_pct > (7.0 if is_kr else 5.0))
+    # v4.67: 손절폭 넓음 판정을 '고정 %'에서 'ATR 배수'로.
+    # [문제] 고정 5%(US)/7%(KR)는 각 종목의 변동성을 무시했다. 미국주는 ATR이
+    #        커서(ANAB 7.7%) 정상 손절폭이 이미 5%를 넘어 → 💎적격에서 미국이
+    #        통째로 탈락, 국내만 남았다. 계속 빙빙 돌던 문제의 뿌리.
+    # [해결] 손절폭이 그 종목 ATR의 1.5배를 넘으면 '넓음'. 즉 변동성 대비 판정.
+    #        - 저변동주(ATR 2%): 손절폭 3% 넘으면 넓음 (더 빡셈)
+    #        - 고변동주(ATR 7.7%): 손절폭 ~11.5%까지 허용 (ANAB 6.8% 통과)
+    #        진짜 '타이트함' = 손절폭/ATR 비율. 절대%가 아님.
+    # ATR이 비정상(0/NaN)이면 옛 고정% 기준으로 폴백(안전).
+    try:
+        _atr_abs = atr(h, lo, c)
+        _cur = float(c.iloc[-1])
+        _atr_pct = (_atr_abs / _cur * 100) if _cur > 0 else 0.0
+    except Exception:
+        _atr_pct = 0.0
+    _ATR_MULT = 1.5
+    if _atr_pct >= 1.0:                       # ATR 유효 → 변동성 대비 판정
+        _stop_limit = _atr_pct * _ATR_MULT
+    else:                                     # ATR 불량 → 고정% 폴백
+        _stop_limit = 7.0 if is_kr else 5.0
+    _stop_wide = bool(risk_pct > _stop_limit)
     return {
         "base_badge": _bq["badge"],
         "base_badge_lv": _bq["badge_lv"],
@@ -1506,7 +1526,8 @@ def badge_fields(c, h, lo, v, pivot, is_kr, rs_rank, rrb) -> dict:
         "base_discontinuity": _bq["discontinuity"],
         "base_gap_ago": _bq["gap_ago"],
         "stop_wide": _stop_wide,
-        "stop_limit_pct": (7.0 if is_kr else 5.0),
+        "stop_limit_pct": round(_stop_limit, 1),   # v4.67: ATR 기반 실제 한계값
+        "atr_pct": round(_atr_pct, 1),
         # v4.66: bear_ok의 손절폭 조건을 stop_wide(5%/7%)와 통일.
         # 기존엔 risk_warn(8%/12%)을 써서, 7.2%짜리가 🚫손절폭넓음(5% 기준)과
         # 💎약세장적격(8% 기준)을 동시에 다는 모순이 있었음(ANAB 사례).
