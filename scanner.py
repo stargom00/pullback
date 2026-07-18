@@ -1495,6 +1495,7 @@ def badge_fields(c, h, lo, v, pivot, is_kr, rs_rank, rrb) -> dict:
     """
     _bq = base_quality(c, h, lo, v, pivot=pivot, is_kr=is_kr)
     risk_pct = float(rrb.get("risk_pct", 0.0))
+    _stop_wide = bool(risk_pct > (7.0 if is_kr else 5.0))
     return {
         "base_badge": _bq["badge"],
         "base_badge_lv": _bq["badge_lv"],
@@ -1504,17 +1505,21 @@ def badge_fields(c, h, lo, v, pivot, is_kr, rs_rank, rrb) -> dict:
         "base_vol_dry": _bq["vol_dry"],
         "base_discontinuity": _bq["discontinuity"],
         "base_gap_ago": _bq["gap_ago"],
-        "stop_wide": bool(risk_pct > (7.0 if is_kr else 5.0)),
+        "stop_wide": _stop_wide,
         "stop_limit_pct": (7.0 if is_kr else 5.0),
+        # v4.66: bear_ok의 손절폭 조건을 stop_wide(5%/7%)와 통일.
+        # 기존엔 risk_warn(8%/12%)을 써서, 7.2%짜리가 🚫손절폭넓음(5% 기준)과
+        # 💎약세장적격(8% 기준)을 동시에 다는 모순이 있었음(ANAB 사례).
+        # 이제 🚫 뜬 종목은 💎이 절대 안 뜬다.
         "bear_ok": bool(
             _bq["badge_lv"] == "good"
             and (rs_rank is not None and rs_rank >= 90)
-            and not rrb.get("risk_warn", True)
+            and not _stop_wide
         ),
         "bear_ok_reasons": {
             "base": _bq["badge_lv"] == "good",
             "rs90": (rs_rank is not None and rs_rank >= 90),
-            "risk_tight": not rrb.get("risk_warn", True),
+            "risk_tight": not _stop_wide,
         },
     }
 
