@@ -282,7 +282,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.61</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.62</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -335,6 +335,18 @@ tr.editing{background:rgba(242,179,61,.06)}
     background:var(--surface);border:1px solid var(--line);color:var(--text);font-size:14px;outline:none">
 </div>
 <div id="content"><div class="loading"><div class="spinner"></div>스캔 중…</div></div>
+
+<!-- v4.62: 왜 안 잡혔나 진단 패널 -->
+<div id="diagBar" style="display:none;padding:0 24px;margin:14px 0">
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <input id="diagInput" type="text" placeholder="🔍 왜 안 잡혔지? — 종목코드 입력 (예: 001800)"
+      style="flex:1;min-width:200px;box-sizing:border-box;padding:10px 14px;border-radius:10px;
+      background:var(--surface);border:1px solid var(--line);color:var(--text);font-size:14px;outline:none">
+    <button id="diagBtn" style="padding:10px 18px;border-radius:10px;background:#1d6b3a;color:#fff;
+      border:none;font-size:14px;cursor:pointer;white-space:nowrap">진단</button>
+  </div>
+  <div id="diagResult" style="margin-top:12px"></div>
+</div>
 <div class="jrnl-wrap" id="journalView" style="display:none"></div>
 
 <div class="modal-bg" id="journalModal">
@@ -896,6 +908,7 @@ async function load(refresh = false) {
     searchQuery = '';
     const sb = document.getElementById('cardSearch'); if (sb) sb.value = '';
     document.getElementById('searchBar').style.display = '';
+    document.getElementById('diagBar').style.display = '';
     renderSectors(data.sector_summary || []);
     renderCards();
   } catch (e) {
@@ -918,6 +931,7 @@ async function loadSectors() {
   const content = document.getElementById('content');
   const status = document.getElementById('status');
   document.getElementById('searchBar').style.display = 'none';
+  document.getElementById('diagBar').style.display = 'none';
   renderSectors([]);
   content.innerHTML = '<div class="loading"><div class="spinner"></div>섹터 집계 중…</div>';
   status.innerHTML = '';
@@ -987,6 +1001,7 @@ async function loadInverse(refresh = false) {
   content.innerHTML = '<div class="loading"><div class="spinner"></div>인버스 스캔 중…</div>';
   status.innerHTML = '';
   document.getElementById('searchBar').style.display = 'none';
+  document.getElementById('diagBar').style.display = 'none';
   try {
     const res = await fetch(`/api/inverse?market=all${refresh ? '&refresh=true' : ''}`);
     const data = await res.json();
@@ -1293,6 +1308,7 @@ document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click'
   document.getElementById('content').style.display = isJournal ? 'none' : '';
   document.getElementById('journalView').style.display = isJournal ? 'block' : 'none';
   document.getElementById('searchBar').style.display = isJournal ? 'none' : '';
+  document.getElementById('diagBar').style.display = isJournal ? 'none' : '';
   document.getElementById('subDesc').textContent = isJournal
     ? '🔥/추세전환 신호를 기록하고 결과(R)를 추적 — 주말에 CSV로 내보내 구글시트에 백업'
     : DESC[mode];
@@ -2568,6 +2584,54 @@ function exportCSV() {
   a.click();
 }
 document.getElementById('refresh').addEventListener('click', () => load(true));
+
+// v4.62: 왜 안 잡혔나 진단
+async function runDiag() {
+  const inp = document.getElementById('diagInput');
+  const out = document.getElementById('diagResult');
+  const q = (inp.value || '').trim();
+  if (!q) { out.innerHTML = ''; return; }
+  out.innerHTML = '<div style="color:var(--muted);font-size:13px">진단 중…</div>';
+  try {
+    const res = await fetch('/api/debug/' + encodeURIComponent(q));
+    const d = await res.json();
+    if (d.error) {
+      out.innerHTML = `<div style="color:#f87171;font-size:13px">${d.error} (${d.ticker || q})</div>`;
+      return;
+    }
+    const modeNames = { pullback:'눌림목', turnaround:'추세전환', imminent:'돌파임박',
+      breakout:'돌파', boxbreak:'박스돌파', leader:'대장후보', super:'슈퍼대장', surge:'급등' };
+    const modeChips = Object.entries(d.modes || {}).map(([k, v]) => {
+      const pass = v === '통과';
+      const bg = pass ? '#12351f' : '#26262e';
+      const col = pass ? '#4ade80' : '#9ca3af';
+      const ic = pass ? '✅' : '✕';
+      return `<span style="display:inline-block;padding:4px 10px;margin:2px;border-radius:8px;
+        background:${bg};color:${col};font-size:12px">${ic} ${modeNames[k] || k}</span>`;
+    }).join('');
+    const reasons = (d['탈락_핵심사유'] || []).map(r =>
+      `<li style="margin:4px 0;color:var(--text);font-size:13px">${r}</li>`).join('');
+    const ind = d.indicators || {};
+    const keyInd = [
+      ['정배열', ind['정배열(20>60>200)'] ? '✅ 정배열' : '❌ 깨짐'],
+      ['20일선', ind.ma20], ['60일선', ind.ma60], ['200일선', ind.ma200],
+      ['200일선 이격', ind.close_vs_ma200_pct != null ? ind.close_vs_ma200_pct + '%' : '-'],
+      ['거래량(vs50일)', ind['거래량배수(vs50일)'] != null ? ind['거래량배수(vs50일)'] + '×' : '-'],
+    ].map(([k, v]) => `<span style="color:var(--muted);font-size:12px;margin-right:12px">${k}: <b style="color:var(--text)">${v}</b></span>`).join('');
+    out.innerHTML = `
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px">
+        <div style="font-size:15px;font-weight:700;margin-bottom:8px">${d.ticker} · ${Number(d.close).toLocaleString()}원</div>
+        <div style="margin-bottom:10px">${modeChips}</div>
+        <div style="font-size:13px;font-weight:600;color:#fbbf24;margin-bottom:4px">📋 핵심 사유</div>
+        <ul style="margin:0 0 10px;padding-left:18px">${reasons}</ul>
+        <div style="border-top:1px solid var(--line);padding-top:8px">${keyInd}</div>
+      </div>`;
+  } catch (e) {
+    out.innerHTML = `<div style="color:#f87171;font-size:13px">진단 실패: ${e.message}</div>`;
+  }
+}
+document.getElementById('diagBtn').addEventListener('click', runDiag);
+document.getElementById('diagInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') runDiag(); });
 
 async function loadIndices() {
   const bar = document.getElementById('idxbar');
