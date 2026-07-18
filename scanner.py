@@ -1396,6 +1396,93 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
 # "베이스가 종목의 성격을 말한다": 길이·깊이·수축·거래량건조로
 # 좋은 베이스를 만드는 종목에 가점, 짧거나 얕은 조정엔 감점 + 배지.
 # ══════════════════════════════════════════════════════
+
+
+# ══════════════════════════════════════════════════════
+# 수평 저항(매물대) 감지 (v4.63)
+# 스파이크 고점(한 번 윗꼬리로 찍고 만 자리)은 진짜 저항이 아니다.
+# 진짜 피벗 = 가격이 '여러 번' 부딪혀 막힌 수평 매물대.
+# 가격대를 잘게 나눠 고가·저가 터치 횟수를 세고, 많이 닿은 구간을 저항으로.
+# ══════════════════════════════════════════════════════
+def horizontal_levels(h: pd.Series, lo: pd.Series, c: pd.Series,
+                      lookback: int = 120, bin_pct: float = 0.01,
+                      min_touch: int = 3, above_only_from: float | None = None) -> dict:
+    """수평 지지/저항 매물대 탐지.
+
+    방법:
+      - 최근 lookback 봉의 고가·저가를 bin_pct(1%) 폭 가격 빈에 누적.
+      - 각 봉의 고가와 저가가 속한 빈에 '터치 1회'. (종가 아님 — 꼬리 포함
+        실제로 그 가격을 건드렸는지가 매물대 형성의 핵심)
+      - min_touch(3회) 이상 닿은 빈 = 유효 매물대. 인접 빈은 병합.
+      - 스파이크는 1~2회만 닿으니 자동 제외된다.
+
+    반환:
+      resistances : 현재가 위 매물대 [{price, touches, dist_pct}] (가까운 순)
+      supports    : 현재가 아래 매물대 (가까운 순)
+      pivot       : 현재가 위 '가장 가깝고 유효한' 저항 = 추천 피벗 (없으면 None)
+      pivot_touches : 그 피벗의 터치 횟수
+    """
+    out = {"resistances": [], "supports": [], "pivot": None, "pivot_touches": 0}
+    try:
+        n = len(c)
+        if n < 30:
+            return out
+        H = h.iloc[-lookback:].values
+        L = lo.iloc[-lookback:].values
+        cur = float(c.iloc[-1])
+        if cur <= 0:
+            return out
+
+        # 가격 빈: 현재가 기준 log가 아니라 절대 % 폭. bin 크기 = cur*bin_pct
+        binsize = cur * bin_pct
+        from collections import defaultdict
+        touch = defaultdict(int)
+        # 각 봉: 고가 빈, 저가 빈에 +1 (같은 빈이면 1회만)
+        for hi, low in zip(H, L):
+            bh = round(hi / binsize)
+            bl = round(low / binsize)
+            seen = {bh, bl}
+            for b in seen:
+                touch[b] += 1
+
+        # min_touch 이상만, 인접 빈(±1) 병합
+        raw = sorted([(b, t) for b, t in touch.items() if t >= min_touch])
+        merged = []
+        for b, t in raw:
+            price = b * binsize
+            if merged and abs(price - merged[-1]["price"]) <= binsize * 1.5:
+                # 병합: 터치 합산, 가격은 터치 가중 평균
+                m = merged[-1]
+                total = m["touches"] + t
+                m["price"] = (m["price"] * m["touches"] + price * t) / total
+                m["touches"] = total
+            else:
+                merged.append({"price": price, "touches": t})
+
+        res, sup = [], []
+        for m in merged:
+            price = round(m["price"])
+            dist = (price - cur) / cur * 100
+            entry = {"price": price, "touches": m["touches"], "dist_pct": round(dist, 1)}
+            # 현재가 ±2% 안은 '현재 가격대' — 저항/지지가 아니라 지금 서 있는 자리라 제외
+            if price > cur * 1.02:       # 2%+ 위 = 저항
+                res.append(entry)
+            elif price < cur * 0.98:     # 2%+ 아래 = 지지
+                sup.append(entry)
+        # 저항: 가까운 순(위로), 지지: 가까운 순(아래로)
+        res.sort(key=lambda x: x["price"])
+        sup.sort(key=lambda x: -x["price"])
+        out["resistances"] = res
+        out["supports"] = sup
+        # 추천 피벗 = 가장 가까운 저항 (터치 많을수록 신뢰)
+        if res:
+            out["pivot"] = res[0]["price"]
+            out["pivot_touches"] = res[0]["touches"]
+        return out
+    except Exception:
+        return out
+
+
 def badge_fields(c, h, lo, v, pivot, is_kr, rs_rank, rrb) -> dict:
     """베이스 품질 + 손절폭 + 약세장 적격 배지 필드를 한 번에 생성 (v4.61).
     analyze / analyze_imminent / analyze_breakout 등 여러 탭에서 공통 사용.

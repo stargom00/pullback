@@ -5,6 +5,13 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.63 [신규] 수평 저항/지지 매물대 감지 — 진짜 피벗 자동 판정.
+        [문제] 스캐너 박스 상단이 '최근 N일 최고가'라 스파이크(윗꼬리 한번)를
+               피벗으로 잡음. 여러번 눌린 수평 매물대가 진짜 저항인데 못 봄.
+               (빅솔론: 스캐너는 8970을 피벗으로 봤지만 실제 저항은 8300대)
+        [해결] horizontal_levels() — 가격을 1% 빈으로 나눠 고가·저가 터치횟수
+               집계. 3회+ 닿은 구간만 매물대(스파이크는 1~2회라 자동 제외).
+               인접 빈 병합, 현재가 ±2% 제외. /api/debug와 진단패널에 표시.
 v4.62 [신규] '왜 안 잡혔나' 진단 패널 — 카드 상단에 종목코드 입력→진단.
         /api/debug에 탈락_핵심사유 자동 판정 추가(정배열깨짐/박스미돌파/거래량부족
         등을 지표로 자동 해석). UI에서 모드별 통과/탈락 칩 + 사유 + 핵심지표 표시.
@@ -857,7 +864,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.62"
+VERSION = "v4.63"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1921,6 +1928,18 @@ async def debug_ticker(ticker: str):
         },
         "atr_median_pct": round(float(tr.iloc[-14:].median()) / close * 100, 2),
     }
+    # v4.63: 수평 저항/지지 매물대 (터치 횟수 기반 — 스파이크 제외)
+    try:
+        from scanner import horizontal_levels
+        _hl = horizontal_levels(h, lo, c)
+        payload["수평저항"] = {
+            "추천피벗": _hl["pivot"],
+            "피벗_터치횟수": _hl["pivot_touches"],
+            "저항": [f"{r['price']} ({r['touches']}회, {r['dist_pct']:+}%)" for r in _hl["resistances"][:4]],
+            "지지": [f"{s['price']} ({s['touches']}회, {s['dist_pct']:+}%)" for s in _hl["supports"][:3]],
+        }
+    except Exception as _e:
+        payload["수평저항"] = {"error": str(_e)}
     # v4.62: 탈락 사유 자동 판정 (사람이 지표 보고 유추 안 해도 되게)
     # 각 모드가 '탈락'일 때, 지표로 가장 유력한 사유를 한 줄로.
     reasons = []
