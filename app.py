@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.62 [신규] '왜 안 잡혔나' 진단 패널 — 카드 상단에 종목코드 입력→진단.
+        /api/debug에 탈락_핵심사유 자동 판정 추가(정배열깨짐/박스미돌파/거래량부족
+        등을 지표로 자동 해석). UI에서 모드별 통과/탈락 칩 + 사유 + 핵심지표 표시.
+        기존엔 /api/debug/{ticker} URL 직접 쳐야 했음.
 v4.61 [수정] 손절폭 배지 2건 + 베이스 배지 전탭 확대.
         [버그1] stop_wide를 analyze 로컬 risk_pct(피벗기준)로 판정 → 카드
                 하단 '리스크%'(rrb값)와 달라 11.32%인데 ✅로 뜸. rrb.risk_pct로 통일.
@@ -853,7 +857,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.61"
+VERSION = "v4.62"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1917,6 +1921,31 @@ async def debug_ticker(ticker: str):
         },
         "atr_median_pct": round(float(tr.iloc[-14:].median()) / close * 100, 2),
     }
+    # v4.62: 탈락 사유 자동 판정 (사람이 지표 보고 유추 안 해도 되게)
+    # 각 모드가 '탈락'일 때, 지표로 가장 유력한 사유를 한 줄로.
+    reasons = []
+    ind = payload["indicators"]
+    aligned = ind.get("정배열(20>60>200)")
+    if not aligned:
+        if ma200 is not None and not (close > ma200):
+            reasons.append("200일선 아래 — 추세 미달 (모든 추세 모드 탈락)")
+        elif ma200 is not None and not (ma20 > ma60):
+            reasons.append(f"정배열 깨짐: 20일선({round(ma20)}) < 60일선({round(ma60)}) — 눌림목/추세전환 탈락")
+        elif ma200 is not None and not (ma60 > ma200):
+            reasons.append(f"정배열 깨짐: 60일선({round(ma60)}) < 200일선({round(ma200)})")
+    # 돌파 계열
+    box_broken = any(box_info.get(f"박스{w}_돌파여부") for w in (20, 40, 60))
+    if not box_broken:
+        tops = [box_info.get(f"박스{w}_상단") for w in (20, 40, 60) if box_info.get(f"박스{w}_상단")]
+        near = min(tops, key=lambda t: abs(t - close)) if tops else None
+        if near:
+            gap = (near - close) / close * 100
+            reasons.append(f"박스 상단 미돌파 — 가장 가까운 저항 {near} (현재가 대비 {gap:+.1f}%) · 돌파/돌파임박/박스돌파 탈락")
+    if vol_mult is not None and vol_mult < 1.5:
+        reasons.append(f"거래량 부족: 50일 평균의 {vol_mult}배 (돌파는 1.5배+ 필요)")
+    if not reasons:
+        reasons.append("주요 필터는 통과 — RS/세부 조건(거래량·눌림폭 등)에서 미세 탈락 가능. modes와 indicators 대조 필요")
+    payload["탈락_핵심사유"] = reasons
     # ensure_ascii=False + charset 명시 → 모바일에서 한글 안 깨짐
     return Response(
         content=_json.dumps(payload, ensure_ascii=False, indent=2),
