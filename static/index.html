@@ -282,7 +282,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.68</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.69</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -331,21 +331,23 @@ tr.editing{background:rgba(242,179,61,.06)}
   <div class="alert-list" id="alertList"></div>
 </div>
 <div id="searchBar" style="display:none;padding:0 24px;margin:0 0 14px">
-  <input id="cardSearch" type="text" placeholder="🔍 종목명 또는 코드로 찾기 (예: 삼성, 005930)"
-    style="width:100%;box-sizing:border-box;padding:10px 14px;border-radius:10px;
-    background:var(--surface);border:1px solid var(--line);color:var(--text);font-size:14px;outline:none">
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <input id="cardSearch" type="text" placeholder="🔍 종목명 또는 코드로 찾기 (예: 삼성, 005930)"
+      style="flex:1 1 0;min-width:200px;box-sizing:border-box;padding:10px 14px;border-radius:10px;
+      background:var(--surface);border:1px solid var(--line);color:var(--text);font-size:14px;outline:none">
+    <div style="flex:1 1 0;min-width:200px;display:flex;gap:8px">
+      <input id="diagInput" type="text" placeholder="🔍 왜 안 잡혔지? — 종목코드 입력 (예: 001800)"
+        style="flex:1;box-sizing:border-box;padding:10px 14px;border-radius:10px;
+        background:var(--surface);border:1px solid var(--line);color:var(--text);font-size:14px;outline:none">
+      <button id="diagBtn" style="padding:10px 18px;border-radius:10px;background:#1d6b3a;color:#fff;
+        border:none;font-size:14px;cursor:pointer;white-space:nowrap">진단</button>
+    </div>
+  </div>
 </div>
 <div id="content"><div class="loading"><div class="spinner"></div>스캔 중…</div></div>
 
-<!-- v4.62: 왜 안 잡혔나 진단 패널 -->
+<!-- v4.62: 왜 안 잡혔나 진단 패널 (검색란은 위 searchBar로 이동, 결과만 여기 표시) -->
 <div id="diagBar" style="display:none;padding:0 24px;margin:14px 0">
-  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-    <input id="diagInput" type="text" placeholder="🔍 왜 안 잡혔지? — 종목코드 입력 (예: 001800)"
-      style="flex:1;min-width:200px;box-sizing:border-box;padding:10px 14px;border-radius:10px;
-      background:var(--surface);border:1px solid var(--line);color:var(--text);font-size:14px;outline:none">
-    <button id="diagBtn" style="padding:10px 18px;border-radius:10px;background:#1d6b3a;color:#fff;
-      border:none;font-size:14px;cursor:pointer;white-space:nowrap">진단</button>
-  </div>
   <div id="diagResult" style="margin-top:12px"></div>
 </div>
 <div class="jrnl-wrap" id="journalView" style="display:none"></div>
