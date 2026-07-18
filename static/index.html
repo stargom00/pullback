@@ -282,7 +282,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.67</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.68</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -694,6 +694,7 @@ function card(s) {
       <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
       <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(${s.entry_basis ?? '피벗'}진입)</span></div><div class="v">${s.risk_pct}%</div></div>
       <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
+      <div class="metric"><div class="k">ATR</div><div class="v" title="일간 변동성(ATR/현재가). 손절폭 넓음 판정 기준(ATR×1.5)의 근거값.">${s.atr_pct != null ? s.atr_pct + '%' : '-'}</div></div>
     </div>` : s.mode === 'surge' ? `
     <div class="metrics mono">
       <div class="metric"><div class="k">당일</div><div class="v" style="color:var(--px-up)">+${s.change_pct}%</div></div>
@@ -713,6 +714,7 @@ function card(s) {
       <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
       <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(${s.entry_basis ?? '피벗'}진입)</span></div><div class="v">${s.risk_pct}%</div></div>
       <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
+      <div class="metric"><div class="k">ATR</div><div class="v" title="일간 변동성(ATR/현재가). 손절폭 넓음 판정 기준(ATR×1.5)의 근거값.">${s.atr_pct != null ? s.atr_pct + '%' : '-'}</div></div>
     </div>` : s.mode === 'breakout' ? `
     <div class="metrics mono">
       <div class="metric"><div class="k">연장도</div><div class="v" style="${s.in_valid_zone ? 'color:var(--green)' : 'color:var(--up)'}">+${s.ext_pct}%</div></div>
@@ -725,6 +727,7 @@ function card(s) {
       <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
       <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(${s.entry_basis ?? '피벗'}진입)</span></div><div class="v">${s.risk_pct}%</div></div>
       <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
+      <div class="metric"><div class="k">ATR</div><div class="v" title="일간 변동성(ATR/현재가). 손절폭 넓음 판정 기준(ATR×1.5)의 근거값.">${s.atr_pct != null ? s.atr_pct + '%' : '-'}</div></div>
     </div>` : s.mode === 'boxbreak' ? `
     <div class="metrics mono">
       <div class="metric"><div class="k">연장도</div><div class="v" style="${s.ext_pct <= 5 ? 'color:var(--green)' : 'color:var(--up)'}">+${s.ext_pct}%</div></div>
@@ -737,6 +740,7 @@ function card(s) {
       <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
       <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(${s.entry_basis ?? '피벗'}진입)</span></div><div class="v">${s.risk_pct}%</div></div>
       <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
+      <div class="metric"><div class="k">ATR</div><div class="v" title="일간 변동성(ATR/현재가). 손절폭 넓음 판정 기준(ATR×1.5)의 근거값.">${s.atr_pct != null ? s.atr_pct + '%' : '-'}</div></div>
     </div>` : s.mode === 'super' ? `
     <div class="metrics mono">
       <div class="metric"><div class="k">상태</div><div class="v" style="font-size:12px">${s.status}</div></div>
@@ -820,6 +824,7 @@ function card(s) {
       <div class="metric"><div class="k">손절 기준</div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
       <div class="metric"><div class="k">리스크 <span style="font-size:9px;opacity:.6">(${s.entry_basis ?? '피벗'}진입)</span></div><div class="v">${s.risk_pct}%</div></div>
       <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
+      <div class="metric"><div class="k">ATR</div><div class="v" title="일간 변동성(ATR/현재가). 손절폭 넓음 판정 기준(ATR×1.5)의 근거값.">${s.atr_pct != null ? s.atr_pct + '%' : '-'}</div></div>
     </div>`}
     ${(s.mode === 'leader' || s.mode === 'super' || s.mode === 'breakout' || s.mode === 'surge' || s.mode === 'imminent' || s.mode === 'boxbreak' || s.mode === 'pattern') ? '' : s.mode === 'turnaround' ? `
     <div class="badges">
@@ -1688,7 +1693,7 @@ async function refreshPrices() {
                             && r.entry && r.stop
                             && (r.tracking || r.status === 'pending' || r.status === 'entered'));
   if (active.length === 0) { alert('추적할 진입/대기 종목이 없어요.'); return; }
-  let prices = {};
+  let prices = {}, mclosed = {};
   let errMsg = '';
   try {
     const res = await fetch('/api/prices', {
@@ -1696,7 +1701,7 @@ async function refreshPrices() {
       body: JSON.stringify({ tickers: active.map(r => r.ticker) })
     });
     if (!res.ok) { errMsg = `서버 응답 오류 (${res.status})`; }
-    else { prices = (await res.json()).prices || {}; }
+    else { const j = await res.json(); prices = j.prices || {}; mclosed = j.closed || {}; }
   } catch(e) { errMsg = '네트워크 오류: ' + e.message; }
 
   if (errMsg) { alert('현재가 갱신 실패\n' + errMsg); return; }
@@ -1704,14 +1709,14 @@ async function refreshPrices() {
   const got = Object.keys(prices).length;
   const missing = active.filter(r => prices[r.ticker] == null).map(r => r.name);
   // 가격 반영 (updateTracking과 동일 로직 재사용)
-  await updateTracking(prices);
+  await updateTracking(prices, mclosed);
 
   let msg = `현재가 갱신 완료\n성공: ${got}개`;
   if (missing.length) msg += `\n실패(가격 못 가져옴): ${missing.join(', ')}`;
   alert(msg);
 }
 
-async function updateTracking(prefetched) {
+async function updateTracking(prefetched, prefetchedClosed) {
   const j = getJournal();
   // 추적 대상: 미종료 + entry/stop 있음. 진입(entered)·대기(pending) 모두 가격 갱신.
   // status==='missed'만 제외. (과거에 tracking 플래그가 꺼진 진입 종목도 포함되게 보강)
@@ -1720,13 +1725,16 @@ async function updateTracking(prefetched) {
                             && (r.tracking || r.status === 'pending' || r.status === 'entered'));
   if (active.length === 0) return;
   let prices = prefetched || {};
+  let mclosed = prefetchedClosed || {};
   if (!prefetched) {
     try {
       const res = await fetch('/api/prices', {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ tickers: active.map(r => r.ticker) })
       });
-      prices = (await res.json()).prices || {};
+      const j2 = await res.json();
+      prices = j2.prices || {};
+      mclosed = j2.closed || {};
     } catch(e) { return; }
   }
 
@@ -1742,11 +1750,17 @@ async function updateTracking(prefetched) {
     const target = parseFloat(r.target);
     const oneR = entry - stop;
     if (oneR <= 0) { changed = true; continue; }
+    // v4.68: 손절은 종가로만 확정. 장중엔 순간가가 손절가를 스쳐도(꼬리) 종료 처리하지
+    // 않고 '터치'만 기록 — 장중 노이즈로 손절 확정 후 종가에 다시 말아올려도 일지에
+    // 반영 안 되던 문제(장중엔 계속 진입중으로 남고, 종가 확인 시점에 이미 회복해
+    // px<=stop이 거짓이 되어 영영 손절로 안 잡히던 버그) 수정.
+    // mclosed[ticker]가 없으면(과거 캐시 등) 보수적으로 '장마감'으로 간주해 기존 동작 유지.
+    const mClosedNow = mclosed[r.ticker] !== false;
 
     // ── 대기(pending): 아직 안 산 추적관찰 ──
     // 진입가(피벗) 도달 → 자동 '진입'으로 전환, 진입일 갱신.
     // 자동 무산 2조건: (1) 대기 WATCH_DAYS일 경과(셋업 식음)
-    //                  (2) 현재가가 손절가 아래로 빠짐(베이스/셋업 붕괴)
+    //                  (2) 종가가 손절가 아래로 빠짐(베이스/셋업 붕괴)
     if ((r.status || 'entered') === 'pending') {
       if (px >= entry) {
         r.status = 'entered';
@@ -1756,9 +1770,9 @@ async function updateTracking(prefetched) {
         changed = true;
         continue;
       }
-      // 자동 무산 판정
+      // 자동 무산 판정 (종가 확정 후에만 — 장중 터치는 무산시키지 않음)
       const waitDays = Math.floor((today - new Date(r.date)) / 86400000);
-      if (stop && px <= stop) {
+      if (stop && px <= stop && mClosedNow) {
         r.status = 'missed';
         r.tracking = false;
         r.closed_reason = '셋업붕괴(손절가 이탈)';
@@ -1781,13 +1795,16 @@ async function updateTracking(prefetched) {
     //  사용자가 직접 ⏹종료 누를 때까지 현재가·R을 계속 추적한다.)
     const daysHeld = Math.floor((today - new Date(r.date)) / 86400000);
     let closed = false, reason = '', resultR = null;
-    if (px <= stop) { closed = true; reason = '손절도달'; resultR = -1; }
+    // 장중엔 터치만 기록(배지 표시용), 종가에만 최종 손절 확정.
+    r.stop_touched_intraday = (!mClosedNow && px <= stop);
+    if (mClosedNow && px <= stop) { closed = true; reason = '손절도달'; resultR = -1; }
     else if (target && px >= target) { closed = true; reason = '목표도달'; resultR = (target - entry) / oneR; }
     // 14일 경과해도 자동종료하지 않음 — 현재가·R 계속 갱신만 함
 
     if (closed) {
       r.tracking = false;
       r.status = 'closed';
+      r.stop_touched_intraday = false;
       r.result_r = (Math.round(resultR * 100) / 100).toString();
       r.exit = Math.round(px * 100) / 100;
       r.closed_reason = reason;
@@ -2435,7 +2452,9 @@ function viewRow(r) {
                 const dheld = Math.floor((Date.now() - new Date(r.date)) / 86400000);
                 const col = liveR >= 0 ? 'var(--px-up)' : 'var(--px-down)';
                 return `<span style="color:${col};font-weight:600">${liveR>=0?'+':''}${liveR.toFixed(1)}R</span>`
-                     + `<div style="font-size:9px;color:var(--muted)">D+${dheld}</div>`;
+                     + `<div style="font-size:9px;color:var(--muted)">D+${dheld}</div>`
+                     // v4.68: 장중 손절가 터치 — 아직 종가 확정 전이라 자동종료는 안 됐지만 경고만.
+                     + (r.stop_touched_intraday ? `<div style="font-size:9px;color:#f87171;font-weight:600" title="장중 손절가를 스쳤지만 종가로만 손절을 확정합니다. 마감까지 지켜보세요.">⚠️ 장중 손절터치</div>` : '');
               })()
             : `<span style="color:var(--muted);font-size:11px">추적대기</span><div style="font-size:9px;color:var(--muted)">${r.entry?'앱 새로고침 시 갱신':''}</div>`)
     }</td>

@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.68 [신규] 일지 자동 손절을 종가 기준으로 확정 + 카드에 ATR% 상시 표시.
+        [문제] 자동 손절 판정이 앱을 연 순간의 장중 실시간가로 즉시 이뤄짐.
+               장중 손절가를 스쳤다가 종가에 반등하면, 그 순간에 앱을 안 보고
+               있었을 경우 다음에 열었을 땐 이미 가격이 회복돼 있어 px<=stop이
+               거짓이 됨 → 영원히 '진입중'으로 남고 일지에 손절 기록이 안 됨.
+        [해결] /api/prices가 티커별 장마감 여부(closed)도 함께 반환. 프론트는
+               장중엔 손절가 터치를 배지로만 표시(⚠️ 장중 손절터치), 실제 종료
+               판정(exit_reason=손절도달)은 장마감 후 가격으로만 확정. 대기
+               종목의 셋업붕괴 판정도 동일하게 종가 기준으로 통일.
+        [ATR 표시] badge_fields가 내부적으로만 쓰던 atr_pct를 _rr_block에도
+               추가해 눌림목/추세전환/돌파/박스돌파/돌파임박/패턴 전 탭에 노출,
+               카드에 '리스크' 옆 'ATR' 지표로 상시 표시. 손절폭 넓음 배지의
+               판정 근거(ATR×1.5)를 숫자로 직접 확인 가능.
 v4.67 [수정] 손절폭 판정을 고정%에서 ATR 배수로 — 미국주 배제 문제 해결.
         [문제] 고정 5%(US)/7%(KR)가 종목 변동성을 무시. 미국주는 ATR이 커서
                (ANAB 7.7%) 정상 손절폭이 5%를 넘어 💎적격에서 통째 탈락,
@@ -889,7 +902,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.67"
+VERSION = "v4.68"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1031,6 +1044,21 @@ def _market_session_key(market: str) -> str | None:
     if not needed():
         return None
     return now.strftime("%Y-%m-%d")
+
+
+def _is_market_open_now(is_kr: bool) -> bool:
+    """지금 그 시장이 '장중'인지 (일지 자동 손절 판정을 종가로만 하기 위한 게이트, v4.68).
+    - 한국장: 평일 09:00~15:30 KST
+    - 미국장: DST 계산 없이 넉넉히 22:00~06:30 KST를 '장중'으로 봄(실제 22:30~05:00/06:00
+      보다 넓게 잡아 장중을 장마감으로 오판하는 일이 없게 안전 마진을 둠).
+    주말은 항상 장마감."""
+    now = datetime.now(KST)
+    if now.weekday() >= 5:
+        return False
+    hm = now.hour * 60 + now.minute
+    if is_kr:
+        return 9 * 60 <= hm < 15 * 60 + 30
+    return hm >= 22 * 60 or hm < 6 * 60 + 30
 
 
 def _disk_cache_dir() -> str:
@@ -2757,7 +2785,9 @@ async def save_journal(request: Request):
 @app.post("/api/prices")
 async def batch_prices(request: Request):
     """추적용 현재가 일괄 조회. body: {"tickers": ["AAPL", "005930.KS", ...]}
-    반환: {"prices": {"AAPL": 123.4, ...}} (실패 종목은 생략)."""
+    반환: {"prices": {"AAPL": 123.4, ...}, "closed": {"AAPL": true, ...}} (실패 종목은 prices에서 생략).
+    v4.68: closed = 해당 티커 시장이 지금 장중이 아닌지. 일지 자동 손절 판정을
+    장중 순간가가 아니라 종가로만 하기 위해 프론트에서 이 플래그로 게이트한다."""
     body = await request.json()
     tickers = body.get("tickers", []) if isinstance(body, dict) else []
     if not tickers or not isinstance(tickers, list):
@@ -2791,7 +2821,8 @@ async def batch_prices(request: Request):
         loop.run_in_executor(_executor, _one_price, tk) for tk in tickers
     ])
     prices = {tk: p for tk, p in results if p is not None}
-    return JSONResponse({"prices": prices})
+    closed = {tk: (not _is_market_open_now(naver_kr.is_kr(tk))) for tk in prices}
+    return JSONResponse({"prices": prices, "closed": closed})
 
 
 @app.get("/")

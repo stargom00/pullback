@@ -695,6 +695,12 @@ def _rr_block(pivot: float, stop: float, h: pd.Series, lo: pd.Series, c: pd.Seri
     eff = info.get("stop_eff") or stop
     base = entry if (entry and entry > 0) else pivot
     risk_pct = (base - eff) / base * 100 if base > 0 else 0.0
+    # v4.68: 일간 변동성(ATR%) — 카드에 손절폭과 나란히 표시해 '넓다/좁다'를 직접 판단 가능하게.
+    try:
+        _cur = float(c.iloc[-1])
+        atr_pct = round(atr(h, lo, c) / _cur * 100, 1) if _cur > 0 else None
+    except Exception:
+        atr_pct = None
     return {
         "stop": round(eff, 2),
         "risk_pct": round(risk_pct, 2),
@@ -705,6 +711,7 @@ def _rr_block(pivot: float, stop: float, h: pd.Series, lo: pd.Series, c: pd.Seri
         "risk_warn": risk_pct > warn_pct,
         "stop_struct": round(stop_struct, 2) if stop_struct is not None else None,
         "atr_buf": round(atr_buf, 2),
+        "atr_pct": atr_pct,
     }
 
 
