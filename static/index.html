@@ -282,7 +282,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.66</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.67</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -647,7 +647,7 @@ function card(s) {
           // (대부분이 좁아야 정상 → ✅를 모든 카드에 다는 건 노이즈이자 하단
           //  '리스크 %'와 숫자 중복). 나쁜 것에만 시선이 가게 한다.
           if (!s.stop_wide) return '';
-          return ` <span class="climax-tag danger" style="background:#341418;color:#f87171;border:1px solid #6b2028" title="손절폭 넓음 (${s.risk_pct ?? '?'}% > 기준 ${s.stop_limit_pct}%). +1R 목표=손절폭만큼 상승이라, 넓으면 +1R 도달 전에 손절될 확률↑. 돌파 추격 대신 지지 근처(눌림목)에서 진입해 손절폭을 좁히세요. 이 자리는 진입 비권장.">🚫 손절폭넓음</span>`;
+          return ` <span class="climax-tag danger" style="background:#341418;color:#f87171;border:1px solid #6b2028" title="손절폭 넓음 (${s.risk_pct ?? '?'}% > 기준 ${s.stop_limit_pct}%). 기준은 이 종목 ATR(하루 변동폭 ${s.atr_pct ?? '?'}%)의 1.5배 — 변동성 대비 손절이 넓다는 뜻. +1R 목표=손절폭만큼 상승이라 넓으면 도달 전 손절 확률↑. 지지 근처(눌림목) 진입으로 손절폭을 좁히세요.">🚫 손절폭넓음</span>`;
         })()}${(() => {
           // v4.59: 약세장(🟡🔴) 진입 적격 배지. 게이트가 pressure/correction일 때만 노출.
           // 강세장(🟢)에선 굳이 옥석 안 가려도 되므로 표시 안 함.
