@@ -1464,8 +1464,12 @@ def horizontal_levels(h: pd.Series, lo: pd.Series, c: pd.Series,
             price = round(m["price"])
             dist = (price - cur) / cur * 100
             entry = {"price": price, "touches": m["touches"], "dist_pct": round(dist, 1)}
-            # 현재가 ±2% 안은 '현재 가격대' — 저항/지지가 아니라 지금 서 있는 자리라 제외
-            if price > cur * 1.02:       # 2%+ 위 = 저항
+            # v4.64: 위쪽 제외폭 +2% → +0.5%로 축소.
+            # ±2% 대칭 제외는 '눈앞의 저항'을 지워버렸다 (나이스정통: 현재가
+            # 29,900의 +2%=30,498이라 실제 저항대 30,200~30,400이 제외됨).
+            # 트레이딩 대상은 바로 위 저항이므로 위쪽은 0.5%만 제외(당일 노이즈),
+            # 아래쪽 지지는 -2% 유지(현재 가격대와 구분).
+            if price > cur * 1.005:      # 0.5%+ 위 = 저항
                 res.append(entry)
             elif price < cur * 0.98:     # 2%+ 아래 = 지지
                 sup.append(entry)

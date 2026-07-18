@@ -5,6 +5,12 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.64 [신규] 발견→관찰→진입 파이프라인 (봇 v2.8과 세트).
+        ① 원클릭 관찰: 카드 [⚡관찰] 버튼 → POST /api/watch/quick →
+           피벗·손절 자동으로 일지 대기 등록 → 봇 즉시 감시. (등록 마찰 제거 —
+           "스캐너 발견했는데 등록 안 해서 알림 못 받고 놓침" 패턴 차단)
+        ② 수평저항 위쪽 제외 +2%→+0.5% (나이스정통: 눈앞 저항 30,300이
+           제외구간에 들어가 안 잡히던 버그)
 v4.63 [신규] 수평 저항/지지 매물대 감지 — 진짜 피벗 자동 판정.
         [문제] 스캐너 박스 상단이 '최근 N일 최고가'라 스파이크(윗꼬리 한번)를
                피벗으로 잡음. 여러번 눌린 수평 매물대가 진짜 저항인데 못 봄.
@@ -864,7 +870,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.63"
+VERSION = "v4.64"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2636,6 +2642,71 @@ async def save_rsettings(request: Request):
     except OSError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
     return JSONResponse({"ok": True, **data})
+
+
+@app.post("/api/watch/quick")
+async def watch_quick(request: Request):
+    """v4.64 원클릭 관찰 등록 — 스캐너 카드에서 클릭 한 번으로 봇 감시 시작.
+
+    [배경] 스캐너 발견 ≠ 봇 감시. 기존엔 '+ 일지에 추가' 모달에서 수동 입력해야
+    봇이 감시했고, 그 마찰 때문에 등록을 미루다 돌파를 놓침(Seulki 반복 패턴).
+    이 API는 카드의 피벗·손절을 그대로 받아 서버에서 일지에 1건 append한다.
+    (기존 POST /api/journal은 전체 덮어쓰기라 동시성 위험 → append 전용 신설)
+
+    body: {ticker, name, market, pivot, stop}
+    중복: 같은 ticker의 pending 항목이 이미 있으면 새로 안 만들고 exists 반환.
+    """
+    body = await request.json()
+    ticker = (body.get("ticker") or "").strip()
+    if not ticker:
+        return JSONResponse({"ok": False, "error": "ticker 필요"}, status_code=400)
+    try:
+        pivot = float(body.get("pivot") or 0) or None
+        stop = float(body.get("stop") or 0) or None
+    except (TypeError, ValueError):
+        pivot, stop = None, None
+    if not pivot:
+        return JSONResponse({"ok": False, "error": "pivot 필요"}, status_code=400)
+
+    j = load_journal()
+    for r in j:
+        if r.get("ticker") == ticker and r.get("status") == "pending":
+            return JSONResponse({"ok": True, "exists": True, "id": r.get("id"),
+                                 "msg": "이미 대기 감시 중"})
+    import time as _t
+    rec = {
+        "id": int(_t.time() * 1000),
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "ticker": ticker,
+        "name": body.get("name") or ticker,
+        "market": body.get("market") or ("KR" if ticker[:1].isdigit() else "US"),
+        "status": "pending",
+        "category": "추세추종",
+        "cat": "추세추종",
+        "tab": body.get("tab") or "돌파임박",
+        "signal": "",
+        "pivot": pivot,
+        "entry": pivot,          # 대기 항목의 entry=피벗(베이스 천장) 관례
+        "stop": stop,
+        "pivot_type": "원클릭",
+        "setup_score": body.get("score") or "",
+    }
+    j.append(rec)
+    try:
+        d = os.path.dirname(JOURNAL_PATH)
+        if os.path.exists(JOURNAL_PATH):
+            try:
+                import shutil
+                shutil.copy2(JOURNAL_PATH, JOURNAL_PATH + ".bak")
+            except OSError:
+                pass
+        tmp = JOURNAL_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(j, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, JOURNAL_PATH)
+    except OSError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "id": rec["id"], "pivot": pivot, "stop": stop})
 
 
 @app.post("/api/journal")
