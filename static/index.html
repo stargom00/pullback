@@ -282,7 +282,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.64</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.65</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -306,6 +306,7 @@ tr.editing{background:rgba(242,179,61,.06)}
     <button class="tab" data-market="us">미국</button>
     <button class="tab" id="strictToggle" title="RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓ 만 표시 (주도주 엄선)">🎯 주도주만</button>
     <button class="tab" id="riskSortToggle" title="손절폭(리스크%) 좁은 순으로 정렬 — 타이트한 진입 자리가 위로. 단 ATR(일상 변동)보다 좁은 손절은 노이즈에 털릴 수 있어 ⚠️ 표시">↕ 손절좁은순</button>
+    <button class="tab" id="bearOkToggle" title="약세장 적격(💎)만 표시 — 탄탄한베이스 + RS90+ + 손절폭적정, 3조건 전부 충족. 게이트 🟡🔴일 때 125개 후보에서 옥석을 가리는 필터. 대부분 걸러져서 몇 개만 남는 게 정상.">💎 적격만</button>
   </div>
   <button class="refresh" id="refresh">다시 스캔</button>
 </header>
@@ -628,7 +629,7 @@ function breakdownCard(s) {
     ${s.oversold ? '<div class="surge-warn" style="background:rgba(242,179,61,.08);border-color:rgba(242,179,61,.3);margin-top:8px">⚠️ RSI ' + s.rsi + ' 과매도 — 단기 반등(숏 스퀴즈) 위험. 추격 숏 금지, 반등 후 진입.</div>' : ''}
     ${krWarn ? '<div class="surge-warn" style="margin-top:8px">⚠️ 한국 종목 — 개인 공매도 제약. 인버스 ETF나 관찰용으로 활용.</div>' : ''}
     <div class="surge-warn" style="background:rgba(255,107,107,.06);border-color:rgba(255,107,107,.25);margin-top:8px">🩸 숏은 손실 무한·숏스퀴즈 위험. 손절(위쪽 저항) 칼같이, 소액만. 미너비니式 본래 현금 우선.</div>
-    ${s.ticker ? `<button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button><button class="journal-btn" style="margin-left:6px;background:#1d6b3a;border-color:#1d6b3a" onclick="quickWatch(this,'${s.ticker}')" title="클릭 한 번으로 봇 감시 등록 — 카드의 피벗·손절이 자동 입력됨. 돌파 시 텔레그램 알림.">⚡ 관찰</button>` : ''}
+    ${s.ticker ? `<button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button><button class="journal-btn" style="margin-left:6px;background:#1d6b3a;border-color:#1d6b3a" onclick="quickWatch(this,'${s.ticker}')" title="원클릭 봇 감시(대기) 등록 — 피벗·손절 자동 입력. 돌파·리테스트 시 텔레그램 알림. (일지의 '관찰' 카테고리와 다름: 관찰=이평 접근 알림용)">⚡ 감시</button>` : ''}
   </div>`;
 }
 
@@ -840,7 +841,7 @@ function card(s) {
       </div>`;
     })() : ''}
     ${s.ticker ? `
-    <button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button><button class="journal-btn" style="margin-left:6px;background:#1d6b3a;border-color:#1d6b3a" onclick="quickWatch(this,'${s.ticker}')" title="원클릭 봇 감시 등록">⚡ 관찰</button>` : ''}
+    <button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button><button class="journal-btn" style="margin-left:6px;background:#1d6b3a;border-color:#1d6b3a" onclick="quickWatch(this,'${s.ticker}')" title="원클릭 봇 감시 등록">⚡ 감시</button>` : ''}
   </div>`;
 }
 
@@ -851,9 +852,15 @@ let searchQuery = '';
 let lastHits = [];
 let strictMode = false;
 let riskSort = false;
+let bearOkOnly = false;   // v4.65: 💎 약세장적격만
 document.getElementById('strictToggle').addEventListener('click', (e) => {
   strictMode = !strictMode;
   e.target.classList.toggle('active', strictMode);
+  renderCards();
+});
+document.getElementById('bearOkToggle').addEventListener('click', (e) => {
+  bearOkOnly = !bearOkOnly;
+  e.target.classList.toggle('active', bearOkOnly);
   renderCards();
 });
 document.getElementById('riskSortToggle').addEventListener('click', (e) => {
@@ -1183,6 +1190,10 @@ function renderCards() {
   }
   // 주도주 엄격모드 필터: RS90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓
   // 주도주(RS90+) 필터는 롱 전용 — 숏(붕괴)은 약한 종목이라 적용하지 않음
+  // v4.65: 💎 약세장적격만 — bear_ok(탄탄베이스+RS90+손절폭적정) 3조건 충족만
+  if (bearOkOnly && mode !== 'breakdown') {
+    list = list.filter(h => h.bear_ok === true);
+  }
   if (strictMode && mode !== 'breakdown') {
     list = list.filter(h => {
       const rsOk = (h.rs ?? 0) >= 90;
