@@ -15,7 +15,7 @@
 **모든 UI 수정은 `static/index.html`에 해야 한다.** 루트 index.html 편집하면 라이브에 안 뜬다. (v4.58 base 배지가 "안 보인다"던 사건의 원인.)
 
 ### 2. 버전 스탬프를 항상 올린다
-- `app.py`의 `VERSION` 문자열(약 826라인)을 올리고 `[변경 이력]` 헤더에 항목 추가.
+- `app.py`의 `VERSION` 문자열(`grep -n '^VERSION' app.py`로 찾을 것 — changelog가 계속 늘어나 라인 번호가 매 버전 밀림)을 올리고 `[변경 이력]` 헤더에 항목 추가.
 - UI 버전 배지는 `static/index.html`의 `<span id="verBadge">`에 하드코딩 + JS가 스캔 완료 시 `app.py`의 `data.version`으로 덮어씀. **둘 다 같이 올려야** 새로고침마다 old→new 깜빡임이 안 생긴다.
 - Seulki는 이 배지로 배포 성공을 확인함. 안 올리면 코드가 나가도 배지가 옛날 버전으로 남음.
 
