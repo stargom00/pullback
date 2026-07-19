@@ -5,6 +5,21 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.73 [버그수정] 장중 스캐너 가격이 첫 fetch 이후로 사실상 고정되던 문제(근본원인).
+        [문제] _fetch_market_data_inner의 증분재사용 로직이 "직전 캐시가
+               REUSE_TTL(30분) 이내인가"를 번들 전체의 재구성 시각(ts)으로
+               판단했음. 그런데 ts는 실제 fetch가 하나도 없는 순수 재사용
+               사이클에서도 매번 now()로 갱신됨. 백그라운드 워밍(4~8분 주기)이
+               이 사이클을 계속 돌리는데 그 주기가 REUSE_TTL(30분)보다 짧아서,
+               재사용 조건이 사실상 영원히 참이 됨 → 장 시작 후 첫 fetch
+               이후로는 종목별 실제 가격이 하루 종일 다시 안 받아짐(카드
+               현재가·등락률·RS 전부 고정). v4.43.2가 고쳤다고 기록된
+               "기가비스 6/26 종가 고정" 버그가 "며칠"에서 "장중 내내"로
+               형태만 바뀌어 재발한 셈.
+        [해결] 종목별 실제 fetch 시각을 별도 딕셔너리(data_ts)로 추적, 번들
+               재구성 여부와 무관하게 종목 단위로 REUSE_TTL 경과 시 반드시
+               재요청되게 함. 일지 추적가(/api/prices)는 원래도 매번 실시간
+               조회라 이 버그의 영향을 받지 않았음 — 스캐너 카드 쪽만 해당.
 v4.72 [기능개선] 일지 '수동 추가' → 관찰(watch) 상태에서 피벗가 필수 입력 제거.
         [문제] 스캐너 유니버스에 없는 신규 상장주(예: 마키나락스 477850, 2026-05
                코스닥 상장이라 유니버스 갱신 주기에 아직 안 들어감)를 "관찰"로만
@@ -934,7 +949,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.72"
+VERSION = "v4.73"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1230,19 +1245,28 @@ async def _fetch_market_data_inner(market: str, cache_key: str) -> dict:
     # ── 증분 다운로드(C안): 직전 캐시에 있는 종목 df는 재사용, 새로 편입된 종목만 받는다.
     # [v4.43.2] 신선도 검사 추가: 직전 캐시가 REUSE_TTL(기본 30분) 이내일 때만 재사용.
     # 이전엔 나이 확인 없이 무조건 재사용해 서버가 살아있는 동안 가격이 며칠 전에
-    # 얼어붙는 버그가 있었음(기가비스 6/26 종가 고정 사례). 30분 = 장중 유니버스
-    # 슬롯 갱신 주기와 일치 — 원래 증분 캐시의 설계 의도(30분 내 유니버스 갱신 시
-    # 기존 종목 재사용)로 범위를 되돌림.
+    # 얼어붙는 버그가 있었음(기가비스 6/26 종가 고정 사례).
+    # [v4.73 수정] v4.43.2의 신선도 검사는 "번들이 마지막으로 재구성된 시각"(ts)을
+    # 봤는데, ts는 재사용만 하고 실제 fetch가 하나도 없어도 매 사이클 now()로
+    # 갱신됨. 백그라운드 워밍이 4~8분마다 도는데 REUSE_TTL은 30분이라, 재사용
+    # 조건이 사실상 영원히 참이 되어 장이 열린 뒤 첫 fetch 이후로는 종목별
+    # 실제 가격이 하루 종일 다시 안 받아지는 문제가 있었음(기가비스 버그가
+    # "며칠"에서 "장중 내내"로 형태만 바뀌어 재발). 종목별로 실제 fetch 시각을
+    # 따로 추적(data_ts)해 번들 재구성 여부와 무관하게 30분마다 실제 재요청되게 함.
     prev = _data_cache.get(cache_key)
-    prev_fresh = isinstance(prev, dict) and (time.time() - prev.get("ts", 0) < REUSE_TTL)
-    prev_data = prev.get("data", {}) if prev_fresh else {}
+    prev_data = prev.get("data", {}) if isinstance(prev, dict) else {}
+    prev_data_ts = prev.get("data_ts", {}) if isinstance(prev, dict) else {}
+    now_ts = time.time()
     reused: dict = {}
+    data_ts: dict = {}
     fetch_targets = []
     for t in tickers:
-        if t in prev_data and prev_data[t] is not None:
-            reused[t] = prev_data[t]      # 직전 캐시 재사용 (다운로드 스킵)
+        fetched_at = prev_data_ts.get(t, 0)
+        if t in prev_data and prev_data[t] is not None and now_ts - fetched_at < REUSE_TTL:
+            reused[t] = prev_data[t]      # 최근 REUSE_TTL 이내에 실제로 받은 데이터 재사용
+            data_ts[t] = fetched_at
         else:
-            fetch_targets.append(t)        # 캐시에 없음 → 새로 받아야 함
+            fetch_targets.append(t)        # 없거나, 실제 fetch가 오래돼 다시 받아야 함
 
     kr_tickers = [t for t in fetch_targets if naver_kr.is_kr(t)]
     us_tickers = [t for t in fetch_targets if not naver_kr.is_kr(t)]
@@ -1262,6 +1286,7 @@ async def _fetch_market_data_inner(market: str, cache_key: str) -> dict:
         for t, df in zip(kr_tickers, kr_dfs):
             if df is not None:
                 data[t] = df
+                data_ts[t] = time.time()
     _dur_kr = time.time() - _t_kr
 
     # ── 미국: yf.download 배치 (100개씩) → 요청 수 1/100로 축소 ──
@@ -1279,6 +1304,8 @@ async def _fetch_market_data_inner(market: str, cache_key: str) -> dict:
             results = await asyncio.gather(*[fetch_us_batch(b) for b in chunk])
             for r in results:
                 data.update(r)
+                for t in r:
+                    data_ts[t] = time.time()
     _dur_us = time.time() - _t_us
 
     # ── RS 등급: "지수 대비 초과성과" 기반 ──
@@ -1327,6 +1354,7 @@ async def _fetch_market_data_inner(market: str, cache_key: str) -> dict:
     bundle = {
         "universe": universe,
         "data": data,
+        "data_ts": data_ts,
         "rs_ranks": rs_ranks,
         "rs_moms": rs_moms,
         "ts": time.time(),
