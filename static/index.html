@@ -52,6 +52,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .idx{display:flex;align-items:baseline;gap:8px;padding:6px 14px;
   background:var(--bg);border:1px solid var(--line);border-radius:10px;font-size:13px}
 .idx .nm{color:var(--muted);font-weight:500}
+.idx .nm a{cursor:pointer} .idx .nm a:hover{text-decoration:underline!important}
 .idx .vl{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
 .idx .ch{font-size:12px;font-variant-numeric:tabular-nums}
 .idx .ch.up{color:var(--px-up)} .idx .ch.down{color:var(--px-down)} .idx .ch.flat{color:var(--muted)}
@@ -282,7 +283,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.74</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.75</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -2745,6 +2746,16 @@ async function runDiag() {
 document.getElementById('diagBtn').addEventListener('click', runDiag);
 document.getElementById('diagInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') runDiag(); });
 
+// v4.75: /api/indices의 한글 name → 트레이딩뷰 심볼 (지수 이름 클릭용)
+const TV_INDEX_SYMBOL = {
+  '코스피': 'KRX:KOSPI',
+  '코스닥': 'KRX:KOSDAQ',
+  '나스닥': 'NASDAQ:IXIC',
+  'S&P500': 'SP:SPX',
+  '닛케이': 'TVC:NI225',
+  '비트코인': 'COINBASE:BTCUSD',
+};
+
 async function loadIndices() {
   const bar = document.getElementById('idxbar');
   try {
@@ -2797,7 +2808,13 @@ async function loadIndices() {
         ? `${arrow} ${Math.abs(chg).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} (${pct > 0 ? '+' : ''}${pct.toFixed(2)}%)`
         : '–';
       const dot = regimeDot(ix.regime);
-      return `<div class="idx" title="${ix.regime_txt || '시장 분위기(분산일 기반)'}"><span class="nm">${ix.name}${dot ? ` <span style="font-size:9px" title="시장 분위기">${dot}</span>` : ''}</span>`
+      // v4.75: 지수 이름 클릭 → 트레이딩뷰 차트. 백엔드가 한글 라벨만 주므로
+      // 프론트에서 라벨→트레이딩뷰 심볼로 매핑 (표에 없는 지수는 그냥 텍스트).
+      const tvSym = TV_INDEX_SYMBOL[ix.name];
+      const nm = tvSym
+        ? `<a href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSym)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${ix.name}</a>`
+        : ix.name;
+      return `<div class="idx" title="${ix.regime_txt || '시장 분위기(분산일 기반)'}"><span class="nm">${nm}${dot ? ` <span style="font-size:9px" title="시장 분위기">${dot}</span>` : ''}</span>`
         + `<span class="vl">${val}</span>`
         + `<span class="ch ${dir}">${chgStr}</span></div>`;
     }).join('');

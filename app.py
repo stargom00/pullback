@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.75 [신규] 상단 지수 바(코스피/코스닥/S&P500/나스닥/닛케이/비트코인) 이름 클릭 시
+        트레이딩뷰 차트로 이동. /api/indices가 한글 라벨만 주기 때문에 프론트에
+        라벨→트레이딩뷰 심볼 매핑(TV_INDEX_SYMBOL)을 추가 (KRX:KOSPI,
+        KRX:KOSDAQ, NASDAQ:IXIC, SP:SPX, TVC:NI225, COINBASE:BTCUSD).
 v4.74 [버그수정] 일지 날짜 스탬프(등록일·활동달력)가 KST 자정~09시엔 하루 전으로
         찍히던 문제.
         [문제] 프론트가 '오늘' 날짜를 전부 new Date().toISOString().slice(0,10)로
@@ -961,7 +965,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.74"
+VERSION = "v4.75"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
