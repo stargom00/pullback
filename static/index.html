@@ -282,7 +282,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.73</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.74</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -454,6 +454,17 @@ tr.editing{background:rgba(242,179,61,.06)}
 </div>
 
 <script>
+// 일지 날짜 스탬프는 브라우저 로컬시간이 아니라 항상 KST(UTC+9) 기준이어야 한다.
+// toISOString()은 항상 UTC라, 한국이 자정~09시(KST)일 땐 아직 UTC로는 전날이라
+// 하루 전 날짜로 찍히는 버그가 있었음(v4.74) — 예: 마키나락스를 7/20 새벽에
+// 등록했는데 활동 달력엔 7/19로 표시. d를 직접 mutate하지 않고 KST로 shift한
+// 복제본만 반환하므로, 같은 Date 객체를 밀리초 차분(경과일 계산 등)에도 쓰는
+// 기존 호출부는 그대로 둬도 안전하다.
+function kstStr(d, len) {
+  d = (d instanceof Date) ? d : new Date();
+  return new Date(d.getTime() + 9 * 3600 * 1000).toISOString().slice(0, len || 10);
+}
+
 const fmtPrice = (p, mkt) => mkt === 'KR'
   ? Math.round(p).toLocaleString('ko-KR') + '원'
   : '$' + p.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
@@ -1467,8 +1478,8 @@ function periodR() {
   const now = new Date();
   const day = (now.getDay() + 6) % 7;              // 월=0
   const weekStart = new Date(now); weekStart.setDate(now.getDate() - day);
-  const wk = weekStart.toISOString().slice(0, 10);
-  const mo = now.toISOString().slice(0, 7);
+  const wk = kstStr(weekStart);
+  const mo = kstStr(now, 7);
   let week = 0, month = 0;
   for (const r of getJournal()) {
     if (r.result_r === '' || r.status === 'missed' || isBrokenRow(r)) continue;
@@ -1749,7 +1760,7 @@ async function updateTracking(prefetched, prefetchedClosed) {
     const px = prices[r.ticker];
     if (px == null) continue;
     r.last_price = px;
-    r.last_checked = today.toISOString().slice(0, 10);
+    r.last_checked = kstStr(today);
     if ((r.status || 'entered') === 'entered') r.tracking = true;  // 진입 종목은 추적 켜기(표시용)
     const entry = parseFloat(r.entry), stop = parseFloat(r.stop);
     const target = parseFloat(r.target);
@@ -1770,7 +1781,7 @@ async function updateTracking(prefetched, prefetchedClosed) {
       if (px >= entry) {
         r.status = 'entered';
         r.tracking = true;
-        r.date = today.toISOString().slice(0, 10);  // 실제 진입일로 갱신
+        r.date = kstStr(today);  // 실제 진입일로 갱신
         r.closed_reason = '';
         changed = true;
         continue;
@@ -1815,7 +1826,7 @@ async function updateTracking(prefetched, prefetchedClosed) {
       r.closed_reason = reason;
       r.exit_reason = reason;
       r.held_days = daysHeld;
-      r.closed_date = new Date().toISOString().slice(0, 10);   // 주간/월간 R 집계 기준
+      r.closed_date = kstStr();   // 주간/월간 R 집계 기준
     }
     changed = true;
   }
@@ -1862,7 +1873,7 @@ function renderJCal(all) {
   const first = new Date(y, m, 1);
   const startDow = first.getDay();                 // 0=일
   const daysInMonth = new Date(y, m + 1, 0).getDate();
-  const todayStr = now.toISOString().slice(0, 10);
+  const todayStr = kstStr(now);
   let cells = '';
   for (let i = 0; i < startDow; i++) cells += '<div></div>';
   for (let d = 1; d <= daysInMonth; d++) {
@@ -2049,7 +2060,7 @@ async function saveManualAdd() {
   const name = document.getElementById('maName').value.trim() || ticker;
   const sector = document.getElementById('maSector').value.trim();
   const note = document.getElementById('maNote').value.trim();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = kstStr();
   // 관찰은 category='관찰'로 표시해 통계에서 제외됨
   const cat = status === 'watch' ? '관찰' : '';
   const tab = status === 'watch' ? '수동관찰' : (isEntered ? '수동진입' : '수동관찰');
@@ -2160,7 +2171,7 @@ async function saveJournal() {
   const sig = (typeof entrySignal === 'function') ? entrySignal(s) : null;
   const rec = {
     id: Date.now(),
-    date: new Date().toISOString().slice(0, 10),
+    date: kstStr(),
     ticker: s.ticker, name: s.name, market: s.market, sector: s.sector || '',
     tab: modeTab(s.mode),
     mode_raw: s.mode || '',
@@ -2179,7 +2190,7 @@ async function saveJournal() {
     tracking: (entry && stop) ? true : false,  // 진입가·손절 있으면 추적 시작
     target: s.target ?? (entry && stop ? Math.round((entry + (entry - stop) * 2) * 100) / 100 : ''),  // 목표가(없으면 2R)
     last_price: entry,                         // 마지막 확인 가격
-    last_checked: new Date().toISOString().slice(0, 10),
+    last_checked: kstStr(),
     closed_reason: '',                         // 손절 | 목표 | 만료 | 수동
     // ── 진입 상태 ──
     //  pending(대기): 추적관찰, 아직 진입가 미도달 → 손익통계 제외, 손절가 닿아도 손절 아님
@@ -2527,7 +2538,7 @@ async function markEntered(id) {
   }
   r.status = 'entered';
   r.tracking = true;
-  r.date = new Date().toISOString().slice(0, 10);
+  r.date = kstStr();
   r.closed_reason = '';
   setJournal(j); await _saveJournalToServer(j); renderJournal();
 }
@@ -2624,14 +2635,14 @@ function saveEdit(id) {
     r.status = 'closed';
     r.exit_reason = exitReason;
     r.closed_reason = exitReason || r.closed_reason || '수동';
-    if (!r.closed_date) r.closed_date = new Date().toISOString().slice(0, 10);
+    if (!r.closed_date) r.closed_date = kstStr();
   } else if (manualR) {
     r.result_r = manualR;
     r.tracking = false;
     r.status = 'closed';
     r.exit_reason = exitReason;
     r.closed_reason = exitReason || r.closed_reason || '수동';
-    if (!r.closed_date) r.closed_date = new Date().toISOString().slice(0, 10);
+    if (!r.closed_date) r.closed_date = kstStr();
   } else if (exitReason) {
     r.exit_reason = exitReason;          // 사유만 나중에 고쳐 저장하는 경우
   }
@@ -2666,7 +2677,7 @@ function exportCSV() {
   const blob = new Blob(['\uFEFF' + csv], {type: 'text/csv;charset=utf-8'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `눌림목일지_${new Date().toISOString().slice(0,10)}.csv`;
+  a.download = `눌림목일지_${kstStr()}.csv`;
   a.click();
 }
 document.getElementById('refresh').addEventListener('click', () => load(true));
