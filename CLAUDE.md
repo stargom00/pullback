@@ -1,0 +1,82 @@
+# 눌림목 스캐너 (pullback scanner)
+
+개인용 눌림목 스캐너 웹앱. 한국/미국 시장을 스캔해 눌림목 셋업을 찾고, 뉴스 기반 섹터 분석을 제공한다. Minervini/O'Neil/IBD/SEPA 방법론 기반.
+
+- 배포: pullback-production.up.railway.app
+- 레포: stargom00/pullback
+- 배포 흐름: GitHub push → Railway 자동 배포
+
+---
+
+## ⚠️ 배포 전 반드시 지킬 것 (하드하게 배운 것들)
+
+### 1. 서빙되는 파일은 `static/index.html`이다
+`app.py`의 `@app.get("/")`는 **`static/index.html`을 서빙한다.** 루트의 `index.html`은 아무도 안 보는 좀비 파일(삭제 대상).
+**모든 UI 수정은 `static/index.html`에 해야 한다.** 루트 index.html 편집하면 라이브에 안 뜬다. (v4.58 base 배지가 "안 보인다"던 사건의 원인.)
+
+### 2. 버전 스탬프를 항상 올린다
+- `app.py`의 `VERSION` 문자열(약 826라인)을 올리고 `[변경 이력]` 헤더에 항목 추가.
+- UI 버전 배지는 `static/index.html`의 `<span id="verBadge">`에 하드코딩 + JS가 스캔 완료 시 `app.py`의 `data.version`으로 덮어씀. **둘 다 같이 올려야** 새로고침마다 old→new 깜빡임이 안 생긴다.
+- Seulki는 이 배지로 배포 성공을 확인함. 안 올리면 코드가 나가도 배지가 옛날 버전으로 남음.
+
+### 3. 보이는 것 바꿨으면 static/index.html도 올린다
+`scanner.py`/`app.py`는 API로 데이터를 주지만, **렌더링은 `static/index.html`이 한다.** 카드/배너에 새 배지·필드 추가했는데 .py만 올리면 화면에 조용히 안 뜬다.
+
+### 4. git 커밋 메시지는 따옴표 없는 짧은 영어로
+따옴표/오타로 커밋이 반복 실패한 이력 있음. `git commit -m short english message` 형태로.
+
+---
+
+## 검증 방법
+- 라이브 URL(pullback-production.up.railway.app)은 Claude bash 네트워크 allowlist에 **없다** → curl 불가.
+- `raw.githubusercontent.com`은 됨 → 배포 검증은 **레포의 raw 파일**로 한다.
+
+---
+
+## 개발 원칙 (Seulki)
+- **근본 원인 먼저.** 이상한 값이 나오면 방어 코드나 range 필터로 덮지 말고, 왜 그 값이 나왔는지부터 밝힌다. 재현으로 원인 확인 후 패치.
+- 방어/안전망 코드(특히 외부 데이터 오염 대비)는 **근본 수정 위에 2차 레이어로만** 추가.
+- **번들 수정 선호.** 패치 찔끔찔끔 배포 말고 묶어서. 데이터 소스 한계는 추측-패치-배포 반복 대신 처음에 선언.
+- 백테스트 없는 승률 주장 금지. 💎적격 우위는 구조적 추론(더 타이트한 손절 = +1R 도달성)이지 검증된 승률이 아니다. 실제 답은 Seulki 저널의 적격/부적격 결과 누적에서 나온다.
+
+---
+
+## 핵심 로직 메모
+
+### 💎적격 vs score (혼동 주의)
+- **score** = 셋업 예쁨 + 모멘텀. 베이스짧음·손절폭10.9%여도 99 가능.
+- **💎적격** = 생존 필터 = 탄탄베이스 + RS90 + 손절폭 적정.
+- 약세장에선 구조상 적격 86이 부적격 99보다 나을 수 있음(타이트한 손절). 단 이건 논리적 추론이지 백테스트 아님.
+
+### ATR 상대 손절폭 (v4.67)
+- `stop_wide` 판정 = `risk_pct > atr_pct × 1.5` (atr_pct = atr/close×100). 고정 5%US/7%KR을 대체 → 고ATR 미국주가 적격에서 구조적으로 빠지던 문제 해결.
+- ATR 무효(<1%)일 때만 고정 %로 폴백.
+- 🚫손절폭넓음 배지와 bear_ok(💎) 둘 다 적용. `badge_fields`가 atr_pct + 동적 stop_limit_pct 반환.
+- **핵심 통찰:** "타이트함"은 손절폭/ATR 비율이지 절대 %가 아니다.
+
+### 알려진 설계 갭 (미변경, 검토 대상)
+- `analyze_imminent`(돌파임박) 추세 게이트가 `close >= ma200` AND `ma20 > ma60`뿐 → 단기 이평 아래로 깊게 눌린 종목도 통과함. Minervini 템플릿은 50일선 위를 요구. `price > ma20(or ma60)` 조건 추가 검토 중.
+
+---
+
+## 아키텍처 요약
+- 스택: FastAPI(app.py) + scanner.py, 프론트는 static/index.html(단일 파일).
+- 저널 저장: Railway 볼륨 마운트 `/data`.
+- RS 랭킹: IBD 가중, 벤치마크 상대 백분위. (0.4×1mo + 0.4×3mo + 0.2×6mo + 0.1×9mo + 0.1×12mo)
+- Minervini 추세 템플릿 8조건 구현. **단 섹터강도 필터·EPS 필터는 없음.**
+- 탭: 돌파/급등/눌림목/섹터요약/패턴(컵앤핸들·깃발·더블바닥)/역ETF.
+- 시장별 리스크 임계치: KR 12%, US 8%.
+- `/api/ma/{ticker}` 엔드포인트를 얼마냐봇이 사용.
+- `/api/debug` = '왜 안 잡혔나' 진단 패널 (탈락 핵심사유 자동 판정, 수평저항 touch-count).
+- 대기(pending) 저널은 가격이 피벗 도달 시 자동으로 진입(entered)으로 전환됨(설계상). 순수 추적은 관찰 사용, 안 잡은 트레이드는 무산 처리해야 R 통계가 깨끗함.
+
+---
+
+## 연동
+- 얼마냐봇(Telegram 알림 봇)이 `/api/ma/{ticker}` 사용. 봇 상태는 in-memory라 재배포 시 리셋됨.
+
+---
+
+## Git 워크플로
+- 개인 전용 레포, 협업자 없음 — **별도 브랜치/PR 없이 main에서 바로 작업하고 push한다.**
+- Railway는 main만 보고 자동 배포하므로, 다른 브랜치에 머물러 있으면 배포가 트리거되지 않는다.
