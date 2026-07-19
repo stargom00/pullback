@@ -282,7 +282,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.71</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.72</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -441,7 +441,7 @@ tr.editing{background:rgba(242,179,61,.06)}
     </div>
     <div class="row">
       <div><label id="maPivotLabel">피벗가 (돌파 알림 기준) *</label><input id="maPivot" inputmode="decimal" placeholder="예: 337"></div>
-      <div><label>손절가</label><input id="maStop" inputmode="decimal" placeholder="예: 320"></div>
+      <div><label id="maStopLabel">손절가</label><input id="maStop" inputmode="decimal" placeholder="예: 320"></div>
     </div>
     <div id="maCalc" class="rcalc"></div>
     <label>메모 (한 줄)</label>
@@ -1695,7 +1695,7 @@ function tvUrl(tickerOrObj, market) {
 async function refreshPrices() {
   const j = getJournal();
   const active = j.filter(r => r.result_r === '' && r.status !== 'missed'
-                            && r.entry && r.stop
+                            && r.entry && (r.stop || r.status === 'watch')
                             && (r.tracking || r.status === 'pending' || r.status === 'entered'));
   if (active.length === 0) { alert('추적할 진입/대기 종목이 없어요.'); return; }
   let prices = {}, mclosed = {};
@@ -1726,7 +1726,7 @@ async function updateTracking(prefetched, prefetchedClosed) {
   // 추적 대상: 미종료 + entry/stop 있음. 진입(entered)·대기(pending) 모두 가격 갱신.
   // status==='missed'만 제외. (과거에 tracking 플래그가 꺼진 진입 종목도 포함되게 보강)
   const active = j.filter(r => r.result_r === '' && r.status !== 'missed'
-                            && r.entry && r.stop
+                            && r.entry && (r.stop || r.status === 'watch')
                             && (r.tracking || r.status === 'pending' || r.status === 'entered'));
   if (active.length === 0) return;
   let prices = prefetched || {};
@@ -2016,16 +2016,32 @@ function closeManualAdd() {
 async function saveManualAdd() {
   const ticker = document.getElementById('maTicker').value.trim().toUpperCase();
   const status = document.getElementById('maStatus').value;   // pending | entered | watch
-  const pivot = parseFloat(document.getElementById('maPivot').value);
+  let pivot = parseFloat(document.getElementById('maPivot').value);
   if (!ticker) { alert('종목코드를 입력하세요'); return; }
   const isEntered = status === 'entered';
-  // 진입이면 '진입가', 그 외엔 '피벗가'가 필수
+  const isWatch = status === 'watch';
+  // 진입이면 '진입가', 대기면 '피벗가'가 필수. 관찰은 피벗을 만드는 셋업이 아닐 수
+  // 있어 필수 아님 — 비우면 현재가를 가져와 채운다 (v4.72).
   if (!pivot || isNaN(pivot)) {
-    alert(isEntered ? '진입가를 입력하세요' : '피벗가를 입력하세요 (돌파 알림 기준)');
-    return;
+    if (!isWatch) {
+      alert(isEntered ? '진입가를 입력하세요' : '피벗가를 입력하세요 (돌파 알림 기준)');
+      return;
+    }
+    try {
+      const res = await fetch('/api/prices', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ tickers: [ticker] })
+      });
+      const j = await res.json();
+      pivot = (j.prices || {})[ticker];
+    } catch (e) { pivot = null; }
+    if (!pivot) {
+      alert('현재가를 가져오지 못했어요. 관심 등록가를 직접 입력해주세요.');
+      return;
+    }
   }
   const stop = parseFloat(document.getElementById('maStop').value) || null;
-  // 진입 상태면 손절 필수 (R 계산·손절 알림에 필요)
+  // 진입 상태면 손절 필수 (R 계산·손절 알림에 필요). 관찰은 손절 없이도 됨.
   if (isEntered && !stop) { alert('진입 종목은 손절가가 필요해요 (R 계산·손절 알림)'); return; }
   // 손절 검증: 있으면 기준가보다 낮아야 함
   if (stop && stop >= pivot) { alert('손절가는 ' + (isEntered ? '진입가' : '피벗가') + '보다 낮아야 해요'); return; }
@@ -2061,11 +2077,17 @@ async function saveManualAdd() {
 function onMaStatusChange() {
   const status = document.getElementById('maStatus').value;
   const lbl = document.getElementById('maPivotLabel');
-  const btn = document.querySelector('#manualAddModal .save, #journalModal .save');
+  const stopLbl = document.getElementById('maStopLabel');
   if (status === 'entered') {
     if (lbl) lbl.textContent = '진입가 *';
+    if (stopLbl) stopLbl.textContent = '손절가';
+  } else if (status === 'watch') {
+    // 관찰은 피벗을 만드는 셋업이 아닐 수 있어 필수 아님 — 비우면 현재가로 자동 설정 (v4.72)
+    if (lbl) lbl.textContent = '관심 등록가 (선택 — 비우면 현재가 자동)';
+    if (stopLbl) stopLbl.textContent = '손절가 (선택)';
   } else {
     if (lbl) lbl.textContent = '피벗가 (돌파 알림 기준) *';
+    if (stopLbl) stopLbl.textContent = '손절가';
   }
   const saveBtn = document.querySelector('.ma-save-btn');
   if (saveBtn) {
@@ -2451,6 +2473,11 @@ function viewRow(r) {
             ? `<span style="color:var(--amber);font-size:11px">피벗 대기</span><div style="font-size:9px;color:var(--muted)">${r.last_price?'현재 '+(/\.(KS|KQ)$/i.test(r.ticker||'')?Math.round(parseFloat(r.last_price)).toLocaleString():parseFloat(r.last_price).toFixed(2)):'미진입'}</div>`
         : st === 'missed'
             ? `<span style="color:var(--muted);font-size:11px">무산</span>${r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:''}`
+        // 관찰(watch)은 손절이 없을 수 있어 R 계산 대신 현재가만 표시 (v4.72)
+        : st === 'watch'
+            ? (r.last_price
+                ? `<span style="color:var(--muted);font-size:11px">${/\.(KS|KQ)$/i.test(r.ticker||'') ? Math.round(parseFloat(r.last_price)).toLocaleString() : parseFloat(r.last_price).toFixed(2)}</span>`
+                : `<span style="color:var(--muted);font-size:11px">관찰중</span>`)
         : (r.tracking && r.last_price && r.entry && r.stop
             ? (() => {
                 const liveR = (parseFloat(r.last_price) - parseFloat(r.entry)) / (parseFloat(r.entry) - parseFloat(r.stop));
