@@ -3,8 +3,27 @@
 <head>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>눌림목 스캐너</title>
+<!-- v4.79: PWA — 앱스토어 없이 홈 화면에 설치해서 앱처럼 쓰기 -->
+<link rel="manifest" href="/static/manifest.json">
+<link rel="apple-touch-icon" href="/static/icons/icon-180.png">
+<meta name="theme-color" content="#0C111B">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="눌림목">
+<script>
+// v4.79: 서비스워커 등록 — 홈 화면 설치(PWA) 요건. 오프라인 캐싱은 안 함(항상
+// 최신 데이터 필요한 스캐너라 캐시하면 오히려 해로움), 설치 가능하게만 함.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    // 루트(/sw.js)에서 등록해야 스코프가 사이트 전체(/)가 된다. /static/sw.js로
+    // 등록하면 스코프가 /static/으로 좁아져 앱 설치 조건을 못 채움.
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -282,13 +301,68 @@ tr.editing{background:rgba(242,179,61,.06)}
 @media (prefers-reduced-motion:reduce){.spinner{animation:none}}
 @media (max-width:600px){header{padding:16px}.grid{padding:0 16px 32px;grid-template-columns:1fr}}
 @media (max-width:600px){#searchBar{padding:0 16px}}
+
+/* ══════════════ v4.79: 모바일 전면 재정비 ══════════════
+   PC 가로 레이아웃을 그대로 축소만 하던 걸 실제로 재배치.
+   - 모드 탭: 줄바꿈으로 잘리던 것 → 한 줄 가로 스크롤(스와이프)로.
+   - 카드: metrics 4열은 폰 폭에서 숫자가 뭉개져서 2열로.
+   - 일지 표: 가로 스크롤 중에도 종목명이 안 사라지게 3번째 열 고정.
+   - 전반: 폰트·여백을 desktop 축소판이 아니라 터치 기준으로 다시 잡음. */
+@media (max-width:700px){
+  header{padding:14px 16px;gap:10px}
+  h1{font-size:16px}
+  .sub{font-size:11.5px}
+  .tabs{margin-left:0;width:100%;flex-wrap:nowrap;overflow-x:auto;
+    -webkit-overflow-scrolling:touch;scrollbar-width:none;gap:2px}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{padding:9px 13px;font-size:13.5px;flex-shrink:0;white-space:nowrap}
+  .refresh{padding:10px 16px;font-size:13.5px}
+
+  .idxbar{padding:10px 16px;gap:8px}
+  .idx{font-size:12.5px;padding:7px 12px}
+  .statusbar{padding:12px 16px;font-size:11.5px}
+  .legend{padding:0 16px 10px}
+  .sectorbar{padding:0 16px 12px}
+  .alert-panel{padding:12px 16px}
+
+  .grid{gap:12px}
+  .card{padding:14px;gap:10px}
+  .name{font-size:16px}
+  .price{font-size:18px}
+  .metrics{grid-template-columns:repeat(2,1fr);gap:10px 8px}
+  .metric .k{font-size:10.5px}
+  .metric .v{font-size:14px}
+  .journal-btn,.fund-btn{padding:10px;font-size:13px}
+  .badge{font-size:10.5px;padding:4px 9px}
+  .climax-tag,.gbadge,.pmat{font-size:10px}
+
+  .jrnl-wrap{padding:0 16px 40px}
+  .jrnl-tools{gap:8px}
+  .jrnl-tools button{padding:10px 14px;font-size:13.5px}
+  .jrnl-tab{padding:10px 16px;font-size:14.5px}
+  .fbtn{padding:8px 14px;font-size:13px}
+  .riskbar{font-size:12.5px;padding:10px 12px}
+  .statcard{min-width:100%}
+  .sigval-t{min-width:100%}
+
+  /* 일지 표: 폰트 키우고, 종목명 열(3번째)은 스크롤해도 항상 보이게 고정 */
+  .jtable{font-size:13px}
+  .jtable th,.jtable td{padding:10px 9px}
+  .jtable th:nth-child(3),.jtable td:nth-child(3){
+    position:sticky;left:0;background:var(--bg);z-index:1;
+    box-shadow:2px 0 4px rgba(0,0,0,.25)}
+  .jtable tbody tr:nth-child(even) td:nth-child(3){background:#0e1420}
+
+  .modal{padding:18px;width:94vw}
+  .modal input,.modal textarea{font-size:16px} /* 16px 미만이면 iOS가 확대해버림 */
+}
 </style>
 </head>
 <body>
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.78</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.79</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">

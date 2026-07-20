@@ -1,0 +1,15 @@
+{
+  "name": "눌림목 스캐너",
+  "short_name": "눌림목",
+  "description": "한국/미국 시장 눌림목 스캐너 · 개인용",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0C111B",
+  "theme_color": "#0C111B",
+  "orientation": "any",
+  "icons": [
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

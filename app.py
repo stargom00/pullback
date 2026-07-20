@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.79 [신규] 모바일 대응 전면 재정비 + PWA(홈 화면 설치) 지원.
+        [모바일 레이아웃] PC 레이아웃을 그대로 축소만 하던 걸 실제로 재배치:
+               모드 탭이 줄바꿈으로 잘려서 다루기 힘들던 것 → 한 줄 가로 스크롤
+               (스와이프)로 전환. 카드 metrics 4열이 폰 폭에서 숫자가 뭉개지던
+               것 → 2열로. 일지 표는 가로 스크롤 중에도 종목명(3번째 열)이
+               고정되게. 전반적으로 폰트·여백을 터치 기준으로 재조정.
+        [PWA] manifest.json + 아이콘(192/512, iOS용 180) + 서비스워커(sw.js)
+               추가 — 앱스토어 등록 없이 폰 홈 화면에 "추가"하면 브라우저 주소창
+               없이 앱처럼 전체화면으로 실행됨. 서비스워커는 스코프가 사이트
+               전체(/)가 되도록 반드시 루트(/sw.js)에서 서빙 — /static/sw.js로
+               등록하면 스코프가 /static/으로 좁아져 설치 조건을 못 채움.
+               오프라인 캐싱은 의도적으로 안 함(항상 최신 데이터 필요).
 v4.78 [버그수정] 인버스 탭 "강도 점수(0~100)"가 항상 '–'로 뜨던 문제(근본원인).
         [문제] UI 안내문·정렬 코드(app.py의 inv_score 정렬 키)는 이미 있었는데,
                정작 scanner.analyze_inverse()가 inv_score 필드 자체를 계산해서
@@ -985,7 +997,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.78"
+VERSION = "v4.79"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2929,6 +2941,14 @@ async def batch_prices(request: Request):
 @app.get("/")
 async def index():
     return FileResponse("static/index.html")
+
+
+@app.get("/sw.js")
+async def service_worker():
+    """PWA 서비스워커는 반드시 루트(/)에서 서빙해야 스코프가 사이트 전체(/)가 된다
+    (v4.79). /static/sw.js로 등록하면 스코프가 /static/으로 좁아져 앱 설치가
+    제대로 안 됨 — /static 밑 정적파일과 별도로 루트 라우트를 둔다."""
+    return FileResponse("static/sw.js", media_type="application/javascript")
 
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
