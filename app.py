@@ -5,6 +5,15 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.78 [버그수정] 인버스 탭 "강도 점수(0~100)"가 항상 '–'로 뜨던 문제(근본원인).
+        [문제] UI 안내문·정렬 코드(app.py의 inv_score 정렬 키)는 이미 있었는데,
+               정작 scanner.analyze_inverse()가 inv_score 필드 자체를 계산해서
+               반환한 적이 없었음 — 프론트가 항상 undefined를 받아 '–' 표시.
+        [해결] scanner.inverse_score() 신설: 정배열/20일선/기울기 구조 신호(최대
+               55점) + 5일 모멘텀(최대 25점, 20%↑에서 만점) + 거래량 확인(최대
+               20점, 평균 3배↑에서 만점) 합산, 과열(RSI)이면 되돌림 위험으로
+               -15점 감점. analyze_inverse()가 이 값을 inv_score로 반환.
+               곱버스(2x/3x) 파생 카드는 레버리지 반영된 5일 등락으로 재계산.
 v4.77 [수정] 일지 진입중/대기/관찰을 큰 탭으로 승격.
         [문제] 상태 필터(진입중/대기/관찰)가 이미 있었지만 전체/종료/추세/단타
                필터와 똑같은 작은 pill 버튼으로 섞여있어 눈에 안 띄고, 기본
@@ -954,7 +963,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, analyze_inverse, analyze_breakdown, analyze_pattern, rs_raw_score, to_rs_rank, climax_warning
+from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, analyze_inverse, analyze_breakdown, analyze_pattern, rs_raw_score, to_rs_rank, climax_warning, inverse_score
 from inverse_universe import inverse_universe
 from sectors import get_sector
 try:
@@ -976,7 +985,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.77"
+VERSION = "v4.78"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1565,6 +1574,11 @@ async def inverse_scan(market: str = "all", refresh: bool = False):
         derived["close"] = None       # 곱버스 실제가는 데이터 불신 → 표시 안 함
         derived["derived"] = True      # 1x에서 역산했음 표시
         derived["derived_from"] = src
+        # 강도점수도 레버리지 반영한 5일 등락으로 재계산 (구조 신호는 1x와 동일 가정)
+        derived["inv_score"] = inverse_score(
+            base.get("aligned", False), base.get("above_ma20", False),
+            base.get("ma20_slope_up", False), derived["ret5_pct"],
+            base.get("vol_mult", 0.0), base.get("overheated", False))
         hits.append({"ticker": t, "market": meta.get("market", "US"), **derived})
 
     # ── 기초지수 5일 등락 (인버스가 왜 오르는지 직관적으로) ──

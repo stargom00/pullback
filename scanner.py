@@ -2750,6 +2750,21 @@ INVERSE_CONFIG = {
 }
 
 
+def inverse_score(aligned: bool, above_ma20: bool, ma20_slope_up: bool,
+                   ret5_pct: float, vol_mult: float, overheated: bool) -> int:
+    """인버스 강도 점수(0~100) — "지금 인버스 살 만한 국면인가" 종합 점수.
+    v4.78: UI에 "강도 점수(0~100)"라고 문구는 있었는데 실제 계산이 없어서
+    카드에 항상 '–'만 뜨던 버그. 구조(정배열/20일선/기울기) + 5일 모멘텀 +
+    거래량 확인을 합산, 과열(RSI)이면 되돌림 위험으로 감점."""
+    score = 40.0 if aligned else (20.0 if above_ma20 else 0.0)
+    score += 15.0 if ma20_slope_up else 0.0
+    score += max(0.0, min(ret5_pct, 20.0)) / 20.0 * 25.0   # 5일 +20%↑에서 만점
+    score += max(0.0, min(vol_mult, 3.0)) / 3.0 * 20.0     # 평균 대비 3배↑에서 만점
+    if overheated:
+        score -= 15.0
+    return int(round(max(0.0, min(100.0, score))))
+
+
 def analyze_inverse(df: pd.DataFrame, meta: dict | None = None,
                     cfg: dict = INVERSE_CONFIG) -> dict | None:
     """인버스 ETF 분석. 일반 종목의 거울상 —
@@ -2806,6 +2821,7 @@ def analyze_inverse(df: pd.DataFrame, meta: dict | None = None,
     name = (meta or {}).get("name", "")
     leverage = (meta or {}).get("leverage", 1)
     underlying = (meta or {}).get("underlying", "")
+    inv_score = inverse_score(aligned, above_ma20, ma20_slope, ret5, vol_mult, overheated)
 
     return {
         "name": name,
@@ -2822,6 +2838,7 @@ def analyze_inverse(df: pd.DataFrame, meta: dict | None = None,
         "vol_mult": round(vol_mult, 1),
         "rsi": round(cur_rsi, 1),
         "overheated": overheated,
+        "inv_score": inv_score,
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
             None if math.isnan(x) else round(float(x), 4)
