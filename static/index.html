@@ -283,7 +283,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.75</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.76</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -2492,11 +2492,16 @@ function viewRow(r) {
                 : `<span style="color:var(--muted);font-size:11px">관찰중</span>`)
         : (r.tracking && r.last_price && r.entry && r.stop
             ? (() => {
-                const liveR = (parseFloat(r.last_price) - parseFloat(r.entry)) / (parseFloat(r.entry) - parseFloat(r.stop));
+                const entryN = parseFloat(r.entry), stopN = parseFloat(r.stop);
+                const liveR = (parseFloat(r.last_price) - entryN) / (entryN - stopN);
                 const dheld = Math.floor((Date.now() - new Date(r.date)) / 86400000);
                 const col = liveR >= 0 ? 'var(--px-up)' : 'var(--px-down)';
+                // v4.76: 현재 R만 보고는 "얼마까지 가야 2R인지" 감이 안 와서, 2R 도달가를 같이 표시.
+                const isKr2 = /\.(KS|KQ)$/i.test(r.ticker || '');
+                const px2R = entryN + 2 * (entryN - stopN);
+                const px2RStr = isKr2 ? Math.round(px2R).toLocaleString() : px2R.toFixed(2);
                 return `<span style="color:${col};font-weight:600">${liveR>=0?'+':''}${liveR.toFixed(1)}R</span>`
-                     + `<div style="font-size:9px;color:var(--muted)">D+${dheld}</div>`
+                     + `<div style="font-size:9px;color:var(--muted)">D+${dheld} · 2R ${px2RStr}</div>`
                      // v4.68: 장중 손절가 터치 — 아직 종가 확정 전이라 자동종료는 안 됐지만 경고만.
                      + (r.stop_touched_intraday ? `<div style="font-size:9px;color:#f87171;font-weight:600" title="장중 손절가를 스쳤지만 종가로만 손절을 확정합니다. 마감까지 지켜보세요.">⚠️ 장중 손절터치</div>` : '');
               })()

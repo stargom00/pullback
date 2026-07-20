@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.76 [신규] 일지 진입/추적 종목의 R 표시에 2R 도달가 같이 표시.
+        [배경] "0.8R" 같은 배수만 봐선 실제로 얼마까지 가야 2R인지 감이 안
+               잡힘. 진입가·손절가로 2R 가격(entry + 2×(entry-stop))을
+               계산해 "D+n" 옆에 "2R 12,340" 식으로 상시 노출.
 v4.75 [신규] 상단 지수 바(코스피/코스닥/S&P500/나스닥/닛케이/비트코인) 이름 클릭 시
         트레이딩뷰 차트로 이동. /api/indices가 한글 라벨만 주기 때문에 프론트에
         라벨→트레이딩뷰 심볼 매핑(TV_INDEX_SYMBOL)을 추가 (KRX:KOSPI,
@@ -965,7 +969,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.75"
+VERSION = "v4.76"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
