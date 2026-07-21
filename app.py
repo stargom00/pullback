@@ -5,6 +5,12 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.81 [수정] '종목명 찾기'와 '왜 안 잡혔지?' 진단 검색란을 하나로 통일.
+        [문제] 입력란이 두 개 따로 있어서(카드 필터용 / 진단용) 뭘 어디에
+               넣어야 하는지 헷갈린다는 피드백.
+        [해결] 검색란 하나로 합침 — 타이핑하면 기존처럼 카드 실시간 필터링,
+               Enter나 진단 버튼을 누르면 같은 검색어로 상세 진단(/api/debug)도
+               같이 뜸. runDiag()가 이제 이 단일 입력란값을 읽음.
 v4.80 [수정] M&A의심 종목 스캔 결과에서 제외 + 감시 등록 직후 일지 미반영 버그.
         [M&A의심] 지금까지는 배지(🤝 M&A의심)로 표시만 하고 카드 자체는 그대로
                노출했음. pullback/breakout/boxbreak/imminent/breakdown/pattern
@@ -1008,7 +1014,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.80"
+VERSION = "v4.81"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

@@ -362,7 +362,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.80</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.81</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -408,23 +408,22 @@ tr.editing{background:rgba(242,179,61,.06)}
   <button id="alertAdd">추가</button>
   <div class="alert-list" id="alertList"></div>
 </div>
+<!-- v4.81: 종목명 찾기 + 진단 검색란을 하나로 통일. 입력은 카드 실시간 필터링에
+     쓰이고, Enter나 진단 버튼을 누르면 같은 검색어로 '왜 안 잡혔는지' 상세 진단도
+     같이 뜬다 (예전엔 입력란 두 개가 따로 있어서 뭘 어디에 넣어야 하는지 헷갈렸음). -->
 <div id="searchBar" style="display:none;padding:0 24px;margin:0 0 14px">
-  <div style="display:flex;gap:10px;flex-wrap:wrap">
-    <input id="cardSearch" type="text" placeholder="🔍 종목명 또는 코드로 찾기 (예: 삼성, 005930)"
-      style="flex:1 1 0;min-width:200px;box-sizing:border-box;padding:10px 14px;border-radius:10px;
+  <div style="display:flex;gap:8px">
+    <input id="cardSearch" type="text" placeholder="🔍 종목명 또는 코드로 찾기 (예: 삼성, 005930) — Enter로 진단도 같이"
+      style="flex:1;box-sizing:border-box;padding:10px 14px;border-radius:10px;
       background:var(--surface);border:1px solid var(--line);color:var(--text);font-size:14px;outline:none">
-    <div style="flex:1 1 0;min-width:200px;display:flex;gap:8px">
-      <input id="diagInput" type="text" placeholder="🔍 왜 안 잡혔지? — 종목코드 입력 (예: 001800)"
-        style="flex:1;box-sizing:border-box;padding:10px 14px;border-radius:10px;
-        background:var(--surface);border:1px solid var(--line);color:var(--text);font-size:14px;outline:none">
-      <button id="diagBtn" style="padding:10px 18px;border-radius:10px;background:#1d6b3a;color:#fff;
-        border:none;font-size:14px;cursor:pointer;white-space:nowrap">진단</button>
-    </div>
+    <button id="diagBtn" title="입력한 종목이 왜 스캔 결과에 안 잡혔는지 자세히 진단"
+      style="padding:10px 18px;border-radius:10px;background:#1d6b3a;color:#fff;
+      border:none;font-size:14px;cursor:pointer;white-space:nowrap">🔬 진단</button>
   </div>
 </div>
 <div id="content"><div class="loading"><div class="spinner"></div>스캔 중…</div></div>
 
-<!-- v4.62: 왜 안 잡혔나 진단 패널 (검색란은 위 searchBar로 이동, 결과만 여기 표시) -->
+<!-- v4.62: 왜 안 잡혔나 진단 결과 (검색란은 위 searchBar로 통합, 결과만 여기 표시) -->
 <div id="diagBar" style="display:none;padding:0 24px;margin:14px 0">
   <div id="diagResult" style="margin-top:12px"></div>
 </div>
@@ -2776,7 +2775,7 @@ document.getElementById('refresh').addEventListener('click', () => load(true));
 
 // v4.62: 왜 안 잡혔나 진단
 async function runDiag() {
-  const inp = document.getElementById('diagInput');
+  const inp = document.getElementById('cardSearch');
   const out = document.getElementById('diagResult');
   const q = (inp.value || '').trim();
   if (!q) { out.innerHTML = ''; return; }
@@ -2835,7 +2834,7 @@ async function runDiag() {
   }
 }
 document.getElementById('diagBtn').addEventListener('click', runDiag);
-document.getElementById('diagInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') runDiag(); });
+document.getElementById('cardSearch').addEventListener('keydown', (e) => { if (e.key === 'Enter') runDiag(); });
 
 // v4.75: /api/indices의 한글 name → 트레이딩뷰 심볼 (지수 이름 클릭용)
 const TV_INDEX_SYMBOL = {
