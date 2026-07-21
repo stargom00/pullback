@@ -1351,6 +1351,11 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     _tt = trend_grade(c, lo, h, rs_rank, ud=up_down_volume(c, v, 50))
     if _ls["late_level"] == "danger" and cfg.get("late_stage_exclude", True):
         return None
+    # v4.80: M&A/특수상황 의심 종목은 배지로 표시만 하던 걸 아예 스캔 결과에서 제외.
+    # 추세매매 부적합(상방 막힘+하방 비대칭 리스크)이라 안 보이는 게 낫다는 요청.
+    _mg = _merger_block(c, h, lo, v)
+    if _mg["merger"]:
+        return None
 
     return {
         "close": round(close, 2),
@@ -1362,7 +1367,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "rs_mom": rs_mom,
         "leader": is_leader,
         "mode": "pullback",
-        **_merger_block(c, h, lo, v),
+        **_mg,
         "pullback_pct": round(pullback * 100, 1),
         "support_ma": disp_support,
         "ma_dist_pct": disp_support_dist,
@@ -2278,6 +2283,10 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
     _tt = trend_grade(c, lo, h, rs_rank, ud=up_down_volume(c, v, 50))
     if _ls["late_level"] == "danger" and CONFIG.get("late_stage_exclude", True):
         return None
+    # v4.80: M&A/특수상황 의심 종목은 스캔 결과에서 제외 (배지 표시만 하지 않음).
+    _mg = _merger_block(c, h, lo, v)
+    if _mg["merger"]:
+        return None
 
     return {
         "mode": "breakout",
@@ -2285,7 +2294,7 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
         "late_flags": _ls["late_flags"], "late_level": _ls["late_level"],
         "ext200_pct": _ls["ext200_pct"],
         "grade": _tt["grade"], "tt_pass": _tt["passed"], "tt_fails": _tt["fails"],
-        **_merger_block(c, h, lo, v),
+        **_mg,
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
         "score": score,
@@ -2437,13 +2446,17 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
     _tt = trend_grade(c, lo, h, rs_rank, ud=up_down_volume(c, v, 50))
     if _ls["late_level"] == "danger" and CONFIG.get("late_stage_exclude", True):
         return None
+    # v4.80: M&A/특수상황 의심 종목은 스캔 결과에서 제외.
+    _mg = _merger_block(c, h, lo, v)
+    if _mg["merger"]:
+        return None
 
     return {
         "mode": "boxbreak",
         "late_flags": _ls["late_flags"], "late_level": _ls["late_level"],
         "ext200_pct": _ls["ext200_pct"],
         "grade": _tt["grade"], "tt_pass": _tt["passed"], "tt_fails": _tt["fails"],
-        **_merger_block(c, h, lo, v),
+        **_mg,
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
         "score": score,
@@ -2606,11 +2619,15 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
     _tt = trend_grade(c, lo, h, rs_rank, ud=up_down_volume(c, v, 50))
     if _ls["late_level"] == "danger" and CONFIG.get("late_stage_exclude", True):
         return None
+    # v4.80: M&A/특수상황 의심 종목은 스캔 결과에서 제외.
+    _mg = _merger_block(c, h, lo, v)
+    if _mg["merger"]:
+        return None
 
     return {
         "mode": "imminent",
         **badge_fields(c, h, lo, v, pivot, is_kr, rs_rank, rrb),
-        **_merger_block(c, h, lo, v),
+        **_mg,
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
         "score": round(score, 1),
@@ -2947,6 +2964,12 @@ def analyze_breakdown(df: pd.DataFrame, rs_rank: int | None = None,
     prev_close = float(c.iloc[-2])
     change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
 
+    # v4.80: M&A/특수상황 의심 종목은 스캔 결과에서 제외. 숏(붕괴) 탭도 마찬가지 —
+    # 딜 완주 시 갭업으로 숏도 위험한 비대칭 리스크라 여기도 배제 대상.
+    _mg = _merger_block(c, h, lo, v)
+    if _mg["merger"]:
+        return None
+
     return {
         "mode": "breakdown",
         "close": round(close, 2),
@@ -2966,7 +2989,7 @@ def analyze_breakdown(df: pd.DataFrame, rs_rank: int | None = None,
         "oversold": oversold,
         "rsi": round(cur_rsi, 1),
         "vol_ratio": round(vol_ratio, 2),
-        **_merger_block(c, h, lo, v),
+        **_mg,
         **volume_info(close, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
@@ -3354,10 +3377,14 @@ def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
     score = min(score, 100.0)
 
     _tt = trend_grade(c, lo, h, rs_rank, ud=up_down_volume(c, v, 50))
+    # v4.80: M&A/특수상황 의심 종목은 스캔 결과에서 제외.
+    _mg = _merger_block(c, h, lo, v)
+    if _mg["merger"]:
+        return None
     return {
         "mode": "pattern",
         "grade": _tt["grade"], "tt_pass": _tt["passed"], "tt_fails": _tt["fails"],
-        **_merger_block(c, h, lo, v),
+        **_mg,
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
         "score": round(score, 1),

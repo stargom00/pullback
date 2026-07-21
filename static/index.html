@@ -362,7 +362,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.79</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.80</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -2047,6 +2047,10 @@ async function quickWatch(btn, ticker) {
     if (j.ok) {
       btn.textContent = j.exists ? '✓ 감시중' : '✓ 등록됨';
       btn.style.background = '#12351f';
+      // v4.80: /api/watch/quick은 서버 일지에만 저장하고 클라이언트 journalCache는
+      // 안 건드려서, 등록 직후 '내 일지' 탭으로 가면 옛 캐시가 그대로 보여
+      // 방금 감시 등록한 종목이 안 보이던 문제. 서버에서 다시 읽어와 캐시 동기화.
+      await loadJournalFromServer();
     } else {
       btn.textContent = '실패'; btn.disabled = false;
     }

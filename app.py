@@ -5,6 +5,17 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.80 [수정] M&A의심 종목 스캔 결과에서 제외 + 감시 등록 직후 일지 미반영 버그.
+        [M&A의심] 지금까지는 배지(🤝 M&A의심)로 표시만 하고 카드 자체는 그대로
+               노출했음. pullback/breakout/boxbreak/imminent/breakdown/pattern
+               6개 모드의 analyze_*()에서 _merger_block 판정 후 merger=True면
+               스캔 결과에서 아예 제외하도록 변경 — 배지 대신 완전 배제.
+        [감시→일지 미반영] ⚡ 감시 버튼 → POST /api/watch/quick은 서버 일지
+               파일에만 append하고, 클라이언트의 journalCache는 안 건드렸음.
+               그래서 등록 직후 '내 일지' 탭으로 가면 방금 등록한 종목이 안
+               보이고, 새로고침해야만 나타났음(캐시가 등록 이전 시점 그대로라).
+               quickWatch() 성공 시 loadJournalFromServer()로 캐시를 즉시
+               재동기화하도록 수정.
 v4.79 [신규] 모바일 대응 전면 재정비 + PWA(홈 화면 설치) 지원.
         [모바일 레이아웃] PC 레이아웃을 그대로 축소만 하던 걸 실제로 재배치:
                모드 탭이 줄바꿈으로 잘려서 다루기 힘들던 것 → 한 줄 가로 스크롤
@@ -997,7 +1008,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.79"
+VERSION = "v4.80"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
