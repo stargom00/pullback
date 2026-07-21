@@ -362,7 +362,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.81</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.82</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1193,6 +1193,9 @@ function triggerLookup(query) {
     if (!q || q.length < 1) return;
     if (q === _lookupLast) return;   // 중복 호출 방지
     _lookupLast = q;
+    // v4.82: 이 탭에 안 잡힌 종목이면, 기본 현재가 카드뿐 아니라 '왜 안 잡혔는지'
+    // 상세 진단도 자동으로 같이 띄운다 (예전엔 Enter/진단 버튼을 눌러야 나왔음).
+    runDiag();
     const hint = document.getElementById('lookupHint');
     try {
       const res = await fetch('/api/lookup/' + encodeURIComponent(q));
@@ -1323,6 +1326,12 @@ function renderCards() {
   // 탭 결과에 없으면 유니버스 전체 조회 (검색어 있을 때만)
   if (!list.length && searchQuery && !strictMode) {
     triggerLookup(searchQuery);
+  } else {
+    // v4.82: 이번 탭에서 찾아졌거나 검색어를 지웠으면, 이전 검색의 진단 결과가
+    // 카드 밑에 그대로 남아있지 않게 정리.
+    const dr = document.getElementById('diagResult');
+    if (dr) dr.innerHTML = '';
+    _lookupLast = '';
   }
   // 별 버튼 이벤트 바인딩
   content.querySelectorAll('.fav-btn').forEach(b => b.addEventListener('click', async (e) => {
