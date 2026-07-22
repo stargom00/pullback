@@ -139,16 +139,20 @@ def fetch_live_price(ticker: str) -> float | None:
     """
     장중 현재가 (실시간 근접). 네이버 모바일 통합 API.
     실패 시 None → 호출부에서 일봉 마지막 종가로 폴백.
-    """
+
+    v4.87 버그수정: totalInfos에서 code가 'closePrice'/'nowVal'인 항목을 찾았는데,
+    실제 API 응답의 totalInfos엔 그런 code가 없음(lastClosePrice=전일종가,
+    openPrice/highPrice/lowPrice뿐 — 실측 확인함, 마키나락스 477850 사례).
+    그래서 이 함수가 사실상 항상 None을 반환해 호출부가 매번 일봉 마지막
+    종가로 폴백하고 있었음 — 장중엔 그게 전일 종가라 "가격이 안 바뀐다"는
+    문제로 보임. dealTrendInfos[0](최신 거래일)의 closePrice가 실제 현재가에
+    해당하므로 이를 최종 폴백으로 추가."""
     code = to_code(ticker)
     url = f"https://m.stock.naver.com/api/stock/{code}/integration"
     try:
         resp = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
-        # totalInfos 리스트에서 'closePrice' 또는 dealTrendInfos 등에 현재가 존재.
-        # 구조 변동 대비: 여러 경로를 순서대로 시도.
-        # 1) 최상위 'dealTrendInfos' / 'closePrice'
         price = None
         if isinstance(data, dict):
             # 가장 흔한 위치
@@ -156,12 +160,17 @@ def fetch_live_price(ticker: str) -> float | None:
             if ct:
                 price = _to_num(ct)
             if price is None:
-                # totalInfos: [{"code":"closePrice","value":"37,800"}, ...]
+                # totalInfos: [{"code":"closePrice","value":"37,800"}, ...] (구형/일부 응답)
                 for item in data.get("totalInfos", []) or []:
                     if item.get("code") in ("closePrice", "nowVal"):
                         price = _to_num(item.get("value"))
                         if price:
                             break
+            if price is None:
+                # v4.87: dealTrendInfos[0] = 최신 거래일 항목의 종가(장중엔 현재가에 해당)
+                dt = data.get("dealTrendInfos") or []
+                if dt and isinstance(dt[0], dict):
+                    price = _to_num(dt[0].get("closePrice"))
         return price
     except (requests.RequestException, ValueError, KeyError):
         return None

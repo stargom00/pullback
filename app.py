@@ -5,6 +5,22 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.87 [버그수정] naver_kr.fetch_live_price()가 실제 API 응답 구조와 안 맞아
+        사실상 항상 실패하던 문제 — 파급 범위가 예상보다 훨씬 컸음.
+        [문제] totalInfos에서 code가 'closePrice'/'nowVal'인 항목을 찾는
+               로직이었는데, 실측해보니(마키나락스 477850, 사용자가 관찰
+               등록한 종목의 가격이 안 바뀐다고 제보) 실제 응답의 totalInfos엔
+               그런 code가 없음(lastClosePrice=전일종가, openPrice/high/low
+               뿐). 그래서 이 함수가 사실상 항상 None → 호출부가 매번 일봉
+               마지막 종가로 조용히 폴백하고 있었음.
+        [파급 범위] 이 함수는 (1) 일지 추적가(/api/prices) 뿐 아니라
+               (2) naver_kr.fetch() — 스캐너가 한국 종목 일봉에 장중 현재가를
+               덮어쓰는 바로 그 함수에도 쓰임. 즉 장중 내내 한국 종목 전체가
+               실시간가 보정 없이 직전 일봉 그대로 스캔되고 있었을 가능성이
+               높음 — v4.73/v4.86의 캐시 신선도 수정과는 별개의, 더 근본적인
+               "애초에 라이브 가격을 못 받아오던" 문제.
+        [해결] dealTrendInfos[0](최신 거래일 항목)의 closePrice를 최종 폴백으로
+               추가 — 실제로 마키나락스 22,600원을 정확히 돌려주는 것 확인.
 v4.86 [버그수정] "첫 스캔 대부분 실패, 로딩돼도 10분" 근본원인 수정.
         [문제] _fetch_market_data의 모든 호출(스캔/섹터/마감정리/스케줄러 전부)이
                시장별 공유 락(_market_fetch_locks)을 무조건 기다리는 구조였음.
@@ -1062,7 +1078,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.86"
+VERSION = "v4.87"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
