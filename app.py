@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.83 [신규] 📋 마감정리 탭 — 코스피/코스닥 상한가 종목 + 거래대금 상위.
+        신규 /api/eod: 상한가는 캐시된 KR 일봉 전체를 훑어 당일 등락률이
+        ±30% 가격제한폭에 근접(29.5%+)한 종목을 찾음(추가 네트워크 호출 없음).
+        거래대금 상위는 네이버 거래대금 상위 페이지의 등장 순서(=실제 순위)를
+        그대로 쓰고, 표시용 종가/등락률만 캐시된 일봉에서 조회. 10분 캐시.
 v4.82 [수정] 검색한 종목이 현재 탭에 안 잡혔을 때, '왜 안 잡혔는지' 상세 진단이
         자동으로 뜨게 함 (그동안은 Enter/진단 버튼을 따로 눌러야 나왔음).
         기본 현재가 카드를 띄우는 triggerLookup()에 runDiag() 자동 호출을
@@ -1019,7 +1024,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.82"
+VERSION = "v4.83"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2435,6 +2440,71 @@ def _clean_nan(obj):
     if isinstance(obj, (list, tuple)):
         return [_clean_nan(v) for v in obj]
     return obj
+
+
+_eod_cache: dict = {}
+_EOD_TTL = 600  # 10분 캐시
+
+
+@app.get("/api/eod")
+async def eod_summary():
+    """코스피/코스닥 마감 정리 — 상한가 종목 + 거래대금 상위 (v4.83).
+    - 상한가: 국내 가격제한폭(±30%)에 근접(29.5%+)한 당일 등락률. 캐시된 KR
+      일봉 전체를 훑어 계산(추가 네트워크 호출 없음).
+    - 거래대금 상위: 네이버 거래대금 상위 페이지의 등장 순서를 그대로 순위로
+      사용(=실제 거래대금 순위). 표시용 종가/등락률만 캐시된 일봉에서 조회."""
+    now = time.time()
+    if _eod_cache and now - _eod_cache.get("ts", 0) < _EOD_TTL:
+        return JSONResponse(_eod_cache["data"])
+
+    bundle = await _fetch_market_data("kr")
+    data = bundle.get("data", {})
+    universe = bundle.get("universe", {})
+
+    limit_up = []
+    for t, df in data.items():
+        if df is None or len(df) < 2:
+            continue
+        try:
+            c = df["Close"]
+            close, prev = float(c.iloc[-1]), float(c.iloc[-2])
+            if prev <= 0:
+                continue
+            chg = (close / prev - 1) * 100
+            if chg >= 29.5:
+                limit_up.append({"ticker": t, "name": universe.get(t, t), "market": "KR",
+                                 "close": round(close, 2), "change_pct": round(chg, 2)})
+        except Exception:
+            continue
+    limit_up.sort(key=lambda x: -x["change_pct"])
+
+    top_value = []
+    try:
+        loop = asyncio.get_event_loop()
+        tv = await loop.run_in_executor(_executor, naver_kr.fetch_top_value, 40)
+        for t, name in tv.items():
+            df = data.get(t)
+            if df is None or len(df) < 2:
+                continue
+            c = df["Close"]
+            close, prev = float(c.iloc[-1]), float(c.iloc[-2])
+            chg = (close / prev - 1) * 100 if prev > 0 else 0.0
+            top_value.append({"ticker": t, "name": name, "market": "KR",
+                              "close": round(close, 2), "change_pct": round(chg, 2)})
+    except Exception:
+        pass
+
+    daykey = _market_session_key("kr")
+    result = {
+        "date": daykey or datetime.now(KST).strftime("%Y-%m-%d"),
+        "market_closed": bool(daykey),
+        "limit_up": limit_up,
+        "top_value": top_value,
+    }
+    result = _clean_nan(result)
+    _eod_cache["ts"] = now
+    _eod_cache["data"] = result
+    return JSONResponse(result)
 
 
 @app.get("/api/indices")
