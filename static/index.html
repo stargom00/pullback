@@ -362,7 +362,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.83</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.84</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1115,32 +1115,32 @@ async function loadEod() {
       <span>상한가 <b>${d.limit_up.length}</b>개</span>`;
     const chgColor = v => v > 0 ? 'var(--px-up)' : v < 0 ? 'var(--px-down)' : 'var(--muted)';
     const row = (r) => `<tr>
-      <td style="padding:8px 10px;border-bottom:1px solid var(--line)">
-        <a href="${tvUrl(r)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${r.name}<span style="font-size:9px;opacity:.5"> ↗</span></a>
-        <div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker.replace(/\.(KS|KQ)$/, '')}</div>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--line)">
+        <a href="${tvUrl(r)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${r.name}<span style="font-size:8px;opacity:.5"> ↗</span></a>
+        <div class="mono" style="font-size:9px;color:var(--muted)">${r.ticker.replace(/\.(KS|KQ)$/, '')}</div>
       </td>
-      <td class="mono" style="padding:8px 10px;border-bottom:1px solid var(--line);text-align:right">${Math.round(r.close).toLocaleString()}원</td>
-      <td class="mono" style="padding:8px 10px;border-bottom:1px solid var(--line);text-align:right;color:${chgColor(r.change_pct)};font-weight:600">${r.change_pct>=0?'+':''}${r.change_pct}%</td>
+      <td class="mono" style="padding:6px 8px;border-bottom:1px solid var(--line);text-align:right">${Math.round(r.close).toLocaleString()}</td>
+      <td class="mono" style="padding:6px 8px;border-bottom:1px solid var(--line);text-align:right;color:${chgColor(r.change_pct)};font-weight:600">${r.change_pct>=0?'+':''}${r.change_pct}%</td>
     </tr>`;
     const table = (rows, emptyMsg) => rows.length ? `
-      <table style="width:100%;border-collapse:collapse">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead><tr>
-          <th style="text-align:left;padding:6px 10px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--line)">종목</th>
-          <th style="text-align:right;padding:6px 10px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--line)">종가</th>
-          <th style="text-align:right;padding:6px 10px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--line)">등락률</th>
+          <th style="text-align:left;padding:5px 8px;font-size:10.5px;color:var(--muted);border-bottom:1px solid var(--line)">종목</th>
+          <th style="text-align:right;padding:5px 8px;font-size:10.5px;color:var(--muted);border-bottom:1px solid var(--line)">종가</th>
+          <th style="text-align:right;padding:5px 8px;font-size:10.5px;color:var(--muted);border-bottom:1px solid var(--line)">등락률</th>
         </tr></thead>
         <tbody>${rows.map(row).join('')}</tbody>
-      </table>` : `<div style="color:var(--muted);font-size:13px;padding:12px 0">${emptyMsg}</div>`;
+      </table>` : `<div style="color:var(--muted);font-size:12px;padding:10px 0">${emptyMsg}</div>`;
     content.innerHTML = `
-      <div style="max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:20px">
-        <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px">
-          <div style="font-size:14px;font-weight:700;margin-bottom:2px">🔴 상한가</div>
-          <div style="font-size:11px;color:var(--muted);margin-bottom:8px">당일 등락률이 가격제한폭(±30%)에 근접(+29.5%↑)한 종목</div>
+      <div style="max-width:1080px;margin:0 auto;display:flex;gap:16px;flex-wrap:wrap;padding:0 24px">
+        <div style="flex:1;min-width:320px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px">
+          <div style="font-size:13px;font-weight:700;margin-bottom:2px">🔴 상한가</div>
+          <div style="font-size:10.5px;color:var(--muted);margin-bottom:8px">당일 등락률이 가격제한폭(±30%)에 근접(+29.5%↑)한 종목</div>
           ${table(d.limit_up, '오늘은 상한가 종목이 없어요.')}
         </div>
-        <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px">
-          <div style="font-size:14px;font-weight:700;margin-bottom:2px">💰 거래대금 상위</div>
-          <div style="font-size:11px;color:var(--muted);margin-bottom:8px">코스피+코스닥 통합, 네이버 거래대금 순위 기준 상위 ${d.top_value.length}종목</div>
+        <div style="flex:1;min-width:320px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px">
+          <div style="font-size:13px;font-weight:700;margin-bottom:2px">💰 거래대금 상위</div>
+          <div style="font-size:10.5px;color:var(--muted);margin-bottom:8px">코스피+코스닥 통합, 네이버 거래대금 순위 기준 상위 ${d.top_value.length}종목</div>
           ${table(d.top_value, '데이터를 못 가져왔어요.')}
         </div>
       </div>`;
