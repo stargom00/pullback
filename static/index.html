@@ -149,8 +149,11 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .note-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .merger-tag{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;background:rgba(147,112,219,.14);color:#b794f6;border:1px solid rgba(147,112,219,.4);white-space:nowrap;cursor:help}
 .st-badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px;white-space:nowrap}
-.st-act{display:inline-block;font-size:9px;padding:2px 5px;border-radius:5px;cursor:pointer;background:#222;color:#bbb;border:1px solid #333}
-.st-act:hover{background:#2e2e2e;color:#fff}
+/* v4.85: 상태배지(꽉 찬 배경)와 확실히 구분되는 '버튼' 느낌 — 점선 테두리 + 투명배경.
+   이전엔 둘 다 진한 배경이라 '지금 상태'와 '누르는 버튼'이 한눈에 안 구분됐음. */
+.st-act{display:inline-block;font-size:10.5px;font-weight:600;padding:3px 7px;border-radius:5px;
+  cursor:pointer;background:transparent;border:1px dashed #555;color:#bbb}
+.st-act:hover{background:rgba(255,255,255,.06);color:#fff}
 .jtable input.result{width:70px;background:var(--bg);border:1px solid var(--line);
   color:var(--text);padding:4px 6px;border-radius:6px;font-size:12px;font-family:var(--mono)}
 .jrnl-empty{color:var(--muted);text-align:center;padding:60px 20px;line-height:1.7}
@@ -362,7 +365,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.84</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.85</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -2433,6 +2436,7 @@ function flagStats(closed) {
 
 let journalFilter = 'all';  // all | 추세추종 | 단타
 let editingId = null;
+let partialEditingId = null;   // v4.85: 부분익절 입력 행 펼침 상태
 
 function renderSignalValidation(all) {
   const v = signalValidation(all);
@@ -2573,7 +2577,7 @@ function renderJournal() {
         <th>결과R</th><th>근거/복기</th><th></th>
       </tr></thead>
       <tbody>
-        ${j.map(r => r.id === editingId ? editRow(r) : viewRow(r)).join('')}
+        ${j.map(r => r.id === partialEditingId ? partialRow(r) : (r.id === editingId ? editRow(r) : viewRow(r))).join('')}
       </tbody>
     </table></div>`;
 }
@@ -2595,12 +2599,13 @@ function viewRow(r) {
   // 대기 중이면 진입/무산, 진입 중이면 종료 빠른 버튼
   const stActions = st === 'pending'
       ? `<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">
-           <span class="st-act" onclick="markEntered(${r.id})" title="실제 진입함">▶진입</span>
-           <span class="st-act" onclick="markMissed(${r.id})" title="돌파 안 옴 · 무산">✖무산</span>
+           <span class="st-act" onclick="markEntered(${r.id})" title="실제 진입함" style="border-color:#40916c;color:#7fe0a7">▶진입</span>
+           <span class="st-act" onclick="markMissed(${r.id})" title="돌파 안 옴 · 무산" style="border-color:#8c4040;color:#ff9b9b">✖무산</span>
          </div>`
     : st === 'entered'
       ? `<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">
-           <span class="st-act" onclick="markClosed(${r.id})" title="매매 종료 · 청산가 입력" style="background:#2a2a3a;color:#9fb4ff">⏹종료</span>
+           <span class="st-act" onclick="partialEditingId=${r.id};editingId=null;renderJournal()" title="부분 익절 기록 (예: 2R에서 절반)" style="border-color:#8c6d2d;color:#f2b33d">🔪부분</span>
+           <span class="st-act" onclick="markClosed(${r.id})" title="매매 종료 · 청산가 입력" style="border-color:#2d5a8c;color:#9fb4ff">⏹종료</span>
          </div>`
       : '';
   const broken = isBrokenRow(r);   // 손절≥진입 = 데이터 오류
@@ -2625,7 +2630,9 @@ function viewRow(r) {
     })()}</td>
     <td class="mono"${broken?' style="color:#ff6b6b"':''}>${r.stop ?? '-'}</td>
     <td class="mono" style="${r.result_r&&parseFloat(r.result_r)>0?'color:var(--px-up)':r.result_r?'color:var(--px-down)':''}">${
-      r.result_r
+      // v4.85: 부분익절(2R에서 절반 등) 기록 이력 — 있으면 항상 맨 위에 작게 표시.
+      (r.partials && r.partials.length ? `<div style="font-size:9px;color:#f2b33d;font-weight:600">${r.partials.map((p,i) => `${i+1}차 ${p.pct}%@${p.r>=0?'+':''}${p.r}R`).join(' · ')}</div>` : '') +
+      (r.result_r
         ? `${r.result_r}R${r.exit_reason==='충동'?`<div style="font-size:9px;color:#ff6b6b;font-weight:700">⚠️ 충동</div>`:r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:''}`
         : st === 'pending'
             ? `<span style="color:var(--amber);font-size:11px">피벗 대기</span><div style="font-size:9px;color:var(--muted)">${r.last_price?'현재 '+(/\.(KS|KQ)$/i.test(r.ticker||'')?Math.round(parseFloat(r.last_price)).toLocaleString():parseFloat(r.last_price).toFixed(2)):'미진입'}</div>`
@@ -2651,7 +2658,7 @@ function viewRow(r) {
                      // v4.68: 장중 손절가 터치 — 아직 종가 확정 전이라 자동종료는 안 됐지만 경고만.
                      + (r.stop_touched_intraday ? `<div style="font-size:9px;color:#f87171;font-weight:600" title="장중 손절가를 스쳤지만 종가로만 손절을 확정합니다. 마감까지 지켜보세요.">⚠️ 장중 손절터치</div>` : '');
               })()
-            : `<span style="color:var(--muted);font-size:11px">추적대기</span><div style="font-size:9px;color:var(--muted)">${r.entry?'앱 새로고침 시 갱신':''}</div>`)
+            : `<span style="color:var(--muted);font-size:11px">추적대기</span><div style="font-size:9px;color:var(--muted)">${r.entry?'앱 새로고침 시 갱신':''}</div>`))
     }</td>
     <td style="white-space:normal;max-width:240px;font-size:11px;color:var(--muted)"><div class="note-clamp" title="${(r.note||'').replace(/"/g,'&quot;')}${r.review?' / 복기: '+r.review.replace(/"/g,'&quot;'):''}">${r.note || ''}${r.review?`<br><i style="color:var(--amber)">복기: ${r.review}</i>`:''}</div></td>
     <td style="white-space:nowrap">
@@ -2704,8 +2711,54 @@ async function markMissed(id) {
   setJournal(j); await _saveJournalToServer(j); renderJournal();
 }
 
+// v4.85: 부분익절 입력 행 — 청산비율(%)·청산가만 받는다. R은 진입가/손절로 자동계산.
+// 포지션은 계속 열려있는 채로(entered) 남고, 나머지 물량만 계속 추적된다.
+function partialRow(r) {
+  return `<tr class="editing">
+    <td class="mono">${r.date}</td>
+    <td colspan="7">
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:3px">${r.name} — 몇 차 익절이든 순서대로 기록</label></div>
+        <div><label style="display:block;font-size:10px;color:var(--muted)">청산 비율(%)</label>
+          <input id="p_pct" class="ein" inputmode="decimal" placeholder="예: 50" style="width:70px"></div>
+        <div><label style="display:block;font-size:10px;color:var(--muted)">청산가</label>
+          <input id="p_price" class="ein" inputmode="decimal" placeholder="예: ${r.entry ?? ''}" style="width:90px"></div>
+        <div style="display:flex;gap:6px">
+          <span class="save-btn" onclick="savePartial(${r.id})" title="저장">💾 저장</span>
+          <span class="del" onclick="partialEditingId=null;renderJournal()" title="취소">↩ 취소</span>
+        </div>
+      </div>
+    </td>
+  </tr>`;
+}
+
+function savePartial(id) {
+  const j = getJournal();
+  const r = j.find(x => x.id === id);
+  if (!r) return;
+  const pct = parseFloat(document.getElementById('p_pct').value);
+  const price = parseFloat(document.getElementById('p_price').value);
+  if (!pct || pct <= 0 || pct > 100) { alert('청산 비율을 1~100 사이로 입력하세요.'); return; }
+  const entry = parseFloat(r.entry), stop = parseFloat(r.stop);
+  if (!price || !entry || !stop || entry <= stop) { alert('청산가를 입력하세요 (진입가/손절가가 있어야 R 계산 가능).'); return; }
+  const prevPct = (r.partials || []).reduce((s, p) => s + p.pct, 0);
+  if (prevPct + pct > 100) { alert(`이미 ${prevPct}% 청산됨 — 나머지 ${100 - prevPct}%를 넘을 수 없어요.`); return; }
+  const rMult = Math.round((price - entry) / (entry - stop) * 100) / 100;
+  r.partials = r.partials || [];
+  r.partials.push({ date: kstStr(), price, pct, r: rMult });
+  partialEditingId = null;
+  setJournal(j);
+  renderJournal();
+}
+
 function editRow(r) {
   const cat = r.category || '추세추종';
+  // v4.85: 보유일 자동 계산 — 예전엔 매번 손으로 세서 입력해야 했음.
+  // 등록일 기준 경과일을 기본값으로 채우되, 필요하면 여전히 수정 가능.
+  const autoHeld = Math.floor((Date.now() - new Date(r.date)) / 86400000);
+  const partialsSummary = (r.partials && r.partials.length)
+    ? `<div style="font-size:11px;color:#f2b33d;margin-bottom:6px">이미 청산: ${r.partials.map((p,i) => `${i+1}차 ${p.pct}%@${p.price}(${p.r>=0?'+':''}${p.r}R)`).join(' · ')} — 나머지 ${100 - r.partials.reduce((s,p)=>s+p.pct,0)}%에 대해 아래 청산가/R을 입력하세요.</div>`
+    : '';
   // 7컬럼 구조: 날짜 / 상태 / 종목 / 진입가 / 손절 / 결과R(청산가) / [상세입력 colspan]
   return `<tr class="editing">
     <td class="mono">${r.date}</td>
@@ -2714,7 +2767,7 @@ function editRow(r) {
       <div style="font-size:10px;color:var(--muted);opacity:.8;margin-top:2px">${[r.tab, r.rs!=null?'RS '+r.rs:'', r.sector].filter(Boolean).join(' · ')}</div></td>
     <td><input id="e_entry" class="ein" value="${r.entry ?? ''}" inputmode="decimal" style="width:70px"></td>
     <td><input id="e_stop" class="ein" value="${r.stop ?? ''}" inputmode="decimal" style="width:70px"></td>
-    <td><input id="e_exit" class="ein" value="${r.exit || ''}" placeholder="청산가" style="width:70px" inputmode="decimal" title="청산가를 넣으면 결과R 자동 계산">
+    <td><input id="e_exit" class="ein" value="${r.exit || ''}" placeholder="청산가" style="width:70px" inputmode="decimal" title="청산가를 넣으면 결과R 자동 계산 (부분익절 기록이 있으면 블렌디드 R로 합산)">
         <input id="e_result" class="ein" value="${r.result_r || ''}" placeholder="또는 R" style="width:70px;margin-top:4px">
         <select id="e_reason" class="ein" style="width:120px;margin-top:4px" title="종료 사유 — 종료 시 필수. 규칙 안에서 나갔는지 스스로에게 답하는 게이트">
           <option value="">종료 사유…</option>
@@ -2724,6 +2777,7 @@ function editRow(r) {
           <option value="충동" ${r.exit_reason==='충동'?'selected':''}>⚠️ 규칙 외(충동)</option>
         </select></td>
     <td colspan="2">
+      ${partialsSummary}
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start">
         <select id="e_cat" class="ein" style="width:110px">
           <option value="추세추종" ${cat==='추세추종'?'selected':''}>📈 추세추종</option>
@@ -2731,16 +2785,26 @@ function editRow(r) {
           <option value="대기" ${cat==='대기'?'selected':''}>⏳ 대기</option>
           <option value="관찰" ${cat==='관찰'?'selected':''}>👁 관찰</option>
         </select>
-        <input id="e_held" class="ein" value="${r.held_days || ''}" placeholder="보유일" style="width:60px">
+        <input id="e_held" class="ein" value="${r.held_days || autoHeld}" placeholder="보유일" style="width:60px" title="자동 계산된 경과일 — 필요하면 수정 가능">
         <div style="display:flex;gap:6px;margin-left:auto">
           <span class="save-btn" onclick="saveEdit(${r.id})" title="저장">💾 저장</span>
           <span class="del" onclick="editingId=null;renderJournal()" title="취소">↩ 취소</span>
         </div>
       </div>
-      <textarea id="e_note" class="ein" style="width:100%;height:70px;margin-top:6px" placeholder="진입 근거">${r.note || ''}</textarea>
-      <textarea id="e_review" class="ein" style="width:100%;height:70px;margin-top:6px" placeholder="복기 (왜 잘됐나/못됐나)">${r.review || ''}</textarea>
+      <textarea id="e_note" class="ein" style="width:100%;height:130px;margin-top:6px;font-size:13px;line-height:1.5" placeholder="진입 근거">${r.note || ''}</textarea>
+      <textarea id="e_review" class="ein" style="width:100%;height:130px;margin-top:6px;font-size:13px;line-height:1.5" placeholder="복기 (왜 잘됐나/못됐나)">${r.review || ''}</textarea>
     </td>
   </tr>`;
+}
+
+// v4.85: 부분익절이 있으면 최종 청산 시 결과R을 비중가중 블렌드로 계산.
+// 예: 1차 50%@+2.1R, 잔여 50%가 최종 +3.4R로 청산 → (0.5*2.1)+(0.5*3.4)=2.75R
+function blendedR(r, finalR) {
+  const partials = r.partials || [];
+  const partialPct = partials.reduce((s, p) => s + p.pct, 0);
+  const remainPct = Math.max(0, 100 - partialPct);
+  const partialSum = partials.reduce((s, p) => s + p.pct / 100 * p.r, 0);
+  return Math.round((partialSum + remainPct / 100 * finalR) * 100) / 100;
 }
 
 function saveEdit(id) {
@@ -2780,16 +2844,19 @@ function saveEdit(id) {
     alert('종료 사유를 선택해주세요.\n\n🔴 손절가 도달 / 📉 트레일링·규칙 익절 / 🎯 목표 도달 / ⚠️ 규칙 외(충동)\n\n"충동"이어도 괜찮아요 — 기록이 쌓이면 데이터가 됩니다.');
     return;
   }
+  const hasPartials = r.partials && r.partials.length;
   if (!isNaN(exitV) && entry && stop && entry > stop) {
     r.exit = exitV;
-    r.result_r = (Math.round((exitV - entry) / (entry - stop) * 100) / 100).toString();
+    const finalR = (exitV - entry) / (entry - stop);
+    r.result_r = (hasPartials ? blendedR(r, finalR) : Math.round(finalR * 100) / 100).toString();
     r.tracking = false;                  // 수동 청산 → 추적 종료
     r.status = 'closed';
     r.exit_reason = exitReason;
     r.closed_reason = exitReason || r.closed_reason || '수동';
     if (!r.closed_date) r.closed_date = kstStr();
   } else if (manualR) {
-    r.result_r = manualR;
+    const finalR = parseFloat(manualR);
+    r.result_r = (hasPartials && !isNaN(finalR) ? blendedR(r, finalR) : manualR).toString();
     r.tracking = false;
     r.status = 'closed';
     r.exit_reason = exitReason;
@@ -2821,11 +2888,12 @@ function exportCSV() {
   const j = getJournal();
   if (!j.length) return;
   const cols = ['date','status','ticker','name','market','sector','tab','mode_raw','category','signal','pivot_type','shares','r_value_krw','closed_date',
-    'setup_score','rs','entry','stop','risk_pct','sig_level','sig_flags','avwap_zone','rr_at_entry','alert','note','exit','result_r','held_days','review'];
+    'setup_score','rs','entry','stop','risk_pct','sig_level','sig_flags','avwap_zone','rr_at_entry','alert','note','exit','result_r','held_days','review','partials_summary'];
   const head = ['날짜','상태','티커','종목','시장','섹터','탭','모드','구분','신호','피벗종류','주식수','1R금액','종료일','전일점수','RS',
-    '진입가','손절','리스크%','진입신호등','경고항목','AVWAP존','진입시손익비','경보','진입근거','청산가','결과R','보유일','복기'];
+    '진입가','손절','리스크%','진입신호등','경고항목','AVWAP존','진입시손익비','경보','진입근거','청산가','결과R','보유일','복기','부분익절'];
   const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const csv = [head.join(','), ...j.map(r => cols.map(c => esc(r[c])).join(','))].join('\r\n');
+  const partialsStr = r => (r.partials || []).map((p, i) => `${i+1}차 ${p.pct}%@${p.price}(${p.r>=0?'+':''}${p.r}R)`).join(' / ');
+  const csv = [head.join(','), ...j.map(r => cols.map(c => esc(c === 'partials_summary' ? partialsStr(r) : r[c])).join(','))].join('\r\n');
   const blob = new Blob(['\uFEFF' + csv], {type: 'text/csv;charset=utf-8'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
