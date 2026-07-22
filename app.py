@@ -5,6 +5,24 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.86 [버그수정] "첫 스캔 대부분 실패, 로딩돼도 10분" 근본원인 수정.
+        [문제] _fetch_market_data의 모든 호출(스캔/섹터/마감정리/스케줄러 전부)이
+               시장별 공유 락(_market_fetch_locks)을 무조건 기다리는 구조였음.
+               v4.73에서 종목별 실제 fetch 시각을 추적하도록 고친 뒤로 실제
+               재수집이 예전보다 훨씬 자주(종목당 30분마다) 일어나게 됐는데, 그
+               재수집 한 번이 네이버 레이트리밋 등으로 오래 걸리면(수분~10분+)
+               그동안 락을 쥐고 있어 캐시가 이미 신선한 다른 요청까지 전부 그
+               뒤에서 대기하게 됨 — 스케줄러 주석에도 "장중엔 콜드 스캔이
+               사용자 요청 때 실행되면 브라우저 타임아웃으로 스캔 실패가 뜸"
+               이라고 정확히 예견돼 있었으나, v4.73 이후 이 경로가 훨씬 자주
+               걸리게 되면서 드물던 증상이 "대부분"으로 악화된 것.
+        [해결] _fetch_market_data에 wait_for_fresh 인자 추가. 기본값 False(사용자
+               요청 전부)는 캐시가 있으면 신선도와 무관하게 즉시 반환하고, 오래
+               됐으면 백그라운드 태스크로 갱신만 걸어둔 뒤 요청은 기다리지 않는다
+               (stale-while-revalidate). 캐시가 아예 없을 때(콜드 스타트)만
+               실제로 기다림 — 서버 재시작 직후 딱 한 번만 발생. 스케줄러의
+               워밍 호출만 wait_for_fresh=True로 실제 완료를 기다린다(워밍의
+               목적 자체가 미리 실제로 받아두기라서).
 v4.85 [신규] 일지 — 부분익절 기록 + 보유일 자동계산 + 근거/복기란 확대.
         [배경] 기본 매매가 "2R/30%에서 절반 익절 후 나머지는 추세 따라 홀딩"인데
                일지는 진입/전량청산 2단계뿐이라 부분익절을 남길 데이터 필드
@@ -1044,7 +1062,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.85"
+VERSION = "v4.86"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1304,15 +1322,67 @@ def _benchmark_rs_scores() -> dict:
 # → "스캔 반복 실패" 루프의 원인. 락 안에서 캐시를 재확인하므로 뒤늦게 진입한
 # 요청은 페치 없이 방금 채워진 캐시를 그대로 받는다.
 _market_fetch_locks: dict = {}
+_market_refreshing: dict = {}   # v4.86: cache_key -> True인 동안 백그라운드 갱신 진행중
 
 
-async def _fetch_market_data(market: str) -> dict:
+async def _fetch_market_data(market: str, wait_for_fresh: bool = False) -> dict:
     """시장 단위로 종목 일봉 + RS 계산. 모드와 무관하므로 시장별로 캐시해 재사용.
-    여기서만 네이버/야후를 호출한다 (모드 전환 시 재호출 안 함)."""
+    여기서만 네이버/야후를 호출한다 (모드 전환 시 재호출 안 함).
+
+    v4.86 [버그수정] "첫 스캔 대부분 실패, 로딩돼도 10분" 증상의 근본원인.
+        [문제] 지금까지 모든 호출이 시장별 공유 락(_market_fetch_locks)을 무조건
+               기다렸음. v4.73에서 종목별 실제 fetch 시각을 추적하도록 고친 뒤로
+               실제 재수집이 예전보다 훨씬 자주(종목당 30분마다) 일어나게 됐는데,
+               그 재수집 한 번이 네이버 레이트리밋 등으로 오래 걸리면(수분~10분+)
+               그동안 락을 쥐고 있어 다른 모든 요청(캐시가 이미 신선해도!)이
+               전부 그 뒤에서 대기하게 됨.
+        [해결] wait_for_fresh=False(기본값, 사용자 요청 전부)면: 캐시가 있으면
+               신선도와 무관하게 즉시 반환하고, 오래됐으면 백그라운드 태스크로
+               갱신만 걸어둔 뒤 이번 요청은 기다리지 않는다(stale-while-
+               revalidate). 캐시가 아예 없을 때(콜드 스타트)만 실제로 기다린다.
+               wait_for_fresh=True(스케줄러 워밍 전용)는 기존처럼 락을 잡고
+               진짜로 최신 데이터가 될 때까지 기다린다 — 워밍의 목적 자체가
+               '미리 실제로 받아두기'라 여기서까지 스킵하면 캐시가 영영 안 됨."""
     cache_key = f"data:{market}"
+    if wait_for_fresh:
+        _lock = _market_fetch_locks.setdefault(cache_key, asyncio.Lock())
+        async with _lock:
+            return await _fetch_market_data_inner(market, cache_key)
+
+    daykey = _market_session_key(market)
+    mem = _data_cache.get(cache_key)
+    if daykey and mem and mem.get("daykey") == daykey:
+        return mem
+    if not mem and daykey:
+        disk = _load_disk_cache(market, daykey)
+        if disk:
+            _data_cache[cache_key] = disk
+            return disk
+    if mem:
+        fresh = (not daykey) and (time.time() - mem.get("ts", 0) < DATA_TTL)
+        if not fresh and not _market_refreshing.get(cache_key):
+            _market_refreshing[cache_key] = True
+            asyncio.create_task(_refresh_market_data_bg(market, cache_key))
+        return mem
+    # 캐시가 아예 없음(콜드 스타트) — 이번 한 번만 실제로 기다린다.
     _lock = _market_fetch_locks.setdefault(cache_key, asyncio.Lock())
     async with _lock:
+        mem = _data_cache.get(cache_key)
+        if mem:   # 대기 중 다른 요청이 이미 채웠으면 그걸 그대로
+            return mem
         return await _fetch_market_data_inner(market, cache_key)
+
+
+async def _refresh_market_data_bg(market: str, cache_key: str):
+    """캐시는 있지만 오래됐을 때 백그라운드에서 실제로 갱신. 사용자 요청은 안 기다림."""
+    _lock = _market_fetch_locks.setdefault(cache_key, asyncio.Lock())
+    try:
+        async with _lock:
+            await _fetch_market_data_inner(market, cache_key)
+    except Exception as e:
+        print(f"[bg-refresh] {market} failed: {e}")
+    finally:
+        _market_refreshing[cache_key] = False
 
 
 async def _fetch_market_data_inner(market: str, cache_key: str) -> dict:
@@ -1725,7 +1795,7 @@ async def _warm_market(market: str):
         if _warmed.get(wkey):
             return
         try:
-            await _fetch_market_data(market)
+            await _fetch_market_data(market, wait_for_fresh=True)
             for mode in ("imminent", "pullback", "turnaround", "breakout"):
                 res = await run_scan(market, mode)
                 res["daykey"] = daykey
@@ -1742,7 +1812,7 @@ async def _warm_market(market: str):
     if now - last < 480:      # 8분
         return
     try:
-        await _fetch_market_data(market)
+        await _fetch_market_data(market, wait_for_fresh=True)
         for mode in ("imminent", "pullback", "turnaround", "breakout"):
             res = await run_scan(market, mode)
             res["daykey"] = None
