@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.88 [수정] 메인 화면 상단 범례(⚠️경보/리스크, ⭕점수, 🤝M&A의심) 줄 삭제.
+        v4.70에서 👑주도주·🔥트리거는 이미 뺐는데 나머지 세 개가 남아있었음 —
+        요청에 따라 마저 제거. 배지 자체(카드에 뜨는 아이콘)는 그대로 유지,
+        설명 줄만 삭제.
 v4.87 [버그수정] naver_kr.fetch_live_price()가 실제 API 응답 구조와 안 맞아
         사실상 항상 실패하던 문제 — 파급 범위가 예상보다 훨씬 컸음.
         [문제] totalInfos에서 code가 'closePrice'/'nowVal'인 항목을 찾는
@@ -1078,7 +1082,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.87"
+VERSION = "v4.88"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
