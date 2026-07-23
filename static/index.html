@@ -365,7 +365,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.96</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.97</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -975,7 +975,7 @@ const DESC = {
   inverse: '🔻 지수 하락 베팅 · 인버스 ETF가 강세(정배열·상승)면 = 시장 하락 국면 · 곱버스는 변동성 극심, 단기·소액만 · 미너비니式 본래 현금 우선',
   pattern: '🧩 장기 패턴이 거의 완성된 종목 · 컵앤핸들(12~35% U바닥+얕은 손잡이) / 치솟은깃발(45봉내 +90% 후 얕은 깃발) / 더블바닥(W자) · 피벗 근처만 표시 — 돌파임박과 달리 몇 주~몇 달 형태를 인식',
   sectors: '📊 전일 섹터별 강세 요약 · 코스피/코스닥/미국 각각 섹터 평균 등락·상승비율·상위 종목 · 섹터 매핑된 종목 기준',
-  eod: '📋 코스피/코스닥 마감 정리 · 상한가 종목 + 거래대금 상위(네이버 순위 기준)',
+  eod: '📋 코스피/코스닥 마감 정리 · 상한가 종목 + 거래대금 상위(네이버 순위 기준) + 섹터 로테이션(상승률/거래대금 상위 섹터)',
   breakdown: '🩸 Stage 4 숏 셋업 · 역배열(20<60<200)+200일선 하락+지지 이탈+하락 거래량+RS 약세 · ⚠️ 숏은 손실 무한·숏스퀴즈·급반등 위험, 한국은 개인 공매도 제약 · 미국 종목 위주'
 };
 
@@ -1148,7 +1148,41 @@ async function loadEod() {
           ${breadthBox('코스닥 등락', d.breadth.KOSDAQ)}
         </div>
       </div>` : '';
-    content.innerHTML = breadthHtml + `
+    // v4.97: 섹터 로테이션 — 상승률 상위 / 거래대금 상위 섹터 (한국 시장 순환매 심함)
+    const sectorTop = (items) => items.map(x => `${x.name}(${x.ticker.replace(/\.(KS|KQ)$/, '')})`).join(', ');
+    const sectorRiseRow = (r) => `<tr>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--line);font-weight:600">${r.sector}</td>
+      <td class="mono" style="padding:6px 8px;border-bottom:1px solid var(--line);text-align:right;color:${chgColor(r.avg_chg)};font-weight:600">${r.avg_chg>=0?'+':''}${r.avg_chg}%</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--line);font-size:10.5px;color:var(--muted)">${sectorTop(r.top)}</td>
+    </tr>`;
+    const sectorValueRow = (r) => `<tr>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--line);font-weight:600">${r.sector}</td>
+      <td class="mono" style="padding:6px 8px;border-bottom:1px solid var(--line);text-align:right">${r.n}종목</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--line);font-size:10.5px;color:var(--muted)">${sectorTop(r.top)}</td>
+    </tr>`;
+    const sectorTable = (rows, rowFn, colLabel, emptyMsg) => rows.length ? `
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr>
+          <th style="text-align:left;padding:5px 8px;font-size:10.5px;color:var(--muted);border-bottom:1px solid var(--line)">섹터</th>
+          <th style="text-align:right;padding:5px 8px;font-size:10.5px;color:var(--muted);border-bottom:1px solid var(--line)">${colLabel}</th>
+          <th style="text-align:left;padding:5px 8px;font-size:10.5px;color:var(--muted);border-bottom:1px solid var(--line)">상위 종목</th>
+        </tr></thead>
+        <tbody>${rows.map(rowFn).join('')}</tbody>
+      </table>` : `<div style="color:var(--muted);font-size:12px;padding:10px 0">${emptyMsg}</div>`;
+    const sectorHtml = (d.sector_rise || d.sector_value) ? `
+      <div style="max-width:1080px;margin:0 auto 16px;padding:0 24px;display:flex;gap:16px;flex-wrap:wrap">
+        <div style="flex:1;min-width:320px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px">
+          <div style="font-size:13px;font-weight:700;margin-bottom:2px">📈 상승률 상위 섹터</div>
+          <div style="font-size:10.5px;color:var(--muted);margin-bottom:8px">섹터 내 종목 평균 등락률(생존자 2종목↑ 기준)</div>
+          ${sectorTable(d.sector_rise || [], sectorRiseRow, '평균등락', '섹터 데이터를 못 가져왔어요.')}
+        </div>
+        <div style="flex:1;min-width:320px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px">
+          <div style="font-size:13px;font-weight:700;margin-bottom:2px">🔥 거래대금 상위 섹터</div>
+          <div style="font-size:10.5px;color:var(--muted);margin-bottom:8px">거래대금 상위 120종목이 몰린 섹터(종목 수 기준)</div>
+          ${sectorTable(d.sector_value || [], sectorValueRow, '종목수', '섹터 데이터를 못 가져왔어요.')}
+        </div>
+      </div>` : '';
+    content.innerHTML = breadthHtml + sectorHtml + `
       <div style="max-width:1080px;margin:0 auto;display:flex;gap:16px;flex-wrap:wrap;padding:0 24px">
         <div style="flex:1;min-width:320px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px">
           <div style="font-size:13px;font-weight:700;margin-bottom:2px">🔴 상한가</div>

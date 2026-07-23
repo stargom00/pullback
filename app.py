@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.97 [신규] 📋 마감정리 탭에 섹터 로테이션(상승률 상위/거래대금 상위 섹터) 추가.
+        [배경] 한국 시장은 순환매(테마 로테이션)가 특히 심해서, 마감 후
+               개별 종목보다 "오늘 어느 섹터가 주도했는지"를 먼저 봐야 함.
+        [구현] /api/eod에 두 축 추가:
+               1) sector_rise — 유니버스 전 종목 등락률을 섹터로 묶어 평균
+                  (생존자 2종목↑), 내림차순 정렬. 각 섹터 상위 3종목 포함.
+               2) sector_value — 네이버 거래대금 순위 상위 120종목(기존 40→120
+                  확대, top_value 표시용 데이터도 겸용)이 어느 섹터에 몰렸는지
+                  종목 수로 집계. 실제 거래대금 금액은 스크레이핑 소스에 없어
+                  순위 등장 빈도를 프록시로 사용(/api/sectors 주도업종 집계와
+                  같은 철학).
+        static/index.html: 마감정리 탭에 "📈 상승률 상위 섹터" / "🔥 거래대금
+        상위 섹터" 2열 카드 추가.
 v4.96 [버그수정] 관심종목 수동 등록 시 한국 종목 현재가 조회 실패(마키나락스 477850 사례).
         [문제] saveManualAdd()가 "시장" 드롭다운(한국/미국)과 무관하게 종목코드
                입력값을 그대로("477850") 써서 /api/prices에 넘김. is_kr()은
@@ -1195,7 +1208,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v4.96"
+VERSION = "v4.97"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2720,11 +2733,14 @@ _EOD_TTL = 600  # 10분 캐시
 
 @app.get("/api/eod")
 async def eod_summary():
-    """코스피/코스닥 마감 정리 — 상한가 종목 + 거래대금 상위 (v4.83).
+    """코스피/코스닥 마감 정리 — 상한가 종목 + 거래대금 상위 (v4.83) + 섹터
+    로테이션(v4.97).
     - 상한가: 국내 가격제한폭(±30%)에 근접(29.5%+)한 당일 등락률. 캐시된 KR
       일봉 전체를 훑어 계산(추가 네트워크 호출 없음).
     - 거래대금 상위: 네이버 거래대금 상위 페이지의 등장 순서를 그대로 순위로
-      사용(=실제 거래대금 순위). 표시용 종가/등락률만 캐시된 일봉에서 조회."""
+      사용(=실제 거래대금 순위). 표시용 종가/등락률만 캐시된 일봉에서 조회.
+    - 섹터 로테이션: 상승률 상위 섹터(유니버스 평균 등락%) + 거래대금 상위
+      섹터(거래대금 상위 120종목의 섹터별 등장 빈도)."""
     now = time.time()
     if _eod_cache and now - _eod_cache.get("ts", 0) < _EOD_TTL:
         return JSONResponse(_eod_cache["data"])
@@ -2757,9 +2773,11 @@ async def eod_summary():
     limit_up.sort(key=lambda x: -x["change_pct"])
 
     top_value = []
+    tv = {}
     try:
         loop = asyncio.get_event_loop()
-        tv = await loop.run_in_executor(_executor, naver_kr.fetch_top_value, 40)
+        # v4.97: 섹터별 거래대금 집중도 집계에 쓸 표본을 늘리려 40→120.
+        tv = await loop.run_in_executor(_executor, naver_kr.fetch_top_value, 120)
         for t, name in tv.items():
             df = data.get(t)
             if df is None or len(df) < 2:
@@ -2772,6 +2790,59 @@ async def eod_summary():
     except Exception:
         pass
 
+    # v4.97 [신규] 섹터 로테이션 — 한국 시장은 순환매가 심해 "오늘 어느 섹터가
+    # 뜨는지"가 개별 종목보다 먼저 봐야 할 신호. 두 축으로 집계:
+    #   1) 상승률 상위 섹터: 유니버스 전 종목 등락률을 섹터로 묶어 평균(생존자 ≥2).
+    #   2) 거래대금 상위 섹터: 네이버 거래대금 순위 상위 120종목이 어느 섹터에
+    #      몰렸는지 종목 수로 집계(실제 거래대금 금액은 스크레이핑 소스에 없어
+    #      순위 등장 빈도를 프록시로 사용 — /api/sectors의 주도업종 집계와
+    #      같은 "생존자 카운트" 철학).
+    from collections import defaultdict as _dd
+    sector_chg = _dd(list)
+    for t, df in data.items():
+        if not naver_kr.is_kr(t) or df is None or len(df) < 2:
+            continue
+        try:
+            c = df["Close"]
+            close, prev = float(c.iloc[-1]), float(c.iloc[-2])
+            if prev <= 0:
+                continue
+            chg = (close / prev - 1) * 100
+        except Exception:
+            continue
+        if chg > 31 or chg < -31:
+            continue
+        sec = _sector_of(t)
+        if sec == "기타":
+            continue
+        sector_chg[sec].append((t, universe.get(t, t), chg))
+    sector_rise = []
+    for sec, items in sector_chg.items():
+        if len(items) < 2:
+            continue
+        avg = sum(x[2] for x in items) / len(items)
+        top = sorted(items, key=lambda x: -x[2])[:3]
+        sector_rise.append({
+            "sector": sec, "n": len(items), "avg_chg": round(avg, 2),
+            "top": [{"ticker": tk, "name": nm, "chg": round(cg, 1)} for tk, nm, cg in top],
+        })
+    sector_rise.sort(key=lambda r: -r["avg_chg"])
+
+    sector_value_count: dict = _dd(int)
+    sector_value_top: dict = _dd(list)
+    for t, name in tv.items():
+        sec = _sector_of(t)
+        if sec == "기타":
+            continue
+        sector_value_count[sec] += 1
+        if len(sector_value_top[sec]) < 3:
+            sector_value_top[sec].append({"ticker": t, "name": name})
+    sector_value = [
+        {"sector": sec, "n": cnt, "top": sector_value_top[sec]}
+        for sec, cnt in sector_value_count.items()
+    ]
+    sector_value.sort(key=lambda r: -r["n"])
+
     daykey = _market_session_key("kr")
     result = {
         "date": daykey or datetime.now(KST).strftime("%Y-%m-%d"),
@@ -2779,6 +2850,8 @@ async def eod_summary():
         "breadth": breadth,
         "limit_up": limit_up,
         "top_value": top_value,
+        "sector_rise": sector_rise[:8],
+        "sector_value": sector_value[:8],
     }
     result = _clean_nan(result)
     _eod_cache["ts"] = now
