@@ -10,10 +10,22 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import requests
+
+KST = timezone(timedelta(hours=9))
+
+
+def _kr_market_open_now() -> bool:
+    """한국장이 지금 장중인지 (평일 09:00~15:30 KST). fetch()가 '오늘' 봉을
+    새로 만들지 판단하는 데 씀 (v4.89) — 서버 로컬시간이 아니라 항상 KST 기준."""
+    now = datetime.now(KST)
+    if now.weekday() >= 5:
+        return False
+    hm = now.hour * 60 + now.minute
+    return 9 * 60 <= hm < 15 * 60 + 30
 
 _HEADERS = {
     "User-Agent": (
@@ -189,7 +201,20 @@ def fetch(ticker: str) -> pd.DataFrame | None:
     """
     한국 종목 통합 fetch: 과거 일봉 + 현재가 보정.
     - 일봉을 받고, 장중 현재가가 있으면 '오늘' 봉의 Close를 덮어쓴다.
-    - 오늘 봉이 아직 없으면 현재가로 새 행을 추가한다.
+    - 오늘 봉이 아직 없고 지금 장중이면 현재가로 새 행을 추가한다.
+
+    v4.89 버그수정: "한국 종목 오늘 등락률이 +0%로 뜬다".
+    [원인] v4.87에서 fetch_live_price()가 dealTrendInfos[0](최신 '거래일'의
+    종가 — 장중 실시간이 아니라 그날 최종 종가에 가까운 값, 개장 전엔 어제
+    걸로 남아있음)를 폴백으로 반환하게 고쳤음. 그런데 이 함수는 "live가 있으면
+    무조건 오늘 날짜로 봉을 만든다"였어서, 장 열리기 전(예: 09시 전) 어제
+    종가가 그대로 live로 돌아와도 그걸 '오늘 새 봉'으로 추가해버렸음. 그러면
+    오늘 봉 Close(=어제 종가)와 어제 봉 Close(=어제 종가)가 완전히 같아져서
+    등락률이 항상 0%로 계산됨.
+    [해결] 오늘 봉이 아직 없을 때는 지금이 실제로 한국장 장중(_kr_market_open_now)
+    일 때만 새 봉을 만든다. 장외(개장 전/마감 후)면 live는 그냥 마지막 종가를
+    반복하는 값이니 무시하고 과거 일봉 그대로 반환 — 등락률은 정상적으로
+    "마지막 완결 거래일 vs 그 전날"로 계산됨.
     """
     df = fetch_history(ticker)
     if df is None or df.empty:
@@ -197,15 +222,15 @@ def fetch(ticker: str) -> pd.DataFrame | None:
 
     live = fetch_live_price(ticker)
     if live and live > 0:
-        today = pd.Timestamp(datetime.now().date())
+        today = pd.Timestamp(datetime.now(KST).date())
         last_day = df.index[-1].normalize()
         if last_day == today:
-            # 오늘 봉 존재 → 종가/고저 보정
+            # 오늘 봉 이미 존재(장중 갱신 반복 등) → 종가/고저만 보정
             df.loc[df.index[-1], "Close"] = live
             df.loc[df.index[-1], "High"] = max(df.iloc[-1]["High"], live)
             df.loc[df.index[-1], "Low"] = min(df.iloc[-1]["Low"], live)
-        else:
-            # 오늘 봉 없음 → 현재가로 임시 행 추가 (거래량은 직전값 근사)
+        elif _kr_market_open_now():
+            # 오늘 봉 없고 지금 진짜 장중 → 현재가로 새 행 추가
             prev_close = float(df.iloc[-1]["Close"])
             df.loc[today] = {
                 "Open": prev_close,
@@ -214,6 +239,7 @@ def fetch(ticker: str) -> pd.DataFrame | None:
                 "Close": live,
                 "Volume": float(df.iloc[-1]["Volume"]),
             }
+        # else: 장외인데 오늘 봉도 없음 → live는 마지막 종가 반복일 뿐이니 무시
     return df
 
 
