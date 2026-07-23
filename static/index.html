@@ -365,7 +365,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.94</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.95</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1963,7 +1963,7 @@ async function updateTracking(prefetched, prefetchedClosed) {
       continue;  // pending인 동안은 손절/목표/만료 판정 안 함
     }
 
-    // ── 진입(entered): 실제 매수 → 손절/목표 자동추적, 14일 만료는 자동종료 안 함 ──
+    // ── 진입(entered): 실제 매수 → 손절 자동추적, 14일 만료는 자동종료 안 함 ──
     // (페이퍼 검증 시절엔 14일 자동종료했지만, 실제 매매 기록이 된 후로는
     //  사용자가 직접 ⏹종료 누를 때까지 현재가·R을 계속 추적한다.)
     const daysHeld = Math.floor((today - new Date(r.date)) / 86400000);
@@ -1971,8 +1971,11 @@ async function updateTracking(prefetched, prefetchedClosed) {
     // 장중엔 터치만 기록(배지 표시용), 종가에만 최종 손절 확정.
     r.stop_touched_intraday = (!mClosedNow && px <= stop);
     if (mClosedNow && px <= stop) { closed = true; reason = '손절도달'; resultR = -1; }
-    else if (target && px >= target) { closed = true; reason = '목표도달'; resultR = (target - entry) / oneR; }
-    // 14일 경과해도 자동종료하지 않음 — 현재가·R 계속 갱신만 함
+    // v4.95: 목표(2R) 도달 자동 전량종료 제거. 실제 매매 방식(2R/30%에서 부분
+    // 익절 후 나머지 홀딩)과 자동 전량청산이 충돌해서, 부분익절 하려고 들어간
+    // 사이 종목이 먼저 자동 종료돼버리는 사고가 있었음(WTTR 사례). 이제는
+    // 플래그만 남기고 실제 종료는 사용자가 🔪부분/⏹종료로 직접 판단한다.
+    r.target_reached = !!(target && px >= target);
 
     if (closed) {
       r.tracking = false;
@@ -2621,6 +2624,12 @@ function viewRow(r) {
            <span class="st-act" onclick="partialEditingId=${r.id};editingId=null;renderJournal()" title="부분 익절 기록 (예: 2R에서 절반)" style="border-color:#8c6d2d;color:#f2b33d">🔪부분</span>
            <span class="st-act" onclick="markClosed(${r.id})" title="매매 종료 · 청산가 입력" style="border-color:#2d5a8c;color:#9fb4ff">⏹종료</span>
          </div>`
+    // v4.95: 목표도달 자동종료가 남긴 실수(부분익절 하려던 종목이 먼저 전량
+    // 종료돼버린 경우 등)를 되돌릴 수 있게. 종료 기록만 초기화하고 진입중으로 복귀.
+    : st === 'closed'
+      ? `<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">
+           <span class="st-act" onclick="reopenRow(${r.id})" title="실수로 종료됐거나, 부분익절 후 계속 보유 중이면 진입중 상태로 되돌리기" style="border-color:#666;color:#aaa">🔓재오픈</span>
+         </div>`
       : '';
   const broken = isBrokenRow(r);   // 손절≥진입 = 데이터 오류
   // 종목 셀에 보조정보(탭·RS·섹터) 작게 접어넣기 — 컬럼은 줄이되 정보는 유지
@@ -2670,7 +2679,9 @@ function viewRow(r) {
                 return `<span style="color:${col};font-weight:600">${liveR>=0?'+':''}${liveR.toFixed(1)}R</span>`
                      + `<div style="font-size:9px;color:var(--muted)">D+${dheld} · 2R ${px2RStr}</div>`
                      // v4.68: 장중 손절가 터치 — 아직 종가 확정 전이라 자동종료는 안 됐지만 경고만.
-                     + (r.stop_touched_intraday ? `<div style="font-size:9px;color:#f87171;font-weight:600" title="장중 손절가를 스쳤지만 종가로만 손절을 확정합니다. 마감까지 지켜보세요.">⚠️ 장중 손절터치</div>` : '');
+                     + (r.stop_touched_intraday ? `<div style="font-size:9px;color:#f87171;font-weight:600" title="장중 손절가를 스쳤지만 종가로만 손절을 확정합니다. 마감까지 지켜보세요.">⚠️ 장중 손절터치</div>` : '')
+                     // v4.95: 목표가 도달은 이제 자동 종료 안 하고 알림만 — 부분익절 고려 유도.
+                     + (r.target_reached ? `<div style="font-size:9px;color:#f2b33d;font-weight:600" title="목표가(2R) 도달 — 자동 종료되지 않습니다. 부분익절(🔪) 또는 직접 종료 여부를 판단하세요.">🎯 목표가 도달</div>` : '');
               })()
             : `<span style="color:var(--muted);font-size:11px">추적대기</span><div style="font-size:9px;color:var(--muted)">${r.entry?'앱 새로고침 시 갱신':''}</div>`))
     }</td>
@@ -2722,6 +2733,24 @@ async function markMissed(id) {
   const r = j.find(x => x.id === id); if (!r) return;
   r.status = 'missed';
   r.tracking = false;
+  setJournal(j); await _saveJournalToServer(j); renderJournal();
+}
+
+// v4.95: 종료(closed) → 진입중(entered)으로 되돌리기. 목표도달 자동종료가
+// 남긴 실수를 바로잡거나, 부분익절만 하고 계속 보유 중인 경우에 씀.
+// 종료 기록(결과R/청산가/종료사유/종료일)만 초기화 — 부분익절 이력(partials)은 유지.
+async function reopenRow(id) {
+  const j = getJournal();
+  const r = j.find(x => x.id === id); if (!r) return;
+  if (!confirm(`${r.name}을(를) 다시 '진입중' 상태로 되돌릴까요?\n종료 기록(결과R·청산가·종료사유)이 초기화됩니다. 부분익절 기록은 그대로 남아요.`)) return;
+  r.status = 'entered';
+  r.tracking = true;
+  r.result_r = '';
+  r.exit = '';
+  r.closed_reason = '';
+  r.exit_reason = '';
+  r.closed_date = '';
+  r.target_reached = false;
   setJournal(j); await _saveJournalToServer(j); renderJournal();
 }
 
