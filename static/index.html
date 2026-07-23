@@ -365,7 +365,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.95</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.96</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -2189,12 +2189,33 @@ function closeManualAdd() {
   document.getElementById('manualModal').classList.remove('open');
 }
 async function saveManualAdd() {
-  const ticker = document.getElementById('maTicker').value.trim().toUpperCase();
+  let ticker = document.getElementById('maTicker').value.trim().toUpperCase();
+  const market = document.getElementById('maMarket').value;
   const status = document.getElementById('maStatus').value;   // pending | entered | watch
   let pivot = parseFloat(document.getElementById('maPivot').value);
   if (!ticker) { alert('종목코드를 입력하세요'); return; }
   const isEntered = status === 'entered';
   const isWatch = status === 'watch';
+
+  // v4.96: 시장을 한국(KR)으로 골라도 코드에 .KS/.KQ가 없으면(예: "477850")
+  // is_kr() 판정(접미사만 봄)에 안 걸려서 가격 조회가 엉뚱하게 미국(yfinance)
+  // 경로로 새 신규상장주(마키나락스 477850)에서 재현됨. 코스닥/코스피 둘 다
+  // 조회해서 실제로 값이 오는 접미사로 티커 자체를 바로잡는다(저장값도 포함).
+  let fetchedPrice = null;
+  if (market === 'KR' && /^\d{5,6}$/.test(ticker)) {
+    try {
+      const cand = [ticker + '.KQ', ticker + '.KS'];
+      const res = await fetch('/api/prices', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ tickers: cand })
+      });
+      const j = await res.json();
+      const prices = j.prices || {};
+      const hit = cand.find(t => prices[t] != null);
+      if (hit) { ticker = hit; fetchedPrice = prices[hit]; }
+    } catch (e) { /* 아래에서 기존 로직으로 처리 */ }
+  }
+
   // 진입이면 '진입가', 대기면 '피벗가'가 필수. 관찰은 피벗을 만드는 셋업이 아닐 수
   // 있어 필수 아님 — 비우면 현재가를 가져와 채운다 (v4.72).
   if (!pivot || isNaN(pivot)) {
@@ -2202,14 +2223,18 @@ async function saveManualAdd() {
       alert(isEntered ? '진입가를 입력하세요' : '피벗가를 입력하세요 (돌파 알림 기준)');
       return;
     }
-    try {
-      const res = await fetch('/api/prices', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ tickers: [ticker] })
-      });
-      const j = await res.json();
-      pivot = (j.prices || {})[ticker];
-    } catch (e) { pivot = null; }
+    if (fetchedPrice) {
+      pivot = fetchedPrice;
+    } else {
+      try {
+        const res = await fetch('/api/prices', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ tickers: [ticker] })
+        });
+        const j = await res.json();
+        pivot = (j.prices || {})[ticker];
+      } catch (e) { pivot = null; }
+    }
     if (!pivot) {
       alert('현재가를 가져오지 못했어요. 관심 등록가를 직접 입력해주세요.');
       return;
@@ -2220,7 +2245,6 @@ async function saveManualAdd() {
   if (isEntered && !stop) { alert('진입 종목은 손절가가 필요해요 (R 계산·손절 알림)'); return; }
   // 손절 검증: 있으면 기준가보다 낮아야 함
   if (stop && stop >= pivot) { alert('손절가는 ' + (isEntered ? '진입가' : '피벗가') + '보다 낮아야 해요'); return; }
-  const market = document.getElementById('maMarket').value;
   const name = document.getElementById('maName').value.trim() || ticker;
   const sector = document.getElementById('maSector').value.trim();
   const note = document.getElementById('maNote').value.trim();

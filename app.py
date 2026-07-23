@@ -5,6 +5,17 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.96 [버그수정] 관심종목 수동 등록 시 한국 종목 현재가 조회 실패(마키나락스 477850 사례).
+        [문제] saveManualAdd()가 "시장" 드롭다운(한국/미국)과 무관하게 종목코드
+               입력값을 그대로("477850") 써서 /api/prices에 넘김. is_kr()은
+               ticker가 .KS/.KQ로 끝나는지만 보므로 접미사 없는 코드는 무조건
+               미국(yfinance) 경로로 새서 한국 종목(특히 신규상장주)은 가격을
+               못 가져옴 — 저장되는 ticker 필드 자체에도 접미사가 안 붙어
+               이후 추적(updateTracking 등)까지 계속 실패.
+        [해결] 시장=한국(KR)이고 코드가 접미사 없는 5~6자리 숫자면 .KQ/.KS
+               둘 다 /api/prices로 조회해 실제로 값이 온 접미사로 ticker
+               변수 자체를 교정(코드가 있으면 관심 등록가 자동입력이든, 수동
+               입력이든 저장되는 ticker에 항상 반영).
 v4.95 [버그수정] 목표가(2R) 도달 시 자동 전량종료되던 문제 — 부분익절과 충돌.
         [문제] updateTracking()이 현재가가 target(대부분 2R 기본값)에 닿으면
                자동으로 '목표도달'로 전량 종료·result_r 확정해버렸음. 근데
@@ -1184,7 +1195,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v4.95"
+VERSION = "v4.96"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
