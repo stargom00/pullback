@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.94 [신규] 📋 마감정리 탭에 코스피/코스닥 상승·하락·보합 종목 수 표시.
+        /api/eod가 KR 데이터 순회하는 김에 같이 집계(추가 호출 없음). 캐시된
+        일봉 등락 부호로 코스피/코스닥 각각 상승/하락/보합 종목 수를 세어
+        상한가/거래대금 상위 박스 위에 별도 요약 박스로 표시.
 v4.93 [버그수정] 진짜 최종 근본원인 — 디스크 캐시(rs4)가 v4.87~89 버그를
         영구히 물고 있었음. v4.92까지도 안 고쳐진 이유.
         [원인] 하필 이 버그를 고치던 시점에 한국장이 마감(15:40 KST)됐음.
@@ -1163,7 +1167,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v4.93"
+VERSION = "v4.94"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2702,6 +2706,8 @@ async def eod_summary():
     universe = bundle.get("universe", {})
 
     limit_up = []
+    # v4.94: 코스피/코스닥 상승·하락 종목 수 (등락 폭 무관, 부호만) — 같은 순회에서 집계.
+    breadth = {"KOSPI": {"up": 0, "down": 0, "flat": 0}, "KOSDAQ": {"up": 0, "down": 0, "flat": 0}}
     for t, df in data.items():
         if df is None or len(df) < 2:
             continue
@@ -2711,6 +2717,10 @@ async def eod_summary():
             if prev <= 0:
                 continue
             chg = (close / prev - 1) * 100
+            mkt_key = "KOSPI" if t.endswith(".KS") else ("KOSDAQ" if t.endswith(".KQ") else None)
+            if mkt_key:
+                bucket = "up" if chg > 0 else ("down" if chg < 0 else "flat")
+                breadth[mkt_key][bucket] += 1
             if chg >= 29.5:
                 limit_up.append({"ticker": t, "name": universe.get(t, t), "market": "KR",
                                  "close": round(close, 2), "change_pct": round(chg, 2)})
@@ -2738,6 +2748,7 @@ async def eod_summary():
     result = {
         "date": daykey or datetime.now(KST).strftime("%Y-%m-%d"),
         "market_closed": bool(daykey),
+        "breadth": breadth,
         "limit_up": limit_up,
         "top_value": top_value,
     }

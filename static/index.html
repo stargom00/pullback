@@ -365,7 +365,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.93</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.94</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1129,7 +1129,26 @@ async function loadEod() {
         </tr></thead>
         <tbody>${rows.map(row).join('')}</tbody>
       </table>` : `<div style="color:var(--muted);font-size:12px;padding:10px 0">${emptyMsg}</div>`;
-    content.innerHTML = `
+    // v4.94: 코스피/코스닥 상승·하락 종목 수 (등락폭 무관, 부호만)
+    const breadthBox = (label, b) => `
+      <div style="flex:1;min-width:200px">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px">${label}</div>
+        <div style="font-size:15px">
+          <span style="color:var(--px-up);font-weight:700">▲${b.up}</span>
+          <span style="color:var(--muted);margin:0 6px">·</span>
+          <span style="color:var(--px-down);font-weight:700">▼${b.down}</span>
+          <span style="color:var(--muted);margin:0 6px">·</span>
+          <span style="color:var(--muted)">보합 ${b.flat}</span>
+        </div>
+      </div>`;
+    const breadthHtml = d.breadth ? `
+      <div style="max-width:1080px;margin:0 auto 16px;padding:0 24px">
+        <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;gap:24px;flex-wrap:wrap">
+          ${breadthBox('코스피 등락', d.breadth.KOSPI)}
+          ${breadthBox('코스닥 등락', d.breadth.KOSDAQ)}
+        </div>
+      </div>` : '';
+    content.innerHTML = breadthHtml + `
       <div style="max-width:1080px;margin:0 auto;display:flex;gap:16px;flex-wrap:wrap;padding:0 24px">
         <div style="flex:1;min-width:320px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px">
           <div style="font-size:13px;font-weight:700;margin-bottom:2px">🔴 상한가</div>
