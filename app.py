@@ -5,6 +5,23 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.90 [버그수정] 한국 종목 등락률 +0% — v4.89로도 안 고쳐졌던 진짜 근본원인.
+        [재조사] v4.89는 fetch_live_price()의 값이 '오늘 실시간'이라고 믿고
+               언제 오버레이할지만 게이팅했는데, 실측(curl)해보니 전제 자체가
+               틀렸음: fetch_live_price()(m.stock.naver.com integration API)가
+               최종적으로 참조하는 dealTrendInfos[0]과 totalInfos.lastClosePrice는
+               이름 그대로 '전일 종가' — 어떤 필드를 폴백해도 하루 지연된 값만
+               나옴. 반면 fetch_history()가 쓰는 siseJson 엔드포인트는 오늘
+               날짜 행을 이미 실시간에 가깝게 채워서 줌 — 삼성전자우(005935)로
+               직접 대조: siseJson 오늘 행의 시가/고가/저가/거래량이
+               integration API의 당일 실시간 값과 정확히 일치, 반면 종가만
+               '어제' 값을 물고 있었음.
+        [해결] naver_kr.fetch()에서 fetch_live_price 기반 오버레이 로직 자체를
+               제거 — siseJson이 이미 정답을 주므로 fetch_history() 그대로
+               반환. app.py의 _one_price(/api/prices, 일지 추적가)도 동일하게
+               fetch_live_price 대신 fetch_history 직접 사용으로 변경.
+               fetch_live_price()는 이제 아무 데서도 실가격 판단에 안 쓰임
+               (디버그 엔드포인트의 참고용 출력에만 남음).
 v4.89 [버그수정] 한국 종목 오늘 등락률이 +0%로 뜨던 문제 — v4.87의 부작용.
         [원인] v4.87에서 fetch_live_price()가 dealTrendInfos[0](최신 '거래일'
                종가 — 장중 실시간이 아니라 그날 종가에 가까운 값, 개장 전엔
@@ -1095,7 +1112,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.89"
+VERSION = "v4.90"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -3125,10 +3142,9 @@ async def batch_prices(request: Request):
     def _one_price(tk: str):
         try:
             if naver_kr.is_kr(tk):
-                p = naver_kr.fetch_live_price(tk)
-                if p and p > 0:
-                    return tk, float(p)
-                # 폴백: 일봉 마지막 종가
+                # v4.90: fetch_live_price는 결국 하루 지연된 값(가장 최근 '완결'
+                # 거래일 종가)만 주는 API라 여기 쓰면 오히려 stale — siseJson
+                # 일봉(fetch_history)이 이미 오늘 행을 실시간에 가깝게 채워준다.
                 df = naver_kr.fetch_history(tk, days=10)
                 if df is not None and not df.empty:
                     return tk, float(df["Close"].iloc[-1])
