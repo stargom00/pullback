@@ -5,6 +5,20 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.93 [버그수정] 진짜 최종 근본원인 — 디스크 캐시(rs4)가 v4.87~89 버그를
+        영구히 물고 있었음. v4.92까지도 안 고쳐진 이유.
+        [원인] 하필 이 버그를 고치던 시점에 한국장이 마감(15:40 KST)됐음.
+        _fetch_market_data_inner는 장마감 후엔 디스크 캐시(/data, 영구 볼륨)를
+        읽고 "다음 거래일까지 재호출 0"으로 그대로 반환함. 마감 직후 저장된
+        오늘자 rs4 캐시 파일이 v4.87~v4.89 버그(등락률 0%로 오염된 오늘 봉)를
+        그대로 담고 있었는데, 이후 v4.90~v4.92를 아무리 배포해도 디스크 캐시
+        히트 경로는 naver_kr.fetch()를 다시 호출하지 않으니 그 오염된 파일을
+        계속 그대로 서빙 — 서버 재배포로도 안 지워짐(영구 볼륨이라 재시작해도
+        파일이 살아남음). "강력 새로고침해도 로딩이 금방 된다"는 사용자
+        관찰이 정확히 이 증거였음(진짜 재수집이면 몇 분 걸려야 정상).
+        [해결] 디스크 캐시 네임스페이스 rs4→rs5로 캐시버스트. 이 코드베이스가
+        전에도 같은 이유(rs2→rs3, rs3→rs4)로 두 번 써온 패턴 — 오염된 캐시
+        파일을 이름 자체를 바꿔 강제로 무시하고 새로 빌드하게 함.
 v4.92 [버그수정] 브라우저가 /api/* 응답을 캐싱해서, v4.87~v4.91 서버 수정을
         아무리 배포해도 화면이 안 바뀌는 것처럼 보이던 문제(사용자가 "버전은
         올랐는데 삼기도 그대로, 등락률도 0% 그대로"라고 반복 제보).
@@ -1149,7 +1163,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v4.92"
+VERSION = "v4.93"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1331,8 +1345,13 @@ def _universe_sig(market: str) -> str:
 
 
 def _disk_cache_path(market: str, daykey: str) -> str:
-    # rs4 = v4.43.2 캐시버스트(증분재사용 버그로 오염된 rs3 파일 무시). u{N} = 유니버스 크기 시그니처.
-    return os.path.join(_disk_cache_dir(), f"datacache_rs4_{market}_{_universe_sig(market)}_{daykey}.pkl")
+    # v4.93: rs4→rs5 캐시버스트. 오늘(장마감 후) 저장된 rs4 파일이 v4.87~v4.89의
+    # 버그(등락률 0%로 오염된 오늘 봉)를 그대로 물고 있어서, 그 뒤로 v4.90~v4.92를
+    # 아무리 배포해도 디스크 캐시 히트 경로가 naver_kr.fetch()를 아예 다시
+    # 안 불러 계속 오염된 값을 서빙하고 있었음(다음 거래일까지 캐시라 서버
+    # 재배포로도 안 없어짐 — /data가 영구 볼륨이라 재시작해도 파일이 남음).
+    # u{N} = 유니버스 크기 시그니처.
+    return os.path.join(_disk_cache_dir(), f"datacache_rs5_{market}_{_universe_sig(market)}_{daykey}.pkl")
 
 
 def _load_disk_cache(market: str, daykey: str):
@@ -1358,7 +1377,8 @@ def _save_disk_cache(market: str, daykey: str, bundle: dict):
         # 오래된 캐시 정리(해당 시장의 다른 날짜 파일 삭제)
         d = _disk_cache_dir()
         for fn in os.listdir(d):
-            if (fn.startswith(f"datacache_rs4_{market}_") and not fn.endswith(f"_{daykey}.pkl")) \
+            if (fn.startswith(f"datacache_rs5_{market}_") and not fn.endswith(f"_{daykey}.pkl")) \
+               or fn.startswith(f"datacache_rs4_{market}_") \
                or fn.startswith(f"datacache_rs3_{market}_"):
                 try:
                     os.remove(os.path.join(d, fn))
