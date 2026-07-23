@@ -5,6 +5,16 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.92 [버그수정] 브라우저가 /api/* 응답을 캐싱해서, v4.87~v4.91 서버 수정을
+        아무리 배포해도 화면이 안 바뀌는 것처럼 보이던 문제(사용자가 "버전은
+        올랐는데 삼기도 그대로, 등락률도 0% 그대로"라고 반복 제보).
+        [원인] FastAPI 기본값은 Cache-Control 헤더를 아예 안 붙임 → 브라우저가
+        자체 휴리스틱으로 /api/scan 같은 GET 응답을 캐싱해버릴 수 있음. 그러면
+        서버 로직이 아무리 바뀌어도 브라우저가 네트워크를 다시 안 타서 예전
+        응답을 그대로 재사용 — 서버 쪽만 계속 고치고 있었으니 못 잡을 만했음.
+        [해결] 모든 /api/* 응답에 Cache-Control: no-store 미들웨어로 강제.
+        서비스워커(sw.js)도 /api/ fetch에 cache:'no-store' 명시(이중 방어),
+        프론트 메인 스캔 fetch에도 동일 옵션 추가.
 v4.91 [신규] 국장 시총 1000억원 미만 종목 스캔 제외 (예: 시총 718억짜리
         삼기가 돌파임박에 뜨던 문제).
         naver_kr.fetch_high_marketcap_allowed(): sise_market_sum 페이지가
@@ -1122,7 +1132,24 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.91"
+
+@app.middleware("http")
+async def _no_cache_api(request, call_next):
+    """v4.92 [버그수정] /api/* 응답에 캐시 방지 헤더가 전혀 없었음 — FastAPI
+    기본값은 Cache-Control을 아예 안 붙이는데, 그러면 브라우저가 자체
+    휴리스틱으로 GET 응답(특히 /api/scan)을 캐싱해버릴 수 있음. 그러면
+    서버 로직을 아무리 고쳐도(v4.87~v4.91) 브라우저가 네트워크를 다시 안
+    타서 화면이 안 바뀌는 것처럼 보임 — 실제로 사용자가 여러 버전을 거쳐도
+    똑같은 숫자(등락률 0%, 시총 미달 종목)가 계속 보이던 문제의 유력한 원인.
+    /api/ 전체에 무조건 no-store를 강제해 브라우저/중간 프록시 캐싱을 차단."""
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
+
+VERSION = "v4.92"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
