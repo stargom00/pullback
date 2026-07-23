@@ -409,3 +409,70 @@ def fetch_top_marketcap(per_market_pages: int = 20) -> dict:
             except (requests.RequestException, ValueError):
                 break
     return out
+
+
+# ── 시가총액 하한 필터 (v4.91) — 국장 소형주 스캔 제외용 ──
+_ROW_RE = re.compile(r'<tr[^>]*onMouseOver.*?</tr>', re.S)
+_ROW_CODE_RE = re.compile(r'code=(\d{6})"[^>]*>([^<]+)</a>')
+_ROW_NUM_RE = re.compile(r'<td class="number">([0-9,]+)</td>')
+
+
+def _parse_marketcap_rows(html: str) -> list[tuple[str, str, int]]:
+    """sise_market_sum 한 페이지에서 (코드, 이름, 시가총액(억원)) 리스트 추출.
+    행의 '숫자만 있는(중첩태그 없는) td' 중 3번째가 시가총액 — 실측 확인함
+    (1번=현재가, 2번=액면가, 3번=시가총액; 전일비/등락률 칸은 <em>/<span>이
+    중첩돼 있어 이 단순 패턴에 안 걸림)."""
+    out = []
+    for row in _ROW_RE.finditer(html):
+        r = row.group(0)
+        cm = _ROW_CODE_RE.search(r)
+        if not cm:
+            continue
+        nums = _ROW_NUM_RE.findall(r)
+        if len(nums) < 3:
+            continue
+        try:
+            mcap_eok = int(nums[2].replace(",", ""))
+        except ValueError:
+            continue
+        out.append((cm.group(1), cm.group(2).strip(), mcap_eok))
+    return out
+
+
+def fetch_high_marketcap_allowed(min_eok: int = 1000, max_pages: int = 80) -> set:
+    """시가총액이 min_eok(억원) 이상인 코스피+코스닥 종목의 티커 집합(허용목록).
+    스캐너에서 초소형주를 걸러내는 데 씀 (예: 시총 700억짜리가 돌파임박에
+    뜨는 문제) — 반환된 집합에 없는 KR 티커는 문턱 미달로 간주해 제외한다.
+
+    '미달 집합(블랙리스트)'이 아니라 '충족 집합(화이트리스트)'을 만드는 이유:
+    미달 종목은 코스피/코스닥 전체(수천 개)를 끝까지 긁어야 완전히 알 수
+    있어 비쌈. 반대로 sise_market_sum은 시총 내림차순 정렬이라, 충족
+    종목만 모으는 건 문턱을 넘는 그 페이지에서 바로 멈추면 되므로 훨씬
+    쌈 — 실측상 코스피 ~25페이지, 코스닥 ~14페이지선에서 1000억 문턱을 넘음."""
+    allowed = set()
+    for sosok, suffix in ((0, ".KS"), (1, ".KQ")):
+        for page in range(1, max_pages + 1):
+            try:
+                resp = requests.get(
+                    _MARKETSUM_URL,
+                    params={"sosok": sosok, "page": page},
+                    headers=_HEADERS,
+                    timeout=_TIMEOUT,
+                )
+                resp.raise_for_status()
+                resp.encoding = "euc-kr"
+                rows = _parse_marketcap_rows(resp.text)
+            except (requests.RequestException, ValueError):
+                break
+            if not rows:
+                break
+            hit_below = False
+            for code, name, mcap_eok in rows:
+                if mcap_eok >= min_eok:
+                    allowed.add(f"{code}{suffix}")
+                else:
+                    hit_below = True
+            if hit_below:
+                break   # 내림차순 정렬 — 이 페이지 이후는 전부 문턱 미달
+            _time.sleep(0.12)
+    return allowed

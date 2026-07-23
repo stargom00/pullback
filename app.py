@@ -5,6 +5,16 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.91 [신규] 국장 시총 1000억원 미만 종목 스캔 제외 (예: 시총 718억짜리
+        삼기가 돌파임박에 뜨던 문제).
+        naver_kr.fetch_high_marketcap_allowed(): sise_market_sum 페이지가
+        시총 내림차순 정렬임을 이용해, 문턱(1000억) 아래로 내려가는 순간
+        그 시장 스크레이핑을 중단 — 코스피 ~25페이지, 코스닥 ~14페이지선에서
+        끝남(전체 종목을 다 긁을 필요 없음, 실측 확인). 결과는 '허용목록'
+        (시총 충족 티커 집합)으로 캐시하고, 하루 1회 스케줄러가 백그라운드로
+        갱신. _fetch_market_data_inner에서 유니버스 구성 시 국장 종목 중
+        허용목록에 없는 것만 제외 — 허용목록이 아직 준비 안 됐으면(서버
+        재시작 직후 등) 필터 없이 통과(fail-open).
 v4.90 [버그수정] 한국 종목 등락률 +0% — v4.89로도 안 고쳐졌던 진짜 근본원인.
         [재조사] v4.89는 fetch_live_price()의 값이 '오늘 실시간'이라고 믿고
                언제 오버레이할지만 게이팅했는데, 실측(curl)해보니 전제 자체가
@@ -1112,7 +1122,7 @@ import fundamentals as fundamentals_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
-VERSION = "v4.90"
+VERSION = "v4.91"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1454,6 +1464,13 @@ async def _fetch_market_data_inner(market: str, cache_key: str) -> dict:
         return cached
 
     universe = get_universe(market)
+    # v4.91: 시총 1000억원 미만 국장 종목 제외 (예: 시총 700억짜리가 돌파임박에
+    # 뜨는 문제). 허용목록이 아직 준비 안 됐으면(서버 갓 재시작 등) 필터 없이
+    # 통과 — fail-open, 백그라운드 채워지면 다음 스캔부터 적용됨.
+    _mcap_allowed = _get_mcap_allowed()
+    if _mcap_allowed:
+        universe = {t: n for t, n in universe.items()
+                    if not naver_kr.is_kr(t) or t in _mcap_allowed}
     loop = asyncio.get_event_loop()
     tickers = list(universe.keys())
 
@@ -1874,6 +1891,41 @@ async def _warm_market(market: str):
         print(f"[scheduler] intraday warm {market} failed: {e}")
 
 
+_MCAP_MIN_EOK = 1000  # 시총 1000억원 미만 국장 종목은 스캔 제외 (v4.91)
+_mcap_allowed_cache: dict = {}   # {"date": "YYYY-MM-DD", "tickers": set(...)}
+_mcap_fetch_in_progress = False
+
+
+def _get_mcap_allowed() -> set:
+    """오늘자로 준비된 시총 허용목록. 아직 없으면 빈 set(필터 없이 통과 — fail-open)."""
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    if _mcap_allowed_cache.get("date") == today:
+        return _mcap_allowed_cache.get("tickers", set())
+    return set()
+
+
+async def _ensure_mcap_allowed():
+    """시총 허용목록을 하루 1회 백그라운드로 채움 (블로킹 스크레이핑이라 executor에서)."""
+    global _mcap_fetch_in_progress
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    if _mcap_allowed_cache.get("date") == today or _mcap_fetch_in_progress:
+        return
+    _mcap_fetch_in_progress = True
+    try:
+        loop = asyncio.get_event_loop()
+        allowed = await loop.run_in_executor(
+            _executor, naver_kr.fetch_high_marketcap_allowed, _MCAP_MIN_EOK
+        )
+        if allowed:
+            _mcap_allowed_cache["date"] = today
+            _mcap_allowed_cache["tickers"] = allowed
+            print(f"[mcap] {today} 시총 {_MCAP_MIN_EOK}억↑ 허용목록 {len(allowed)}종목")
+    except Exception as e:
+        print(f"[mcap] fetch failed: {e}")
+    finally:
+        _mcap_fetch_in_progress = False
+
+
 async def _scheduler_loop():
     """4분마다 깨어나 각 시장을 워밍.
     - 장 마감 후: 하루 1회 (데이터 고정)
@@ -1882,6 +1934,7 @@ async def _scheduler_loop():
     await asyncio.sleep(20)  # 부팅 직후 잠깐 대기
     while True:
         try:
+            asyncio.create_task(_ensure_mcap_allowed())  # 하루 1회, 워밍과 별개로 진행
             for market in ("kr", "us"):
                 await _warm_market(market)
         except Exception as e:
