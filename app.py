@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v4.99 [버그수정] 마감정리/섹터요약 탭이 장중에 계속 숫자가 바뀌던 문제.
+        [원인] 두 탭 다 "전일/마감" 요약이 취지인데(섹터요약은 docstring에도
+               "전일" 명시), 실제 구현은 그때그때 마지막 봉(iloc[-1])을 다시
+               계산해서 장중엔 그 순간의 미확정 등락률·거래대금 순위가 10분
+               TTL마다 계속 반영됐음. 사용자가 "장이 열리면 전날 자료 기준으로
+               그대로 유지해야 할 것 같은데 장중에 계속 로딩한다"고 지적.
+        [해결] _market_session_key("kr")로 오늘 KR장이 아직 마감 전인지 판정.
+               마감 전이면 마지막으로 "마감 확정" 상태에서 계산해둔 스냅샷을
+               그대로 반환(재계산 안 함) — /api/eod, /api/sectors 둘 다 적용.
+               장 마감(평일 15:40 KST) 후 딱 1번만 새로 계산해서 스냅샷 갱신.
+        [주의] 배포 직후 등 스냅샷이 아예 없는 상태에서 장중에 첫 요청이 오면
+               부득이 그 순간 값을 1회성으로 보여줌(그 다음 마감 때 정상 스냅샷으로 교체).
 v4.98 [신규] 진입 종목 급락 알림(-5% 이상, 60초 폴링 기준).
         [배경] "짧은 시간 안에 -5% 이상 급락하면 알림"이 필요하다는 요청.
                오늘 등락률(며칠에 걸친 하락 포함)과 달리 폴링 주기 사이의
@@ -1221,7 +1233,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v4.98"
+VERSION = "v4.99"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2170,11 +2182,26 @@ async def debug_raw(ticker: str):
     return JSONResponse(out)
 
 
+_sectors_cache: dict = {}   # {"ts":, "closed_daykey":, "data": {...}} — v4.99
+
+
 @app.get("/api/sectors")
 async def api_sectors():
     """전일(마지막 봉) 섹터별 강세 요약 — 코스피/코스닥/미국 3패널.
     유니버스 전 종목의 마지막 봉 등락률을 섹터로 묶어 평균·상승비율·상위 종목 집계.
-    v4.44.0. 섹터 매핑된 종목 기준(기타 제외)."""
+    v4.44.0. 섹터 매핑된 종목 기준(기타 제외).
+
+    v4.99 [버그수정] 이름대로 "전일" 요약이어야 하는데, 실제론 마지막 봉을 그때
+    그때 다시 계산해서 장중엔 그날 진행 중인(미확정) 등락률이 계속 반영됐음
+    (사용자 피드백: 장 열리면 전날 자료 그대로 유지해야 하는데 장중에 계속
+    로딩된다). /api/eod와 같은 방식으로 KR장이 아직 마감 전(_market_session_key
+    가 None)이면 마지막 마감 확정 스냅샷을 그대로 반환 — 재계산 안 함."""
+    daykey = _market_session_key("kr")   # None이면 오늘 KR장 아직 마감 전
+    if daykey is None and _sectors_cache.get("data"):
+        return JSONResponse(_sectors_cache["data"])
+    if daykey and _sectors_cache.get("closed_daykey") == daykey:
+        return JSONResponse(_sectors_cache["data"])
+
     bundle = await _fetch_market_data("all")
     data = bundle["data"]
     universe = bundle["universe"]
@@ -2266,7 +2293,12 @@ async def api_sectors():
         out[pname] = rows
     ts = bundle.get("ts")
     asof = datetime.fromtimestamp(ts, KST).strftime("%Y-%m-%d %H:%M") if ts else ""
-    return {"version": VERSION, "asof": asof, "panels": out}
+    result = {"version": VERSION, "asof": asof, "panels": out}
+    _sectors_cache["data"] = result
+    if daykey:
+        # 마감 확정된 결과만 스냅샷으로 표시 — 다음 장중엔 이 스냅샷을 그대로 재사용.
+        _sectors_cache["closed_daykey"] = daykey
+    return result
 
 
 @app.get("/api/lookup/{ticker}")
@@ -2753,9 +2785,23 @@ async def eod_summary():
     - 거래대금 상위: 네이버 거래대금 상위 페이지의 등장 순서를 그대로 순위로
       사용(=실제 거래대금 순위). 표시용 종가/등락률만 캐시된 일봉에서 조회.
     - 섹터 로테이션: 상승률 상위 섹터(유니버스 평균 등락%) + 거래대금 상위
-      섹터(거래대금 상위 120종목의 섹터별 등장 빈도)."""
+      섹터(거래대금 상위 120종목의 섹터별 등장 빈도).
+
+    v4.99 [버그수정] 장중에 숫자가 계속 바뀌던 문제. "마감정리"라는 탭 이름과
+    달리, 예전엔 10분 TTL만 보고 계속 재계산해서 장중엔 그 순간의 미확정
+    등락률·거래대금 순위가 계속 반영됐음(사용자 피드백: "장이 열리면 전날
+    자료 기준으로 그대로 유지해야 할 것 같은데 장중에 계속 로딩함"). 이제는
+    _market_session_key("kr")가 None(=오늘 KR장이 아직 마감 전)이면 마지막으로
+    "마감 확정" 상태에서 계산해둔 스냅샷을 그대로 반환 — 재계산 자체를 안 함.
+    장 마감(평일 15:40 KST) 후 딱 1번만 새로 계산해서 스냅샷을 갱신한다."""
+    daykey = _market_session_key("kr")   # None이면 오늘 KR장 아직 마감 전
+    if daykey is None and _eod_cache.get("data"):
+        # 스냅샷은 마감 확정 상태에서 계산된 것 그대로 반환 — date/market_closed도
+        # 그 마감일 기준을 유지(진짜 "장중"이 아니라 "직전 마감"이 맞는 표현).
+        return JSONResponse(_eod_cache["data"])
     now = time.time()
-    if _eod_cache and now - _eod_cache.get("ts", 0) < _EOD_TTL:
+    if (daykey and _eod_cache.get("closed_daykey") == daykey
+            and now - _eod_cache.get("ts", 0) < _EOD_TTL):
         return JSONResponse(_eod_cache["data"])
 
     bundle = await _fetch_market_data("kr")
@@ -2856,7 +2902,6 @@ async def eod_summary():
     ]
     sector_value.sort(key=lambda r: -r["n"])
 
-    daykey = _market_session_key("kr")
     result = {
         "date": daykey or datetime.now(KST).strftime("%Y-%m-%d"),
         "market_closed": bool(daykey),
@@ -2869,6 +2914,9 @@ async def eod_summary():
     result = _clean_nan(result)
     _eod_cache["ts"] = now
     _eod_cache["data"] = result
+    if daykey:
+        # 마감 확정된 결과만 "스냅샷"으로 표시 — 다음 장중엔 이 스냅샷을 그대로 재사용.
+        _eod_cache["closed_daykey"] = daykey
     return JSONResponse(result)
 
 
