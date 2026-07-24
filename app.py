@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.04 [신규] /api/pullback-signal/{ticker} — 얼마냐봇 "눌림 지지 진입" 알림용
+        신규 엔드포인트. RS 백분위(사이트 전역 rs_ranks 재사용) · U/D Volume
+        Ratio(매집/분산, up_down_volume 재사용) · 주봉 10EMA 거리(신규
+        weekly_ema10()) · 21일 ATR%(atr() 재사용) · 월봉 50% 되돌림(신규
+        monthly_retrace_50(), confluence 가산 참고용) 한 번에 반환.
+        [배경] 봇에 "🚀 피벗 돌파" 외에 "📉 눌림 지지 접근" 알림을 새로 추가
+        하려는데, RS 백분위와 주봉 EMA·월봉 되돌림은 스캐너에만 있는 전체
+        유니버스 캐시가 필요해서(벤치마크 대비 초과성과, 리샘플링) 봇 단독
+        구현 불가 — 이 엔드포인트로 노출.
+        scanner.py: weekly_ema10(), monthly_retrace_50() 신규(일봉→주봉/월봉
+        리샘플링, DatetimeIndex 기반). 게이트 임계값(RS≥90/U·D≥1.5/±2%)은
+        봇 쪽에서 판정 — 운영 중 튜닝하기 쉽게 스캐너는 원시값만 제공.
 v5.03 [신규] 🇺🇸IBD9 탭 — IBD/MarketSmith식 9조건 스크린(사용자 제공 스펙,
         미국 전용). 1.A/D Rating A/B 2.가격$5+ 3.50일평균거래량50만주+
         4.50일평균거래대금$500만+ 5.3개월수익률30%+ 6.21일ATR4%+ 7.베타1+
@@ -1293,7 +1305,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.03"
+VERSION = "v5.04"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -3394,6 +3406,57 @@ async def distribution_signal(ticker: str):
     try:
         r = scanner_mod.distribution_check(df["Close"], df["High"], df["Low"], df["Volume"])
         return JSONResponse({"ok": True, "ticker": ticker, **r})
+    except Exception:
+        return JSONResponse({"ok": False}, status_code=500)
+
+
+@app.get("/api/pullback-signal/{ticker}")
+async def pullback_signal(ticker: str):
+    """눌림 지지 진입 신호 (v5.04) — 얼마냐봇의 "눌림 지지 진입" 알림 전용.
+    RS 백분위(지수 대비 초과성과, 사이트 전역 rs_ranks 재사용) · U/D Volume
+    Ratio(매집/분산) · 주봉 10EMA 거리 · 21일→14일 ATR%(atr() 기본 period
+    재사용, 기존 badge_fields와 동일 산식) · 월봉 50% 되돌림(참고용 confluence)
+    을 한 번에 반환. 봇이 이 값들로 직접 게이트 판정(RS>=90, U/D>=1.5,
+    주봉10EMA ±2%)한다 — 게이트 임계값 자체는 봇 쪽 로직(운영 중 튜닝 용이)."""
+    ticker = ticker.upper().strip()
+    df = None
+    rs_rank = None
+    for key in ("data:all", "data:KR", "data:US"):
+        bundle = _data_cache.get(key)
+        if bundle and ticker in bundle.get("data", {}):
+            df = bundle["data"][ticker]
+            rs_rank = bundle.get("rs_ranks", {}).get(ticker)
+            break
+    if df is None:
+        try:
+            df = await asyncio.get_event_loop().run_in_executor(_executor, _fetch, ticker)
+        except Exception:
+            df = None
+    if df is None or len(df) < 70:
+        return JSONResponse({"ok": False}, status_code=404)
+    try:
+        c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+        close = float(c.iloc[-1])
+        ema10w = scanner_mod.weekly_ema10(c)
+        ud = scanner_mod.up_down_volume(c, v, 50)
+        atr_val = scanner_mod.atr(h, lo, c, period=14)
+        atr_pct = round(atr_val / close * 100, 2) if close > 0 else None
+        retrace50 = scanner_mod.monthly_retrace_50(c)
+        ema10w_dist_pct = round((close - ema10w) / ema10w * 100, 2) if ema10w else None
+        confluence = bool(
+            ema10w is not None and retrace50 is not None and close > 0
+            and abs(ema10w - retrace50) / close <= 0.02
+        )
+        return JSONResponse({
+            "ok": True, "ticker": ticker, "close": round(close, 2),
+            "rs_rank": rs_rank,
+            "ud_ratio": ud,
+            "weekly_ema10": round(ema10w, 2) if ema10w is not None else None,
+            "weekly_ema10_dist_pct": ema10w_dist_pct,
+            "atr_pct": atr_pct,
+            "monthly_retrace_50": round(retrace50, 2) if retrace50 is not None else None,
+            "confluence": confluence,
+        })
     except Exception:
         return JSONResponse({"ok": False}, status_code=500)
 

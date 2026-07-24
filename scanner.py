@@ -916,6 +916,45 @@ def up_down_volume(c: pd.Series, v: pd.Series, window: int = 50):
     return round(up_vol / down_vol, 2)
 
 
+def weekly_ema10(c: pd.Series) -> float | None:
+    """일봉 종가를 주봉으로 리샘플링해 10주 EMA 계산 (v5.04, 눌림 지지 알림용).
+    최소 70봉(≈14주) 필요. 일봉 df가 이미 DatetimeIndex라 resample 바로 가능."""
+    if c is None or len(c) < 70:
+        return None
+    try:
+        weekly = c.resample("W").last().dropna()
+        if len(weekly) < 10:
+            return None
+        return float(weekly.ewm(span=10, adjust=False).mean().iloc[-1])
+    except Exception:
+        return None
+
+
+def monthly_retrace_50(c: pd.Series, lookback_months: int = 18) -> float | None:
+    """월봉 기준 최근 상승 스윙의 50% 되돌림가 (v5.04, confluence 가산용 참고치).
+    '월봉 상승분'의 정확한 스윙 판정 규칙이 스펙에 엄밀히 정의돼 있지 않아,
+    최근 lookback_months개월 내 월봉 최저점 이후 형성된 최고점을 스윙으로
+    보는 단순 버전으로 구현 — 정밀도보다 방향성 참고용(선택 조건)이라 충분."""
+    if c is None or len(c) < 90:
+        return None
+    try:
+        monthly = c.resample("ME").last().dropna()
+        if len(monthly) < 6:
+            return None
+        recent = monthly.iloc[-lookback_months:] if len(monthly) >= lookback_months else monthly
+        low_idx = recent.idxmin()
+        after_low = recent.loc[low_idx:]
+        if len(after_low) < 2:
+            return None
+        swing_low = float(after_low.iloc[0])
+        swing_high = float(after_low.max())
+        if swing_high <= swing_low:
+            return None
+        return swing_high - (swing_high - swing_low) * 0.5
+    except Exception:
+        return None
+
+
 def significant_support(lo: pd.Series, window: int, min_touches: int = 2,
                         band: float = 0.02, exclude: int = 1):
     """'여러 번 지지받은' 의미있는 지지 가격을 찾는다 (저항의 거울 버전).
