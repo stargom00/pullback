@@ -5,6 +5,24 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.03 [신규] 🇺🇸IBD9 탭 — IBD/MarketSmith식 9조건 스크린(사용자 제공 스펙,
+        미국 전용). 1.A/D Rating A/B 2.가격$5+ 3.50일평균거래량50만주+
+        4.50일평균거래대금$500만+ 5.3개월수익률30%+ 6.21일ATR4%+ 7.베타1+
+        8.펀드보유수20개+ 9.시총$2억+.
+        [데이터 한계 — 명확히 선언] 8번(펀드 보유 수)은 yfinance 무료
+        데이터로 IBD 원본과 동일한 정확한 개수를 못 구해서
+        heldPercentInstitutions(기관 보유 비율)로 대체 — 참고용, 필터링엔
+        안 씀. 1번(A/D Rating)도 IBD 고유 알고리즘(13주 가중)이 아니라
+        기존 ud_volume_ratio(U/D Volume Ratio, 50일)를 등급(A~E)으로 변환한
+        근사치. 카드/설명에 전부 "근사치" 명시.
+        [구현] 적용 순서: 가격데이터만으로 되는 저비용 5개(조건2~6, 캐시된
+        일봉으로 즉시 계산) 먼저 → 통과한 종목 중 3개월수익률 상위 60개만
+        yfinance .info(베타·시총·기관보유비율)로 고비용 3개(조건1·7·9) 확인
+        — .info는 종목당 네트워크 왕복이라 무제한 조회하면 레이트리밋 위험.
+        scanner.py: analyze_ibd9_cheap()/analyze_ibd9_full() 신규.
+        app.py: 전용 파이프라인 _run_scan_ibd9() + /api/scan?mode=ibd9.
+        static/index.html: 🇺🇸IBD9 탭 + 전용 카드(3개월수익률/ATR/베타/시총/
+        거래량·거래대금/A·D등급 배지) 추가.
 v5.02 [신규] 📐Stage2 탭 — 미너비니 Stage2 트렌드 템플릿 스캐너(사용자 스펙).
         적용 순서: 유동성 → RS백분위 → Stage2템플릿 → 거래량수축/MA수렴(필터)
         → A/B 티어링. 한국 전용(유동성컷이 원화 거래대금 기준이라).
@@ -1236,7 +1254,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, analyze_inverse, analyze_breakdown, analyze_pattern, analyze_stage2, rs_score_stage2, rs_raw_score, to_rs_rank, climax_warning, inverse_score
+from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, analyze_inverse, analyze_breakdown, analyze_pattern, analyze_stage2, rs_score_stage2, analyze_ibd9_cheap, analyze_ibd9_full, rs_raw_score, to_rs_rank, climax_warning, inverse_score
 from inverse_universe import inverse_universe
 from sectors import get_sector
 try:
@@ -1275,7 +1293,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.02"
+VERSION = "v5.03"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1838,11 +1856,105 @@ async def _run_scan_stage2(bundle: dict) -> dict:
     }
 
 
+# ── IBD 9조건 스크린 (v5.03, 사용자 제공 스펙 — 미국 전용) ──
+# 적용 순서: 가격데이터만으로 되는 저비용 5개(2~6번) 먼저 → 통과한 소수만
+# yfinance .info(베타·시총·기관보유비율)가 필요한 고비용 3개(1·7·9번) 확인.
+# 저비용 단계에서 3개월수익률 30%+ 등으로 이미 크게 줄어들지만, 시장 급등
+# 국면 등 예외적으로 생존자가 많을 때를 대비해 상위 IBD9_MAX_INFO_FETCH개로
+# 캡 — .info 호출은 종목당 네트워크 왕복이라 무제한 허용하면 레이트리밋/
+# 응답지연 위험.
+IBD9_MAX_INFO_FETCH = 60
+
+
+def _ibd9_fetch_info(ticker: str) -> dict:
+    """블로킹 — executor에서 실행. yfinance .info에서 베타/시총/기관보유비율만
+    추출. 실패하면 전부 None(그 종목은 고비용 단계에서 탈락)."""
+    try:
+        info = yf.Ticker(ticker).info or {}
+    except Exception:
+        return {"beta": None, "market_cap": None, "held_pct_inst": None}
+    return {
+        "beta": info.get("beta"),
+        "market_cap": info.get("marketCap"),
+        "held_pct_inst": info.get("heldPercentInstitutions"),
+    }
+
+
+async def _run_scan_ibd9(bundle: dict) -> dict:
+    universe = bundle["universe"]
+    data = bundle["data"]
+
+    diag = {"kr_universe": 0, "us_universe": 0, "kr_fetched": 0, "us_fetched": 0,
+            "kr_hits": 0, "us_hits": 0}
+    for t in universe:
+        if naver_kr.is_kr(t): diag["kr_universe"] += 1
+        else: diag["us_universe"] += 1
+    for t in data:
+        if not naver_kr.is_kr(t): diag["us_fetched"] += 1
+
+    # ── 저비용 필터(가격 데이터만, 조건 2~6) — 미국 종목만 ──
+    cheap_survivors = {}
+    for t, df in data.items():
+        if naver_kr.is_kr(t):
+            continue
+        r = analyze_ibd9_cheap(df)
+        if r is not None:
+            cheap_survivors[t] = r
+    diag["cheap_dropped"] = diag["us_fetched"] - len(cheap_survivors)
+
+    # 생존자가 많으면 3개월 수익률 상위 IBD9_MAX_INFO_FETCH개만 고비용 단계로.
+    tickers = sorted(cheap_survivors, key=lambda t: -cheap_survivors[t]["ret_3m_pct"])
+    tickers = tickers[:IBD9_MAX_INFO_FETCH]
+    diag["info_fetch_capped"] = len(cheap_survivors) - len(tickers)
+
+    # ── 고비용 필터(yfinance .info: 베타/시총/기관보유비율) — 배치 실행 ──
+    loop = asyncio.get_event_loop()
+    info_map = {}
+    BATCH = 8
+    for i in range(0, len(tickers), BATCH):
+        chunk = tickers[i:i + BATCH]
+        results = await asyncio.gather(
+            *[loop.run_in_executor(_executor, _ibd9_fetch_info, t) for t in chunk]
+        )
+        for t, res in zip(chunk, results):
+            info_map[t] = res
+
+    hits = []
+    for t in tickers:
+        extra = info_map.get(t, {})
+        r = analyze_ibd9_full(data[t], cheap_survivors[t], extra.get("beta"),
+                              extra.get("market_cap"), extra.get("held_pct_inst"))
+        if r is None:
+            continue
+        hits.append({
+            "ticker": t, "name": universe.get(t, t), "market": "US",
+            "sector": _sector_of(t), "alert": None,
+            "climax": False, "climax_reasons": [], "climax_level": None,
+            **r,
+        })
+        diag["us_hits"] += 1
+    hits.sort(key=lambda x: -x["score"])
+
+    from collections import Counter
+    sec_count = Counter(h["sector"] for h in hits if h["sector"] != "기타")
+    sector_summary = [{"sector": s, "count": n} for s, n in sec_count.most_common() if n >= 2]
+
+    return {
+        "version": VERSION, "market": "us", "mode": "ibd9",
+        "scanned": len(universe), "fetched": len(data), "diag": diag,
+        "hits": hits, "sector_summary": sector_summary, "warn_count": 0,
+        "timing": bundle.get("timing"),
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "ts": time.time(),
+    }
+
+
 async def run_scan(market: str, mode: str) -> dict:
     # 데이터는 시장 단위 캐시에서 (모드 바뀌어도 재호출 안 함)
     bundle = await _fetch_market_data(market)
     if mode == "stage2":
         return await _run_scan_stage2(bundle)
+    if mode == "ibd9":
+        return await _run_scan_ibd9(bundle)
     universe = bundle["universe"]
     data = bundle["data"]
     rs_ranks = bundle["rs_ranks"]
@@ -1922,7 +2034,7 @@ async def run_scan(market: str, mode: str) -> dict:
 @app.get("/api/scan")
 async def scan(market: str = "all", mode: str = "imminent", refresh: bool = False):
     market = market if market in ("kr", "us", "all") else "all"
-    mode = mode if mode in ("pullback", "turnaround", "leader", "super", "breakout", "surge", "imminent", "boxbreak", "breakdown", "pattern", "stage2") else "pullback"
+    mode = mode if mode in ("pullback", "turnaround", "leader", "super", "breakout", "surge", "imminent", "boxbreak", "breakdown", "pattern", "stage2", "ibd9") else "pullback"
     key = f"{market}:{mode}"
     favs = load_favorites()
     cached = _cache.get(key)

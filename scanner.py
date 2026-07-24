@@ -3580,3 +3580,102 @@ def analyze_stage2(df: pd.DataFrame, rs_pctile: int | None, cfg: dict = STAGE2_C
             for x in ma20.iloc[-60:].tolist()
         ],
     }
+
+
+# ══════════════════════════════════════════════════════
+# IBD 9조건 스크린 (v5.03, 사용자 제공 스펙 — 미국 전용)
+# 1.A/D Rating A/B 2.가격$5+ 3.50일평균거래량50만+ 4.50일평균거래대금$500만+
+# 5.3개월수익률30%+ 6.21일ATR4%+ 7.베타1+ 8.펀드보유수20+ 9.시총$2억+
+#
+# 적용 순서: 가격데이터만으로 되는 저비용 5개(2~6번) 먼저 → 통과한 소수만
+# yfinance .info가 필요한 고비용 3개(1·7·9번) 확인. 8번(펀드 보유 수)은
+# yfinance 무료 데이터로 IBD 원본과 동일한 정확한 개수를 못 구해서
+# heldPercentInstitutions(기관 보유 비율)로 대체 — 근사치임을 명시.
+# 1번(A/D Rating)도 IBD 고유 알고리즘(13주 가중 가격·거래량)이 아니라
+# 기존 ud_volume_ratio(U/D Volume Ratio, 50일)를 등급으로 변환한 근사치.
+# ══════════════════════════════════════════════════════
+
+def analyze_ibd9_cheap(df: pd.DataFrame) -> dict | None:
+    """IBD 9조건 중 가격 데이터만으로 판정 가능한 5개(조건 2~6).
+    가격 $5+ · 50일평균거래량 50만주+ · 50일평균거래대금 $500만+ ·
+    3개월수익률 30%+ · 21일ATR(중앙값 방식, atr() 함수 재사용) 4%+.
+    전부 통과해야 dict 반환, 하나라도 미달이면 None(고비용 단계 생략)."""
+    if df is None or len(df) < 65:
+        return None
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if len(df) < 65:
+        return None
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+    close = float(c.iloc[-1])
+    if close < 5:
+        return None
+
+    vol50 = float(v.iloc[-50:].mean()) if len(v) >= 50 else float(v.mean())
+    if vol50 < 500_000:
+        return None
+
+    dvol50 = float((c.iloc[-50:] * v.iloc[-50:]).mean()) if len(c) >= 50 else float((c * v).mean())
+    if dvol50 < 5_000_000:
+        return None
+
+    p3 = float(c.iloc[-64]) if len(c) >= 64 else None
+    if not p3 or p3 <= 0:
+        return None
+    ret3m = close / p3 - 1
+    if ret3m < 0.30:
+        return None
+
+    atr21 = atr(h, lo, c, period=21)
+    atr_pct21 = atr21 / close * 100 if close > 0 else 0.0
+    if atr_pct21 < 4.0:
+        return None
+
+    return {
+        "close": round(close, 2),
+        "vol50_avg": round(vol50),
+        "dollar_vol50_avg": round(dvol50),
+        "ret_3m_pct": round(ret3m * 100, 1),
+        "atr21_pct": round(atr_pct21, 2),
+    }
+
+
+def analyze_ibd9_full(df: pd.DataFrame, cheap: dict, beta: float | None,
+                      market_cap: float | None, held_pct_inst: float | None) -> dict | None:
+    """IBD 9조건 중 yfinance .info가 필요한 나머지(조건 1·7·8·9) 판정.
+    cheap은 analyze_ibd9_cheap()의 반환값(이미 조건 2~6 통과). beta/market_cap/
+    held_pct_inst는 호출부(app.py)가 yfinance .info에서 미리 가져와 넘긴다
+    (이 함수 자체는 네트워크 호출 없음).
+    조건7 베타>=1, 조건9 시총>=$2억, 조건1 A/D등급(U/D Volume Ratio 근사) A/B만.
+    조건8(펀드 보유 수)은 정확한 개수를 못 구해 별도 필터 없이 참고 표시만."""
+    if beta is None or beta < 1.0:
+        return None
+    if market_cap is None or market_cap < 200_000_000:
+        return None
+
+    c, v = df["Close"], df["Volume"]
+    ud = ud_volume_ratio(c, v, days=50)
+    grade = ("A" if ud >= 1.5 else "B" if ud >= 1.15 else
+             "C" if ud >= 0.87 else "D" if ud >= 0.65 else "E")
+    if grade not in ("A", "B"):
+        return None
+
+    prev_close = float(c.iloc[-2]) if len(c) >= 2 else cheap["close"]
+    change_pct = (cheap["close"] / prev_close - 1) * 100 if prev_close else 0.0
+    score = round(50 * min(ud, 3) / 3 + 50 * min(cheap["ret_3m_pct"], 100) / 100, 1)
+
+    return {
+        "mode": "ibd9",
+        "change_pct": round(change_pct, 2),
+        "score": score,
+        "ad_grade": grade,
+        "ud_ratio": round(ud, 2),
+        "beta": round(beta, 2),
+        "market_cap_musd": round(market_cap / 1e6),
+        "held_pct_inst": round(held_pct_inst * 100, 1) if held_pct_inst is not None else None,
+        **cheap,
+        "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
+        "spark_ma20": [
+            None if math.isnan(x) else round(float(x), 4)
+            for x in c.rolling(20).mean().iloc[-60:].tolist()
+        ],
+    }
