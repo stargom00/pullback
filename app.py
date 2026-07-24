@@ -5,6 +5,14 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.00 [신규] /api/opening-surge — 장 시작 10분 돈 유입(거래량 급증) 스캔용
+        엔드포인트. 얼마냐봇이 09:10 KST에 1회 호출해 텔레그램 알림.
+        유니버스 전 종목의 오늘 누적 거래량을 시간보정한 평소(50일 평균)
+        예상 거래량과 비교해 급증(기본 3배↑ + 최소 거래대금 5억) 종목만 반환.
+        종목별 API 왕복 대신 이미 캐시된 유니버스 일봉을 한 번에 훑음(수백~
+        수천 종목을 09:00~09:10 사이에 개별 조회하면 시간 안에 못 끝남).
+        wait_for_fresh=True로 강제 — 이 시각에 스테일 캐시를 쓰면 거래량이
+        사실상 0으로 잡혀 무의미함.
 v4.99 [버그수정] 마감정리/섹터요약 탭이 장중에 계속 숫자가 바뀌던 문제.
         [원인] 두 탭 다 "전일/마감" 요약이 취지인데(섹터요약은 docstring에도
                "전일" 명시), 실제 구현은 그때그때 마지막 봉(iloc[-1])을 다시
@@ -1233,7 +1241,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v4.99"
+VERSION = "v5.00"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -3161,6 +3169,74 @@ async def distribution_signal(ticker: str):
         return JSONResponse({"ok": True, "ticker": ticker, **r})
     except Exception:
         return JSONResponse({"ok": False}, status_code=500)
+
+
+def _kr_session_elapsed_ratio(now: datetime) -> float:
+    """장 시작 급증 스캔용 장중 경과 비율 — 봇의 _session_elapsed_ratio와 같은
+    로직을 서버 쪽에 복제. 유니버스 전체를 한 번에 훑어야 해서(종목별 API
+    왕복이면 너무 느림) 이 안에서 직접 계산한다. 장외는 1.0(스캔 의미 없음)."""
+    open_min, close_min = 9 * 60, 15 * 60 + 30
+    cur_min = now.hour * 60 + now.minute
+    if cur_min < open_min or cur_min >= close_min:
+        return 1.0
+    return max(0.01, (cur_min - open_min) / (close_min - open_min))
+
+
+_OPENING_SURGE_MIN_RATIO = 3.0     # 시간보정 평소 거래량 대비 이 배수 이상만 "급증"
+_OPENING_SURGE_MIN_VALUE_EOK = 5   # 최소 거래대금(억원) — 초소형/저유동 잡음 제외
+
+
+@app.get("/api/opening-surge")
+async def opening_surge():
+    """장 시작 직후 돈 유입(거래량 급증) 스캔 (v5.00) — 얼마냐봇이 장 시작
+    10분 뒤(09:10 KST) 1회 호출. 유니버스 전 종목의 오늘 누적 거래량(네이버
+    근실시간 '오늘' 봉)을, 시간보정한 평소(50일 평균) 예상 거래량과 비교해
+    급증(기본 3배 이상 + 최소 거래대금 5억) 종목만 반환. 종목별 API 왕복 없이
+    이미 캐시된 유니버스 일봉을 한 번에 훑는다 — get_stock_data를 수백~수천
+    종목에 개별 호출하면 09:00~09:10 사이에 못 끝남.
+    wait_for_fresh=True로 강제 — 이 시각에 스테일 캐시(장 열리기 전 데이터)를
+    돌려주면 거래량이 사실상 0으로 잡혀 무의미하다."""
+    now = datetime.now(KST)
+    ratio_elapsed = _kr_session_elapsed_ratio(now)
+    bundle = await _fetch_market_data("kr", wait_for_fresh=True)
+    data = bundle.get("data", {})
+    universe = bundle.get("universe", {})
+    out = []
+    for t, df in data.items():
+        if df is None or len(df) < 55 or "Volume" not in df:
+            continue
+        try:
+            vol = df["Volume"]
+            vol_today = float(vol.iloc[-1])
+            avg50 = float(vol.iloc[-51:-1].mean())   # 오늘 제외 과거 50일
+            if avg50 <= 0:
+                continue
+            expected_by_now = avg50 * ratio_elapsed
+            if expected_by_now <= 0:
+                continue
+            surge_ratio = vol_today / expected_by_now
+            if surge_ratio < _OPENING_SURGE_MIN_RATIO:
+                continue
+            close = float(df["Close"].iloc[-1])
+            prev = float(df["Close"].iloc[-2]) if len(df) >= 2 else close
+            chg = (close / prev - 1) * 100 if prev > 0 else 0.0
+            value_eok = close * vol_today / 1e8
+            if value_eok < _OPENING_SURGE_MIN_VALUE_EOK:
+                continue
+            out.append({
+                "ticker": t, "name": universe.get(t, t),
+                "close": round(close, 2), "change_pct": round(chg, 2),
+                "surge_ratio": round(surge_ratio, 1),
+                "value_eok": round(value_eok, 1),
+            })
+        except Exception:
+            continue
+    out.sort(key=lambda r: -r["surge_ratio"])
+    return JSONResponse({
+        "asof": now.strftime("%Y-%m-%d %H:%M"),
+        "session_elapsed_pct": round(ratio_elapsed * 100, 1),
+        "hits": out[:15],
+    })
 
 
 @app.get("/api/watch/positions")
