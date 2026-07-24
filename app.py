@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.01 [버그수정] 거래량 없는 스파이크가 며칠 뒤 갑자기 정식 피벗으로 둔갑.
+        [사례] 티쓰리: 거래량 없이 찍은 고가 때문에, 그 봉이 EXCLUDE(오늘·
+               어제) 구간을 벗어나자마자 베이스천장 피벗이 2925→2950으로
+               튐(사용자 리포트).
+        [원인] scanner.py select_pivot()의 "베이스천장"(단기 피벗) = 직전
+               2봉 뺀 5봉의 고가(High) raw 최댓값. "전고"(significant_
+               resistance)는 최소 2회 터치를 요구해 노이즈를 걸러내는데,
+               베이스천장은 그 필터가 없어서 거래량 없는 1회성 꼬리도 그대로
+               저항으로 인정됐음.
+        [해결] select_pivot()에 v(거래량) 인자 추가. 그날 거래량이 최근 20일
+               평균의 50% 미만인 봉은 베이스천장 후보 고가에서 제외. analyze/
+               analyze_turnaround/analyze_imminent 3곳 모두 v 전달하도록 수정.
 v5.00 [신규] /api/opening-surge — 장 시작 10분 돈 유입(거래량 급증) 스캔용
         엔드포인트. 얼마냐봇이 09:10 KST에 1회 호출해 텔레그램 알림.
         유니버스 전 종목의 오늘 누적 거래량을 시간보정한 평소(50일 평균)
@@ -1241,7 +1253,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.00"
+VERSION = "v5.01"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

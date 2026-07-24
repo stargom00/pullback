@@ -1009,7 +1009,7 @@ def significant_resistance(h: pd.Series, window: int, min_touches: int = 2,
 
 
 def select_pivot(h, lo, c, close, recent_high_window: int, is_kr: bool = False,
-                 use_near: bool = False):
+                 use_near: bool = False, v=None):
     """
     피벗 후보 중 현재가 위에서 가장 가까운 것 선택.
     ★ 핵심: 피벗은 '베이스(횡보 구간)의 저항선'이라 고정돼야 한다.
@@ -1022,6 +1022,13 @@ def select_pivot(h, lo, c, close, recent_high_window: int, is_kr: bool = False,
     use_near(v4.52): True면 '현재가에서 가장 가까운 의미있는 저항'을 우선.
        돌파임박 탭에서 먼 스파이크 고점 대신 리테스트 중인 실제 저항을 잡기 위함.
     반환: (pivot, pivot_type, tl_break, tl_break_intraday)
+
+    v5.01 [버그수정] 거래량 없는 1회성 꼬리가 EXCLUDE 구간(오늘·어제)을 벗어나는
+    순간 갑자기 '정식 피벗'으로 둔갑하던 문제(티쓰리 사례: 거래량 없이 찍은
+    고가가 피벗이 2925→2950으로 튐). "전고"(significant_resistance)는 최소
+    2회 터치를 요구해 이런 노이즈를 걸러내는데, "베이스천장"은 그 필터 없이
+    5봉 중 raw 최댓값을 그대로 썼음. 이제 v(거래량)가 주어지면 그날 거래량이
+    최근 20일 평균의 50% 미만인 봉은 베이스천장 후보에서 제외한다.
     """
     EXCLUDE = 2   # 오늘·어제(신고가 갱신 중일 수 있는 봉) 제외
 
@@ -1035,7 +1042,15 @@ def select_pivot(h, lo, c, close, recent_high_window: int, is_kr: bool = False,
             cands.append((float(near), "리테스트저항"))
     # 베이스 천장 — 직전 2봉 빼고 그 앞 5봉의 고가 (고정된 단기 저항)
     if len(h) > EXCLUDE + 5:
-        base_short = float(h.iloc[-(5 + EXCLUDE):-EXCLUDE].max())
+        win_h = h.iloc[-(5 + EXCLUDE):-EXCLUDE]
+        base_short = float(win_h.max())
+        if v is not None and len(v) > EXCLUDE + 20:
+            win_v = v.iloc[-(5 + EXCLUDE):-EXCLUDE]
+            avg_v = float(v.iloc[-(EXCLUDE + 20):-EXCLUDE].mean())
+            if avg_v > 0:
+                sig = win_v >= avg_v * 0.5
+                if sig.any():
+                    base_short = float(win_h[sig].max())
         cands.append((base_short, "베이스천장"))
     # 전고(중기) — '여러 번 닿은 의미있는 저항' 우선. 긴 꼬리(오버슈팅) 하나는
     # 천장으로 안 침. 그런 저항이 없으면(진짜 신고가 추세) 단순 최고가로 폴백.
@@ -1260,7 +1275,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
 
     # ── 8) 피벗 / 손절 / 리스크 ──
     pw = cfg["pivot_window"]
-    pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, pw, is_kr=is_kr)
+    pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, pw, is_kr=is_kr, v=v)
 
     # 손절 후보 (미너비니식: 의미있는 지지 기준, spike 꼬리 제외):
     #  1) 현재가 아래의 지지 이평선 중 가장 가까운(=손절폭 작은) 것
@@ -1880,7 +1895,7 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
     breakout_vol = vol_mult_5d >= cfg["breakout_vol_mult"]
 
     # 피벗: 20봉 고가/타이트존/하락추세선 중 가장 가까운 트리거, 손절은 60일선 -2%
-    pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, 20, is_kr=is_kr)
+    pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, 20, is_kr=is_kr, v=v)
     ud = ud_volume_ratio(c, v)
     stop = m60 * 0.98
     candidates = [x for x in (stop, float(lo.iloc[-10:].min())) if x < close]
@@ -2539,7 +2554,7 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
         return None
 
     # ── 2) 피벗 근접 (천장 코앞이지만 아직 안 뚫음) ──
-    pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, cfg["pivot_window"], is_kr=is_kr, use_near=True)
+    pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, cfg["pivot_window"], is_kr=is_kr, use_near=True, v=v)
     near = (close - pivot) / pivot if pivot > 0 else -1.0   # 음수면 피벗 아래
     if not (cfg["near_min"] <= near <= cfg["near_max"]):
         return None   # -5%~0% 밖이면 탈락 (멀거나 이미 돌파)
