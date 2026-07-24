@@ -365,7 +365,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.97</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v4.98</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1923,6 +1923,45 @@ async function refreshPrices() {
   alert(msg);
 }
 
+// ── v4.98: 진입종목 급락 알림 ──
+// "짧은 시간 안에 -5% 이상 급락"은 오늘 등락률(며칠에 걸친 하락 포함)과 달리
+// 폴링 주기(60초) 사이의 변화만 봐야 의미가 있어서, updateTracking()이 매번
+// 직전 체크가(last_price)와 비교해서 판정한다.
+const FLASH_DROP_PCT = -5;
+const _flashAlertLast = {};  // ticker -> 마지막 알림 시각(ms), 같은 종목 재알림 쿨다운
+function showFlashBanner(msg) {
+  const bar = document.createElement('div');
+  bar.style.cssText = 'position:fixed;top:14px;left:50%;transform:translateX(-50%);'
+    + 'background:#3a2020;color:#ff9b9b;border:1px solid #ff6b6b;border-radius:10px;'
+    + 'padding:10px 18px;font-size:13px;font-weight:600;z-index:9999;white-space:pre-line;'
+    + 'text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.35)';
+  bar.textContent = msg;
+  document.body.appendChild(bar);
+  setTimeout(() => bar.remove(), 12000);
+}
+function notifyFlashDrop(r, prevPx, px, dropPct) {
+  const now = Date.now();
+  const last = _flashAlertLast[r.ticker] || 0;
+  if (now - last < 10 * 60 * 1000) return;  // 종목당 10분 쿨다운(같은 하락에 반복 알림 방지)
+  _flashAlertLast[r.ticker] = now;
+  const msg = `🔴 ${r.name} 급락 ${dropPct.toFixed(1)}%\n`
+    + `${Math.round(prevPx).toLocaleString()} → ${Math.round(px).toLocaleString()}`;
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    try { new Notification('⚠️ 급락 알림', { body: msg, tag: 'flash-' + r.ticker }); } catch (e) {}
+  }
+  showFlashBanner(msg);  // 알림 권한이 없거나 탭이 열려 있을 때도 놓치지 않게 인앱 배너 병행
+}
+// 진입 종목만 60초마다 자동 폴링 — 급락은 수동 새로고침/탭 열람만으론 못 잡음.
+let _flashPollTimer = null;
+function startFlashDropPolling() {
+  if (_flashPollTimer) return;
+  _flashPollTimer = setInterval(() => {
+    const j = getJournal();
+    const hasEntered = j.some(r => r.result_r === '' && r.status === 'entered' && r.entry && r.stop);
+    if (hasEntered) updateTracking();
+  }, 60000);
+}
+
 async function updateTracking(prefetched, prefetchedClosed) {
   const j = getJournal();
   // 추적 대상: 미종료 + entry/stop 있음. 진입(entered)·대기(pending) 모두 가격 갱신.
@@ -1950,9 +1989,18 @@ async function updateTracking(prefetched, prefetchedClosed) {
   for (const r of active) {
     const px = prices[r.ticker];
     if (px == null) continue;
+    // v4.98: 급락 알림 — 짧은 폴링 주기(60초) 동안 진입 종목이 -5% 이상 빠지면
+    // 알림. 직전 체크가(prevPx) 있고 지금 이미 진입 상태였을 때만 비교해야
+    // "짧은 시간 내" 급변을 잡음(며칠 전 갱신값과 비교하면 그냥 하락장 판정).
+    const wasEntered = (r.status || 'entered') === 'entered';
+    const prevPx = parseFloat(r.last_price);
     r.last_price = px;
     r.last_checked = kstStr(today);
-    if ((r.status || 'entered') === 'entered') r.tracking = true;  // 진입 종목은 추적 켜기(표시용)
+    if (wasEntered) r.tracking = true;  // 진입 종목은 추적 켜기(표시용)
+    if (wasEntered && prevPx > 0) {
+      const dropPct = (px - prevPx) / prevPx * 100;
+      if (dropPct <= FLASH_DROP_PCT) notifyFlashDrop(r, prevPx, px, dropPct);
+    }
     const entry = parseFloat(r.entry), stop = parseFloat(r.stop);
     const target = parseFloat(r.target);
     const oneR = entry - stop;
@@ -2622,6 +2670,10 @@ function renderJournal() {
       <button class="exp" onclick="openManualAdd()" style="background:#2d6a4a;border-color:#40916c;color:#fff">➕ 수동 추가</button>
       <button class="exp" onclick="exportCSV()">⬇ CSV 내보내기</button>
       <button onclick="if(confirm('일지를 모두 지울까요? 되돌릴 수 없어요.')){setJournal([]);renderJournal();}">전체 삭제</button>
+      ${(typeof Notification === 'undefined') ? ''
+        : Notification.permission === 'granted'
+        ? '<span class="exp" style="margin-left:auto;color:var(--muted);cursor:default">🔔 급락 알림 ON</span>'
+        : `<button class="exp" style="margin-left:auto;background:#3a2020;border-color:#ff6b6b;color:#ff9b9b" onclick="Notification.requestPermission().then(()=>renderJournal())">🔔 급락 알림 켜기</button>`}
     </div>
     <div class="jrnl-stats">
       <div class="statcard">
@@ -3150,6 +3202,11 @@ loadRSettings();           // R 시스템 설정 로드 (v4.47)
 loadGateSuggest();         // 시장 게이트 자동 제안 (v4.50)
 hookCalcInputs();          // 진입 폼 사이즈 자동계산 훅
 load();
+// v4.98: 진입종목 급락 알림 — 브라우저 알림 권한 요청 + 60초 자동 폴링 시작
+if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+  Notification.requestPermission().catch(() => {});
+}
+startFlashDropPolling();
 </script>
 </body>
 </html>
