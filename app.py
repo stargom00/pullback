@@ -5,6 +5,28 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.02 [신규] 📐Stage2 탭 — 미너비니 Stage2 트렌드 템플릿 스캐너(사용자 스펙).
+        적용 순서: 유동성 → RS백분위 → Stage2템플릿 → 거래량수축/MA수렴(필터)
+        → A/B 티어링. 한국 전용(유동성컷이 원화 거래대금 기준이라).
+        1) 유동성컷: 일평균 거래대금(20일) >= 20억원(KR).
+        2) RS백분위: RS_score = 3M*0.4+6M*0.3+12M*0.3(로그수익률+클리핑,
+           벤치마크 차감 없음 — 스펙에 언급 없어 절대수익률로 구현), 유동성
+           생존자 안에서만 percentile 계산, >=70만 통과. 기존 rs_raw_score
+           (1M+3M+6M+9M+12M, IBD가중, 지수대비 초과성과, 다른 탭 전용)와는
+           완전히 별개 함수(scanner.rs_score_stage2) — 다른 탭 영향 없음.
+        3) Stage2템플릿: 현재가>50MA>150MA>200MA, 200MA 최근 20거래일(≈1개월)
+           상승, 현재가>=52주저점*1.30, 현재가>=52주고점*0.75(-25%이내).
+        4) 거래량수축(최근5일평균<50일평균) + MA(5/10/20)수렴(스프레드<=종가
+           3%) — 스펙에 "필터"로 명시돼 있어 가점이 아니라 통과 필수 조건.
+        5) 티어링: A=52주고점 -10%이내, B=-10~-25%. 0개인 날 있는 게 정상
+           (스펙에 명시된 기대치) — 필터 완화하지 말 것.
+        구현: scanner.py에 rs_score_stage2()/analyze_stage2()/STAGE2_CONFIG
+        신규. app.py에 전용 파이프라인 _run_scan_stage2() 추가 — 유동성
+        생존자 안에서만 RS 백분위를 다시 매겨야 해서(적용 순서상 필수) 기존
+        run_scan()의 범용 fn 디스패치와 분리. /api/scan?mode=stage2로 호출,
+        응답 모양은 기존 모드와 동일해 프론트 공용 로직 재사용.
+        static/index.html: 📐Stage2 탭 + 전용 카드(RS/50·150·200MA/52주위치/
+        A·B티어 배지/거래대금) 추가.
 v5.01 [버그수정] 거래량 없는 스파이크가 며칠 뒤 갑자기 정식 피벗으로 둔갑.
         [사례] 티쓰리: 거래량 없이 찍은 고가 때문에, 그 봉이 EXCLUDE(오늘·
                어제) 구간을 벗어나자마자 베이스천장 피벗이 2925→2950으로
@@ -1214,7 +1236,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, analyze_inverse, analyze_breakdown, analyze_pattern, rs_raw_score, to_rs_rank, climax_warning, inverse_score
+from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, analyze_inverse, analyze_breakdown, analyze_pattern, analyze_stage2, rs_score_stage2, rs_raw_score, to_rs_rank, climax_warning, inverse_score
 from inverse_universe import inverse_universe
 from sectors import get_sector
 try:
@@ -1253,7 +1275,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.01"
+VERSION = "v5.02"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1737,9 +1759,90 @@ async def _fetch_market_data_inner(market: str, cache_key: str) -> dict:
     return bundle
 
 
+# ── Stage 2 트렌드 템플릿 스캐너 (v5.02, 사용자 스펙) ──
+# 적용 순서: 유동성 → RS백분위 → Stage2템플릿 → 거래량수축/MA수렴 → 티어링.
+# 일반 run_scan()의 fn 디스패치(모든 모드가 유니버스 전체 RS로 판정)와 달리,
+# 이 모드는 "유동성 생존자 안에서만" RS 백분위를 다시 매겨야 해서(사용자
+# 스펙의 적용 순서) 전용 파이프라인으로 분리. 결과 dict 모양은 run_scan()의
+# 반환 형태와 맞춰서 프론트 load()가 그대로 재사용되게 한다.
+STAGE2_LIQUIDITY_MIN_EOK = 20   # 일평균 거래대금(20일) 20억원 이상만 (한국 전용)
+STAGE2_RS_PCTILE_MIN = 70
+
+
+async def _run_scan_stage2(bundle: dict) -> dict:
+    universe = bundle["universe"]
+    data = bundle["data"]
+
+    diag = {"kr_universe": 0, "us_universe": 0, "kr_fetched": 0, "us_fetched": 0,
+            "kr_hits": 0, "us_hits": 0}
+    for t in universe:
+        if naver_kr.is_kr(t): diag["kr_universe"] += 1
+        else: diag["us_universe"] += 1
+    for t in data:
+        if naver_kr.is_kr(t): diag["kr_fetched"] += 1
+
+    # ── 1) 유동성 컷: 일평균 거래대금(20일) >= 20억원. 한국 전용(원화 기준). ──
+    liquid: dict = {}
+    liq_value: dict = {}
+    for t, df in data.items():
+        if not naver_kr.is_kr(t):
+            continue
+        c, v = df.get("Close"), df.get("Volume")
+        if c is None or v is None or len(c) < 20 or len(v) < 20:
+            continue
+        try:
+            avg_value = float((c.iloc[-20:] * v.iloc[-20:]).mean())
+        except Exception:
+            continue
+        if avg_value >= STAGE2_LIQUIDITY_MIN_EOK * 1e8:
+            liquid[t] = df
+            liq_value[t] = avg_value
+    diag["liquidity_dropped"] = diag["kr_fetched"] - len(liquid)
+
+    # ── 2) RS 백분위: 유동성 생존자 안에서만 산출, >=70만 통과 ──
+    raw_scores = {}
+    for t, df in liquid.items():
+        s = rs_score_stage2(df["Close"])
+        if s is not None:
+            raw_scores[t] = s
+    pctiles = to_rs_rank(raw_scores)
+    rs_survivors = {t: liquid[t] for t in liquid if pctiles.get(t, 0) >= STAGE2_RS_PCTILE_MIN}
+    diag["rs_dropped"] = len(liquid) - len(rs_survivors)
+
+    # ── 3) Stage2 템플릿 + 4) 거래량수축/MA수렴(필터) + 5) 티어링 ──
+    hits = []
+    for t, df in rs_survivors.items():
+        r = analyze_stage2(df, rs_pctile=pctiles.get(t))
+        if r is None:
+            continue
+        hits.append({
+            "ticker": t, "name": universe.get(t, t), "market": "KR",
+            "sector": _sector_of(t), "alert": None,
+            "climax": False, "climax_reasons": [], "climax_level": None,
+            "avg_value_20_eok": round(liq_value[t] / 1e8, 1),
+            **r,
+        })
+        diag["kr_hits"] += 1
+    hits.sort(key=lambda x: (x["tier"], -x["score"]))
+
+    from collections import Counter
+    sec_count = Counter(h["sector"] for h in hits if h["sector"] != "기타")
+    sector_summary = [{"sector": s, "count": n} for s, n in sec_count.most_common() if n >= 2]
+
+    return {
+        "version": VERSION, "market": "kr", "mode": "stage2",
+        "scanned": len(universe), "fetched": len(data), "diag": diag,
+        "hits": hits, "sector_summary": sector_summary, "warn_count": 0,
+        "timing": bundle.get("timing"),
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "ts": time.time(),
+    }
+
+
 async def run_scan(market: str, mode: str) -> dict:
     # 데이터는 시장 단위 캐시에서 (모드 바뀌어도 재호출 안 함)
     bundle = await _fetch_market_data(market)
+    if mode == "stage2":
+        return await _run_scan_stage2(bundle)
     universe = bundle["universe"]
     data = bundle["data"]
     rs_ranks = bundle["rs_ranks"]
@@ -1819,7 +1922,7 @@ async def run_scan(market: str, mode: str) -> dict:
 @app.get("/api/scan")
 async def scan(market: str = "all", mode: str = "imminent", refresh: bool = False):
     market = market if market in ("kr", "us", "all") else "all"
-    mode = mode if mode in ("pullback", "turnaround", "leader", "super", "breakout", "surge", "imminent", "boxbreak", "breakdown", "pattern") else "pullback"
+    mode = mode if mode in ("pullback", "turnaround", "leader", "super", "breakout", "surge", "imminent", "boxbreak", "breakdown", "pattern", "stage2") else "pullback"
     key = f"{market}:{mode}"
     favs = load_favorites()
     cached = _cache.get(key)

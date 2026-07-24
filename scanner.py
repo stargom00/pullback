@@ -3436,3 +3436,147 @@ def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
             for x in c.rolling(20).mean().iloc[-60:].tolist()
         ],
     }
+
+
+# ══════════════════════════════════════════════════════
+# Stage 2 트렌드 템플릿 스캐너 (v5.02, 사용자 스펙 그대로 구현)
+# 적용 순서: 유동성 → RS백분위 → Stage2템플릿 → 거래량수축/MA수렴 → 티어링
+# 유동성컷 + RS백분위 계산은 app.py에서 처리(유니버스 전체를 봐야 하는
+# 단계라 종목별 함수인 이 파일에서는 못 함). 여기 analyze_stage2()는
+# 이미 유동성·RS 통과한 종목 하나에 대해 Stage2템플릿~티어링만 판정한다.
+# ══════════════════════════════════════════════════════
+
+def rs_score_stage2(close: pd.Series) -> float | None:
+    """Stage2 스캐너 전용 RS 원점수 (사용자 스펙):
+        RS_score = 3M수익률*0.4 + 6M수익률*0.3 + 12M수익률*0.3
+    기존 rs_raw_score(1M+3M+6M+9M+12M, IBD가중 0.4/0.2/0.2/0.2, app.py에서
+    지수 대비 초과성과로 변환)와는 계산식 자체가 다른 별개 지표 — 다른
+    탭(눌림목/돌파/급등 등)의 RS에는 영향 없음. 벤치마크 차감 없이 절대
+    수익률 그대로 쓰고(사용자 스펙에 벤치마크 언급 없음), 저가주 폭등 왜곡
+    방지용 로그수익률+클리핑만 rs_raw_score와 동일하게 적용."""
+    c = close.dropna()
+    if len(c) < 253:
+        return None
+    now = float(c.iloc[-1])
+
+    def price_ago(days):
+        idx = -min(days, len(c) - 1) - 1
+        return float(c.iloc[idx])
+
+    p3, p6, p12 = price_ago(63), price_ago(126), price_ago(252)
+    if min(now, p3, p6, p12) <= 0:
+        return None
+
+    CLIP = 0.7
+
+    def logret(a, b):
+        r = math.log(a / b)
+        return max(-CLIP, min(CLIP, r))
+
+    r3, r6, r12 = logret(now, p3), logret(now, p6), logret(now, p12)
+    return 0.4 * r3 + 0.3 * r6 + 0.3 * r12
+
+
+STAGE2_CONFIG = {
+    "min_bars": 260,             # 200일선 + 52주 + 200일선 1개월 기울기 계산 여유
+    "low52_mult": 1.30,          # 현재가 >= 52주 저점 * 1.30
+    "high52_mult": 0.75,         # 현재가 >= 52주 고점 * 0.75 (고점 대비 -25% 이내)
+    "ma200_rise_lookback": 20,   # 200일선 상승 판정 구간(거래일, ≈1개월)
+    "ma_converge_max": 0.03,     # 5/10/20일선 최대-최소 스프레드가 종가의 3% 이내 = 수렴
+    "tier_a_mult": 0.90,         # A티어 = 52주 고점 대비 -10% 이내
+}
+
+
+def analyze_stage2(df: pd.DataFrame, rs_pctile: int | None, cfg: dict = STAGE2_CONFIG) -> dict | None:
+    """Stage 2 트렌드 템플릿 (사용자 스펙 그대로):
+        현재가 > 50MA > 150MA > 200MA
+        200MA가 최근 1개월간 상승 중
+        현재가 >= 52주 저점 * 1.30
+        현재가 >= 52주 고점 * 0.75 (고점 대비 -25% 이내 — 낙폭과대 반등형 제거)
+    + 거래량 수축(최근5일 평균 < 50일 평균) + MA(5/10/20) 수렴(스프레드 3%
+    이내) — 사용자 스펙상 "필터"로 명시돼 있어 가점이 아니라 둘 다 필수
+    통과 조건으로 구현(기존 pullback/imminent의 vol_dry는 가점용이었던 것과
+    다름, 별도 함수라 다른 탭에 영향 없음).
+    호출부(app.py)가 유동성컷 + RS 백분위(>=70) 필터링을 이미 마친 뒤 이
+    함수를 호출한다는 전제 — rs_pctile은 그 결과를 그대로 받아 점수/표시에만 씀."""
+    if df is None or len(df) < cfg["min_bars"]:
+        return None
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if len(df) < cfg["min_bars"]:
+        return None
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+
+    ma50 = c.rolling(50).mean()
+    ma150 = c.rolling(150).mean()
+    ma200 = c.rolling(200).mean()
+    close = float(c.iloc[-1])
+    m50, m150, m200 = float(ma50.iloc[-1]), float(ma150.iloc[-1]), float(ma200.iloc[-1])
+    if any(math.isnan(x) for x in (m50, m150, m200)):
+        return None
+
+    # ── Stage2 템플릿 ──
+    if not (close > m50 > m150 > m200):
+        return None
+
+    lb = cfg["ma200_rise_lookback"]
+    m200_prev = float(ma200.iloc[-1 - lb]) if len(ma200) > lb else float("nan")
+    if math.isnan(m200_prev) or not (m200 > m200_prev):
+        return None
+
+    lo52 = float(c.iloc[-252:].min())
+    hi52 = float(c.iloc[-252:].max())
+    if lo52 <= 0 or hi52 <= 0:
+        return None
+    if close < lo52 * cfg["low52_mult"]:
+        return None
+    if close < hi52 * cfg["high52_mult"]:
+        return None
+
+    # ── 거래량 수축 + MA 수렴 (둘 다 필수 — 사용자 스펙상 "필터") ──
+    vol5 = float(v.iloc[-5:].mean())
+    vol50 = float(v.iloc[-50:].mean())
+    vol_dry = vol5 < vol50 if vol50 > 0 else False
+    if not vol_dry:
+        return None
+
+    ma5, ma10, ma20 = c.rolling(5).mean(), c.rolling(10).mean(), c.rolling(20).mean()
+    m5, m10, m20 = float(ma5.iloc[-1]), float(ma10.iloc[-1]), float(ma20.iloc[-1])
+    if any(math.isnan(x) for x in (m5, m10, m20)):
+        return None
+    ma_spread_pct = (max(m5, m10, m20) - min(m5, m10, m20)) / close
+    ma_converge = ma_spread_pct <= cfg["ma_converge_max"]
+    if not ma_converge:
+        return None
+
+    # ── 티어링 ──
+    dist_from_high_pct = (hi52 - close) / hi52 * 100
+    tier = "A" if close >= hi52 * cfg["tier_a_mult"] else "B"
+
+    prev_close = float(c.iloc[-2]) if len(c) >= 2 else close
+    change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
+
+    score = 60 * (rs_pctile or 0) / 99 + 40 * max(0.0, 1 - dist_from_high_pct / 25)
+
+    return {
+        "mode": "stage2",
+        "close": round(close, 2),
+        "change_pct": round(change_pct, 2),
+        "score": round(score, 1),
+        "tier": tier,
+        "rs": rs_pctile,
+        "ma50": round(m50, 2), "ma150": round(m150, 2), "ma200": round(m200, 2),
+        "high52": round(hi52, 2), "low52": round(lo52, 2),
+        "dist_from_high_pct": round(dist_from_high_pct, 1),
+        "dist_from_low_pct": round((close / lo52 - 1) * 100, 1),
+        "vol_ratio": round(vol5 / vol50, 2) if vol50 > 0 else None,
+        "vol_dry": vol_dry,
+        "ma_converge": ma_converge,
+        "ma_spread_pct": round(ma_spread_pct * 100, 2),
+        "triggered": False,
+        "setup_score": None,
+        "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
+        "spark_ma20": [
+            None if math.isnan(x) else round(float(x), 4)
+            for x in ma20.iloc[-60:].tolist()
+        ],
+    }
