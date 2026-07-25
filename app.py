@@ -5,6 +5,23 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.09 [버그수정] v5.08 이후에도 💰실적우수 탭 로딩 실패 — 사용자 재확인,
+        스크린샷으로 "06:44 캐시로 7개 후보 성공" 상태바가 남아있는데 재시도는
+        계속 실패하는 것 확인.
+        [원인] v5.08은 종목당 12초 타임아웃만 뒀는데, 후보가 20개면 배치
+        (4개씩) 5번 × 최대 12초 = 최악 60초. 여기에 유니버스 데이터 자체가
+        아직 캐시에 없는 콜드 상태(코드상 KR 175초+US 41초 소요, 스크린샷의
+        타이밍 로그로 확인)까지 겹치면 총 응답시간이 200초를 훌쩍 넘어가
+        브라우저/Railway 쪽에서 먼저 끊길 수 있었음 — "종목당" 타임아웃만으론
+        전체 파이프라인 시간을 못 막는다는 게 이번에 새로 확인한 지점.
+        [해결] 실적 조회 단계 전체에 45초 "마감시각"을 둠(EARNINGS_TAB_
+        DEADLINE_SEC) — 넘으면 남은 배치는 건너뛰고 그때까지 찾은 결과만
+        으로 즉시 응답. 응답에 partial 플래그 추가, 프론트는 "⏳ 일부만 확인"
+        표시(재시도하면 종목별 6시간 캐시가 쌓여 있어 더 빨라짐). 이제
+        최악의 경우에도 (유니버스 콜드캐시 시간) + 45초를 넘지 않음 —
+        유니버스 자체가 콜드인 경우(다른 탭도 첫 스캔 2~4분 걸리는 것과
+        동일한 현상)는 이 탭만의 문제가 아니라 앱 공통 동작이라 별도 탭을
+        먼저 열어 캐시를 데운 뒤 실적우수 탭을 열면 우회 가능.
 v5.08 [버그수정] v5.07 이후에도 💰실적우수 탭 로딩 계속 실패 — 사용자 재확인
         후 더 깊이 분석.
         [진짜 원인] v5.07의 asyncio.wait_for(timeout=12)는 "코루틴이 기다리는
@@ -1372,7 +1389,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.08"
+VERSION = "v5.09"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2071,6 +2088,7 @@ async def _run_scan_ibd9(bundle: dict) -> dict:
 EARNINGS_TAB_RS_MIN = 70
 EARNINGS_TAB_MAX_CHECK = 20
 EARNINGS_TAB_PER_TICKER_TIMEOUT = 12  # 초
+EARNINGS_TAB_DEADLINE_SEC = 45  # 파이프라인 전체 예산(v5.09) — 넘으면 그때까지 결과로 응답
 
 
 async def _get_earnings_safe(ticker: str) -> dict:
@@ -2116,16 +2134,28 @@ async def _run_scan_earnings(bundle: dict) -> dict:
     # ── 고비용 실적 조회 — 배치 동시 실행 + 종목당 타임아웃 + 6시간 캐시 ──
     # BATCH을 _earnings_executor의 max_workers(4)에 맞춤 — 안 맞추면 나머지가
     # 풀에서 대기만 하다 타임아웃되는 낭비가 생김.
+    # v5.09: 종목당 타임아웃(12초)이 있어도 배치 개수가 많으면 총합이 커져
+    # 결국 응답 자체가 안 오는 문제가 있었음(사용자 재확인: v5.08 이후에도
+    # 실패) — 배치별 타임아웃 대신 파이프라인 전체에 '마감시각'을 둬서,
+    # 넘으면 이후 배치는 건너뛰고 그때까지 찾은 것만으로 응답한다. 이러면
+    # 총 응답시간이 항상 EARNINGS_TAB_DEADLINE_SEC 근처로 상한선이 생김.
     tickers = [t for t, _ in candidates]
     BATCH = 4
     eg_map = {}
+    deadline = time.time() + EARNINGS_TAB_DEADLINE_SEC
+    timed_out = False
     for i in range(0, len(tickers), BATCH):
+        if time.time() >= deadline:
+            timed_out = True
+            break
         chunk = tickers[i:i + BATCH]
         results = await asyncio.gather(
             *[_get_earnings_safe(t) for t in chunk], return_exceptions=True
         )
         for t, r in zip(chunk, results):
             eg_map[t] = r if isinstance(r, dict) else {"ok": False, "verdict": "unknown", "reasons": [str(r)]}
+    diag["earnings_checked"] = len(eg_map)
+    diag["earnings_timed_out"] = timed_out
 
     hits = []
     for t, rs in candidates:
@@ -2166,7 +2196,7 @@ async def _run_scan_earnings(bundle: dict) -> dict:
         "version": VERSION, "market": "all", "mode": "earnings",
         "scanned": len(universe), "fetched": len(data), "diag": diag,
         "hits": hits, "sector_summary": sector_summary, "warn_count": 0,
-        "timing": bundle.get("timing"),
+        "timing": bundle.get("timing"), "partial": timed_out,
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "ts": time.time(),
     }
 

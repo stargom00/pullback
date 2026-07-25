@@ -365,7 +365,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.08</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.09</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1053,6 +1053,7 @@ async function load(refresh = false) {
     status.innerHTML = `<span><b>${data.fetched ?? data.scanned}</b>/${data.scanned}개 종목 스캔</span>
       <span>${(typeof MODE_TAB_LABEL !== 'undefined' && MODE_TAB_LABEL[mode]) || modeTab(mode) || '스캔'} 후보 <b>${data.hits.length}</b>개</span>
       <span>기준 ${data.generated_at}${data.cached ? ' (캐시)' : ''}${_tmStr}</span>
+      ${data.partial ? `<span style="color:#f2b33d" title="실적 조회가 시간 제한(45초)을 넘어 일부 종목만 확인했어요. 잠시 후 다시 스캔하면 캐시가 쌓여 더 빨라져요.">⏳ 일부만 확인</span>` : ''}
       ${data.warn_count ? `<span style="color:#FF6B6B">⚠️ 경보/과대리스크 ${data.warn_count}</span>` : ''}
       <span class="alert-mgr" id="alertToggle">경보종목 관리</span>`;
     const tg = document.getElementById('alertToggle');
