@@ -5,6 +5,25 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.08 [버그수정] v5.07 이후에도 💰실적우수 탭 로딩 계속 실패 — 사용자 재확인
+        후 더 깊이 분석.
+        [진짜 원인] v5.07의 asyncio.wait_for(timeout=12)는 "코루틴이 기다리는
+        걸 포기"하게만 할 뿐 실제로 돌고 있는 스레드를 죽이지 못함(파이썬은
+        스레드 강제종료 불가). yfinance의 income_stmt/quarterly_income_stmt는
+        내부적으로 요청마다 timeout=30이 여러 번(크럼/쿠키/데이터) 걸릴 수
+        있어 최악의 경우 스레드 하나가 60~90초를 붙잡을 수 있는데, 이걸
+        앱 전체가 공유하는 _executor(max_workers=8)에서 그대로 돌렸음.
+        배치마다 새 실적 조회를 또 던지니 느린/멈춘 요청이 쌓이면서 워커가
+        고갈되면 이 탭은 물론 스캔·펀더멘털·분산체크 등 _executor를 쓰는
+        다른 모든 엔드포인트까지 줄줄이 막힐 수 있는 구조였음 — v5.07은
+        증상(응답 지연)만 가렸지 스레드 점유 자체는 못 막았던 게 근본 문제.
+        [해결] 실적 조회 전용 격리 스레드풀(_earnings_executor, max_workers
+        =4) 신규 — 최악의 경우에도 피해 범위를 실적 조회로만 한정하고 다른
+        엔드포인트는 안전. /api/earnings, /api/debug의 실적성장 섹션,
+        _attach_earnings_badges(배지 부착 — v5.07엔 타임아웃이 없었음, 이제
+        추가), _run_scan_earnings 전부 이 풀로 통일. 배치 크기(BATCH)를
+        4로 맞춰 풀 용량과 일치시키고, 조회 대상 40→20으로 축소해 전체
+        최악 대기시간을 v5.07 수준(~60초)으로 유지.
 v5.07 [버그수정] 💰실적우수 탭 로딩 계속 실패(다른 탭은 정상) — 사용자 리포트.
         [원인] yfinance income_stmt/quarterly_income_stmt는 크럼(crumb)/
         쿠키 인증이 필요한 엔드포인트라 Railway 서버 IP에서 야후 응답이
@@ -1353,7 +1372,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.07"
+VERSION = "v5.08"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1363,6 +1382,14 @@ KR_MAX_CONCURRENT = int(os.environ.get("KR_MAX_CONCURRENT", "10"))  # 한국 네
 _cache: dict[str, dict] = {}
 _data_cache: dict[str, dict] = {}
 _executor = ThreadPoolExecutor(max_workers=8)  # v4.39.x 원복(동시성 과다가 오히려 느려짐)
+# v5.08: 실적(earnings) 조회 전용 격리 풀. yfinance income_stmt/quarterly_
+# income_stmt는 내부적으로 timeout=30(요청당)이 여러 번 걸릴 수 있어 최악의
+# 경우 종목 하나가 스레드를 60~90초 붙잡을 수 있음. asyncio.wait_for로
+# "기다리는 걸 포기"해도 스레드 자체는 안 죽어서(파이썬 스레드는 강제 종료
+# 불가) 계속 실행되며 풀 슬롯을 점유 — 공유 _executor(8개뿐)를 같이 쓰면
+# 이게 쌓여 다른 모든 엔드포인트(스캔·펀더멘털·분산체크 등)까지 막힐 수
+# 있음. 격리해서 최악의 경우에도 피해 범위를 실적 조회로만 한정.
+_earnings_executor = ThreadPoolExecutor(max_workers=4)
 
 
 def _downcast(df):
@@ -2031,8 +2058,18 @@ async def _run_scan_ibd9(bundle: dict) -> dict:
 #          (2) asyncio.gather(return_exceptions=True) — 예외 하나가 전체
 #              스캔을 중단시키지 않게.
 #          (3) 조회 대상 80→40개로 축소 — 최악의 경우 총 대기시간 단축.
+#
+# v5.08 [버그수정] v5.07 이후에도 "실적우수 탭만 계속 로딩 실패" — 사용자
+# 재확인. asyncio.wait_for는 코루틴이 기다리는 걸 포기하게만 할 뿐 실제
+# 스레드를 죽이지 못해서(파이썬 스레드 강제종료 불가), 느린/멈춘 yfinance
+# 요청이 공유 _executor(max_workers=8, 앱 전체가 씀)의 워커를 계속 붙잡고
+# 있었을 가능성이 높음 — 배치마다 새 요청을 또 던지니 워커가 고갈되면서
+# 이 탭뿐 아니라 결국 응답 자체가 안 옴. 실적 조회 전용 격리 풀
+# (_earnings_executor, max_workers=4)로 분리해 최악의 경우에도 다른
+# 엔드포인트가 막히지 않게 하고, BATCH를 그 풀 크기(4)에 맞춤 + 조회 대상을
+# 40→20으로 더 줄여 전체 최악 대기시간을 이전 수준(약 60초)으로 유지.
 EARNINGS_TAB_RS_MIN = 70
-EARNINGS_TAB_MAX_CHECK = 40
+EARNINGS_TAB_MAX_CHECK = 20
 EARNINGS_TAB_PER_TICKER_TIMEOUT = 12  # 초
 
 
@@ -2042,7 +2079,7 @@ async def _get_earnings_safe(ticker: str) -> dict:
     loop = asyncio.get_event_loop()
     try:
         return await asyncio.wait_for(
-            loop.run_in_executor(_executor, _get_earnings_cached, ticker),
+            loop.run_in_executor(_earnings_executor, _get_earnings_cached, ticker),
             timeout=EARNINGS_TAB_PER_TICKER_TIMEOUT,
         )
     except asyncio.TimeoutError:
@@ -2077,8 +2114,10 @@ async def _run_scan_earnings(bundle: dict) -> dict:
     diag["rs_prefilter_dropped"] = (diag["kr_fetched"] + diag["us_fetched"]) - len(candidates)
 
     # ── 고비용 실적 조회 — 배치 동시 실행 + 종목당 타임아웃 + 6시간 캐시 ──
+    # BATCH을 _earnings_executor의 max_workers(4)에 맞춤 — 안 맞추면 나머지가
+    # 풀에서 대기만 하다 타임아웃되는 낭비가 생김.
     tickers = [t for t, _ in candidates]
-    BATCH = 8
+    BATCH = 4
     eg_map = {}
     for i in range(0, len(tickers), BATCH):
         chunk = tickers[i:i + BATCH]
@@ -2915,7 +2954,7 @@ async def debug_ticker(ticker: str):
     payload["탈락_핵심사유"] = reasons
     # v5.05: 실적(EPS/매출) 성장 진단 — Phase 1. 데이터 없으면 판정불가로 표시.
     try:
-        _eg = await asyncio.get_event_loop().run_in_executor(_executor, _get_earnings_cached, ticker)
+        _eg = await asyncio.get_event_loop().run_in_executor(_earnings_executor, _get_earnings_cached, ticker)
         payload["실적성장"] = {
             "판정": {"pass": "💰실적우수", "fail": "미충족", "unknown": "판정불가"}.get(_eg.get("verdict"), "판정불가"),
             "연간EPS_3년연속증가": _eg.get("annual_eps_growing"),
@@ -2960,17 +2999,16 @@ async def _attach_earnings_badges(hits: list) -> None:
     이라 반복 스캔은 거의 즉시, 첫 스캔만 종목당 네트워크 왕복 비용."""
     if not hits:
         return
-    loop = asyncio.get_event_loop()
     tickers = [h["ticker"] for h in hits]
-    BATCH = 8
+    BATCH = 4   # v5.08: _earnings_executor의 max_workers(4)에 맞춤
     results = {}
     for i in range(0, len(tickers), BATCH):
         chunk = tickers[i:i + BATCH]
         chunk_results = await asyncio.gather(
-            *[loop.run_in_executor(_executor, _get_earnings_cached, t) for t in chunk]
+            *[_get_earnings_safe(t) for t in chunk], return_exceptions=True
         )
         for t, r in zip(chunk, chunk_results):
-            results[t] = r
+            results[t] = r if isinstance(r, dict) else {}
     for h in hits:
         r = results.get(h["ticker"]) or {}
         h["earnings_verdict"] = r.get("verdict")       # pass|fail|unknown
@@ -3471,7 +3509,7 @@ async def earnings_growth(ticker: str):
     반환. 6시간 캐시(실적은 분기 단위로만 바뀜)."""
     ticker = ticker.upper().strip()
     loop = asyncio.get_event_loop()
-    data = await loop.run_in_executor(_executor, _get_earnings_cached, ticker)
+    data = await loop.run_in_executor(_earnings_executor, _get_earnings_cached, ticker)
     return JSONResponse(data)
 
 
