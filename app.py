@@ -5,6 +5,20 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.07 [버그수정] 💰실적우수 탭 로딩 계속 실패(다른 탭은 정상) — 사용자 리포트.
+        [원인] yfinance income_stmt/quarterly_income_stmt는 크럼(crumb)/
+        쿠키 인증이 필요한 엔드포인트라 Railway 서버 IP에서 야후 응답이
+        느려지거나 막힐 수 있는데, 80종목을 배치(8개씩) 순차 대기하는
+        구조에 종목당 타임아웃이 없었음 — 하나라도 오래 걸리면 응답 전체가
+        안 끝나거나(체감상 "로딩 실패") asyncio.gather가 예외 하나로 전체
+        스캔을 중단시킬 수 있었음. 로컬 20종목 테스트(정상 티커+ETF+지수+
+        상장폐지 종목 포함)에선 크래시가 재현 안 됐지만, 프로덕션 네트워크
+        변동성까지 가정한 방어가 빠져 있던 게 근본 문제.
+        [해결] 종목당 12초 하드 타임아웃(asyncio.wait_for, 초과/실패 시
+        '판정불가'로 넘어가고 스캔 계속) + asyncio.gather(return_exceptions
+        =True)로 예외 전파 차단 + 조회 대상 80→40개 축소(최악 대기시간
+        단축). 이 세 가지는 이미 IBD9/Stage2가 쓰던 "저비용 먼저 + 개수
+        제한" 패턴에 "종목당 타임아웃"을 추가로 얹은 것.
 v5.06 [신규] 💰실적우수 전용 탭 — earnings.py Phase 1 판정만으로 스캔(한국+
         미국 통합). 기존 배지(v5.05)는 그대로 두고, 별도 탭에서 "실적 조건만"
         통과한 종목을 직접 찾아줌.
@@ -1339,7 +1353,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.06"
+VERSION = "v5.07"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1996,14 +2010,45 @@ async def _run_scan_ibd9(bundle: dict) -> dict:
     }
 
 
-# ── 💰실적우수 전용 탭 (v5.06) — earnings.py Phase 1 판정만으로 스캔.
-# 배지(_attach_earnings_badges)는 그대로 두고, 이 탭은 유니버스 전체에서
-# "실적 조건만" 통과한 종목을 직접 찾아준다. 한국+미국 둘 다 대상.
+# ── 💰실적우수 전용 탭 (v5.06, v5.07 안정화) — earnings.py Phase 1 판정만으로
+# 스캔. 배지(_attach_earnings_badges)는 그대로 두고, 이 탭은 유니버스
+# 전체에서 "실적 조건만" 통과한 종목을 직접 찾아준다. 한국+미국 둘 다 대상.
 # 적용 순서: RS 백분위(이미 계산돼 있어 추가비용 0) 사전 필터 → 상위 N개만
 # 비용 발생하는 실적 조회(yfinance/네이버 HTML) — 유니버스 전체(수천 종목)에
 # 실적 조회를 다 걸면 절대 안 끝남.
+#
+# v5.07 [버그수정] "실적우수 탭 로딩 계속 실패" (다른 탭은 정상).
+#   [원인] yfinance income_stmt/quarterly_income_stmt는 최초 크럼(crumb)/
+#          쿠키 인증이 필요한 엔드포인트라, Railway 서버 IP에서 야후가 느리게
+#          응답하거나 일시적으로 막히면 종목 하나당 호출이 오래 걸릴 수 있음.
+#          80종목을 배치(8개씩) 순차 대기하는 구조라, 그 중 하나라도 오래
+#          걸리면(또는 asyncio.gather가 예외 하나에 전체를 중단시키면) 응답
+#          전체가 안 끝나거나 500으로 죽어 "로딩 실패"로 보임 — 로컬 20종목
+#          테스트에선 재현 안 됐지만(전부 성공/정상 실패), 프로덕션 환경의
+#          네트워크 변동성까지 가정한 방어가 없었던 게 근본 문제.
+#   [해결] (1) 종목당 12초 하드 타임아웃(asyncio.wait_for) — 느린 응답이
+#              전체를 막지 않고 그 종목만 '판정불가'로 넘어감.
+#          (2) asyncio.gather(return_exceptions=True) — 예외 하나가 전체
+#              스캔을 중단시키지 않게.
+#          (3) 조회 대상 80→40개로 축소 — 최악의 경우 총 대기시간 단축.
 EARNINGS_TAB_RS_MIN = 70
-EARNINGS_TAB_MAX_CHECK = 80
+EARNINGS_TAB_MAX_CHECK = 40
+EARNINGS_TAB_PER_TICKER_TIMEOUT = 12  # 초
+
+
+async def _get_earnings_safe(ticker: str) -> dict:
+    """_get_earnings_cached를 타임아웃 + 예외 안전망으로 감싼 버전.
+    실패/타임아웃이면 '판정불가'로 취급 — 이 종목 하나가 전체 스캔을 막지 않음."""
+    loop = asyncio.get_event_loop()
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(_executor, _get_earnings_cached, ticker),
+            timeout=EARNINGS_TAB_PER_TICKER_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        return {"ok": False, "verdict": "unknown", "reasons": ["조회 타임아웃"]}
+    except Exception as e:
+        return {"ok": False, "verdict": "unknown", "reasons": [f"조회 실패: {e}"]}
 
 
 async def _run_scan_earnings(bundle: dict) -> dict:
@@ -2031,18 +2076,17 @@ async def _run_scan_earnings(bundle: dict) -> dict:
     candidates = candidates[:EARNINGS_TAB_MAX_CHECK]
     diag["rs_prefilter_dropped"] = (diag["kr_fetched"] + diag["us_fetched"]) - len(candidates)
 
-    # ── 고비용 실적 조회 — 배치 동시 실행 + 6시간 캐시(_get_earnings_cached) ──
-    loop = asyncio.get_event_loop()
+    # ── 고비용 실적 조회 — 배치 동시 실행 + 종목당 타임아웃 + 6시간 캐시 ──
     tickers = [t for t, _ in candidates]
     BATCH = 8
     eg_map = {}
     for i in range(0, len(tickers), BATCH):
         chunk = tickers[i:i + BATCH]
         results = await asyncio.gather(
-            *[loop.run_in_executor(_executor, _get_earnings_cached, t) for t in chunk]
+            *[_get_earnings_safe(t) for t in chunk], return_exceptions=True
         )
         for t, r in zip(chunk, results):
-            eg_map[t] = r
+            eg_map[t] = r if isinstance(r, dict) else {"ok": False, "verdict": "unknown", "reasons": [str(r)]}
 
     hits = []
     for t, rs in candidates:
