@@ -5,6 +5,26 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.05 [신규] 실적(EPS) 필터 Phase 1 — 💰실적우수 배지 + /api/earnings/{ticker}.
+        [Phase 0 데이터 정찰 결과] 미국(yfinance) 20/20 샘플 성공(100%),
+        한국(네이버 파이낸스 "주요재무정보" HTML) 19/20 성공(95%, 실패 1건은
+        상장폐지·합병 종목이라 정상 — 스크레이핑 결함 아님). 이 결과로 미국+
+        한국 둘 다 구현하기로 결정. 상세: earnings.py 모듈 docstring 참조.
+        [판정 기준] 1) 3년 연간 EPS 연속 증가(실제치만) 2) 최근분기 EPS
+        YoY≥25%(미너비니) 3) 매출 YoY 동반 증가 4) (선택 표시) 증가율 가속.
+        데이터 부족/없음은 제외가 아니라 판정불가(verdict=unknown)로 반환.
+        [구현] earnings.py 신규: 미국은 yfinance income_stmt/quarterly_
+        income_stmt, 한국은 finance.naver.com/item/main.naver의 "주요재무
+        정보" 표를 <thead> colspan(연간/분기 열 개수)으로 정확히 헤더 매칭
+        (개수 추측 없음 — Phase 0에서 8~10개로 들쭉날쭉해 보인 건 초기 나이브
+        정규식의 착시였고 실제론 header colspan으로 정확히 셀 수 있음을 확인).
+        ⚠️ 이 네이버 페이지는 UTF-8(naver_kr.py의 다른 페이지들이 쓰는
+        EUC-KR과 다름 — 잘못 지정하면 조용히 전부 실패).
+        app.py: /api/earnings/{ticker}(6시간 캐시) 신규. run_scan()/Stage2/
+        IBD9 세 파이프라인 전부 최종 hits에 배지 부착(유니버스 전체 아님,
+        run_scan()은 상위 30개만 — v4.86에서 고친 스캔 속도 재악화 방지).
+        /api/debug/{ticker}에 "실적성장" 섹션 추가. static/index.html에
+        "💰 실적우수" 배지(카드 상단, 모드 무관 공통 위치) 추가.
 v5.04 [신규] /api/pullback-signal/{ticker} — 얼마냐봇 "눌림 지지 진입" 알림용
         신규 엔드포인트. RS 백분위(사이트 전역 rs_ranks 재사용) · U/D Volume
         Ratio(매집/분산, up_down_volume 재사용) · 주봉 10EMA 거리(신규
@@ -1285,6 +1305,7 @@ from universe import get_universe, load_alerts
 import scanner as scanner_mod
 import naver_kr
 import fundamentals as fundamentals_mod
+import earnings as earnings_mod
 
 app = FastAPI(title="눌림목 스캐너")
 
@@ -1305,7 +1326,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.04"
+VERSION = "v5.05"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1854,6 +1875,7 @@ async def _run_scan_stage2(bundle: dict) -> dict:
         })
         diag["kr_hits"] += 1
     hits.sort(key=lambda x: (x["tier"], -x["score"]))
+    await _attach_earnings_badges(hits)   # v5.05: 💰실적우수 배지
 
     from collections import Counter
     sec_count = Counter(h["sector"] for h in hits if h["sector"] != "기타")
@@ -1946,6 +1968,7 @@ async def _run_scan_ibd9(bundle: dict) -> dict:
         })
         diag["us_hits"] += 1
     hits.sort(key=lambda x: -x["score"])
+    await _attach_earnings_badges(hits)   # v5.05: 💰실적우수 배지
 
     from collections import Counter
     sec_count = Counter(h["sector"] for h in hits if h["sector"] != "기타")
@@ -2017,6 +2040,10 @@ async def run_scan(market: str, mode: str) -> dict:
         else: diag["us_hits"] += 1
 
     hits.sort(key=lambda x: (x.get("triggered", False), x.get("setup_score") or x["score"]), reverse=True)
+    # v5.05: 💰실적우수 배지 — 스캔 하나에 수십~백여 개 히트가 나올 수 있어
+    # (IBD9/Stage2와 달리 이 경로는 히트 수가 안 작음) 상위 30개만 적용.
+    # 안 그러면 v4.86에서 어렵게 고친 "첫 스캔 2~4분" 속도가 다시 느려짐.
+    await _attach_earnings_badges(hits[:30])
 
     # 섹터 요약: 2개 이상 잡힌 섹터를 개수 내림차순 (기타 제외)
     from collections import Counter
@@ -2735,6 +2762,20 @@ async def debug_ticker(ticker: str):
     if not reasons:
         reasons.append("주요 필터는 통과 — RS/세부 조건(거래량·눌림폭 등)에서 미세 탈락 가능. modes와 indicators 대조 필요")
     payload["탈락_핵심사유"] = reasons
+    # v5.05: 실적(EPS/매출) 성장 진단 — Phase 1. 데이터 없으면 판정불가로 표시.
+    try:
+        _eg = await asyncio.get_event_loop().run_in_executor(_executor, _get_earnings_cached, ticker)
+        payload["실적성장"] = {
+            "판정": {"pass": "💰실적우수", "fail": "미충족", "unknown": "판정불가"}.get(_eg.get("verdict"), "판정불가"),
+            "연간EPS_3년연속증가": _eg.get("annual_eps_growing"),
+            "분기EPS_YoY%": _eg.get("quarterly_eps_yoy_pct"),
+            "매출_YoY%": _eg.get("revenue_yoy_pct"),
+            "증가율가속": _eg.get("accelerating"),
+            "연간EPS": _eg.get("annual_eps"),
+            "미충족사유": _eg.get("reasons"),
+        }
+    except Exception as _e:
+        payload["실적성장"] = {"error": str(_e)}
     # ensure_ascii=False + charset 명시 → 모바일에서 한글 안 깨짐
     return Response(
         content=_json.dumps(payload, ensure_ascii=False, indent=2),
@@ -2746,6 +2787,46 @@ _indices_cache: dict = {}
 _INDICES_TTL = 300  # 지수+레짐 캐시 5분 (레짐 계산이 무거워 길게)
 _fund_cache: dict = {}
 _FUND_TTL = 3600    # 펀더멘털 캐시 1시간
+_earnings_cache: dict = {}
+_EARNINGS_TTL = 6 * 3600   # 실적 성장 캐시 6시간 — 실적은 분기 단위로만 바뀜 (v5.05)
+
+
+def _get_earnings_cached(ticker: str) -> dict:
+    """블로킹 — executor에서 실행. earnings.get_earnings_growth()를 6시간 캐시."""
+    now = time.time()
+    c = _earnings_cache.get(ticker)
+    if c and now - c["ts"] < _EARNINGS_TTL:
+        return c["data"]
+    data = earnings_mod.get_earnings_growth(ticker)
+    _earnings_cache[ticker] = {"ts": now, "data": data}
+    return data
+
+
+async def _attach_earnings_badges(hits: list) -> None:
+    """실적 성장 배지(💰실적우수) — 스캔 결과 hits에 in-place로 필드 부착
+    (v5.05, Phase 1). 유니버스 전체가 아니라 이미 필터를 통과해 최종 목록에
+    남은 종목에만 적용(개수가 적어 부담 적음) + 6시간 캐시 + 배치 동시 실행
+    이라 반복 스캔은 거의 즉시, 첫 스캔만 종목당 네트워크 왕복 비용."""
+    if not hits:
+        return
+    loop = asyncio.get_event_loop()
+    tickers = [h["ticker"] for h in hits]
+    BATCH = 8
+    results = {}
+    for i in range(0, len(tickers), BATCH):
+        chunk = tickers[i:i + BATCH]
+        chunk_results = await asyncio.gather(
+            *[loop.run_in_executor(_executor, _get_earnings_cached, t) for t in chunk]
+        )
+        for t, r in zip(chunk, chunk_results):
+            results[t] = r
+    for h in hits:
+        r = results.get(h["ticker"]) or {}
+        h["earnings_verdict"] = r.get("verdict")       # pass|fail|unknown
+        h["earnings_badge"] = (r.get("verdict") == "pass")
+        h["eps_yoy_pct"] = r.get("quarterly_eps_yoy_pct")
+        h["revenue_yoy_pct"] = r.get("revenue_yoy_pct")
+        h["annual_eps_growing"] = r.get("annual_eps_growing")
 
 
 def _fetch_nasdaq() -> dict | None:
@@ -3229,6 +3310,18 @@ async def fundamentals(ticker: str):
     result = data or {"error": "데이터 없음"}
     _fund_cache[ticker] = {"ts": now, "data": result}
     return JSONResponse(result)
+
+
+@app.get("/api/earnings/{ticker}")
+async def earnings_growth(ticker: str):
+    """실적(EPS/매출) 성장 판정 (v5.05, Phase 1) — 미너비니 CAN SLIM 기준.
+    3년 연간 EPS 연속증가 + 최근분기 EPS YoY 25%+ + 매출 YoY 동반증가(+선택
+    가속 여부). 데이터 없으면 제외가 아니라 판정불가(verdict=unknown)로
+    반환. 6시간 캐시(실적은 분기 단위로만 바뀜)."""
+    ticker = ticker.upper().strip()
+    loop = asyncio.get_event_loop()
+    data = await loop.run_in_executor(_executor, _get_earnings_cached, ticker)
+    return JSONResponse(data)
 
 
 # ── 매매 일지 (서버 저장, 기기 간 동기화) ──
