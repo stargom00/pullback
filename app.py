@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.06 [신규] 💰실적우수 전용 탭 — earnings.py Phase 1 판정만으로 스캔(한국+
+        미국 통합). 기존 배지(v5.05)는 그대로 두고, 별도 탭에서 "실적 조건만"
+        통과한 종목을 직접 찾아줌.
+        [배경] 사용자가 Stage2/IBD9엔 왜 배지가 안 뜨냐고 물어서 설명하는
+        과정에서, 두 탭 다 필터 자체에 실적 조건이 없다(추세/유동성/RS만)는
+        걸 확인 — 실적 좋은 종목을 보려면 전용 탭이 필요하다고 판단.
+        [구현] _run_scan_earnings(): 유니버스 전체에 실적 조회를 걸면 절대
+        안 끝나서, RS 백분위(이미 계산돼 있어 추가비용 0)로 먼저 거른 뒤
+        상위 80개만 실적 조회(배치 동시 실행 + 6시간 캐시, IBD9/Stage2와
+        같은 "저비용 먼저" 패턴). RS70+ 사전 필터라 이 문턱 아래 종목은
+        실적이 아무리 좋아도 이 탭엔 안 뜸 — 특정 종목이 궁금하면
+        /api/debug/{ticker}로 직접 확인 권장. static/index.html: 💰실적우수
+        탭 + 전용 카드(RS/분기EPS YoY/매출YoY/가속여부/연간EPS 추이) 추가.
 v5.05 [신규] 실적(EPS) 필터 Phase 1 — 💰실적우수 배지 + /api/earnings/{ticker}.
         [Phase 0 데이터 정찰 결과] 미국(yfinance) 20/20 샘플 성공(100%),
         한국(네이버 파이낸스 "주요재무정보" HTML) 19/20 성공(95%, 실패 1건은
@@ -1326,7 +1339,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.05"
+VERSION = "v5.06"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1983,9 +1996,103 @@ async def _run_scan_ibd9(bundle: dict) -> dict:
     }
 
 
+# ── 💰실적우수 전용 탭 (v5.06) — earnings.py Phase 1 판정만으로 스캔.
+# 배지(_attach_earnings_badges)는 그대로 두고, 이 탭은 유니버스 전체에서
+# "실적 조건만" 통과한 종목을 직접 찾아준다. 한국+미국 둘 다 대상.
+# 적용 순서: RS 백분위(이미 계산돼 있어 추가비용 0) 사전 필터 → 상위 N개만
+# 비용 발생하는 실적 조회(yfinance/네이버 HTML) — 유니버스 전체(수천 종목)에
+# 실적 조회를 다 걸면 절대 안 끝남.
+EARNINGS_TAB_RS_MIN = 70
+EARNINGS_TAB_MAX_CHECK = 80
+
+
+async def _run_scan_earnings(bundle: dict) -> dict:
+    universe = bundle["universe"]
+    data = bundle["data"]
+    rs_ranks = bundle.get("rs_ranks", {})
+
+    diag = {"kr_universe": 0, "us_universe": 0, "kr_fetched": 0, "us_fetched": 0,
+            "kr_hits": 0, "us_hits": 0}
+    for t in universe:
+        if naver_kr.is_kr(t): diag["kr_universe"] += 1
+        else: diag["us_universe"] += 1
+    for t in data:
+        if naver_kr.is_kr(t): diag["kr_fetched"] += 1
+        else: diag["us_fetched"] += 1
+
+    # ── 저비용 사전 필터: RS 백분위(무료) 상위만, 그 중에서도 RS 상위 N개만 ──
+    candidates = []
+    for t, df in data.items():
+        rs = rs_ranks.get(t)
+        if rs is None or rs < EARNINGS_TAB_RS_MIN or df is None or len(df) < 2:
+            continue
+        candidates.append((t, rs))
+    candidates.sort(key=lambda x: -x[1])
+    candidates = candidates[:EARNINGS_TAB_MAX_CHECK]
+    diag["rs_prefilter_dropped"] = (diag["kr_fetched"] + diag["us_fetched"]) - len(candidates)
+
+    # ── 고비용 실적 조회 — 배치 동시 실행 + 6시간 캐시(_get_earnings_cached) ──
+    loop = asyncio.get_event_loop()
+    tickers = [t for t, _ in candidates]
+    BATCH = 8
+    eg_map = {}
+    for i in range(0, len(tickers), BATCH):
+        chunk = tickers[i:i + BATCH]
+        results = await asyncio.gather(
+            *[loop.run_in_executor(_executor, _get_earnings_cached, t) for t in chunk]
+        )
+        for t, r in zip(chunk, results):
+            eg_map[t] = r
+
+    hits = []
+    for t, rs in candidates:
+        eg = eg_map.get(t) or {}
+        if eg.get("verdict") != "pass":
+            continue
+        df = data[t]
+        c = df["Close"]
+        close = float(c.iloc[-1])
+        prev = float(c.iloc[-2]) if len(c) >= 2 else close
+        chg = (close / prev - 1) * 100 if prev else 0.0
+        is_kr = naver_kr.is_kr(t)
+        eps_yoy = eg.get("quarterly_eps_yoy_pct") or 0
+        score = round(60 * (rs or 0) / 99 + 40 * min(eps_yoy, 200) / 200, 1)
+        hits.append({
+            "ticker": t, "name": universe.get(t, t), "market": "KR" if is_kr else "US",
+            "sector": _sector_of(t), "alert": None,
+            "climax": False, "climax_reasons": [], "climax_level": None,
+            "mode": "earnings",
+            "close": round(close, 2), "change_pct": round(chg, 2),
+            "score": score, "rs": rs,
+            "earnings_verdict": "pass", "earnings_badge": True,
+            "eps_yoy_pct": eg.get("quarterly_eps_yoy_pct"),
+            "revenue_yoy_pct": eg.get("revenue_yoy_pct"),
+            "annual_eps_growing": eg.get("annual_eps_growing"),
+            "annual_eps": eg.get("annual_eps"),
+            "accelerating": eg.get("accelerating"),
+        })
+        if is_kr: diag["kr_hits"] += 1
+        else: diag["us_hits"] += 1
+    hits.sort(key=lambda x: -x["score"])
+
+    from collections import Counter
+    sec_count = Counter(h["sector"] for h in hits if h["sector"] != "기타")
+    sector_summary = [{"sector": s, "count": n} for s, n in sec_count.most_common() if n >= 2]
+
+    return {
+        "version": VERSION, "market": "all", "mode": "earnings",
+        "scanned": len(universe), "fetched": len(data), "diag": diag,
+        "hits": hits, "sector_summary": sector_summary, "warn_count": 0,
+        "timing": bundle.get("timing"),
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "ts": time.time(),
+    }
+
+
 async def run_scan(market: str, mode: str) -> dict:
     # 데이터는 시장 단위 캐시에서 (모드 바뀌어도 재호출 안 함)
     bundle = await _fetch_market_data(market)
+    if mode == "earnings":
+        return await _run_scan_earnings(bundle)
     if mode == "stage2":
         return await _run_scan_stage2(bundle)
     if mode == "ibd9":
@@ -2073,7 +2180,7 @@ async def run_scan(market: str, mode: str) -> dict:
 @app.get("/api/scan")
 async def scan(market: str = "all", mode: str = "imminent", refresh: bool = False):
     market = market if market in ("kr", "us", "all") else "all"
-    mode = mode if mode in ("pullback", "turnaround", "leader", "super", "breakout", "surge", "imminent", "boxbreak", "breakdown", "pattern", "stage2", "ibd9") else "pullback"
+    mode = mode if mode in ("pullback", "turnaround", "leader", "super", "breakout", "surge", "imminent", "boxbreak", "breakdown", "pattern", "stage2", "ibd9", "earnings") else "pullback"
     key = f"{market}:{mode}"
     favs = load_favorites()
     cached = _cache.get(key)

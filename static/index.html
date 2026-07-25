@@ -365,7 +365,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.05</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.06</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -379,6 +379,7 @@ tr.editing{background:rgba(242,179,61,.06)}
     <button class="tab" data-mode="super">⭐슈퍼대장</button>
     <button class="tab" data-mode="stage2">📐Stage2</button>
     <button class="tab" data-mode="ibd9">🇺🇸IBD9</button>
+    <button class="tab" data-mode="earnings">💰실적우수</button>
     <button class="tab tab-exp" data-mode="surge">⚡급등<span class="exp-tag">실험</span></button>
     <button class="tab tab-exp" data-mode="inverse">🔻인버스<span class="exp-tag">하락</span></button>
     <button class="tab tab-exp" data-mode="breakdown">🩸붕괴<span class="exp-tag">숏</span></button>
@@ -742,7 +743,7 @@ function card(s) {
         })()}${(() => {
           // v4.59: 약세장(🟡🔴) 진입 적격 배지. 게이트가 pressure/correction일 때만 노출.
           // 강세장(🟢)에선 굳이 옥석 안 가려도 되므로 표시 안 함.
-          if (s.mode === 'stage2' || s.mode === 'ibd9') return '';   // 자체 등급/티어링이 있어 별도 배지 생략
+          if (s.mode === 'stage2' || s.mode === 'ibd9' || s.mode === 'earnings') return '';   // 자체 등급/티어링이 있어 별도 배지 생략
           const g = gateSug && (s.market === 'KR' ? gateSug.gate_kr : gateSug.gate_us) || (gateSug && gateSug.suggest);
           if (!g || g === 'confirmed') return '';   // 강세장이면 배지 없음
           if (s.bear_ok) {
@@ -862,6 +863,15 @@ function card(s) {
       <div class="metric"><div class="k">50일평균거래량</div><div class="v">${fmtVolume(s.vol50_avg, 'US')}</div></div>
       <div class="metric"><div class="k">50일평균거래대금</div><div class="v">${fmtTurnover(s.dollar_vol50_avg, 'US')}</div></div>
       <div class="metric"><div class="k">기관보유비율<span style="font-size:9px;opacity:.6" title="IBD 펀드보유수 대체 지표(근사치)">*</span></div><div class="v">${s.held_pct_inst != null ? s.held_pct_inst + '%' : '-'}</div></div>
+    </div>` : s.mode === 'earnings' ? `
+    <div class="metrics mono">
+      <div class="metric"><div class="k">RS</div><div class="v" style="color:var(--rs)">${s.rs ?? '-'}</div></div>
+      <div class="metric"><div class="k">분기 EPS YoY</div><div class="v" style="color:var(--px-up)">+${s.eps_yoy_pct}%</div></div>
+      <div class="metric"><div class="k">매출 YoY</div><div class="v" style="color:var(--px-up)">+${s.revenue_yoy_pct}%</div></div>
+      <div class="metric"><div class="k">증가율 가속</div><div class="v">${s.accelerating ? '✅' : '-'}</div></div>
+    </div>
+    <div class="metrics mono" style="border-top:none;padding-top:0">
+      <div class="metric" style="flex:1"><div class="k">연간 EPS 추이(오래된→최신)</div><div class="v mono" style="font-size:12px">${(s.annual_eps||[]).map(v=>v.toLocaleString()).join(' → ')}</div></div>
     </div>` : s.mode === 'leader' ? `
     <div class="metrics mono">
       <div class="metric"><div class="k">고점까지</div><div class="v">${s.dist_from_high_pct}%</div></div>
@@ -937,6 +947,12 @@ function card(s) {
     <div class="badges">
       <span class="badge on" style="${s.ad_grade === 'A' ? 'background:#12351f;color:#4ade80;border:1px solid #1d6b3a' : 'background:#152535;color:#7fb8e0;border:1px solid #2d5a8c'}" title="U/D Volume Ratio ${s.ud_ratio} 기반 근사 등급 — IBD 원본 A/D Rating 알고리즘과 다름">A/D ${s.ad_grade}</span>
       <span class="badge on">9조건 통과</span>
+    </div>` : s.mode === 'earnings' ? `
+    <div class="badges">
+      <span class="badge on">3년 EPS 연속증가</span>
+      <span class="badge on">분기 EPS YoY 25%+</span>
+      <span class="badge on">매출 YoY 증가</span>
+      ${s.accelerating ? '<span class="badge on">증가율 가속</span>' : ''}
     </div>` : s.mode === 'leader' ? `
     <div class="badges">
       <span class="badge on">RS ${s.rs}</span>
@@ -1006,6 +1022,7 @@ const DESC = {
   super: 'RS 95+ — 지금 시장에서 가장 강한 종목들 (위치 불문). 상태 라벨로 담을곳/대기 판단',
   stage2: '📐 미너비니 Stage2 트렌드 템플릿(한국 전용) · 유동성(20일 평균 거래대금 20억+) → RS 3M·6M·12M 가중 백분위 70+ → 현재가>50MA>150MA>200MA(200MA 1개월↑) + 52주저점×1.30↑ + 52주고점×0.75↑(-25%이내) → 거래량수축+MA(5/10/20)수렴 필터 → A/B 티어링(A=고점-10%이내). 0개인 날은 필터 문제가 아니라 시장이 약하다는 신호',
   ibd9: '🇺🇸 IBD 9조건 스크린(미국 전용) · 가격$5+ · 50일평균거래량50만주+ · 50일평균거래대금$500만+ · 3개월수익률30%+ · 21일ATR4%+ · 베타1+ · 시총$2억+ · A/D등급 A/B(⚠️ IBD 원본 아닌 U/D Volume Ratio 근사) · 펀드보유수는 무료데이터 한계로 기관보유비율로 대체(참고용)',
+  earnings: '💰 미너비니 CAN SLIM 실적 기준(한국+미국) · 3년 연간 EPS 실제치 연속증가 + 최근분기 EPS YoY 25%+ + 매출 YoY 동반증가 전부 충족 종목만. RS70+ 상위 종목 위주로 먼저 거른 뒤 실적을 확인해서(비용 큰 조회라 전체 유니버스는 스캔 못 함) 놓치는 종목이 있을 수 있어요 — 특정 종목이 궁금하면 /api/debug/{ticker}로 직접 확인',
   breakout: 'RS 80+ · 베이스 천장을 거래량 동반 돌파 · 피벗 +5% 이내=유효 / +5~12%=연장 추격주의',
   imminent: '🎯 돌파 직전 · 천장(피벗) 바로 아래(-5%~0%)까지 올라왔지만 아직 안 뚫음 · 거래량 수축=가점 · RS 50+ — 돌파 전날 미리 포착',
   surge: '⚠️ 단타 신호(추세 아님) · 급등 첫날 포착: 당일 +7%↑ & 거래량 4배↑ & 직전 며칠은 조용 · RS 무관',
@@ -1430,10 +1447,10 @@ function renderCards() {
   // 주도주 엄격모드 필터: RS90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓
   // 주도주(RS90+) 필터는 롱 전용 — 숏(붕괴)은 약한 종목이라 적용하지 않음
   // v4.65: 💎 약세장적격만 — bear_ok(탄탄베이스+RS90+손절폭적정) 3조건 충족만
-  if (bearOkOnly && mode !== 'breakdown' && mode !== 'stage2' && mode !== 'ibd9') {
+  if (bearOkOnly && mode !== 'breakdown' && mode !== 'stage2' && mode !== 'ibd9' && mode !== 'earnings') {
     list = list.filter(h => h.bear_ok === true);
   }
-  if (strictMode && mode !== 'breakdown' && mode !== 'stage2' && mode !== 'ibd9') {
+  if (strictMode && mode !== 'breakdown' && mode !== 'stage2' && mode !== 'ibd9' && mode !== 'earnings') {
     list = list.filter(h => {
       const rsOk = (h.rs ?? 0) >= 90;
       const volOk = (h.vol_mult ?? 0) >= 1.5 || (h.vol_ratio ?? 0) >= 1.0;
@@ -1463,7 +1480,7 @@ function renderCards() {
   list.sort((a, b) => (isFav(b) ? 1 : 0) - (isFav(a) ? 1 : 0));
   content.innerHTML = list.length
     ? `<div class="grid">${list.map(card).join('')}</div>`
-    : `<div class="empty">${(strictMode && mode !== 'breakdown') ? `🎯 주도주 조건(RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓)을 모두 충족하는 종목이 없습니다.<br>엄선 필터라 비어있는 게 정상이에요. 해제하려면 '🎯 주도주만'을 다시 누르세요.` : searchQuery ? `'${searchQuery}'은(는) 이 탭의 시그널엔 없어요.<br><span id="lookupHint" style="color:var(--muted);font-size:12px">유니버스 전체에서 찾는 중…</span>` : sectorFilter ? `'${sectorFilter}' 섹터에 해당 종목이 없습니다.` : `현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : mode === 'breakdown' ? 'Stage 4 숏(붕괴)' : mode === 'stage2' ? 'Stage2' : mode === 'ibd9' ? 'IBD 9조건' : '눌림목'} 종목이 없습니다.${mode === 'stage2' ? '<br>유동성·RS70+·Stage2템플릿·거래량수축·MA수렴을 전부 통과해야 해서 0개인 날이 있는 게 정상이에요 — 필터 문제가 아니라 시장이 약하다는 신호.' : mode === 'ibd9' ? '<br>9가지 조건(3개월 수익률 30%+ 포함)을 전부 통과해야 해서 0개인 날이 있는 게 정상이에요.' : '<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.'}`}</div>`;
+    : `<div class="empty">${(strictMode && mode !== 'breakdown') ? `🎯 주도주 조건(RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓)을 모두 충족하는 종목이 없습니다.<br>엄선 필터라 비어있는 게 정상이에요. 해제하려면 '🎯 주도주만'을 다시 누르세요.` : searchQuery ? `'${searchQuery}'은(는) 이 탭의 시그널엔 없어요.<br><span id="lookupHint" style="color:var(--muted);font-size:12px">유니버스 전체에서 찾는 중…</span>` : sectorFilter ? `'${sectorFilter}' 섹터에 해당 종목이 없습니다.` : `현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : mode === 'breakdown' ? 'Stage 4 숏(붕괴)' : mode === 'stage2' ? 'Stage2' : mode === 'ibd9' ? 'IBD 9조건' : mode === 'earnings' ? '실적우수' : '눌림목'} 종목이 없습니다.${mode === 'stage2' ? '<br>유동성·RS70+·Stage2템플릿·거래량수축·MA수렴을 전부 통과해야 해서 0개인 날이 있는 게 정상이에요 — 필터 문제가 아니라 시장이 약하다는 신호.' : mode === 'ibd9' ? '<br>9가지 조건(3개월 수익률 30%+ 포함)을 전부 통과해야 해서 0개인 날이 있는 게 정상이에요.' : mode === 'earnings' ? '<br>RS70+ 상위 종목 중 3년 EPS 연속증가+분기 YoY25%+매출증가를 전부 통과해야 해서 0개인 날이 있는 게 정상이에요.' : '<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.'}`}</div>`;
   // 탭 결과에 없으면 유니버스 전체 조회 (검색어 있을 때만)
   if (!list.length && searchQuery && !strictMode) {
     triggerLookup(searchQuery);
@@ -2130,6 +2147,7 @@ const MODE_TAB_LABEL = {
   surge: '급등',
   stage2: 'Stage2',
   ibd9: 'IBD9',
+  earnings: '실적우수',
 };
 // ── 📅 활동 달력 (v4.52): 날짜별 분석/등록 종목 한눈에 ──
 let _jcal = null;   // {y, m} 표시 중인 달
