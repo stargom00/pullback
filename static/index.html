@@ -365,7 +365,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.11</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.12</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1047,6 +1047,27 @@ async function load(refresh = false) {
     const res = await fetch(`/api/scan?market=all&mode=${mode}${refresh ? '&refresh=true' : ''}`, { cache: 'no-store' });
     if (!res.ok) throw new Error('status ' + res.status);
     const data = await res.json();
+    // v5.12 [버그수정]: 콜드 스타트(유니버스 데이터가 아직 없음)일 때 서버가
+    // 더 이상 요청을 몇 분씩 붙잡지 않고(그러면 중간에 끊기기 쉬움) 즉시
+    // pending:true로 응답하도록 바꿈 — 여긴 "실패"가 아니라 "아직 준비 중"
+    // 이라 catch의 에러 재시도와는 별개로, 가볍게(5초 간격) 계속 재확인한다.
+    // 폴링 자체가 순간 응답이라 오래 기다려도 안전함(사용자 피드백: "횟수가
+    // 아니라 시간을 오래 줘야 한다, 계속 새로고침하면 안 된다" — 이제 새
+    // 요청 하나하나가 무겁지 않아 새로고침/재시도가 문제 되지 않음).
+    if (data.pending) {
+      const PENDING_POLL_MS = 5000, PENDING_MAX = 150;   // 5초 × 150 = 12.5분
+      load._pendingCount = (load._pendingCount || 0) + 1;
+      if (load._pendingCount <= PENDING_MAX) {
+        const waited = Math.round(load._pendingCount * PENDING_POLL_MS / 1000);
+        content.innerHTML = `<div class="loading"><div class="spinner"></div>유니버스 데이터를 서버가 백그라운드에서 준비 중이에요 — ${waited}초째. 새로고침하지 않아도 자동으로 계속 확인해요.</div>`;
+        setTimeout(() => { load(false); }, PENDING_POLL_MS);
+        return;
+      }
+      load._pendingCount = 0;
+      content.innerHTML = '<div class="empty">데이터 준비가 예상보다 오래 걸리고 있어요. 잠시 후 \'다시 스캔\'을 눌러주세요.</div>';
+      return;
+    }
+    load._pendingCount = 0;
     if (data.version) { const vb = document.getElementById('verBadge'); if (vb) vb.textContent = data.version; }
     const _tm = data.timing;
     const _tmStr = _tm ? ` · ⏱ KR ${_tm.kr_sec}s / US ${_tm.us_sec}s / RS ${_tm.rs_sec}s (신규 ${_tm.n_fetched_kr+_tm.n_fetched_us}, 재사용 ${_tm.n_reused})` : '';

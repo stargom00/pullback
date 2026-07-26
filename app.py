@@ -5,6 +5,23 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.12 [버그수정] v5.11 이후에도 동일 — 사용자가 핵심을 짚어줌: "횟수가
+        중요한 게 아니라 오래 기다려야 한다, 계속 새로고침하면 안 된다."
+        [진짜 원인] v5.05~v5.11 내내 프론트 재시도 "횟수/간격"만 늘렸는데,
+        정작 서버 쪽 콜드 스타트 분기(_fetch_market_data)가 요청 하나를
+        수분~8분+ 동안 그대로 블로킹하고 있던 게 근본 문제였음. 이러면
+        재시도를 몇 번을 하든 매번 새 요청이 또 몇 분짜리로 걸리고, 그 사이
+        브라우저/Railway 엣지 등 중간 어디서든 한 번만 끊겨도 실패로 보임 —
+        "재시도 횟수"가 아니라 "각 요청 자체가 너무 오래 걸린다"는 게 진짜
+        문제였다는 걸 사용자 피드백으로 알아챔.
+        [해결] 아키텍처를 바꿈: 콜드 스타트여도 이 요청은 더 이상 기다리지
+        않는다. 데이터 수집은 백그라운드 태스크로 걸어두고 즉시
+        pending:true로 응답 → 프론트는 이 응답을 실패가 아닌 "준비 중"으로
+        인식해 5초 간격으로 가볍게(즉시 응답) 폴링한다. 어떤 단일 HTTP
+        요청도 이제 수 초 이상 걸리지 않아 중간에 끊길 일이 없음.
+        /api/scan(run_scan 경유)·/api/sectors·/api/eod 전부 이 패턴 적용.
+        pending 응답은 결과 캐시에 저장하지 않음(안 그러면 실제 데이터가
+        준비된 뒤에도 계속 pending만 보이게 됨).
 v5.11 [버그수정] v5.10(재시도 3분)도 여전히 부족 — 사용자 확인: 실적우수뿐
         아니라 돌파임박/눌림목 같은 일반 탭도 평일 첫 스캔은 5분 넘게 걸릴
         때가 있음(주말엔 저장된 자료를 그대로 불러와 빠름). 즉 이건 실적
@@ -1414,7 +1431,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.11"
+VERSION = "v5.12"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1691,7 +1708,7 @@ _market_fetch_locks: dict = {}
 _market_refreshing: dict = {}   # v4.86: cache_key -> True인 동안 백그라운드 갱신 진행중
 
 
-async def _fetch_market_data(market: str, wait_for_fresh: bool = False) -> dict:
+async def _fetch_market_data(market: str, wait_for_fresh: bool = False) -> dict | None:
     """시장 단위로 종목 일봉 + RS 계산. 모드와 무관하므로 시장별로 캐시해 재사용.
     여기서만 네이버/야후를 호출한다 (모드 전환 시 재호출 안 함).
 
@@ -1730,13 +1747,22 @@ async def _fetch_market_data(market: str, wait_for_fresh: bool = False) -> dict:
             _market_refreshing[cache_key] = True
             asyncio.create_task(_refresh_market_data_bg(market, cache_key))
         return mem
-    # 캐시가 아예 없음(콜드 스타트) — 이번 한 번만 실제로 기다린다.
-    _lock = _market_fetch_locks.setdefault(cache_key, asyncio.Lock())
-    async with _lock:
-        mem = _data_cache.get(cache_key)
-        if mem:   # 대기 중 다른 요청이 이미 채웠으면 그걸 그대로
-            return mem
-        return await _fetch_market_data_inner(market, cache_key)
+    # 캐시가 아예 없음(콜드 스타트).
+    # v5.12 [버그수정] "재시도 시간을 아무리 늘려도 여전히 실패" — 사용자가
+    # "횟수가 중요한 게 아니라 오래 기다려야 한다, 계속 새로고침하면 안 된다"
+    # 고 정확히 짚어줌. 원인: 이 분기가 지금까지 "이번 요청 하나가" 콜드
+    # 스캔 전체(수분~8분+)를 끝날 때까지 그대로 물고 있었음 — 그동안 클라
+    # 이언트 fetch() 하나가 몇 분씩 연결을 붙들고 있어야 하는데, 중간의
+    # 어떤 구간(브라우저·Railway 엣지 등)이든 하나만 그 사이 끊어버리면
+    # 실패로 보임. 프론트의 재시도 "횟수"를 늘려도, 매번 새 요청이 또 몇
+    # 분짜리로 다시 걸리는 구조라 근본 해결이 안 됐던 것.
+    # [해결] 이 요청 자체는 더 이상 기다리지 않는다. 백그라운드 태스크만
+    # 걸어두고 즉시 None을 반환 → 호출부(run_scan 등)가 "준비 중" 응답을
+    # 내려보내고, 프론트는 가벼운 폴링(각 요청이 즉시 끝남)으로 기다린다.
+    if not _market_refreshing.get(cache_key):
+        _market_refreshing[cache_key] = True
+        asyncio.create_task(_refresh_market_data_bg(market, cache_key))
+    return None
 
 
 async def _refresh_market_data_bg(market: str, cache_key: str):
@@ -2226,9 +2252,25 @@ async def _run_scan_earnings(bundle: dict) -> dict:
     }
 
 
+def _pending_scan_result(market: str, mode: str) -> dict:
+    """v5.12: 유니버스 데이터가 아직 콜드(백그라운드 수집 중)일 때 즉시
+    반환하는 '준비 중' 응답. 프론트가 이 pending 플래그를 보고 가벼운
+    폴링으로 재확인한다 — 이 응답 자체는 절대 결과 캐시에 저장하면 안 됨
+    (그러면 실제 데이터가 준비된 뒤에도 계속 pending만 보이게 됨)."""
+    return {
+        "version": VERSION, "market": market, "mode": mode,
+        "pending": True, "scanned": 0, "fetched": 0,
+        "diag": {}, "hits": [], "sector_summary": [], "warn_count": 0,
+        "timing": None, "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "ts": time.time(),
+    }
+
+
 async def run_scan(market: str, mode: str) -> dict:
     # 데이터는 시장 단위 캐시에서 (모드 바뀌어도 재호출 안 함)
     bundle = await _fetch_market_data(market)
+    if bundle is None:
+        return _pending_scan_result(market, mode)
     if mode == "earnings":
         return await _run_scan_earnings(bundle)
     if mode == "stage2":
@@ -2329,6 +2371,10 @@ async def scan(market: str = "all", mode: str = "imminent", refresh: bool = Fals
         if fresh:
             return JSONResponse(_clean_nan({**cached, "favorites": favs, "cached": True}))
     result = await run_scan(market, mode)
+    if result.get("pending"):
+        # v5.12: 준비 중 응답은 캐시에 저장하면 안 됨 — 안 그러면 실제 데이터가
+        # 준비된 뒤에도 다음 요청이 이 pending 스냅샷을 계속 돌려주게 됨.
+        return JSONResponse(_clean_nan({**result, "favorites": favs, "cached": False}))
     result["daykey"] = _market_session_key(market)
     _cache[key] = result
     return JSONResponse(_clean_nan({**result, "favorites": favs, "cached": False}))
@@ -2722,6 +2768,9 @@ async def api_sectors():
         return JSONResponse(_sectors_cache["data"])
 
     bundle = await _fetch_market_data("all")
+    if bundle is None:
+        # v5.12: 콜드 스타트라 백그라운드로 수집 중 — 잠시 후 재요청하면 됨.
+        return {"version": VERSION, "pending": True, "asof": "", "panels": {}}
     data = bundle["data"]
     universe = bundle["universe"]
     rs_ranks = bundle.get("rs_ranks", {})
@@ -3377,6 +3426,11 @@ async def eod_summary():
         return JSONResponse(_eod_cache["data"])
 
     bundle = await _fetch_market_data("kr")
+    if bundle is None:
+        # v5.12: 콜드 스타트라 백그라운드로 수집 중 — 잠시 후 재요청하면 됨.
+        return JSONResponse({"pending": True, "date": "", "market_closed": False,
+                             "breadth": {}, "limit_up": [], "top_value": [],
+                             "sector_rise": [], "sector_value": []})
     data = bundle.get("data", {})
     universe = bundle.get("universe", {})
 
