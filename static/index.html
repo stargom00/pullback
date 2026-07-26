@@ -365,7 +365,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.10</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.11</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1071,22 +1071,21 @@ async function load(refresh = false) {
     renderSectors(data.sector_summary || []);
     renderCards();
   } catch (e) {
-    // v5.10 [버그수정]: 콜드 스캔(유니버스 3,500+ 종목 첫 수집)은 실제로
-    // 2~4분(KR/US 데이터 소스 속도에 따라 더 걸릴 수도 있음) 걸리는데,
-    // 예전엔 15초 딱 1번만 재시도하고 실패로 포기해버렸음 — 서버는 백그라운드로
-    // 계속 스캔 중이라 몇 분 뒤엔 캐시가 채워져 성공하는데, 그 전에 영구
-    // 실패 메시지를 띄워서 사용자가 "계속 로딩이 안 된다"고 느끼게 만든 게
-    // 근본 원인. 20초 간격으로 최대 9번(약 3분) 반복 재시도하도록 늘림.
-    const MAX_RETRIES = 9, RETRY_MS = 20000;
+    // v5.11 [버그수정]: v5.10(20초×9회=3분)도 부족했음 — 사용자 확인: 콜드
+    // 스캔은 돌파임박/눌림목 같은 일반 탭도 "5분 넘게" 걸릴 때가 있음(주말엔
+    // 저장된 자료를 그대로 불러와 빠르지만, 평일 첫 스캔은 데이터소스 속도에
+    // 따라 5분+ 가능). 재시도 창을 실제 최대 소요시간보다 넉넉히 늘림 —
+    // 20초 간격 최대 24회(총 8분)로 확대.
+    const MAX_RETRIES = 24, RETRY_MS = 20000;
     load._retryCount = (load._retryCount || 0) + 1;
     if (load._retryCount <= MAX_RETRIES) {
       const waited = load._retryCount * RETRY_MS / 1000;
-      content.innerHTML = `<div class="loading"><div class="spinner"></div>첫 스캔은 시간이 걸려요 — 데이터 준비 중… (${waited}초째, 최대 3분 정도·자동 재시도 ${load._retryCount}/${MAX_RETRIES})</div>`;
+      content.innerHTML = `<div class="loading"><div class="spinner"></div>첫 스캔은 시간이 걸려요 — 데이터 준비 중… (${waited}초째, 최대 8분 정도·자동 재시도 ${load._retryCount}/${MAX_RETRIES})</div>`;
       setTimeout(() => { load(false); }, RETRY_MS);
       return;
     }
     load._retryCount = 0;
-    content.innerHTML = '<div class="empty">스캔에 실패했습니다. 잠시 후 \'다시 스캔\'을 눌러주세요 — 유니버스가 커서 첫 스캔은 3분 넘게 걸릴 수 있어요.</div>';
+    content.innerHTML = '<div class="empty">스캔에 실패했습니다. 잠시 후 \'다시 스캔\'을 눌러주세요 — 유니버스가 커서 첫 스캔은 몇 분 넘게 걸릴 수 있어요.</div>';
   }
   load._retryCount = 0;
 }
