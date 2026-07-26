@@ -365,7 +365,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.14</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.15</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -871,7 +871,7 @@ function card(s) {
       <div class="metric"><div class="k">증가율 가속</div><div class="v">${s.accelerating ? '✅' : '-'}</div></div>
     </div>
     <div class="metrics mono" style="border-top:none;padding-top:0">
-      <div class="metric" style="flex:1"><div class="k">연간 EPS 추이(오래된→최신)</div><div class="v mono" style="font-size:12px">${(s.annual_eps||[]).map(v=>v.toLocaleString()).join(' → ')}</div></div>
+      <div class="metric" style="flex:1"><div class="k">연간 EPS 추이(오래된→최신)</div><div class="v mono" style="font-size:12px">${(s.annual_eps||[]).map(v=>v == null ? '-' : v.toLocaleString()).join(' → ')}</div></div>
     </div>` : s.mode === 'leader' ? `
     <div class="metrics mono">
       <div class="metric"><div class="k">고점까지</div><div class="v">${s.dist_from_high_pct}%</div></div>
