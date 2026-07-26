@@ -5,6 +5,25 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.13 [버그수정] v5.12 배포 후 "강제 새로고침(Cmd+Shift+R)을 해도" 여전히
+        v5.11의 옛날 재시도 문구("자동 재시도 X/24")가 뜨는 것 확인 — 새
+        JS 자체가 브라우저에 전혀 로드되고 있지 않다는 뜻.
+        [원인] PWA 서비스워커(sw.js)가 API가 아닌 요청(메인 HTML 문서 포함)
+        은 그냥 fetch(e.request)만 하고 있었음(cache 옵션 없음). 서비스워커의
+        fetch 핸들러를 거치는 요청은 브라우저의 "하드 리프레시로 캐시 우회"
+        지시가 서비스워커 내부 fetch 호출에는 안 이어질 수 있어서, 사용자가
+        아무리 강하게 새로고침해도 서비스워커가 계속 예전 HTML/JS를 내려주는
+        PWA의 잘 알려진 함정에 걸려 있었음. 게다가 서버의 "/" 라우트도
+        FileResponse 기본값이라 Cache-Control 헤더 자체가 없어 브라우저가
+        자체 판단으로 캐싱할 여지도 있었음(v4.92에서 /api/*엔 이미 막아뒀지만
+        메인 HTML 자체는 안 막았던 사각지대).
+        [해결] sw.js: 메인 문서(navigate 요청 · '/' · /api/*) 전부 명시적
+        cache:'no-store'로 강제. app.py: "/"와 "/sw.js" 라우트에 명시적
+        no-cache 헤더 추가(서버 쪽 이중 안전장치, /api/* no-cache 미들웨어와
+        같은 철학). 이미 등록된 서비스워커가 새 sw.js를 감지하려면 페이지를
+        한두 번 더 새로고침해야 할 수 있음(브라우저가 다음 탐색 시 sw.js
+        바이트 차이를 비교해 갱신 — skipWaiting/clients.claim은 이미 있어
+        감지만 되면 즉시 적용됨).
 v5.12 [버그수정] v5.11 이후에도 동일 — 사용자가 핵심을 짚어줌: "횟수가
         중요한 게 아니라 오래 기다려야 한다, 계속 새로고침하면 안 된다."
         [진짜 원인] v5.05~v5.11 내내 프론트 재시도 "횟수/간격"만 늘렸는데,
@@ -1431,7 +1450,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.12"
+VERSION = "v5.13"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -4199,9 +4218,16 @@ async def batch_prices(request: Request):
     return JSONResponse({"prices": prices, "closed": closed})
 
 
+_NO_CACHE_HEADERS = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"}
+
+
 @app.get("/")
 async def index():
-    return FileResponse("static/index.html")
+    # v5.13: FileResponse 기본값은 Cache-Control을 안 보내 브라우저가 자체
+    # 판단으로 이 HTML(=앱의 JS 전부)을 캐싱할 수 있음 — 배포해도 하드
+    # 리프레시로도 안 바뀌는 것처럼 보이던 문제의 한 축(서비스워커 fetch 캐시
+    # 문제와 별개로 서버도 명시적으로 막아야 이중 안전).
+    return FileResponse("static/index.html", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/sw.js")
@@ -4209,7 +4235,7 @@ async def service_worker():
     """PWA 서비스워커는 반드시 루트(/)에서 서빙해야 스코프가 사이트 전체(/)가 된다
     (v4.79). /static/sw.js로 등록하면 스코프가 /static/으로 좁아져 앱 설치가
     제대로 안 됨 — /static 밑 정적파일과 별도로 루트 라우트를 둔다."""
-    return FileResponse("static/sw.js", media_type="application/javascript")
+    return FileResponse("static/sw.js", media_type="application/javascript", headers=_NO_CACHE_HEADERS)
 
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
