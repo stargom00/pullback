@@ -5,6 +5,23 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.14 [버그수정] 사용자 재확인: "다른 탭이랑 로딩하는 게 다르다. 왜 자꾸
+        재시도를 하냐, 재시도 하지 말라고. 다른 탭 참고해." — 정확한 지적.
+        [원인] 다른 스캔 모드는 가격 번들만 준비되면 나머지(필터링·정렬)가
+        전부 CPU 연산이라 요청 하나 안에서 즉시 끝남. 실적우수만 유일하게
+        그 뒤에 "네트워크 조회"(RS70+ 상위 20종목의 실적 확인, 최악 45초)를
+        같은 요청 안에서 추가로 더 기다리고 있었음 — 이게 다른 탭과 로딩
+        경험이 다르게 "느리고 계속 재시도하는" 것처럼 보인 진짜 이유.
+        v5.09의 45초 "마감시각"은 이 대기 자체를 없앤 게 아니라 상한선만
+        둔 것이라 근본 해결이 아니었음.
+        [해결] _fetch_market_data의 콜드스타트 처리(v5.12)와 완전히 같은
+        패턴 적용: _run_scan_earnings을 얇은 래퍼로 바꿔, 실적 조회(무거운
+        부분)는 _run_scan_earnings_bg()로 백그라운드에 위임하고 이 함수
+        자체는 즉시 반환한다 — 완료된 결과가 있으면(10분 캐시) 그대로,
+        없으면 매번 즉시 pending 응답. 이제 실적우수도 다른 탭처럼 모든
+        요청이 항상 순간적으로 끝나고, 실제 계산은 사용자가 보지 않는
+        백그라운드에서 진행되다가 완료되면 다음 폴링(v5.12, 5초 간격)에
+        자연스럽게 반영된다.
 v5.13 [버그수정] v5.12 배포 후 "강제 새로고침(Cmd+Shift+R)을 해도" 여전히
         v5.11의 옛날 재시도 문구("자동 재시도 X/24")가 뜨는 것 확인 — 새
         JS 자체가 브라우저에 전혀 로드되고 있지 않다는 뜻.
@@ -1450,7 +1467,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.13"
+VERSION = "v5.14"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2176,7 +2193,7 @@ async def _get_earnings_safe(ticker: str) -> dict:
         return {"ok": False, "verdict": "unknown", "reasons": [f"조회 실패: {e}"]}
 
 
-async def _run_scan_earnings(bundle: dict) -> dict:
+async def _run_scan_earnings_inner(bundle: dict) -> dict:
     universe = bundle["universe"]
     data = bundle["data"]
     rs_ranks = bundle.get("rs_ranks", {})
@@ -2283,6 +2300,42 @@ def _pending_scan_result(market: str, mode: str) -> dict:
         "timing": None, "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "ts": time.time(),
     }
+
+
+# v5.14 [버그수정] 사용자 재확인: "다른 탭이랑 로딩하는 게 다르다. 재시도
+# 하지 말라고. 다른 탭 참고해." — 정확한 지적. 다른 모드는 가격 번들만
+# 준비되면 나머지(순회·정렬)가 전부 CPU 연산이라 요청 안에서 즉시 끝나는데,
+# 실적우수만 유일하게 그 뒤에 "네트워크 조회"(RS백분위 20종목 실적 확인,
+# 최대 45초)를 요청 하나 안에서 추가로 더 기다렸음 — 이게 다른 탭과
+# 다르게 "느리고 재시도하는" 것처럼 보인 진짜 이유. _fetch_market_data의
+# 콜드스타트 처리(v5.12)와 완전히 같은 패턴으로: 이 무거운 단계도 요청
+# 밖으로(백그라운드) 빼서, 다른 탭처럼 매 요청이 항상 즉시 끝나게 만든다.
+_earnings_scan_state: dict = {"in_progress": False, "result": None, "finished_at": 0}
+EARNINGS_SCAN_TTL = 600  # 완료된 실적우수 스캔 결과를 얼마나 재사용할지(초)
+
+
+async def _run_scan_earnings_bg(bundle: dict) -> None:
+    try:
+        result = await _run_scan_earnings_inner(bundle)
+        _earnings_scan_state["result"] = result
+        _earnings_scan_state["finished_at"] = time.time()
+    except Exception as e:
+        print(f"[earnings-scan bg] failed: {e}")
+    finally:
+        _earnings_scan_state["in_progress"] = False
+
+
+async def _run_scan_earnings(bundle: dict) -> dict:
+    """더 이상 이 함수를 호출한 요청이 실적 조회를 기다리지 않는다 — 완료된
+    결과가 있으면(TTL 이내) 그걸 반환, 없으면 백그라운드로 계산을 걸어두고
+    즉시 '준비 중'을 반환한다(다른 탭들과 동일하게 매 요청이 가벼움)."""
+    cached = _earnings_scan_state.get("result")
+    if cached is not None and time.time() - _earnings_scan_state.get("finished_at", 0) < EARNINGS_SCAN_TTL:
+        return cached
+    if not _earnings_scan_state.get("in_progress"):
+        _earnings_scan_state["in_progress"] = True
+        asyncio.create_task(_run_scan_earnings_bg(bundle))
+    return _pending_scan_result("all", "earnings")
 
 
 async def run_scan(market: str, mode: str) -> dict:
