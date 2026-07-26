@@ -5,6 +5,22 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.18 [기능개선] 카드에 섹터가 대부분 안 붙는 문제 — 사용자 리포트(SK하이닉스
+        같은 극소수만 붙고 대부분 "기타"라 안 보임).
+        [원인] sectors.py의 SECTOR_MAP은 "AI 데이터센터 밸류체인" 테마 위주로
+        손으로 큐레이션한 좁은 목록(반도체/데이터센터/클라우드 등)이라, 그
+        밖의 종목은 전부 "기타"로 빠짐 — 프론트가 "기타"는 표시 자체를
+        생략해서 섹터가 안 보이는 것처럼 느껴짐. 미국은 이미 us_sectors_auto
+        (외부 데이터셋, 2072종목)로 보완돼 있었는데 한국은 이 보완이 아예
+        없었음.
+        [해결] kr_sectors_auto.py 신규 — 네이버 금융 "업종별시세"(79개 GICS
+        스타일 업종 분류)를 전부 스크레이핑하고, 시가총액 순위 페이지와
+        교차 매칭해 .KS/.KQ 접미사를 확정한 뒤 2685종목 매핑을 생성(us_
+        sectors_auto.py와 동일한 "1회 생성 정적 파일" 패턴). _sector_of()가
+        sectors.py 정밀 매핑 → 없으면 kr_sectors_auto/us_sectors_auto 순으로
+        폴백하도록 수정. 실사용 예시로 검증(브이엠 089970.KQ, 타이거일렉
+        219130.KQ가 기존엔 "기타"였는데 이제 "반도체와반도체장비"로 정확히
+        붙음 — app.py를 실제로 import해서 _sector_of() 직접 호출로 확인).
 v5.17 [기능개선] 💰실적우수 탭 — RS70+ 전체를 확인 대상으로 확대(사용자
         요청: "조건에 맞는 건 다 검색되면 좋겠다, RS70+ 이상"). 이전엔
         RS70+ 중에서도 상위 20개만 확인해서(요청 하나 안에서 기다리던 시절의
@@ -1484,13 +1500,27 @@ try:
 except Exception as _e:
     print(f"[sectors] us_sectors_auto 미탑재 -> 자동보완 비활성: {_e}", flush=True)
     US_SECTORS_AUTO = {}
+try:
+    from kr_sectors_auto import KR_SECTORS_AUTO   # v5.18: 한국 자동 매핑 보완(네이버 업종별시세, 2685종목)
+except Exception as _e:
+    print(f"[sectors] kr_sectors_auto 미탑재 -> 자동보완 비활성: {_e}", flush=True)
+    KR_SECTORS_AUTO = {}
 
 
 def _sector_of(t: str) -> str:
+    # v5.18 [기능개선] sectors.py의 SECTOR_MAP은 "AI 데이터센터 밸류체인"
+    # 테마 위주로 손으로 큐레이션한 좁은 목록이라, 그 밖의 종목은 전부
+    # "기타"로 빠지고 카드에 섹터가 아예 안 붙었음(사용자 리포트: SK하이닉스
+    # 같은 극소수만 붙고 대부분 안 붙음). 미국은 이미 us_sectors_auto로
+    # 보완돼 있었는데 한국은 보완이 없었던 게 원인 — us_sectors_auto.py와
+    # 같은 패턴으로 kr_sectors_auto.py(네이버 업종별시세 79개 분류를
+    # 시가총액 순위 페이지와 교차 매칭해 생성) 추가.
     s = get_sector(t)
-    if s == "기타" and not t.endswith((".KS", ".KQ")):
-        return US_SECTORS_AUTO.get(t.upper(), "기타")
-    return s
+    if s != "기타":
+        return s
+    if t.endswith((".KS", ".KQ")):
+        return KR_SECTORS_AUTO.get(t.upper(), "기타")
+    return US_SECTORS_AUTO.get(t.upper(), "기타")
 from universe import get_universe, load_alerts
 import scanner as scanner_mod
 import naver_kr
@@ -1516,7 +1546,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.17"
+VERSION = "v5.18"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
