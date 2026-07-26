@@ -5,6 +5,22 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.16 [버그수정] v5.15 배포 후에도 동일 — 진짜 크래시 지점을 마침내 찾아
+        Node로 재현·검증 완료.
+        [진짜 원인] card()가 모든 모드에서 무조건 sparkSVG(s.spark,
+        s.spark_ma20)를 호출하는데(스파크라인 차트), _run_scan_earnings_inner
+        가 만드는 hit 딕셔너리엔 이 필드 자체가 없었음(다른 모든 analyze_*
+        함수는 spark/spark_ma20을 채워 반환하는데 이 파이프라인만 app.py에서
+        직접 딕셔너리를 만들면서 빠뜨림). sparkSVG 내부의
+        `closes.concat(...)`이 undefined.concat()으로 100% 크래시 —
+        annual_eps의 null 값(v5.15에서 고침)보다 먼저 실행되는 코드라, v5.15
+        수정은 맞는 수정이었지만 이 크래시에 가려 효과가 안 보였음.
+        [검증] Node로 card() 함수를 실제 index.html에서 그대로 추출해
+        (a) spark 필드 없는 실제 응답 모양으로 호출 → 정확히 동일한 에러
+        재현 확인, (b) spark 필드를 채운 수정 버전으로 호출 → 정상 렌더링
+        확인. 추측이 아니라 실행해서 확인 후 배포.
+        [해결] _run_scan_earnings_inner의 hit 딕셔너리에 spark/spark_ma20
+        추가(다른 analyze_* 함수들과 동일한 방식, c.iloc[-60:] 기반).
 v5.15 [버그수정] 💰실적우수 탭이 계속 "재시도" 화면에 걸려있던 진짜 원인 —
         사용자가 Chrome 개발자도구 Network 탭 응답 원문을 직접 캡처해줘서
         확정.
@@ -1486,7 +1502,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.15"
+VERSION = "v5.16"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2213,6 +2229,7 @@ async def _get_earnings_safe(ticker: str) -> dict:
 
 
 async def _run_scan_earnings_inner(bundle: dict) -> dict:
+    import math
     universe = bundle["universe"]
     data = bundle["data"]
     rs_ranks = bundle.get("rs_ranks", {})
@@ -2289,6 +2306,15 @@ async def _run_scan_earnings_inner(bundle: dict) -> dict:
             "annual_eps_growing": eg.get("annual_eps_growing"),
             "annual_eps": eg.get("annual_eps"),
             "accelerating": eg.get("accelerating"),
+            # v5.16 [버그수정]: 프론트 card()가 모든 모드에서 무조건
+            # sparkSVG(s.spark, s.spark_ma20)를 호출하는데, 이 모드만 그
+            # 필드를 안 채워서 undefined.concat()으로 100% 크래시 —
+            # 다른 analyze_* 함수들과 동일하게 채워준다.
+            "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
+            "spark_ma20": [
+                None if math.isnan(x) else round(float(x), 4)
+                for x in c.rolling(20).mean().iloc[-60:].tolist()
+            ],
         })
         if is_kr: diag["kr_hits"] += 1
         else: diag["us_hits"] += 1
