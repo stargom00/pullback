@@ -5,6 +5,20 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.17 [기능개선] 💰실적우수 탭 — RS70+ 전체를 확인 대상으로 확대(사용자
+        요청: "조건에 맞는 건 다 검색되면 좋겠다, RS70+ 이상"). 이전엔
+        RS70+ 중에서도 상위 20개만 확인해서(요청 하나 안에서 기다리던 시절의
+        속도 걱정 때문에 v5.07~v5.09에서 넣은 제한) 3400여 종목 중 7개만
+        나왔는데, 이는 "실적이 좋은 종목이 드물다"가 아니라 "RS70+ 종목의
+        대부분을 애초에 확인조차 안 했다"는 뜻이었음.
+        v5.14부터 실적 조회가 완전히 백그라운드로 빠져 사용자 응답 속도엔
+        영향이 없으므로: EARNINGS_TAB_MAX_CHECK 20→5000(사실상 무제한),
+        EARNINGS_TAB_DEADLINE_SEC 45초→30분(백그라운드 파이프라인 전체
+        예산), 완료 결과 캐시 10분→6시간(스캔 자체가 오래 걸리는데 짧게
+        버리면 끝나자마자 또 처음부터 도는 낭비 방지), 격리 스레드풀
+        (_earnings_executor) 4→6워커로 확대(격리돼 있어 다른 엔드포인트엔
+        영향 없음). 종목 수가 많아진 만큼 첫 백그라운드 스캔은 수십 분
+        걸릴 수 있음 — 이후엔 6시간 캐시로 즉시 응답.
 v5.16 [버그수정] v5.15 배포 후에도 동일 — 진짜 크래시 지점을 마침내 찾아
         Node로 재현·검증 완료.
         [진짜 원인] card()가 모든 모드에서 무조건 sparkSVG(s.spark,
@@ -1502,7 +1516,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.16"
+VERSION = "v5.17"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1519,7 +1533,9 @@ _executor = ThreadPoolExecutor(max_workers=8)  # v4.39.x 원복(동시성 과다
 # 불가) 계속 실행되며 풀 슬롯을 점유 — 공유 _executor(8개뿐)를 같이 쓰면
 # 이게 쌓여 다른 모든 엔드포인트(스캔·펀더멘털·분산체크 등)까지 막힐 수
 # 있음. 격리해서 최악의 경우에도 피해 범위를 실적 조회로만 한정.
-_earnings_executor = ThreadPoolExecutor(max_workers=4)
+# v5.17: RS70+ 전체를 훑게 되면서 종목 수가 확 늘어(수백~천여 개) 4워커로는
+# 너무 오래 걸림 — 격리 풀이라 다른 엔드포인트에 영향 없이 늘려도 안전.
+_earnings_executor = ThreadPoolExecutor(max_workers=6)
 
 
 def _downcast(df):
@@ -2207,10 +2223,18 @@ async def _run_scan_ibd9(bundle: dict) -> dict:
 # (_earnings_executor, max_workers=4)로 분리해 최악의 경우에도 다른
 # 엔드포인트가 막히지 않게 하고, BATCH를 그 풀 크기(4)에 맞춤 + 조회 대상을
 # 40→20으로 더 줄여 전체 최악 대기시간을 이전 수준(약 60초)으로 유지.
+# v5.17 [기능개선] 사용자 요청: "조건에 맞는 건 다 검색되면 좋겠다, RS70+
+# 이상 전부." 이전엔 RS70+ 중에서도 상위 20개만 확인해서(요청 하나 안에서
+# 기다리던 시절의 속도 걱정 때문) 3400여 종목 중 실적 조건까지 통과한 게
+# 7개뿐이었음 — 이 중 실제로는 "RS70+ 인데 확인조차 안 된" 종목이 훨씬 많이
+# 있었을 거라는 뜻. v5.14부터 실적 조회가 완전히 백그라운드로 빠져서 사용자
+# 응답 속도엔 영향이 없으므로, 이제 RS70+ 전체를 확인 대상으로 늘림(사실상
+# 무제한 — 유니버스 규모를 넉넉히 상회하는 값으로 캡만 걸어둠). 배경 스캔
+# 자체는 종목 수에 비례해 오래 걸릴 수 있음(수백~천여 종목이면 수십 분).
 EARNINGS_TAB_RS_MIN = 70
-EARNINGS_TAB_MAX_CHECK = 20
+EARNINGS_TAB_MAX_CHECK = 5000
 EARNINGS_TAB_PER_TICKER_TIMEOUT = 12  # 초
-EARNINGS_TAB_DEADLINE_SEC = 45  # 파이프라인 전체 예산(v5.09) — 넘으면 그때까지 결과로 응답
+EARNINGS_TAB_DEADLINE_SEC = 1800  # 백그라운드 파이프라인 전체 예산(30분) — 넘으면 그때까지 결과로 응답
 
 
 async def _get_earnings_safe(ticker: str) -> dict:
@@ -2263,7 +2287,7 @@ async def _run_scan_earnings_inner(bundle: dict) -> dict:
     # 넘으면 이후 배치는 건너뛰고 그때까지 찾은 것만으로 응답한다. 이러면
     # 총 응답시간이 항상 EARNINGS_TAB_DEADLINE_SEC 근처로 상한선이 생김.
     tickers = [t for t, _ in candidates]
-    BATCH = 4
+    BATCH = 6   # v5.17: _earnings_executor의 max_workers(6)에 맞춤
     eg_map = {}
     deadline = time.time() + EARNINGS_TAB_DEADLINE_SEC
     timed_out = False
@@ -2356,7 +2380,10 @@ def _pending_scan_result(market: str, mode: str) -> dict:
 # 콜드스타트 처리(v5.12)와 완전히 같은 패턴으로: 이 무거운 단계도 요청
 # 밖으로(백그라운드) 빼서, 다른 탭처럼 매 요청이 항상 즉시 끝나게 만든다.
 _earnings_scan_state: dict = {"in_progress": False, "result": None, "finished_at": 0}
-EARNINGS_SCAN_TTL = 600  # 완료된 실적우수 스캔 결과를 얼마나 재사용할지(초)
+# v5.17: RS70+ 전체를 훑게 되면서 스캔 자체가 수십 분 걸릴 수 있어, 완료된
+# 결과를 너무 짧게(10분) 버리면 다 끝나자마자 또 처음부터 다시 도는 낭비가
+# 생김 — 종목별 실적 캐시(_EARNINGS_TTL)와 맞춰 6시간으로.
+EARNINGS_SCAN_TTL = 6 * 3600
 
 
 async def _run_scan_earnings_bg(bundle: dict) -> None:
@@ -3221,7 +3248,7 @@ async def _attach_earnings_badges(hits: list) -> None:
     if not hits:
         return
     tickers = [h["ticker"] for h in hits]
-    BATCH = 4   # v5.08: _earnings_executor의 max_workers(4)에 맞춤
+    BATCH = 6   # v5.17: _earnings_executor의 max_workers(6)에 맞춤
     results = {}
     for i in range(0, len(tickers), BATCH):
         chunk = tickers[i:i + BATCH]

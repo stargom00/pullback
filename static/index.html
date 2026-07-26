@@ -365,7 +365,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.16</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.17</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1022,7 +1022,7 @@ const DESC = {
   super: 'RS 95+ — 지금 시장에서 가장 강한 종목들 (위치 불문). 상태 라벨로 담을곳/대기 판단',
   stage2: '📐 미너비니 Stage2 트렌드 템플릿(한국 전용) · 유동성(20일 평균 거래대금 20억+) → RS 3M·6M·12M 가중 백분위 70+ → 현재가>50MA>150MA>200MA(200MA 1개월↑) + 52주저점×1.30↑ + 52주고점×0.75↑(-25%이내) → 거래량수축+MA(5/10/20)수렴 필터 → A/B 티어링(A=고점-10%이내). 0개인 날은 필터 문제가 아니라 시장이 약하다는 신호',
   ibd9: '🇺🇸 IBD 9조건 스크린(미국 전용) · 가격$5+ · 50일평균거래량50만주+ · 50일평균거래대금$500만+ · 3개월수익률30%+ · 21일ATR4%+ · 베타1+ · 시총$2억+ · A/D등급 A/B(⚠️ IBD 원본 아닌 U/D Volume Ratio 근사) · 펀드보유수는 무료데이터 한계로 기관보유비율로 대체(참고용)',
-  earnings: '💰 미너비니 CAN SLIM 실적 기준(한국+미국) · 3년 연간 EPS 실제치 연속증가 + 최근분기 EPS YoY 25%+ + 매출 YoY 동반증가 전부 충족 종목만. RS70+ 상위 종목 위주로 먼저 거른 뒤 실적을 확인해서(비용 큰 조회라 전체 유니버스는 스캔 못 함) 놓치는 종목이 있을 수 있어요 — 특정 종목이 궁금하면 /api/debug/{ticker}로 직접 확인',
+  earnings: '💰 미너비니 CAN SLIM 실적 기준(한국+미국) · 3년 연간 EPS 실제치 연속증가 + 최근분기 EPS YoY 25%+ + 매출 YoY 동반증가 전부 충족 종목만. RS70+ 전체를 백그라운드로 확인(종목 수가 많아 첫 스캔은 수십 분 걸릴 수 있음 — 완료되면 6시간 캐시로 이후엔 즉시) — 특정 종목이 궁금하면 /api/debug/{ticker}로 직접 확인',
   breakout: 'RS 80+ · 베이스 천장을 거래량 동반 돌파 · 피벗 +5% 이내=유효 / +5~12%=연장 추격주의',
   imminent: '🎯 돌파 직전 · 천장(피벗) 바로 아래(-5%~0%)까지 올라왔지만 아직 안 뚫음 · 거래량 수축=가점 · RS 50+ — 돌파 전날 미리 포착',
   surge: '⚠️ 단타 신호(추세 아님) · 급등 첫날 포착: 당일 +7%↑ & 거래량 4배↑ & 직전 며칠은 조용 · RS 무관',
