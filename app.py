@@ -5,6 +5,20 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.21 [버그수정] strong_pivot 카드에 "눌림 깊이/지지선"이 undefined로 뜨는
+        문제 — 사용자 리포트.
+        [원인] static/index.html의 card() 메인 지표(metrics) 블록은
+        s.mode별로 분기하는 별도의 삼항연쇄인데(배지 블록과는 다른 체인),
+        v5.20에서 strong_pivot을 이 체인에 추가하지 않아 마지막 default
+        분기(눌림목 전용: pullback_pct/support_ma/ma_dist_pct)로 떨어짐.
+        analyze_imminent는 이 필드들을 아예 반환하지 않아 전부 undefined로
+        찍힌 것 — || 0 같은 방어값으로 가리지 않고 근본 원인(잘못된 분기)을
+        고쳤다.
+        [해결] s.mode === 'strong_pivot' 전용 분기 추가 — 눌림깊이/지지선
+        대신 analyze_imminent가 실제로 주는 필드(피벗까지=pivot_dist_pct,
+        두드림=touch_count, 피벗=pivot)로 표시. Node로 card() 추출해 실제
+        렌더링 결과에 'undefined' 문자열이 없음을 확인, 기존 pullback 모드
+        카드는 회귀 없이 그대로 눌림깊이/지지선 표시됨도 함께 확인.
 v5.20 [기능추가] 실험 탭 strong_pivot("강한피벗") 신규 — analyze_imminent(피벗
         형성 중, 원본 미수정) ∩ (Stage2 통과 OR IBD9 통과). Stage2=한국전용,
         IBD9=미국전용이라 게이트가 시장별로 자연히 갈리고, OR 게이트라 0개
@@ -1587,7 +1601,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.20"
+VERSION = "v5.21"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
