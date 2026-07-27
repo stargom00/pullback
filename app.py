@@ -5,6 +5,32 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.22 [기능개선] strong_pivot 탭을 "초기 국면 + 매집 우위 + 강한 조건 겹침"만
+        남도록 3단 필터로 강화 — analyze_imminent/analyze_stage2/
+        analyze_ibd9_* 원본은 무수정, _run_scan_strong_pivot만 수정.
+        1층(하드컷): late_level≠none(후기 스테이지) 또는 ext200_pct가
+        STRONG_PIVOT_MAX_EXT200(30) 초과면 제외 — 이미 크게 오른 뒤의
+        피벗은 "초기 국면"이 아니므로.
+        2층(매집 필수화): 품질풀(Stage2/IBD9) OR게이트 통과 + U/D Volume
+        Ratio가 STRONG_PIVOT_MIN_UD(1.0) 미만이면 제외 — 구조가 좋아도
+        지금 매집 중이 아니면 배제.
+        3층(강도 스코어): pool_count(20점/개, 최대 40) + 매집강도(최대
+        20점, ud_vol을 1.0~3.0 구간에서 선형 환산) + 두드림(최대 15점) +
+        거래량수축/변동폭축소(각 10점) + RS(최대 15점)로 strength_score
+        산출 → 내림차순 정렬. pool_count>=2(Stage2+IBD9 동시 통과)면 그
+        자체로 최상위 신호로 보고 강도 컷 면제, 아니면
+        STRONG_PIVOT_MIN_STRENGTH(40) 미만이면 제외.
+        임계 상수 3개 전부 파일 상단에 분리 — 배포 후 diag(imminent_pass/
+        dropped_late/dropped_ext200/gate_pass/dropped_accum/dropped_weak/
+        final_hits)를 보고 단계별로 완화 가능.
+        실제 실행 검증(660종목: KR60+US600): imminent_pass 28→dropped_late
+        7→dropped_ext200 15→gate_pass 1→dropped_accum 0→dropped_weak 0→
+        final_hits 1(SNOW). strength_score 66.0을 가중치 수식으로 손계산해
+        정확히 일치함을 확인(20+7.1+6+10+10+12.9=65.98≈66.0).
+        [카드 버그 추가수정] strong_pivot 카드의 4번째 지표를 RSI에서
+        ud_vol(U/D 거래량)로 교체 — 이 탭의 핵심 신호(매집 우위)를 카드에서
+        바로 보이게. Node로 card() 추출해 크래시 없음 + 'undefined' 없음
+        확인.
 v5.21 [버그수정] strong_pivot 카드에 "눌림 깊이/지지선"이 undefined로 뜨는
         문제 — 사용자 리포트.
         [원인] static/index.html의 card() 메인 지표(metrics) 블록은
@@ -1601,7 +1627,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.21"
+VERSION = "v5.22"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2184,13 +2210,31 @@ async def _run_scan_stage2(bundle: dict) -> dict:
     }
 
 
-# ── 강한피벗(strong_pivot) 실험 탭 (v5.20) ──
+# ── 강한피벗(strong_pivot) 실험 탭 (v5.20, v5.22 강화) ──
 # 정의: analyze_imminent 통과(피벗 형성 중) ∩ (Stage2 통과 OR IBD9 통과).
 # Stage2=KR전용, IBD9=US전용이라 자연히 시장별로 갈리고, 게이트는 OR(둘 중
 # 하나만 통과해도 인정)이라 0개 방지 목적. analyze_imminent/analyze_stage2/
 # analyze_ibd9_*와 _run_scan_stage2/_run_scan_ibd9 원본은 전혀 수정하지 않고
 # 그 결과(hits의 ticker 집합)만 재사용한다 — 이 탭이 통째로 사라져도 기존
 # imminent/stage2/ibd9 탭에는 아무 영향이 없다(순수 additive, 롤백 용이).
+#
+# v5.22: "초기 국면 + 매집 우위 + 강한 조건 겹침"만 남도록 3단 필터 추가.
+# 1층(하드컷): 후기 스테이지/과확장 제외 — 이 탭의 목적은 "아직 초기인" 피벗만
+#   보는 것이라, 이미 크게 오른 뒤의 베이스(late_level≠none)나 200일선과
+#   너무 멀어진 종목(ext200_pct 초과)은 대상이 아님.
+# 2층(매집 필수화): 품질풀(Stage2/IBD9) OR게이트 통과 + U/D Volume Ratio가
+#   1.0 이상(매집 우위 확인)이어야 함 — 게이트만으로는 "구조가 좋다"까지만
+#   보장하고 "지금 매집 중이다"는 못 보장하므로 별도 컷으로 분리.
+# 3층(강도 스코어): 남은 후보를 strength_score로 다시 랭킹하고, pool_count가
+#   2(Stage2+IBD9 동시 통과)면 그 자체로 최상위 신호로 보고 강도 컷을 면제,
+#   아니면 strength_score 임계를 넘는 것만 최종 통과.
+# 임계 상수 3개(MAX_EXT200/MIN_UD/MIN_STRENGTH)는 모두 파일 상단에 빼서
+# 배포 후 diag의 단계별 탈락 수를 보고 완화할 수 있게 한다.
+STRONG_PIVOT_MAX_EXT200 = 30    # 200일선 이격 +30% 초과면 과확장으로 제외(1층)
+STRONG_PIVOT_MIN_UD = 1.0       # U/D Volume Ratio 1.0 미만이면 매집 우위 아님(2층)
+STRONG_PIVOT_MIN_STRENGTH = 40  # strength_score 최소 컷 — pool_count>=2면 면제(3층)
+
+
 async def _run_scan_strong_pivot(bundle: dict) -> dict:
     universe = bundle["universe"]
     data = bundle["data"]
@@ -2209,7 +2253,9 @@ async def _run_scan_strong_pivot(bundle: dict) -> dict:
         ibd9_set = set()
 
     diag = {"kr_universe": 0, "us_universe": 0, "kr_fetched": 0, "us_fetched": 0,
-            "kr_hits": 0, "us_hits": 0, "imminent_pass": 0, "gate_pass": 0}
+            "kr_hits": 0, "us_hits": 0, "imminent_pass": 0,
+            "dropped_late": 0, "dropped_ext200": 0, "gate_pass": 0,
+            "dropped_accum": 0, "dropped_weak": 0, "final_hits": 0}
     for t in universe:
         if naver_kr.is_kr(t): diag["kr_universe"] += 1
         else: diag["us_universe"] += 1
@@ -2226,6 +2272,15 @@ async def _run_scan_strong_pivot(bundle: dict) -> dict:
             continue
         diag["imminent_pass"] += 1
 
+        # ── 1층 하드컷: 후기 스테이지 / 과확장 제외 ──
+        if result.get("late_level") not in (None, "none"):
+            diag["dropped_late"] += 1
+            continue
+        if (result.get("ext200_pct") or 0) > STRONG_PIVOT_MAX_EXT200:
+            diag["dropped_ext200"] += 1
+            continue
+
+        # ── 품질풀 OR 게이트 (Stage2 / IBD9) ──
         pools = []
         if t in stage2_set:
             pools.append("Stage2")
@@ -2235,6 +2290,12 @@ async def _run_scan_strong_pivot(bundle: dict) -> dict:
             continue
         diag["gate_pass"] += 1
 
+        # ── 2층: 매집 필수화 — U/D Volume Ratio 1.0 미만이면 제외 ──
+        ud = result.get("ud_vol")
+        if ud is None or ud < STRONG_PIVOT_MIN_UD:
+            diag["dropped_accum"] += 1
+            continue
+
         # ── 저유동성 하드 필터 — 기존 run_scan과 동일 기준 (KR 3억원/US $2M) ──
         avg_turn = result.get("avg_turnover") or 0
         if avg_turn > 0:
@@ -2242,6 +2303,29 @@ async def _run_scan_strong_pivot(bundle: dict) -> dict:
             if avg_turn < floor_:
                 diag["liquidity_dropped"] = diag.get("liquidity_dropped", 0) + 1
                 continue
+
+        # ── 3층: 강도 스코어 (가중치 근거는 위 주석 참고) ──
+        # pool_count 20점/개(최대 40) — 이 탭의 핵심 선별 기준이라 최우선.
+        # 매집강도 최대 20점 — 게이트(1.0)를 넘은 만큼을 0~2.0 구간에서 선형 환산.
+        # 두드림(touch_count) 최대 15점(회당 3점, 5회 캡) — 매물벽 약화 신호.
+        # 거래량수축/변동폭축소 각 10점 고정 — "조용히 준비 중"인 초기 국면의 직접 증거.
+        # RS 최대 15점 — 이미 여러 게이트를 통과했으므로 추가 변별력은 작게만.
+        touch = result.get("touch_count") or 0
+        rs = result.get("rs") or 0
+        pool_score = len(pools) * 20
+        accum_score_component = 20 * max(0.0, min((ud - STRONG_PIVOT_MIN_UD) / 2.0, 1.0))
+        touch_score = min(touch, 5) * 3
+        vol_dry_score = 10 if result.get("vol_dry") else 0
+        tightening_score = 10 if result.get("tightening") else 0
+        rs_score = 15 * rs / 99
+        strength_score = round(pool_score + accum_score_component + touch_score
+                               + vol_dry_score + tightening_score + rs_score, 1)
+        strength_score = min(strength_score, 100.0)
+
+        # ── 최소 컷: pool_count>=2(겹침 자체가 최상위 신호)면 면제, 아니면 강도 임계 필요 ──
+        if len(pools) < 2 and strength_score < STRONG_PIVOT_MIN_STRENGTH:
+            diag["dropped_weak"] += 1
+            continue
 
         mkt = "KR" if is_kr else "US"
         alert_kind = alerts.get(t.upper())
@@ -2255,11 +2339,13 @@ async def _run_scan_strong_pivot(bundle: dict) -> dict:
             "mode": "strong_pivot",
             "pools": pools,
             "pool_count": len(pools),
+            "strength_score": strength_score,
         })
         if is_kr: diag["kr_hits"] += 1
         else: diag["us_hits"] += 1
 
-    hits.sort(key=lambda x: (x["pool_count"], x.get("triggered", False), x.get("score") or 0), reverse=True)
+    hits.sort(key=lambda x: x["strength_score"], reverse=True)
+    diag["final_hits"] = len(hits)
     await _attach_earnings_badges(hits[:30])
 
     from collections import Counter

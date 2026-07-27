@@ -365,7 +365,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.21</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.22</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -912,7 +912,7 @@ function card(s) {
       <div class="metric"><div class="k">피벗까지</div><div class="v" style="color:${s.pivot_dist_pct <= 2 ? 'var(--up)' : 'var(--amber)'}">+${s.pivot_dist_pct}%</div></div>
       <div class="metric"><div class="k">두드림</div><div class="v">${s.touch_count ?? '-'}회</div></div>
       <div class="metric"><div class="k">피벗</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
-      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
+      <div class="metric"><div class="k">U/D 거래량</div><div class="v" style="color:${(s.ud_vol ?? 0) >= 1 ? 'var(--green)' : '#e0a030'}" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집(강한피벗 탭은 1.0 미만이면 애초에 제외됨)">${s.ud_vol ?? '-'}</div></div>
     </div>` : `
     <div class="metrics mono">
       <div class="metric"><div class="k">눌림 깊이</div><div class="v">-${s.pullback_pct}%</div></div>
