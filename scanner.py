@@ -3065,6 +3065,165 @@ PATTERN_CONFIG = {
 }
 
 
+# ══════════════════════════════════════════════════════
+# A-B-C 매집 스코어 (v5.19) — ABC상한가 A구간(횡보 베이스)의 "조용한 물량
+# 수집" 흔적을 수치화. 순위 정렬용 보조 지표일 뿐, 진입 신호도 상한가
+# 확률도 아님. 승률/확률 문구 절대 사용 금지.
+#
+# 가중치·정규화 구간·임계값은 전부 검증된 값이 아니라 사전 추측 —
+# 모듈 상단 상수로 빼서 튜닝 가능하게 함(코드 중간 매직넘버 금지).
+# ══════════════════════════════════════════════════════
+ACCUM_WEIGHTS = {
+    "vol_ratio":      0.25,
+    "atr_compress":   0.25,
+    "close_strength": 0.20,
+    "ud_vol":         0.10,
+    "vol_pickup":     0.10,
+    "range_tight":    0.10,
+}
+# 정규화 구간 (lo, hi) — _norm()에 그대로 사용. lo=0점 경계, hi=1점 경계.
+# lo > hi로 주면 "낮을수록 강함" 지표를 자동으로 역방향 정규화함
+# (atr_compress·range_tight가 이 경우).
+ACCUM_NORM_RANGES = {
+    "vol_ratio":      (1.0, 2.0),
+    "atr_compress":   (1.2, 0.5),    # 역방향: 1.2(약함)→0, 0.5(강함)→1
+    "close_strength": (0.3, 0.8),
+    "ud_vol":         (0.8, 1.6),
+    "vol_pickup":     (0.9, 1.6),
+    "range_tight":    (0.25, 0.10),  # 역방향: 0.25(ABC게이트 상한, 약함)→0, 0.10(강함)→1
+}
+# "강함" 판정 임계값 (accum_parts의 pass 플래그용) — 스펙 표 그대로.
+ACCUM_PASS_THRESHOLDS = {
+    "vol_ratio":      ("ge", 1.3),
+    "atr_compress":   ("le", 0.8),
+    "close_strength": ("ge", 0.55),
+    "ud_vol":         ("ge", 1.1),
+    "vol_pickup":     ("ge", 1.15),
+    "range_tight":    ("le", 0.15),
+}
+ACCUM_SYNERGY_BONUS = 10   # vol_ratio>=1.3 AND atr_compress<=0.8 동시 성립 시 가산
+ACCUM_BADGE_MIN = 65       # 🧲 배지 표시 하한
+ACCUM_MIN_A_BARS = 15
+ACCUM_MIN_PRIOR_BARS = 40
+ACCUM_MAX_BAD_VOL_BARS = 3   # A구간 내 거래량 0/NaN 허용 상한(이상이면 미달)
+
+
+def _norm(value: float, lo: float, hi: float) -> float:
+    """선형 클램프 정규화: lo→0, hi→1, 범위 밖은 [0,1]로 잘림.
+    lo>hi로 주면 자동으로 역방향(작을수록 1에 가까움)이 된다."""
+    if hi == lo:
+        return 0.0
+    x = (value - lo) / (hi - lo)
+    return max(0.0, min(1.0, x))
+
+
+def _accum_pass(key: str, raw: float) -> bool:
+    op, th = ACCUM_PASS_THRESHOLDS[key]
+    return raw >= th if op == "ge" else raw <= th
+
+
+def accumulation_score(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series,
+                       a_start: int, a_end: int) -> dict:
+    """A구간(a_start~a_end, 절대 정수 위치, 오래된→최신 순)의 매집 흔적 채점.
+    반환: {"score": int|None, "reason": str|None, "parts": {...}|None, "synergy": bool|None}
+    데이터 부족 시 score=None + 구체적 reason — 0점으로 채우지 않음(None과
+    0점은 의미가 다름).
+    """
+    a_len = a_end - a_start
+    if a_len < ACCUM_MIN_A_BARS:
+        return {"score": None, "reason": "A구간_15봉미만", "parts": None, "synergy": None}
+
+    prior_start = max(0, a_start - 60)
+    prior_len = a_start - prior_start
+    if prior_len < ACCUM_MIN_PRIOR_BARS:
+        return {"score": None, "reason": "기준윈도우부족", "parts": None, "synergy": None}
+
+    a_vol = v.iloc[a_start:a_end]
+    bad_vol = int(((a_vol.isna()) | (a_vol <= 0)).sum())
+    if bad_vol >= ACCUM_MAX_BAD_VOL_BARS:
+        return {"score": None, "reason": "거래량데이터결측", "parts": None, "synergy": None}
+
+    a_c, a_h, a_lo = c.iloc[a_start:a_end], h.iloc[a_start:a_end], lo.iloc[a_start:a_end]
+    p_vol = v.iloc[prior_start:a_start]
+    p_c, p_h, p_lo = c.iloc[prior_start:a_start], h.iloc[prior_start:a_start], lo.iloc[prior_start:a_start]
+
+    raw = {}
+
+    # 1) vol_ratio — A구간 평균거래량 / 직전 평균거래량
+    p_vol_mean = float(p_vol.mean())
+    raw["vol_ratio"] = float(a_vol.mean()) / p_vol_mean if p_vol_mean > 0 else 0.0
+
+    # 2) atr_compress — atr_pct(A) / atr_pct(prior). atr()는 시리즈 끝에서
+    #    period개만 보는 tail-relative 함수라, 각 구간 앞에 1봉을 더 붙여
+    #    슬라이스하고 period=구간길이로 명시(첫 봉의 전일종가까지 확보).
+    def _seg_atr_pct(seg_h, seg_lo, seg_c, start, end):
+        ext_start = max(0, start - 1)
+        period = end - start
+        _h, _lo, _c = h.iloc[ext_start:end], lo.iloc[ext_start:end], c.iloc[ext_start:end]
+        atr_val = atr(_h, _lo, _c, period=period)
+        mean_close = float(seg_c.mean())
+        return (atr_val / mean_close * 100) if mean_close > 0 else 0.0
+
+    a_atr_pct = _seg_atr_pct(a_h, a_lo, a_c, a_start, a_end)
+    p_atr_pct = _seg_atr_pct(p_h, p_lo, p_c, prior_start, a_start)
+    raw["atr_compress"] = a_atr_pct / p_atr_pct if p_atr_pct > 0 else 1.0
+
+    # 3) close_strength — (close-low)/(high-low) >= 0.6인 봉의 비율. high==low는 제외.
+    rng = a_h - a_lo
+    valid = rng > 0
+    n_valid = int(valid.sum())
+    if n_valid > 0:
+        pos = (a_c - a_lo) / rng
+        strong = int(((pos >= 0.6) & valid).sum())
+        raw["close_strength"] = strong / n_valid
+    else:
+        raw["close_strength"] = 0.0
+
+    # 4) ud_vol — A구간 상승봉 거래량합 / 하락봉 거래량합 (전일 대비, 1봉 앞 포함해 비교)
+    ext_start = max(0, a_start - 1)
+    c_ext = c.iloc[ext_start:a_end]
+    v_ext = v.iloc[ext_start:a_end]
+    diffs = c_ext.diff().iloc[1:]     # a_start~a_end-1 구간의 전일대비 변화
+    vols_for_diff = v_ext.iloc[1:]
+    up_vol = float(vols_for_diff[diffs > 0].sum())
+    down_vol = float(vols_for_diff[diffs < 0].sum())
+    ud_vol_none = down_vol <= 0
+    raw["ud_vol"] = (up_vol / down_vol) if not ud_vol_none else None
+
+    # 5) vol_pickup — A구간 전반부 대비 후반부 평균거래량 비율
+    mid = a_start + a_len // 2
+    first_half = v.iloc[a_start:mid]
+    second_half = v.iloc[mid:a_end]
+    fh_mean = float(first_half.mean()) if len(first_half) > 0 else 0.0
+    raw["vol_pickup"] = (float(second_half.mean()) / fh_mean) if fh_mean > 0 else 0.0
+
+    # 6) range_tight — (최고가-최저가)/최저가
+    a_hi_val, a_lo_val = float(a_h.max()), float(a_lo.min())
+    raw["range_tight"] = (a_hi_val - a_lo_val) / a_lo_val if a_lo_val > 0 else 1.0
+
+    # ── 정규화 + 가중합 (ud_vol None이면 그 가중치 제외하고 나머지 재정규화) ──
+    parts = {}
+    weight_sum = 0.0
+    score_sum = 0.0
+    for key, w in ACCUM_WEIGHTS.items():
+        r = raw[key]
+        if r is None:
+            parts[key] = {"raw": None, "norm": None, "pass": None}
+            continue
+        lo_b, hi_b = ACCUM_NORM_RANGES[key]
+        n = _norm(r, lo_b, hi_b)
+        parts[key] = {"raw": round(r, 3), "norm": round(n, 3), "pass": _accum_pass(key, r)}
+        weight_sum += w
+        score_sum += w * n
+
+    base_score = (score_sum / weight_sum) if weight_sum > 0 else 0.0
+    synergy = bool(parts["vol_ratio"]["pass"] and parts["atr_compress"]["pass"])
+    final = base_score * 100 + (ACCUM_SYNERGY_BONUS if synergy else 0)
+    final = max(0.0, min(100.0, final))
+
+    return {"score": int(round(final)), "reason": None, "parts": parts, "synergy": synergy}
+
+
 def _pat_htf(c, h, lo, v):
     """치솟은깃발(High Tight Flag): ≤45봉 내 +90% 급등 후 3~20봉 얕은(≤25%) 깃발."""
     n = len(c)
@@ -3345,6 +3504,16 @@ def _pat_abc(c, h, lo, v):
         _buy_hi = round(buy_zone_hi, 2) if stage == "수렴중" else None
         _target = round(peak_val, 2) if stage == "수렴중" else None
 
+        # v5.19: 매집 스코어 — A구간(a_start~a_end) 채점. 순위 정렬 보조용,
+        # 진입신호/확률 아님. a_start/a_end는 여기서 처음 반환에 노출됨
+        # (기존엔 내부 계산에만 쓰고 버려졌음).
+        _accum = accumulation_score(c, h, lo, v, a_start, a_end)
+        try:
+            _a_start_date = c.index[a_start].strftime("%Y-%m-%d")
+            _a_end_date = c.index[a_end - 1].strftime("%Y-%m-%d")
+        except Exception:
+            _a_start_date = _a_end_date = None
+
         return {
             "pattern": "ABC상한가",
             "pattern_emoji": "🎆",
@@ -3368,6 +3537,12 @@ def _pat_abc(c, h, lo, v):
             "pat_ready": stage.startswith("폭발") or stage == "첫폭발",
             "pat_missing": [] if "폭발" in stage else ["거래량 폭발 대기"],
             "near_lo": -25.0,
+            "a_start": a_start, "a_end": a_end,          # v5.19: 절대 정수 위치 노출
+            "a_start_date": _a_start_date, "a_end_date": _a_end_date,
+            "accum_score": _accum["score"],
+            "accum_reason": _accum["reason"],
+            "accum_parts": _accum["parts"],
+            "accum_synergy": _accum["synergy"],
         }
     except Exception:
         return None
@@ -3435,10 +3610,25 @@ def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
     _mg = _merger_block(c, h, lo, v)
     if _mg["merger"]:
         return None
+    # v5.19: 매집 스코어는 _pat_abc()가 계산해 best dict에 넣어두지만, 이
+    # 함수는 best를 통째로 스프레드하지 않고 필드를 골라서 새 dict를 만들기
+    # 때문에 따로 안 퍼올리면 계산만 되고 API까지 안 감. ABC상한가가 최종
+    # 승자일 때만 의미있는 필드라(다른 3개 패턴엔 "A구간" 개념이 없음)
+    # best["pattern"] == "ABC상한가"일 때만 채운다.
+    _is_abc = best["pattern"] == "ABC상한가"
+    _accum_fields = {
+        "accum_score": best.get("accum_score") if _is_abc else None,
+        "accum_reason": best.get("accum_reason") if _is_abc else None,
+        "accum_parts": best.get("accum_parts") if _is_abc else None,
+        "accum_synergy": best.get("accum_synergy") if _is_abc else None,
+        "a_start_date": best.get("a_start_date") if _is_abc else None,
+        "a_end_date": best.get("a_end_date") if _is_abc else None,
+    }
     return {
         "mode": "pattern",
         "grade": _tt["grade"], "tt_pass": _tt["passed"], "tt_fails": _tt["fails"],
         **_mg,
+        **_accum_fields,
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
         "score": round(score, 1),

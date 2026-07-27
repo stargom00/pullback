@@ -5,6 +5,28 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.19 [기능추가] A-B-C 상한가 패턴에 매집 스코어(accumulation_score) 추가.
+        기존 ABC 감지기(_pat_abc)가 찾아낸 A구간(횡보 베이스)의 일봉 OHLCV만
+        가지고 "조용한 물량 수집" 흔적을 0~100점으로 채점 — 이미 걸린 ABC
+        후보들 사이의 순위 정렬용 보조 지표. 진입 신호도 상한가 확률도 아님
+        (승률 문구 없음, 백테스트 없음).
+        6개 지표(거래량비/ATR수축비/종가강도/U·D거래량/거래량증가비/변동폭비)
+        를 정규화해 가중합, 데이터 부족(A<15봉, 기준윈도우<40봉, 거래량 결측
+        3봉+)이면 0점이 아니라 score=None+reason으로 구분. ud_vol만 하락봉이
+        없어 계산 불가할 때는 그 가중치(0.10)를 제외하고 나머지로 재정규화
+        (신규 test_udvol_renorm.py로 수기 계산과 정확히 일치함을 확인).
+        analyze_pattern()이 하위 감지기 dict를 통째로 안 넘기고 필드를
+        수동으로 골라 담는 구조라, ABC가 이겼을 때만 accum_* 필드를 넘기도록
+        명시적으로 연결(안 하면 조용히 누락되는 함정이었음).
+        실제 KR 종목 스캔(1504종목 중 364개 확인)에서 5건 실검출로 점수가
+        vol_ratio/ud_vol 동시 충족 종목(42점)과 무충족 종목(18점)을 구조적
+        으로 구분함을 확인. scanner.py는 순수 additive(190줄 추가/0줄 삭제,
+        기존 ABC 게이트 조건 무변경).
+        UI(static/index.html): 🧲매집흔적 배지(65점↑ 강조, 미만은 흐리게),
+        ⚠️매집판정불가 배지(None+사유), 툴팁에 6개 원값+A구간 날짜(승률
+        문구 없음), "🧲 매집순" 정렬 토글(None은 맨 뒤) 추가.
+        /api/debug/{ticker}에 "매집채점" 섹션 추가 — ABC 아니면 "ABC패턴
+        미검출 — 매집채점 대상 아님"으로 명시.
 v5.18 [기능개선] 카드에 섹터가 대부분 안 붙는 문제 — 사용자 리포트(SK하이닉스
         같은 극소수만 붙고 대부분 "기타"라 안 보임).
         [원인] sectors.py의 SECTOR_MAP은 "AI 데이터센터 밸류체인" 테마 위주로
@@ -1546,7 +1568,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.18"
+VERSION = "v5.19"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -3244,6 +3266,25 @@ async def debug_ticker(ticker: str):
         }
     except Exception as _e:
         payload["실적성장"] = {"error": str(_e)}
+    # v5.19: A-B-C 매집 스코어 진단 — ABC상한가가 아니면 채점 대상 아님을 명시
+    try:
+        from scanner import analyze_pattern
+        _pat = analyze_pattern(df)
+        if _pat is None or _pat.get("pattern") != "ABC상한가":
+            _found = _pat.get("pattern") if _pat else None
+            payload["매집채점"] = {
+                "상태": "ABC패턴 미검출 — 매집채점 대상 아님" + (f" (검출된 패턴: {_found})" if _found else ""),
+            }
+        else:
+            payload["매집채점"] = {
+                "A구간": f"{_pat.get('a_start_date')} ~ {_pat.get('a_end_date')}",
+                "매집점수": _pat.get("accum_score"),
+                "판정불가사유": _pat.get("accum_reason"),
+                "시너지가점": _pat.get("accum_synergy"),
+                "raw_parts": _pat.get("accum_parts"),
+            }
+    except Exception as _e:
+        payload["매집채점"] = {"error": str(_e)}
     # ensure_ascii=False + charset 명시 → 모바일에서 한글 안 깨짐
     return Response(
         content=_json.dumps(payload, ensure_ascii=False, indent=2),

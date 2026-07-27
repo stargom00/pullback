@@ -365,7 +365,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.18</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.19</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -394,6 +394,7 @@ tr.editing{background:rgba(242,179,61,.06)}
     <button class="tab" id="strictToggle" title="RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓ 만 표시 (주도주 엄선)">🎯 주도주만</button>
     <button class="tab" id="riskSortToggle" title="손절폭(리스크%) 좁은 순으로 정렬 — 타이트한 진입 자리가 위로. 단 ATR(일상 변동)보다 좁은 손절은 노이즈에 털릴 수 있어 ⚠️ 표시">↕ 손절좁은순</button>
     <button class="tab" id="bearOkToggle" title="약세장 적격(💎)만 표시 — 탄탄한베이스 + RS90+ + 손절폭적정, 3조건 전부 충족. 게이트 🟡🔴일 때 125개 후보에서 옥석을 가리는 필터. 대부분 걸러져서 몇 개만 남는 게 정상.">💎 적격만</button>
+    <button class="tab" id="accumSortToggle" title="🧲 매집흔적 점수(A-B-C 패턴 전용, 보조 지표) 높은 순 정렬 — 판정 불가(데이터 부족) 종목은 맨 뒤로">🧲 매집순</button>
   </div>
   <button class="refresh" id="refresh">다시 스캔</button>
 </header>
@@ -570,6 +571,24 @@ const fmtVolume = (vol, mkt) => {
   if (vol >= 1e3) return (vol/1e3).toFixed(0) + 'K';
   return Math.round(vol).toString();
 };
+
+// v5.19: 매집 흔적 배지 툴팁 — 원본 수치만 표시, 승률/확률 문구 금지
+function accumTooltip(s) {
+  if (s.accum_score == null) {
+    return `매집 판정 불가 — ${s.accum_reason || '사유 미상'}. A구간 데이터가 부족해 채점하지 않음(0점 아님).`;
+  }
+  const p = s.accum_parts || {};
+  const row = (key, label) => {
+    const d = p[key];
+    if (!d || d.raw == null) return `${label} 데이터없음`;
+    return `${label} ${d.raw}${d.pass ? '✓' : ''}`;
+  };
+  const range = (s.a_start_date && s.a_end_date) ? `A구간 ${s.a_start_date}~${s.a_end_date}` : 'A구간 날짜미상';
+  return `매집 흔적 강도(보조 정렬용 지표 — 진입 신호도 확률도 아님) · ${range}\n` +
+    `${row('vol_ratio', '거래량비')} · ${row('atr_compress', 'ATR수축비')} · ${row('close_strength', '종가강도')} · ` +
+    `${row('ud_vol', 'U/D거래량')} · ${row('vol_pickup', '거래량증가비')} · ${row('range_tight', '변동폭비')}` +
+    `${s.accum_synergy ? ' · 거래량비+ATR수축 동시충족(+가점)' : ''}`;
+}
 
 // 거래대금: 한국은 억/조 원, 미국은 $M/$B
 const fmtTurnover = (t, mkt) => {
@@ -918,6 +937,7 @@ function card(s) {
       <span class="badge ${Math.abs(s.pivot_dist_pct) <= 2 ? 'warn' : 'on'}">피벗 ${s.pivot_dist_pct >= 0 ? '+' : ''}${s.pivot_dist_pct}%</span>
       <span class="badge">패턴 깊이 ${s.depth_pct}%</span>
       <span class="badge ${s.vol_dry ? 'on' : ''}">거래량 수축</span>
+      ${s.pattern === 'ABC상한가' ? (s.accum_score != null ? `<span class="badge ${s.accum_score >= 65 ? 'on' : ''}" title="${accumTooltip(s)}">🧲 매집흔적 ${s.accum_score}</span>` : `<span class="badge" title="${accumTooltip(s)}">⚠️매집판정불가</span>`) : ''}
     </div>` : s.mode === 'imminent' ? `
     <div class="badges">
       <span class="badge ${s.pivot_dist_pct <= 2 ? 'warn' : 'on'}">🎯 돌파 임박 (피벗 +${s.pivot_dist_pct}%)</span>
@@ -999,6 +1019,7 @@ let lastHits = [];
 let strictMode = false;
 let riskSort = false;
 let bearOkOnly = false;   // v4.65: 💎 약세장적격만
+let accumSort = false;    // v5.19: 🧲 매집순 (ABC 패턴 전용)
 document.getElementById('strictToggle').addEventListener('click', (e) => {
   strictMode = !strictMode;
   e.target.classList.toggle('active', strictMode);
@@ -1012,6 +1033,11 @@ document.getElementById('bearOkToggle').addEventListener('click', (e) => {
 document.getElementById('riskSortToggle').addEventListener('click', (e) => {
   riskSort = !riskSort;
   e.target.classList.toggle('active', riskSort);
+  renderCards();
+});
+document.getElementById('accumSortToggle').addEventListener('click', (e) => {
+  accumSort = !accumSort;
+  e.target.classList.toggle('active', accumSort);
   renderCards();
 });
 let favorites = [];
@@ -1489,6 +1515,15 @@ function renderCards() {
   // 손절 좁은 순 정렬 (토글): 리스크% 오름차순 — 타이트한 진입 자리가 위로
   if (riskSort) {
     list.sort((a, b) => (a.risk_pct ?? 999) - (b.risk_pct ?? 999));
+  }
+  // 매집순 정렬 (토글, ABC 패턴 전용 보조지표): 내림차순, 판정불가(null)는 맨 뒤
+  if (accumSort && mode === 'pattern') {
+    list.sort((a, b) => {
+      if (a.accum_score == null && b.accum_score == null) return 0;
+      if (a.accum_score == null) return 1;
+      if (b.accum_score == null) return -1;
+      return b.accum_score - a.accum_score;
+    });
   }
   // 시간대별 시장 우선 정렬 (전체 탭에서만):
   // 사용자 요청: 한국시간 오전 6시~오후 8시는 한국주 먼저(미국장 끝나자마자~한국장),
