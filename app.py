@@ -5,6 +5,25 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.20 [기능추가] 실험 탭 strong_pivot("강한피벗") 신규 — analyze_imminent(피벗
+        형성 중, 원본 미수정) ∩ (Stage2 통과 OR IBD9 통과). Stage2=한국전용,
+        IBD9=미국전용이라 게이트가 시장별로 자연히 갈리고, OR 게이트라 0개
+        방지. 기존 analyze_imminent/analyze_stage2/analyze_ibd9_*/
+        _run_scan_stage2/_run_scan_ibd9 원본 함수는 전혀 수정하지 않고 각
+        파이프라인의 hits ticker 집합만 재사용(_run_scan_strong_pivot이
+        내부에서 _run_scan_stage2/_run_scan_ibd9를 그대로 호출, 실패해도
+        try/except로 빈 집합 처리해 이 탭 하나가 죽어도 나머지엔 영향 없음).
+        run_scan()에 분기 한 줄, /api/scan 허용 mode 목록에 한 항목만 추가
+        — 순수 additive(scanner.py 무변경, app.py는 새 함수+분기 2줄 뿐).
+        UI: 탭 목록에 "강한피벗"(실험 태그) 추가, 카드에 통과한 풀(📐Stage2 /
+        🇺🇸IBD9)을 배지로 표시.
+        배포 전 실제 실행 검증: (1) 실 데이터 660종목(KR60+US600) 스캔 →
+        imminent_pass 28, gate_pass 4, HPE/FTNT/SNOW/GH 4건 실검출, 정렬
+        순서(pool_count desc→triggered desc→score desc) 확인. (2) 프론트
+        card() 함수를 Node로 추출해 1풀/2풀 배지 모두 크래시 없이 렌더링
+        확인. (3) test_scanner.py 기존 케이스 회귀 없음 확인(scanner.py를
+        아예 건드리지 않아 origin/main과 diff 0 — 기존 실패 2건은 이 작업
+        이전부터 있던 베이스라인이며 무관함).
 v5.19 [기능추가] A-B-C 상한가 패턴에 매집 스코어(accumulation_score) 추가.
         기존 ABC 감지기(_pat_abc)가 찾아낸 A구간(횡보 베이스)의 일봉 OHLCV만
         가지고 "조용한 물량 수집" 흔적을 0~100점으로 채점 — 이미 걸린 ABC
@@ -1568,7 +1587,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.19"
+VERSION = "v5.20"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2151,6 +2170,99 @@ async def _run_scan_stage2(bundle: dict) -> dict:
     }
 
 
+# ── 강한피벗(strong_pivot) 실험 탭 (v5.20) ──
+# 정의: analyze_imminent 통과(피벗 형성 중) ∩ (Stage2 통과 OR IBD9 통과).
+# Stage2=KR전용, IBD9=US전용이라 자연히 시장별로 갈리고, 게이트는 OR(둘 중
+# 하나만 통과해도 인정)이라 0개 방지 목적. analyze_imminent/analyze_stage2/
+# analyze_ibd9_*와 _run_scan_stage2/_run_scan_ibd9 원본은 전혀 수정하지 않고
+# 그 결과(hits의 ticker 집합)만 재사용한다 — 이 탭이 통째로 사라져도 기존
+# imminent/stage2/ibd9 탭에는 아무 영향이 없다(순수 additive, 롤백 용이).
+async def _run_scan_strong_pivot(bundle: dict) -> dict:
+    universe = bundle["universe"]
+    data = bundle["data"]
+    rs_ranks = bundle["rs_ranks"]
+    rs_moms = bundle["rs_moms"]
+
+    try:
+        stage2_result = await _run_scan_stage2(bundle)
+        stage2_set = {h["ticker"] for h in stage2_result.get("hits", [])}
+    except Exception:
+        stage2_set = set()
+    try:
+        ibd9_result = await _run_scan_ibd9(bundle)
+        ibd9_set = {h["ticker"] for h in ibd9_result.get("hits", [])}
+    except Exception:
+        ibd9_set = set()
+
+    diag = {"kr_universe": 0, "us_universe": 0, "kr_fetched": 0, "us_fetched": 0,
+            "kr_hits": 0, "us_hits": 0, "imminent_pass": 0, "gate_pass": 0}
+    for t in universe:
+        if naver_kr.is_kr(t): diag["kr_universe"] += 1
+        else: diag["us_universe"] += 1
+    for t in data:
+        if naver_kr.is_kr(t): diag["kr_fetched"] += 1
+        else: diag["us_fetched"] += 1
+
+    alerts = load_alerts()
+    hits = []
+    for t, df in data.items():
+        is_kr = naver_kr.is_kr(t)
+        result = analyze_imminent(df, rs_rank=rs_ranks.get(t), rs_mom=rs_moms.get(t), is_kr=is_kr)
+        if result is None:
+            continue
+        diag["imminent_pass"] += 1
+
+        pools = []
+        if t in stage2_set:
+            pools.append("Stage2")
+        if t in ibd9_set:
+            pools.append("IBD9")
+        if not pools:
+            continue
+        diag["gate_pass"] += 1
+
+        # ── 저유동성 하드 필터 — 기존 run_scan과 동일 기준 (KR 3억원/US $2M) ──
+        avg_turn = result.get("avg_turnover") or 0
+        if avg_turn > 0:
+            floor_ = 3e8 if is_kr else 2e6
+            if avg_turn < floor_:
+                diag["liquidity_dropped"] = diag.get("liquidity_dropped", 0) + 1
+                continue
+
+        mkt = "KR" if is_kr else "US"
+        alert_kind = alerts.get(t.upper())
+        cw = climax_warning(df["Close"], df["High"], df["Low"], df["Volume"])
+        hits.append({
+            "ticker": t, "name": universe.get(t, t), "market": mkt,
+            "sector": _sector_of(t), "alert": alert_kind,
+            "climax": cw["climax"], "climax_reasons": cw["reasons"],
+            "climax_level": cw["level"],
+            **result,
+            "mode": "strong_pivot",
+            "pools": pools,
+            "pool_count": len(pools),
+        })
+        if is_kr: diag["kr_hits"] += 1
+        else: diag["us_hits"] += 1
+
+    hits.sort(key=lambda x: (x["pool_count"], x.get("triggered", False), x.get("score") or 0), reverse=True)
+    await _attach_earnings_badges(hits[:30])
+
+    from collections import Counter
+    sec_count = Counter(h["sector"] for h in hits if h["sector"] != "기타")
+    sector_summary = [{"sector": s, "count": n} for s, n in sec_count.most_common() if n >= 2]
+
+    warn_count = sum(1 for h in hits if h.get("alert") or h.get("risk_warn"))
+
+    return {
+        "version": VERSION, "market": "all", "mode": "strong_pivot",
+        "scanned": len(universe), "fetched": len(data), "diag": diag,
+        "hits": hits, "sector_summary": sector_summary, "warn_count": warn_count,
+        "timing": bundle.get("timing"),
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "ts": time.time(),
+    }
+
+
 # ── IBD 9조건 스크린 (v5.03, 사용자 제공 스펙 — 미국 전용) ──
 # 적용 순서: 가격데이터만으로 되는 저비용 5개(2~6번) 먼저 → 통과한 소수만
 # yfinance .info(베타·시총·기관보유비율)가 필요한 고비용 3개(1·7·9번) 확인.
@@ -2473,6 +2585,8 @@ async def run_scan(market: str, mode: str) -> dict:
         return await _run_scan_stage2(bundle)
     if mode == "ibd9":
         return await _run_scan_ibd9(bundle)
+    if mode == "strong_pivot":
+        return await _run_scan_strong_pivot(bundle)
     universe = bundle["universe"]
     data = bundle["data"]
     rs_ranks = bundle["rs_ranks"]
@@ -2556,7 +2670,7 @@ async def run_scan(market: str, mode: str) -> dict:
 @app.get("/api/scan")
 async def scan(market: str = "all", mode: str = "imminent", refresh: bool = False):
     market = market if market in ("kr", "us", "all") else "all"
-    mode = mode if mode in ("pullback", "turnaround", "leader", "super", "breakout", "surge", "imminent", "boxbreak", "breakdown", "pattern", "stage2", "ibd9", "earnings") else "pullback"
+    mode = mode if mode in ("pullback", "turnaround", "leader", "super", "breakout", "surge", "imminent", "boxbreak", "breakdown", "pattern", "stage2", "ibd9", "earnings", "strong_pivot") else "pullback"
     key = f"{market}:{mode}"
     favs = load_favorites()
     cached = _cache.get(key)
