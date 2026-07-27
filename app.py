@@ -5,6 +5,14 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.23 [기능개선] 📊섹터 탭 표에 뜨는 상위 종목(코스피/코스닥/미국 각 셀의
+        상위 5개)이 그냥 텍스트라 클릭이 안 됐음 — 사용자 요청으로
+        트레이딩뷰 차트 링크 연결(다른 탭 카드/마감정리와 동일한 tvUrl()
+        패턴). /api/sectors가 이미 top 항목마다 ticker를 주고 있어서
+        (KR은 .KS/.KQ 접미사 포함) 백엔드 변경 없이 static/index.html만
+        수정 — tvUrl()이 접미사로 KR/US를 자동 판별. Node로 렌더링 결과를
+        직접 실행해 KR(KRX: 접두어)·US(심볼만) 링크가 각각 올바르게
+        생성됨을 확인.
 v5.22 [기능개선] strong_pivot 탭을 "초기 국면 + 매집 우위 + 강한 조건 겹침"만
         남도록 3단 필터로 강화 — analyze_imminent/analyze_stage2/
         analyze_ibd9_* 원본은 무수정, _run_scan_strong_pivot만 수정.
@@ -1627,7 +1635,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.22"
+VERSION = "v5.23"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

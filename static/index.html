@@ -365,7 +365,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.22</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.23</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1174,7 +1174,7 @@ async function loadSectors() {
           <span class="mono" style="${chgColor(r.avg_chg)};font-weight:700;white-space:nowrap">${r.avg_chg > 0 ? '+' : ''}${r.avg_chg}%</span>
         </div>
         <div style="font-size:11px;color:var(--muted)">${r.n}종목 · 상승 ${r.up_pct}%</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.6">${r.top.slice(0, 5).map(t => `${nameOf(t, isUS)} <span style="${chgColor(t.chg)}">${t.chg > 0 ? '+' : ''}${t.chg}%</span>`).join(' · ')}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.6">${r.top.slice(0, 5).map(t => `<a href="${tvUrl(t)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${nameOf(t, isUS)}</a> <span style="${chgColor(t.chg)}">${t.chg > 0 ? '+' : ''}${t.chg}%</span>`).join(' · ')}</div>
       </td>` : '<td style="border-bottom:1px solid var(--line)"></td>';
     let body = '';
     for (let i = 0; i < maxRows; i++) {
