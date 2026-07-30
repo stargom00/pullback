@@ -365,7 +365,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.23</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.24</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -591,6 +591,37 @@ function accumTooltip(s) {
     `${s.accum_synergy ? ' · 거래량비+ATR수축 동시충족(+가점)' : ''}`;
 }
 
+// v5.24: U/D 신뢰도 — 상위3일 제외 U/D 표시 접미사 + 단일/소수일 지배 경고.
+// 단일 급등일 하나가 U/D 분자를 지배해도 그대로 노출되던 문제(한울반도체
+// 320000 사례: 일봉 U/D 1.86이 건강해 보였지만 실은 이틀 거래량이 상승
+// 거래량의 68%를 차지한 이벤트성 순환매였음)를 보완.
+function udExSuffix(s) {
+  return s.ud_ex_top3 != null ? ` (상위3일 제외 ${s.ud_ex_top3})` : '';
+}
+function udReliabilityWarn(s) {
+  if (s.ud_reliable !== false) return '';
+  if (s.top1_share != null && s.top1_share >= 0.40) {
+    const pct = Math.round(s.top1_share * 100);
+    return ` <span style="color:#f87171;font-size:11px" title="상승거래량의 ${pct}%가 하루에 집중 — 이벤트성 가능">⚠️상위1일 ${pct}%</span>`;
+  }
+  if (s.top3_share != null && s.top3_share >= 0.65) {
+    const pct = Math.round(s.top3_share * 100);
+    return ` <span style="color:#f87171;font-size:11px" title="상승거래량의 ${pct}%가 상위 3일에 집중 — 이벤트성 가능">⚠️상위3일 ${pct}%</span>`;
+  }
+  return '';
+}
+// v5.24: 조용한 매집 스코어(quiet_accumulation_score) 배지 — A-B-C 패턴의
+// A구간과 눌림목 탭 카드에 공통 노출. 승률/확률 문구 없이 등급만.
+function quietAccumBadge(s) {
+  if (s.qa_score == null) {
+    if (!s.qa_reason) return '';
+    return `<span class="badge" title="조용한 매집 판정 불가/실격 — ${s.qa_reason}">⛔${s.qa_reason}</span>`;
+  }
+  const c = s.qa_components || {};
+  const detail = Object.entries(c).map(([k, v]) => `${k} ${v}`).join(' · ');
+  return `<span class="badge ${s.qa_score >= 55 ? 'on' : ''}" title="조용한 매집 스코어 ${s.qa_score}(보조 지표, 승률 아님) · ${detail || '세부값 없음'}">${s.qa_grade} ${s.qa_score}</span>`;
+}
+
 // 거래대금: 한국은 억/조 원, 미국은 $M/$B
 const fmtTurnover = (t, mkt) => {
   if (!t) return '-';
@@ -800,7 +831,7 @@ function card(s) {
       <div class="metric"><div class="k">피벗까지</div><div class="v" style="color:${Math.abs(s.pivot_dist_pct) <= 2 ? 'var(--up)' : 'var(--amber)'}">${s.pivot_dist_pct >= 0 ? '+' : ''}${s.pivot_dist_pct}%</div></div>
       <div class="metric"><div class="k">거래량비</div><div class="v" style="${s.vol_dry ? 'color:var(--green)' : ''}">${s.vol_ratio}×</div></div>
       <div class="metric"><div class="k">RS</div><div class="v" style="color:var(--rs)">${s.rs ?? '-'}</div></div>
-      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}${s.ud_vol != null ? ` <span style="color:${s.ud_vol >= 1 ? 'var(--green)' : '#e0a030'};font-size:11px" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집, 1.0↓ 분산">U/D ${s.ud_vol}</span>` : ''}</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}${s.ud_vol != null ? ` <span style="color:${s.ud_vol >= 1 ? 'var(--green)' : '#e0a030'};font-size:11px" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집, 1.0↓ 분산">U/D ${s.ud_vol}${udExSuffix(s)}</span>${udReliabilityWarn(s)}` : ''}</div></div>
     </div>
     <div class="metrics mono" style="border-top:none;padding-top:0">
       <div class="metric"><div class="k">피벗 (${s.pattern})</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
@@ -820,7 +851,7 @@ function card(s) {
       <div class="metric"><div class="k">피벗까지</div><div class="v" style="color:${s.pivot_dist_pct <= 2 ? 'var(--up)' : 'var(--amber)'}">+${s.pivot_dist_pct}%</div></div>
       <div class="metric"><div class="k">거래량비</div><div class="v" style="${s.vol_dry ? 'color:var(--green)' : ''}">${s.vol_ratio}×</div></div>
       <div class="metric"><div class="k">RS</div><div class="v" style="color:var(--rs)">${s.rs}</div></div>
-      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}${s.ud_vol != null ? ` <span style="color:${s.ud_vol >= 1 ? 'var(--green)' : '#e0a030'};font-size:11px" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집, 1.0↓ 분산">U/D ${s.ud_vol}</span>` : ''}</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}${s.ud_vol != null ? ` <span style="color:${s.ud_vol >= 1 ? 'var(--green)' : '#e0a030'};font-size:11px" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집, 1.0↓ 분산">U/D ${s.ud_vol}${udExSuffix(s)}</span>${udReliabilityWarn(s)}` : ''}</div></div>
     </div>
     <div class="metrics mono" style="border-top:none;padding-top:0">
       <div class="metric"><div class="k">피벗 (${s.pivot_type ?? '천장'})</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
@@ -833,7 +864,7 @@ function card(s) {
       <div class="metric"><div class="k">연장도</div><div class="v" style="${s.in_valid_zone ? 'color:var(--green)' : 'color:var(--up)'}">+${s.ext_pct}%</div></div>
       <div class="metric"><div class="k">거래량</div><div class="v">${s.vol_mult}×</div></div>
       <div class="metric"><div class="k">베이스</div><div class="v">${s.base_days}일</div></div>
-      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}${s.ud_vol != null ? ` <span style="color:${s.ud_vol >= 1 ? 'var(--green)' : '#e0a030'};font-size:11px" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집, 1.0↓ 분산">U/D ${s.ud_vol}</span>` : ''}</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}${s.ud_vol != null ? ` <span style="color:${s.ud_vol >= 1 ? 'var(--green)' : '#e0a030'};font-size:11px" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집, 1.0↓ 분산">U/D ${s.ud_vol}${udExSuffix(s)}</span>${udReliabilityWarn(s)}` : ''}</div></div>
     </div>
     <div class="metrics mono" style="border-top:none;padding-top:0">
       <div class="metric"><div class="k">피벗 (베이스 천장)</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
@@ -846,7 +877,7 @@ function card(s) {
       <div class="metric"><div class="k">연장도</div><div class="v" style="${s.ext_pct <= 5 ? 'color:var(--green)' : 'color:var(--up)'}">+${s.ext_pct}%</div></div>
       <div class="metric"><div class="k">거래량</div><div class="v">${s.vol_mult}×</div></div>
       <div class="metric"><div class="k">박스폭</div><div class="v">${s.box_range_pct}%</div></div>
-      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}${s.ud_vol != null ? ` <span style="color:${s.ud_vol >= 1 ? 'var(--green)' : '#e0a030'};font-size:11px" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집, 1.0↓ 분산">U/D ${s.ud_vol}</span>` : ''}</div></div>
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}${s.ud_vol != null ? ` <span style="color:${s.ud_vol >= 1 ? 'var(--green)' : '#e0a030'};font-size:11px" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집, 1.0↓ 분산">U/D ${s.ud_vol}${udExSuffix(s)}</span>${udReliabilityWarn(s)}` : ''}</div></div>
     </div>
     <div class="metrics mono" style="border-top:none;padding-top:0">
       <div class="metric"><div class="k">피벗 (${s.pivot_type})</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
@@ -912,7 +943,7 @@ function card(s) {
       <div class="metric"><div class="k">피벗까지</div><div class="v" style="color:${s.pivot_dist_pct <= 2 ? 'var(--up)' : 'var(--amber)'}">+${s.pivot_dist_pct}%</div></div>
       <div class="metric"><div class="k">두드림</div><div class="v">${s.touch_count ?? '-'}회</div></div>
       <div class="metric"><div class="k">피벗</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
-      <div class="metric"><div class="k">U/D 거래량</div><div class="v" style="color:${(s.ud_vol ?? 0) >= 1 ? 'var(--green)' : '#e0a030'}" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집(강한피벗 탭은 1.0 미만이면 애초에 제외됨)">${s.ud_vol ?? '-'}</div></div>
+      <div class="metric"><div class="k">U/D 거래량</div><div class="v" style="color:${(s.ud_vol ?? 0) >= 1 ? 'var(--green)' : '#e0a030'}" title="매집/분산: 상승일 거래량÷하락일 거래량. 1.0↑ 매집(강한피벗 탭은 1.0 미만이면 애초에 제외됨)">${s.ud_vol ?? '-'}${udExSuffix(s)}${udReliabilityWarn(s)}</div></div>
     </div>` : `
     <div class="metrics mono">
       <div class="metric"><div class="k">눌림 깊이</div><div class="v">-${s.pullback_pct}%</div></div>
@@ -945,6 +976,7 @@ function card(s) {
       <span class="badge">패턴 깊이 ${s.depth_pct}%</span>
       <span class="badge ${s.vol_dry ? 'on' : ''}">거래량 수축</span>
       ${s.pattern === 'ABC상한가' ? (s.accum_score != null ? `<span class="badge ${s.accum_score >= 65 ? 'on' : ''}" title="${accumTooltip(s)}">🧲 매집흔적 ${s.accum_score}</span>` : `<span class="badge" title="${accumTooltip(s)}">⚠️매집판정불가</span>`) : ''}
+      ${quietAccumBadge(s)}
     </div>` : s.mode === 'imminent' ? `
     <div class="badges">
       <span class="badge ${s.pivot_dist_pct <= 2 ? 'warn' : 'on'}">🎯 돌파 임박 (피벗 +${s.pivot_dist_pct}%)</span>
@@ -1005,6 +1037,7 @@ function card(s) {
       <span class="badge ${s.tightening ? 'on' : ''}">변동폭 축소</span>
       <span class="badge ${s.recent_high_ok ? 'on' : ''}">고점 유지</span>${s.tl_break ? '<span class="badge on">추세선 돌파</span>' : (s.tl_break_intraday ? '<span class="badge warn" title="장중에 추세선을 넘었지만 아직 종가 확정 전. 마감까지 위를 지키는지 + 거래량을 확인하세요.">장중 돌파 ⚠️ 미확정</span>' : '')}
       ${(s.pools || []).map(p => `<span class="badge on" title="${p} 통과 — 강한피벗(실험) 게이트: 돌파임박 ∩ ${p}">${p === 'Stage2' ? '📐' : '🇺🇸'} ${p}</span>`).join('')}
+      ${quietAccumBadge(s)}
     </div>`}
     ${(s.mode === 'pullback' || s.mode === 'turnaround' || s.mode === 'breakout' || s.mode === 'imminent' || s.mode === 'boxbreak' || s.mode === 'pattern') ? (() => {
       const sig = entrySignal(s);

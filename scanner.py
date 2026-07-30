@@ -916,6 +916,78 @@ def up_down_volume(c: pd.Series, v: pd.Series, window: int = 50):
     return round(up_vol / down_vol, 2)
 
 
+def ud_volume_detail(c: pd.Series, v: pd.Series, window: int = 50) -> dict | None:
+    """U/D Volume Ratio 신뢰도 분해 (v5.24) — 단일/소수 급등일이 상승거래량
+    분자를 지배해 실제로는 이벤트성 순환매인데 매집처럼 보이는 왜곡을 탐지.
+
+    사용자 리포트 사례(한울반도체 320000.KQ): 일봉 U/D 1.86으로 건강해
+    보였지만, 실제로는 이틀(2026-06-22~23) 거래량이 상승거래량 합의 68%를
+    차지한 이벤트성 급등(그 주 고점 대비 종가 완전 반납, 이후 주가는 사건
+    이전보다도 낮아짐)이었음 — 매집이 아니라 순환매였다.
+    재현 검증: 이 종목은 top1_share(0.33)만으론 0.40 임계를 못 넘었지만
+    top3_share(0.68)가 0.65를 넘어 정확히 걸림 — 그래서 게이트는
+    top1_share 단독이 아니라 top1_share·top3_share 두 조건을 AND로 본다
+    (임계값 자체는 재현 검증 후 그대로 유지, 낮추지 않음).
+
+    반환: {ud_raw, top1_share, top3_share, ud_ex_top1, ud_ex_top3, hhi,
+    n50, ud_reliable}.
+    - ud_ex_top1: 최대 상승일 거래량 하나를 뺀 U/D (진단용 dict 보관, 카드
+      주 표시는 ud_ex_top3를 씀 — 이틀·사흘짜리 사건을 더 잘 잡기 때문).
+    - ud_ex_top3: 상위 3개 상승일 거래량을 뺀 U/D (카드 주 표시값).
+    - n50: 상승거래량 누적 50%에 도달하는 데 필요한 최소 일수(진단용,
+      게이트 아님) — 1이면 하루가 전체의 절반 이상, 클수록 고르게 분산.
+    - 하락일 또는 상승일 거래량 합이 0이면(ZeroDivision 위험) None을
+      반환하고 호출부가 '데이터부족'으로 처리한다 — 방어값(0/9.99 등)으로
+      채우지 않는다.
+    """
+    if len(c) < window + 1:
+        window = len(c) - 1
+    if window < 5:
+        return None
+    cc = c.iloc[-window:]
+    vv = v.iloc[-window:]
+    prev = c.iloc[-(window + 1):-1].values
+
+    up_vols, down_vols = [], []
+    for i in range(len(cc)):
+        if cc.iloc[i] > prev[i]:
+            up_vols.append(float(vv.iloc[i]))
+        elif cc.iloc[i] < prev[i]:
+            down_vols.append(float(vv.iloc[i]))
+
+    up_sum = sum(up_vols)
+    down_sum = sum(down_vols)
+    if up_sum <= 0 or down_sum <= 0:
+        return None
+
+    up_sorted = sorted(up_vols, reverse=True)
+    top1 = up_sorted[0]
+    top3_vol = sum(up_sorted[:3])
+
+    top1_share = top1 / up_sum
+    top3_share = top3_vol / up_sum
+    hhi = sum((x / up_sum) ** 2 for x in up_vols)
+
+    cum, n50 = 0.0, 0
+    half = up_sum * 0.5
+    for x in up_sorted:
+        cum += x
+        n50 += 1
+        if cum >= half:
+            break
+
+    return {
+        "ud_raw": round(up_sum / down_sum, 2),
+        "top1_share": round(top1_share, 3),
+        "top3_share": round(top3_share, 3),
+        "ud_ex_top1": round((up_sum - top1) / down_sum, 2),
+        "ud_ex_top3": round((up_sum - top3_vol) / down_sum, 2),
+        "hhi": round(hhi, 3),
+        "n50": n50,
+        "ud_reliable": bool(top1_share < 0.40 and top3_share < 0.65),
+    }
+
+
 def weekly_ema10(c: pd.Series) -> float | None:
     """일봉 종가를 주봉으로 리샘플링해 10주 EMA 계산 (v5.04, 눌림 지지 알림용).
     최소 70봉(≈14주) 필요. 일봉 df가 이미 DatetimeIndex라 resample 바로 가능."""
@@ -1411,6 +1483,14 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     if _mg["merger"]:
         return None
 
+    # v5.24: 조용한 매집 스코어(Task 2) — 눌림목 탭 카드에도 노출. 여기서
+    # 실패해도 눌림목 탭 전체를 죽이면 안 되므로 별도 try/except로 격리.
+    try:
+        _qa = quiet_accumulation_score(df, window=60)
+    except Exception:
+        _qa = {"score": None, "grade": None, "components": None,
+               "disqualify_reason": "계산오류", "data_basis": "추정"}
+
     return {
         "close": round(close, 2),
         "change_pct": round(change_pct, 2),
@@ -1421,6 +1501,10 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "rs_mom": rs_mom,
         "leader": is_leader,
         "mode": "pullback",
+        "qa_score": _qa["score"],
+        "qa_grade": _qa["grade"],
+        "qa_components": _qa["components"],
+        "qa_reason": _qa["disqualify_reason"],
         **_mg,
         "pullback_pct": round(pullback * 100, 1),
         "support_ma": disp_support,
@@ -1582,7 +1666,19 @@ def badge_fields(c, h, lo, v, pivot, is_kr, rs_rank, rrb) -> dict:
     else:                                     # ATR 불량 → 고정% 폴백
         _stop_limit = 7.0 if is_kr else 5.0
     _stop_wide = bool(risk_pct > _stop_limit)
+    # v5.24: U/D 신뢰도 분해(ud_volume_detail) — 단일/소수 급등일이 U/D를
+    # 지배하는 왜곡 탐지(한울반도체 320000 사례). 데이터부족(하락일 또는
+    # 상승일 거래량 합이 0)이면 전부 None — 방어값으로 채우지 않는다.
+    _udd = ud_volume_detail(c, v, window=50)
     return {
+        "ud_raw": _udd["ud_raw"] if _udd else None,
+        "top1_share": _udd["top1_share"] if _udd else None,
+        "top3_share": _udd["top3_share"] if _udd else None,
+        "ud_ex_top1": _udd["ud_ex_top1"] if _udd else None,
+        "ud_ex_top3": _udd["ud_ex_top3"] if _udd else None,
+        "ud_hhi": _udd["hhi"] if _udd else None,
+        "ud_n50": _udd["n50"] if _udd else None,
+        "ud_reliable": _udd["ud_reliable"] if _udd else None,
         "base_badge": _bq["badge"],
         "base_badge_lv": _bq["badge_lv"],
         "base_length_wk": _bq["length_wk"],
@@ -3224,6 +3320,180 @@ def accumulation_score(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series,
     return {"score": int(round(final)), "reason": None, "parts": parts, "synergy": synergy}
 
 
+# ── 조용한 매집 스코어 (v5.24, Task 2) ──
+# accum_score(A-B-C 전용)와 별개로, 눌림목 탭을 포함해 더 폭넓게 "조용히
+# 물량이 쌓이는 중"인지를 0~100으로 채점. A-B-C의 A구간에도 부착하고
+# 눌림목 카드에도 노출한다(부착/UI는 별도 배포 단계 — 이 함수는 순수 계산).
+QUIET_ACCUM_DQ_SURGE_PCT = 0.15      # 윈도우 내 단일일 등락률 이 이상이면 "조용하지 않음"
+QUIET_ACCUM_DQ_VOL_MULT = 8.0        # 최대거래량일/평균거래량 이 배 이상이면 이벤트성
+QUIET_ACCUM_DQ_STRUCT_RATIO = 0.60   # 현재가/윈도우최고가 이 이하면 구조훼손
+QUIET_ACCUM_DQ_TOP3_SHARE = 0.35     # 상위3일거래량/윈도우 총거래량 이 이상이면 이벤트성(2~3일짜리 사건 포착)
+QUIET_ACCUM_GRADE_STRONG = 75
+QUIET_ACCUM_GRADE_TRACE = 55
+QUIET_ACCUM_GRADE_NEUTRAL = 35
+
+
+def _vol_ma_ratio(v: pd.Series, short: int = 5, long: int = 50) -> float:
+    """거래량 위축/증가 판정 표준 계산법(v5.24 교정) — 단일 봉 값을 절대
+    직접 비교에 쓰지 않고 반드시 '단기 이동평균 ÷ 장기 평균'으로 계산한다.
+    이유: 미완성 봉(장중)이나 휴장 직후 거래량이 급감한 단일 봉 하나를
+    그대로 분자/분모에 쓰면 -80%대의 허위 위축 신호가 난다 — 5일 평균이
+    그 하루의 영향력을 최대 1/5로 완충시킨다."""
+    n = len(v)
+    _long = min(long, n)
+    if _long < 5:
+        return 1.0
+    ma_short = float(v.iloc[-short:].mean())
+    ma_long = float(v.iloc[-_long:].mean())
+    return ma_short / ma_long if ma_long > 0 else 1.0
+
+
+def _quiet_accum_seg_atr_pct(h: pd.Series, lo: pd.Series, c: pd.Series, start: int, end: int) -> float:
+    """세그먼트(start~end, 절대 위치)의 ATR% — accumulation_score의
+    _seg_atr_pct와 동일 관례(앞에 1봉을 더 붙여 슬라이스, period=구간길이)."""
+    ext_start = max(0, start - 1)
+    period = end - start
+    if period <= 0:
+        return 0.0
+    _h, _lo, _c = h.iloc[ext_start:end], lo.iloc[ext_start:end], c.iloc[ext_start:end]
+    atr_val = atr(_h, _lo, _c, period=period)
+    mean_close = float(c.iloc[start:end].mean()) if end > start else 0.0
+    return (atr_val / mean_close * 100) if mean_close > 0 else 0.0
+
+
+def _quiet_accum_grade(score: int) -> str:
+    if score >= QUIET_ACCUM_GRADE_STRONG:
+        return "🔵강한매집"
+    if score >= QUIET_ACCUM_GRADE_TRACE:
+        return "🔷매집흔적"
+    if score >= QUIET_ACCUM_GRADE_NEUTRAL:
+        return "⚪중립"
+    return "⛔없음"
+
+
+def _quiet_accum_dq(reason: str) -> dict:
+    return {"score": 0, "grade": "⛔없음", "components": None,
+            "disqualify_reason": reason, "data_basis": "추정"}
+
+
+def quiet_accumulation_score(df: pd.DataFrame, window: int = 60) -> dict:
+    """조용한 매집 스코어(0~100) — v5.24, Task 2.
+    실격 조건(먼저 검사, 걸리면 score=0 + reason):
+    - 윈도우 내 단일일 등락률 >= QUIET_ACCUM_DQ_SURGE_PCT → "급등포함_조용하지않음"
+    - 최대거래량일/평균거래량 >= QUIET_ACCUM_DQ_VOL_MULT → "이벤트성"
+    - 현재가/윈도우최고가 <= QUIET_ACCUM_DQ_STRUCT_RATIO → "구조훼손"
+    - 상위3일거래량/윈도우총거래량 >= QUIET_ACCUM_DQ_TOP3_SHARE → "이벤트성_상위3일집중"
+      (v5.24 추가 — 이틀·사흘짜리 사건을 단일일 조건이 놓치는 케이스 커버.
+      한울반도체 320000 사례가 바로 이것: 이틀 연속 거래량 폭발이었음.)
+    데이터 부족(len(df) < window+1, 예: 상장 60일 미만)이면 score=None +
+    "데이터부족"으로 구분 — 0점(실격)과는 의미가 다르다.
+    구성요소 2(하락일 거래량 위축)·5(후반부 거래량 증가)는 단일 봉 값이
+    아니라 _vol_ma_ratio(5일 이동평균 ÷ 장기평균) 원칙을 따른다.
+    """
+    if df is None or len(df) < window + 1:
+        return {"score": None, "grade": None, "components": None,
+                "disqualify_reason": "데이터부족", "data_basis": "추정"}
+
+    c_all, h_all, lo_all, v_all = df["Close"], df["High"], df["Low"], df["Volume"]
+    n_total = len(df)
+    c_win = c_all.iloc[-window:]
+    h_win = h_all.iloc[-window:]
+    lo_win = lo_all.iloc[-window:]
+    v_win = v_all.iloc[-window:]
+    close_now = float(c_win.iloc[-1])
+
+    # ── 실격 조건 ──
+    prev_win = c_all.iloc[-(window + 1):-1].values
+    daily_ret = (c_win.values - prev_win) / prev_win
+    if len(daily_ret) and float(daily_ret.max()) >= QUIET_ACCUM_DQ_SURGE_PCT:
+        return _quiet_accum_dq("급등포함_조용하지않음")
+
+    avg_vol = float(v_win.mean())
+    max_vol = float(v_win.max())
+    if avg_vol > 0 and max_vol / avg_vol >= QUIET_ACCUM_DQ_VOL_MULT:
+        return _quiet_accum_dq("이벤트성")
+
+    win_high = float(h_win.max())
+    if win_high > 0 and close_now / win_high <= QUIET_ACCUM_DQ_STRUCT_RATIO:
+        return _quiet_accum_dq("구조훼손")
+
+    total_vol = float(v_win.sum())
+    top3_all = sum(sorted(v_win.tolist(), reverse=True)[:3])
+    if total_vol > 0 and top3_all / total_vol >= QUIET_ACCUM_DQ_TOP3_SHARE:
+        return _quiet_accum_dq("이벤트성_상위3일집중")
+
+    # ── 1) 자금흐름 CLV 가중 (25점) ──
+    rng = h_win - lo_win
+    rng_safe = rng.where(rng != 0, 1.0)
+    mfm = (((c_win - lo_win) - (h_win - c_win)) / rng_safe).where(rng != 0, 0.0)
+    vol_sum = float(v_win.sum())
+    admf = float((mfm * v_win).sum() / vol_sum) if vol_sum > 0 else 0.0
+    comp1 = _norm(admf, -0.10, 0.35) * 25
+
+    # ── 2) 하락일 거래량 위축 (20점) — 단일 봉 대신 5일 이동평균 기준 ──
+    down_mask = daily_ret < 0
+    vol_ma5 = v_win.rolling(5, min_periods=1).mean()
+    if down_mask.any():
+        down_smoothed_mean = float(vol_ma5[down_mask].mean())
+    else:
+        down_smoothed_mean = 0.0   # 하락일이 아예 없음 = 가장 건강한 극단
+    baseline50 = float(v_win.iloc[-50:].mean()) if len(v_win) >= 50 else float(v_win.mean())
+    dryup = down_smoothed_mean / baseline50 if baseline50 > 0 else 1.0
+    comp2 = _norm(dryup, 1.05, 0.60) * 20
+
+    # ── 3) 거래량 분산도 (15점) — Task 1(ud_volume_detail) top1_share 재사용 ──
+    _udd = ud_volume_detail(c_win, v_win, window=window)
+    top1_share = _udd["top1_share"] if _udd else None
+    comp3 = _norm(top1_share, 0.40, 0.12) * 15 if top1_share is not None else 0.0
+
+    # ── 4) 변동성 수축 (15점) — 최근 1/3 구간 ATR% / 이전 2/3 구간 ATR% ──
+    recent_len = max(1, window // 3)
+    recent_start_abs, recent_end_abs = n_total - recent_len, n_total
+    prior_start_abs, prior_end_abs = n_total - window, n_total - recent_len
+    atr_recent = _quiet_accum_seg_atr_pct(h_all, lo_all, c_all, recent_start_abs, recent_end_abs)
+    atr_prior = _quiet_accum_seg_atr_pct(h_all, lo_all, c_all, prior_start_abs, prior_end_abs)
+    comp_val = atr_recent / atr_prior if atr_prior > 0 else 1.0
+    comp4 = _norm(comp_val, 1.0, 0.65) * 15
+
+    # ── 5) 후반부 거래량 증가 (15점) — 거래량은 _vol_ma_ratio(5일/50일), 폭은 반반 분할 ──
+    vol_trend = _vol_ma_ratio(v_win, short=5, long=50)
+    half = window // 2
+    range_all = h_win - lo_win
+    range_second = float(range_all.iloc[-half:].mean())
+    range_first = float(range_all.iloc[-window:-half].mean()) if window > half else range_second
+    range_trend = range_second / range_first if range_first > 0 else 1.0
+    vol_part = _norm(vol_trend, 0.90, 1.05) * 7.5
+    range_part = _norm(range_trend, 1.10, 0.95) * 7.5
+    comp5 = vol_part + range_part
+
+    # ── 6) 가격 안정성 (10점) — MDD 얕음(5점) + 윈도우 range 상위 위치(5점) ──
+    running_max = c_win.cummax()
+    mdd = float(((c_win / running_max) - 1.0).min())
+    mdd_score = _norm(mdd, -0.30, -0.10) * 5
+    win_low = float(lo_win.min())
+    price_pos = (close_now - win_low) / (win_high - win_low) if win_high > win_low else 0.5
+    pos_score = _norm(price_pos, 0.40, 0.80) * 5
+    comp6 = mdd_score + pos_score
+
+    components = {
+        "clv_flow": round(comp1, 1),
+        "dryup": round(comp2, 1),
+        "vol_dispersion": round(comp3, 1),
+        "vol_compression": round(comp4, 1),
+        "late_vol_pickup": round(comp5, 1),
+        "price_stability": round(comp6, 1),
+    }
+    score = max(0, min(100, round(sum(components.values()))))
+
+    return {
+        "score": score,
+        "grade": _quiet_accum_grade(score),
+        "components": components,
+        "disqualify_reason": None,
+        "data_basis": "추정",
+    }
+
+
 def _pat_htf(c, h, lo, v):
     """치솟은깃발(High Tight Flag): ≤45봉 내 +90% 급등 후 3~20봉 얕은(≤25%) 깃발."""
     n = len(c)
@@ -3514,6 +3784,17 @@ def _pat_abc(c, h, lo, v):
         except Exception:
             _a_start_date = _a_end_date = None
 
+        # v5.24: 조용한 매집 스코어(Task 2) — A구간에 부착. accum_score(v5.19)와
+        # 별개 지표(원본 accum_score는 무변경, 새 필드만 추가). A구간 끝(a_end)
+        # 까지의 전체 이력을 넘겨 window=A구간길이로 계산 — 여기서 실패해도
+        # _pat_abc 전체를 죽이면 안 되므로 별도 try/except로 격리.
+        try:
+            _qa_df = pd.DataFrame({"Close": c, "High": h, "Low": lo, "Volume": v}).iloc[:a_end]
+            _qa = quiet_accumulation_score(_qa_df, window=max(5, a_end - a_start))
+        except Exception:
+            _qa = {"score": None, "grade": None, "components": None,
+                   "disqualify_reason": "계산오류", "data_basis": "추정"}
+
         return {
             "pattern": "ABC상한가",
             "pattern_emoji": "🎆",
@@ -3543,6 +3824,10 @@ def _pat_abc(c, h, lo, v):
             "accum_reason": _accum["reason"],
             "accum_parts": _accum["parts"],
             "accum_synergy": _accum["synergy"],
+            "qa_score": _qa["score"],
+            "qa_grade": _qa["grade"],
+            "qa_components": _qa["components"],
+            "qa_reason": _qa["disqualify_reason"],
         }
     except Exception:
         return None
@@ -3623,6 +3908,11 @@ def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
         "accum_synergy": best.get("accum_synergy") if _is_abc else None,
         "a_start_date": best.get("a_start_date") if _is_abc else None,
         "a_end_date": best.get("a_end_date") if _is_abc else None,
+        # v5.24: 조용한 매집 스코어(Task 2) — 같은 이유로 여기서 퍼올려야 API까지 간다.
+        "qa_score": best.get("qa_score") if _is_abc else None,
+        "qa_grade": best.get("qa_grade") if _is_abc else None,
+        "qa_components": best.get("qa_components") if _is_abc else None,
+        "qa_reason": best.get("qa_reason") if _is_abc else None,
     }
     return {
         "mode": "pattern",
