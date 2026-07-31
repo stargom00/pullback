@@ -3362,10 +3362,13 @@ def _quiet_accum_seg_atr_pct(h: pd.Series, lo: pd.Series, c: pd.Series, start: i
 
 
 def _quiet_accum_grade(score: int) -> str:
+    # v5.25: "매집흔적"이 accum_score(v5.19, A구간 전용 배지 "🧲 매집흔적 N")와
+    # 텍스트가 겹쳐 같은 ABC 카드에 "매집흔적"이 두 번(다른 숫자로) 뜨는
+    # 혼동이 있었음(사용자 리포트) — "🔷매집조짐"으로 교체해 구분.
     if score >= QUIET_ACCUM_GRADE_STRONG:
         return "🔵강한매집"
     if score >= QUIET_ACCUM_GRADE_TRACE:
-        return "🔷매집흔적"
+        return "🔷매집조짐"
     if score >= QUIET_ACCUM_GRADE_NEUTRAL:
         return "⚪중립"
     return "⛔없음"
