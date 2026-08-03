@@ -3691,8 +3691,36 @@ def _pat_abc(c, h, lo, v):
 
         # ── 3) A 구간: 상승 1파 시작 전 수렴 (상승폭 감안해 peak에서 충분히 앞) ──
         # 상승 1파가 A~peak 사이에 있으므로, A는 그 이전이어야 순수 수렴.
+        # v5.26: 고정 55봉 대신 적응형 — a_end에서 한 봉씩 뒤로 확장하며 누적
+        # 고저폭이 25%를 넘기 직전까지 늘린다. 실데이터 검증 결과 종목별 실제
+        # 수렴 유지 길이가 5봉~199봉까지 크게 갈려서(고정 55봉과 어긋나는 게
+        # 흔함) 값을 하드코딩하지 않고 직접 찾는다.
+        # 주의: a_start가 0(데이터 시작)까지 밀리면 아래 accumulation_score의
+        # prior 구간(40봉 필요) 확보가 안 돼 매집 스코어가 채점 불가로 빠지고,
+        # quiet_accumulation_score도 window=a_end-a_start=a_end가 되면서
+        # len(df)<window+1 조건이 정확히 이 경우에만 항상 참이 되어(기존부터
+        # 있던 조건, 이번에 새로 만든 버그 아님) 무조건 실격 처리된다 — 실측
+        # 결과 이런 케이스는 애초에 first_wave/near 게이트에서 먼저 탈락하는
+        # 종목들이라 실제 통과 히트에는 영향 없었음(22종목 회귀 기준).
+        A_MAX_LOOKBACK = 250   # 무한 확장 방지 상한(초장기 횡보 케이스)
         a_end = max(peak_abs - 10, 20)
-        a_start = max(a_end - 55, 0)
+        a_start = a_end
+        running_hi = running_lo = None
+        while True:
+            candidate_start = a_start - 1
+            if candidate_start < 0:
+                break
+            if a_end - candidate_start > A_MAX_LOOKBACK:
+                break
+            val = float(c.iloc[candidate_start])
+            cand_hi = val if running_hi is None else max(running_hi, val)
+            cand_lo = val if running_lo is None else min(running_lo, val)
+            cand_mid = (cand_hi + cand_lo) / 2
+            cand_range = (cand_hi - cand_lo) / cand_mid if cand_mid > 0 else 1.0
+            if cand_range > 0.25:
+                break
+            a_start = candidate_start
+            running_hi, running_lo = cand_hi, cand_lo
         a_seg = c.iloc[a_start:a_end]
         if len(a_seg) < 25:
             return None
