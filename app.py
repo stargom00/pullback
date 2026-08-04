@@ -3495,6 +3495,7 @@ async def debug_ticker(ticker: str):
 
     payload = {
         "ticker": ticker,
+        "market": "KR" if is_kr else "US",
         "close": round(close),
         "modes": modes,
         "indicators": {
