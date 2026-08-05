@@ -2656,11 +2656,27 @@ async function saveJournal() {
 // 데이터 오류 판정: 손절가가 진입가보다 높은(또는 같은) 항목은 깨진 데이터.
 // (과거 버그 버전으로 저장된 잔재 — 손절은 항상 진입가보다 낮아야 함)
 // 단 진입/손절이 비어있으면 판정 불가 → false.
+// 붕괴(breakdown) 모드만 숏 — 손절이 진입가보다 "위"에 있는 게 정상(반대로
+// 롱은 손절이 진입가 "아래"). 아래 isBrokenRow/saveEdit/savePartial이 전부
+// entry>stop을 롱 전제로 하드코딩했던 버그가 있었음: 숏 포지션은 저장 시점에
+// entry<stop이라 "데이터오류"로 오분류돼 통계에서 빠지고, 종료 버튼을 눌러도
+// 청산가가 저장 안 되는 문제로 이어졌다(①버그 수정, v4.9x).
+function isShortRow(r) { return r.mode_raw === 'breakdown'; }
+
 function isBrokenRow(r) {
   const entry = parseFloat(r.entry);
   const stop = parseFloat(r.stop);
   if (!entry || !stop || isNaN(entry) || isNaN(stop)) return false;
-  return stop >= entry;   // 손절 ≥ 진입 = 비정상
+  return isShortRow(r) ? stop <= entry : stop >= entry;   // 숏=손절≤진입, 롱=손절≥진입이 비정상
+}
+
+// 진입가 대비 손익%(방향 반영). entry·exit 둘 다 있어야 계산 — 손절 데이터
+// 없어도(R 계산 불가해도) 청산가만 있으면 이걸로 성과를 볼 수 있다.
+function pnlPct(r) {
+  const entry = parseFloat(r.entry), exit = parseFloat(r.exit);
+  if (!entry || isNaN(exit)) return null;
+  const pct = isShortRow(r) ? (entry - exit) / entry * 100 : (exit - entry) / entry * 100;
+  return Math.round(pct * 10) / 10;
 }
 
 function journalStats(list) {
@@ -2719,9 +2735,90 @@ function flagStats(closed) {
   return out;
 }
 
-let journalFilter = 'all';  // all | 추세추종 | 단타
+let journalTab = 'entered';        // entered | pending | closed | missed — 상태별 주 탭
+let journalCatFilter = 'all';      // all | 추세추종 | 단타 | 관찰 — 탭 안에서 한 번 더 좁히는 보조 필터
+const closedMonthOpen = new Set(); // 펼쳐둔 종료월(YYYY-MM) — 기본은 전부 접힘
 let editingId = null;
 let partialEditingId = null;   // v4.85: 부분익절 입력 행 펼침 상태
+
+// ── 종료 탭 집계 (②재설계) ──────────────────────────────────────
+// 승률은 손익%(pnlPct — 청산가만 있으면 항상 계산)로 판정해서 손절 데이터
+// 없는 종료 건도 승/패에는 잡힌다. 평균R·총손익(R)은 요청대로 "손절 데이터
+// 있는 것만"(result_r이 실제로 채워진 건만) 집계 — R 계산 불가 건은 자동으로
+// 빠진다(result_r이 애초에 안 채워지므로 별도 필터 불필요).
+// 총 손익 금액은 시장 통화 그대로(원/달러, 환산 안 함) — shares가 기록된
+// 종목만 합산 가능해 나머지는 건수만 따로 표시.
+function closedTabStats(rows) {
+  rows = rows.filter(r => !isBrokenRow(r));
+  const withPnl = rows.filter(r => pnlPct(r) != null);
+  const wins = withPnl.filter(r => pnlPct(r) > 0).length;
+  const winRate = withPnl.length ? Math.round(wins / withPnl.length * 100) : null;
+  const withR = rows.filter(r => r.result_r !== '' && !isNaN(parseFloat(r.result_r)));
+  const avgR = withR.length ? withR.reduce((s, r) => s + parseFloat(r.result_r), 0) / withR.length : null;
+  const totalR = withR.length ? withR.reduce((s, r) => s + parseFloat(r.result_r), 0) : null;
+  let krPnl = 0, krN = 0, krSkip = 0, usPnl = 0, usN = 0, usSkip = 0;
+  for (const r of rows) {
+    const entry = parseFloat(r.entry), exit = parseFloat(r.exit), shares = parseFloat(r.shares);
+    const isKr = r.market === 'KR';
+    if (!entry || isNaN(exit) || !shares) { if (isKr) krSkip++; else usSkip++; continue; }
+    const pnl = (isShortRow(r) ? (entry - exit) : (exit - entry)) * shares;
+    if (isKr) { krPnl += pnl; krN++; } else { usPnl += pnl; usN++; }
+  }
+  return { total: rows.length, withPnlCount: withPnl.length, wins, winRate,
+           withRCount: withR.length, avgR, totalR, krPnl, krN, krSkip, usPnl, usN, usSkip };
+}
+
+function renderClosedSummary(stats) {
+  const rr = v => v == null ? '–' : `${v > 0 ? '+' : ''}${v.toFixed(2)}R`;
+  const moneyLine = (v, n, skip, fmt) => n === 0 ? null :
+    `${fmt(v)}${skip ? ` <span style="opacity:.6">(사이즈 미기록 ${skip}건 제외)</span>` : ''}`;
+  const krLine = moneyLine(stats.krPnl, stats.krN, stats.krSkip,
+    v => `🇰🇷 ${v >= 0 ? '+' : ''}${Math.round(v).toLocaleString('ko-KR')}원`);
+  const usLine = moneyLine(stats.usPnl, stats.usN, stats.usSkip,
+    v => `🇺🇸 ${v >= 0 ? '+' : ''}$${Math.round(v).toLocaleString('en-US')}`);
+  return `
+    <div class="jrnl-stats" style="margin-bottom:10px">
+      <div class="statcard">
+        <div class="statcard-t">✔ 종료 요약 (전체 ${stats.total}건)</div>
+        <div class="statcard-v">
+          승률 ${stats.winRate == null ? '–' : stats.winRate + '%'} (${stats.wins}승/${stats.withPnlCount}건)
+          · 평균 ${rr(stats.avgR)} <span style="opacity:.6;font-size:11px">(R기록 ${stats.withRCount}건)</span>
+          · 총 손익 ${rr(stats.totalR)}
+        </div>
+        ${(krLine || usLine) ? `<div class="statcard-v" style="margin-top:4px;font-size:12px;color:var(--muted)">${[krLine, usLine].filter(Boolean).join(' · ')}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+function monthKeyOf(r) { return (r.closed_date || r.date || '').slice(0, 7) || '기타'; }
+
+function toggleClosedMonth(m) {
+  if (closedMonthOpen.has(m)) closedMonthOpen.delete(m); else closedMonthOpen.add(m);
+  renderJournal();
+}
+
+// 종료 탭 전용: 월별로 접어서 렌더. 최신월이 위, 기본 전부 접힘(클릭해서 펼침).
+function renderClosedMonths(rows) {
+  const groups = {};
+  for (const r of rows) { const k = monthKeyOf(r); (groups[k] = groups[k] || []).push(r); }
+  const months = Object.keys(groups).sort().reverse();
+  return months.map(m => {
+    const rowsM = groups[m];
+    const st = closedTabStats(rowsM);
+    const open = closedMonthOpen.has(m);
+    const head = `
+      <tr onclick="toggleClosedMonth('${m}')" style="cursor:pointer;background:var(--surface)">
+        <td colspan="8" style="padding:9px 12px;font-weight:700">
+          ${open ? '▾' : '▸'} ${m === '기타' ? '날짜 미상' : m}
+          <span style="font-weight:400;color:var(--muted);font-size:12px">— ${rowsM.length}건 · 승률 ${st.winRate == null ? '–' : st.winRate + '%'} · 평균 ${st.avgR == null ? '–' : (st.avgR > 0 ? '+' : '') + st.avgR.toFixed(2) + 'R'}</span>
+        </td>
+      </tr>`;
+    const body = open
+      ? rowsM.map(r => r.id === partialEditingId ? partialRow(r) : (r.id === editingId ? editRow(r) : viewRow(r))).join('')
+      : '';
+    return head + body;
+  }).join('');
+}
 
 function renderSignalValidation(all) {
   const v = signalValidation(all);
@@ -2761,23 +2858,29 @@ function renderJournal() {
       진입가·손절·근거만 적으면 나머지는 자동으로 채워집니다.</div>`;
     return;
   }
-  // 필터: 상태(진입중/대기/종료) 또는 카테고리(추세/단타/관찰)
+  // ②재설계: 주 탭은 상태 4개(진입/대기/종료/무산)뿐 — 관찰·추세·단타는
+  // 탭 안에서 한 번 더 좁히는 보조 필터. 관찰은 상태 개념이 아니라(진입/
+  // 대기/종료 어디에도 속할 수 있는 카테고리) 보조 필터를 켜면 주 탭과
+  // 무관하게 관찰 종목 전체를 보여준다(기존 동작 그대로 유지).
   const isWatch = r => (r.category || '추세추종') === '관찰';
   const stOf = r => r.status || (r.result_r ? 'closed' : 'entered');
-  let j = all;
-  if (journalFilter === 'entered') j = all.filter(r => stOf(r) === 'entered' && !isWatch(r));
-  else if (journalFilter === 'pending') j = all.filter(r => stOf(r) === 'pending' && !isWatch(r));
-  else if (journalFilter === 'closed') j = all.filter(r => stOf(r) === 'closed' && !isWatch(r));
-  else if (journalFilter !== 'all') j = all.filter(r => (r.category || '추세추종') === journalFilter);
-  // 정렬: 진입중 → 대기 → 관찰 → 종료 → 무산, 각 그룹 안에선 최신순
-  const grp = r => isWatch(r) ? 2 : ({entered: 0, pending: 1, closed: 3, missed: 4}[stOf(r)] ?? 3);
-  j = [...j].sort((a, b) => grp(a) - grp(b) || (b.date || '').localeCompare(a.date || ''));
+  let j;
+  if (journalCatFilter === '관찰') {
+    j = all.filter(isWatch);
+  } else {
+    j = all.filter(r => stOf(r) === journalTab && !isWatch(r));
+    if (journalCatFilter !== 'all') j = j.filter(r => (r.category || '추세추종') === journalCatFilter);
+  }
+  // 정렬: 최신순(종료 탭은 closed_date 우선, 그 외는 등록일)
+  j = [...j].sort((a, b) => (b.closed_date || b.date || '').localeCompare(a.closed_date || a.date || ''));
   // 카테고리별 통계 (추세추종 / 단타 분리)
   const trend = journalStats(all.filter(r => (r.category || '추세추종') === '추세추종'));
   const scalp = journalStats(all.filter(r => (r.category || '추세추종') === '단타'));
 
-  const fbtn = (key, label) => `<button class="fbtn ${journalFilter===key?'on':''}" onclick="journalFilter='${key}';renderJournal()">${label}</button>`;
-  const tabBtn = (key, label) => `<button class="jrnl-tab ${journalFilter===key?'on':''}" onclick="journalFilter='${key}';renderJournal()">${label}</button>`;
+  const tabCount = key => all.filter(r => stOf(r) === key && !isWatch(r)).length;
+  const mainTab = (key, label) => `<button class="jrnl-tab ${(journalTab===key && journalCatFilter!=='관찰')?'on':''}" onclick="journalTab='${key}';journalCatFilter=(journalCatFilter==='관찰'?'all':journalCatFilter);renderJournal()">${label} <span style="opacity:.6;font-size:12px">${tabCount(key)}</span></button>`;
+  const catBtn = (key, label) => `<button class="fbtn ${journalCatFilter===key?'on':''}" onclick="journalCatFilter='${key}';renderJournal()">${label}</button>`;
+  const isClosedTab = journalTab === 'closed' && journalCatFilter !== '관찰';
 
   // ── R 리스크 대시보드 ──
   const _open = openRiskR();
@@ -2855,18 +2958,21 @@ function renderJournal() {
     ${renderRCurve(all)}
     ${renderSignalValidation(all)}
     <div class="jrnl-filter">
-      ${tabBtn('entered','▶ 진입중')} ${tabBtn('pending','⏳ 대기')} ${tabBtn('관찰','👁 관찰')}
-      <span class="jrnl-tab-sep"></span>
-      ${fbtn('all','전체')} ${fbtn('closed','✔ 종료')} ${fbtn('추세추종','📈 추세')} ${fbtn('단타','⚡ 단타')}
+      ${mainTab('entered','▶ 진입')} ${mainTab('pending','⏳ 대기')} ${mainTab('closed','✔ 종료')} ${mainTab('missed','✖ 무산')}
     </div>
+    <div class="jrnl-filter" style="margin-top:6px">
+      ${catBtn('all','전체')} ${catBtn('추세추종','📈 추세')} ${catBtn('단타','⚡ 단타')} ${catBtn('관찰','👁 관찰')}
+    </div>
+    ${isClosedTab ? renderClosedSummary(closedTabStats(j)) : ''}
     <div style="overflow-x:auto">
     <table class="jtable">
       <thead><tr>
         <th>날짜</th><th>상태</th><th>종목</th><th>진입가</th><th>손절</th>
-        <th>결과R</th><th>근거/복기</th><th></th>
+        <th>손익 (R)</th><th>근거/복기</th><th></th>
       </tr></thead>
       <tbody>
-        ${j.map(r => r.id === partialEditingId ? partialRow(r) : (r.id === editingId ? editRow(r) : viewRow(r))).join('')}
+        ${isClosedTab ? renderClosedMonths(j)
+          : j.map(r => r.id === partialEditingId ? partialRow(r) : (r.id === editingId ? editRow(r) : viewRow(r))).join('')}
       </tbody>
     </table></div>`;
 }
@@ -2927,8 +3033,20 @@ function viewRow(r) {
     <td class="mono" style="${r.result_r&&parseFloat(r.result_r)>0?'color:var(--px-up)':r.result_r?'color:var(--px-down)':''}">${
       // v4.85: 부분익절(2R에서 절반 등) 기록 이력 — 있으면 항상 맨 위에 작게 표시.
       (r.partials && r.partials.length ? `<div style="font-size:9px;color:#f2b33d;font-weight:600">${r.partials.map((p,i) => `${i+1}차 ${p.pct}%@${p.r>=0?'+':''}${p.r}R`).join(' · ')}</div>` : '') +
-      (r.result_r
-        ? `${r.result_r}R${r.exit_reason==='충동'?`<div style="font-size:9px;color:#ff6b6b;font-weight:700">⚠️ 충동</div>`:r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:''}`
+      (st === 'closed'
+        // ②재설계: R은 손절 데이터 있을 때만(result_r), 손익%는 청산가만 있으면
+        // 항상 계산(pnlPct) — 둘 다 있으면 R을 메인으로, %는 보조로 작게.
+        ? (() => {
+            const pct = pnlPct(r);
+            const rNum = r.result_r !== '' && !isNaN(parseFloat(r.result_r)) ? parseFloat(r.result_r) : null;
+            const pctStr = pct != null ? `${pct > 0 ? '+' : ''}${pct}%` : null;
+            const rStr = rNum != null ? `${rNum > 0 ? '+' : ''}${r.result_r}R` : null;
+            const mainVal = rNum != null ? rNum : pct;
+            const col = mainVal > 0 ? 'var(--px-up)' : mainVal < 0 ? 'var(--px-down)' : 'inherit';
+            return `<span style="color:${col}">${rStr || pctStr || '-'}</span>` +
+              (rStr && pctStr ? `<div style="font-size:9px;color:var(--muted)">${pctStr}</div>` : (!rStr && !pctStr ? `<div style="font-size:9px;color:var(--muted)">R 없음(손절 미기록)</div>` : '')) +
+              (r.exit_reason==='충동'?`<div style="font-size:9px;color:#ff6b6b;font-weight:700">⚠️ 충동</div>`:r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:'');
+          })()
         : st === 'pending'
             ? `<span style="color:var(--amber);font-size:11px">피벗 대기</span><div style="font-size:9px;color:var(--muted)">${r.last_price?'현재 '+(/\.(KS|KQ)$/i.test(r.ticker||'')?Math.round(parseFloat(r.last_price)).toLocaleString():parseFloat(r.last_price).toFixed(2)):'미진입'}</div>`
         : st === 'missed'
@@ -3055,10 +3173,11 @@ function savePartial(id) {
   const price = parseFloat(document.getElementById('p_price').value);
   if (!pct || pct <= 0 || pct > 100) { alert('청산 비율을 1~100 사이로 입력하세요.'); return; }
   const entry = parseFloat(r.entry), stop = parseFloat(r.stop);
-  if (!price || !entry || !stop || entry <= stop) { alert('청산가를 입력하세요 (진입가/손절가가 있어야 R 계산 가능).'); return; }
+  const isShort = isShortRow(r);
+  if (!price || !entry || !stop || (isShort ? stop <= entry : entry <= stop)) { alert('청산가를 입력하세요 (진입가/손절가가 있어야 R 계산 가능).'); return; }
   const prevPct = (r.partials || []).reduce((s, p) => s + p.pct, 0);
   if (prevPct + pct > 100) { alert(`이미 ${prevPct}% 청산됨 — 나머지 ${100 - prevPct}%를 넘을 수 없어요.`); return; }
-  const rMult = Math.round((price - entry) / (entry - stop) * 100) / 100;
+  const rMult = Math.round((isShort ? (entry - price) / (stop - entry) : (price - entry) / (entry - stop)) * 100) / 100;
   r.partials = r.partials || [];
   r.partials.push({ date: kstStr(), price, pct, r: rMult });
   partialEditingId = null;
@@ -3145,14 +3264,22 @@ function saveEdit(id) {
   const entry = parseFloat(document.getElementById('e_entry').value) || null;
   const stop = parseFloat(document.getElementById('e_stop').value) || null;
   r.entry = entry; r.stop = stop;
-  // 진입가·손절 바뀌면 리스크% 재계산
-  if (entry && stop && entry > stop) r.risk_pct = Math.round((entry - stop) / entry * 1000) / 10;
+  const isShort = isShortRow(r);
+  // 진입가·손절 바뀌면 리스크% 재계산 (숏은 손절이 진입가 위)
+  if (entry && stop && (isShort ? stop > entry : entry > stop)) {
+    r.risk_pct = Math.round(Math.abs(entry - stop) / entry * 1000) / 10;
+  }
   // 청산가 입력 시 결과R 자동 환산 (R 직접 입력값보다 우선)
   const exitV = parseFloat(document.getElementById('e_exit').value);
   const manualR = document.getElementById('e_result').value.trim();
   const reasonSel = document.getElementById('e_reason');
   const exitReason = reasonSel ? reasonSel.value : '';
-  const isClosing = (!isNaN(exitV) && entry && stop && entry > stop) || !!manualR;
+  // ①버그 수정: 예전엔 "entry>stop"(롱 전제)을 만족해야만 종료로 쳐서, 숏
+  // 포지션이거나 손절가가 아예 기록 안 된 종목은 청산가를 입력해도 이
+  // isClosing이 false가 돼 종료 사유 게이트도 안 뜨고 status도 그대로라
+  // 조용히 저장이 안 되는 버그가 있었음. 청산가(또는 수동 R)만 있으면 종료로
+  // 본다 — R 계산 가능 여부와 "종료됐다"는 사실은 별개.
+  const isClosing = !isNaN(exitV) || !!manualR;
   // ── 종료 사유 게이트: 청산하려면 사유를 반드시 골라야 함 ──
   // (승인 게이트의 1인용 버전 — 손이 먼저 나가기 전에 "이게 규칙인가 충동인가" 자문)
   if (isClosing && (r.status === 'entered' || r.status === 'closed' || !r.status) && !exitReason) {
@@ -3160,10 +3287,15 @@ function saveEdit(id) {
     return;
   }
   const hasPartials = r.partials && r.partials.length;
-  if (!isNaN(exitV) && entry && stop && entry > stop) {
+  // R은 손절 데이터가 있어야만(방향에 맞게) 계산 — 없으면 청산가·종료 상태만
+  // 저장하고 R은 비워둔다(나중에 진입가 대비 손익%로는 항상 계산 가능).
+  const canComputeR = entry != null && stop != null && (isShort ? stop > entry : entry > stop);
+  if (!isNaN(exitV)) {
     r.exit = exitV;
-    const finalR = (exitV - entry) / (entry - stop);
-    r.result_r = (hasPartials ? blendedR(r, finalR) : Math.round(finalR * 100) / 100).toString();
+    if (canComputeR) {
+      const finalR = isShort ? (entry - exitV) / (stop - entry) : (exitV - entry) / (entry - stop);
+      r.result_r = (hasPartials ? blendedR(r, finalR) : Math.round(finalR * 100) / 100).toString();
+    }
     r.tracking = false;                  // 수동 청산 → 추적 종료
     r.status = 'closed';
     r.exit_reason = exitReason;
