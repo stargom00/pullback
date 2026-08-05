@@ -3170,38 +3170,43 @@ PATTERN_CONFIG = {
 # 모듈 상단 상수로 빼서 튜닝 가능하게 함(코드 중간 매직넘버 금지).
 # ══════════════════════════════════════════════════════
 ACCUM_WEIGHTS = {
-    "vol_ratio":      0.25,
-    "atr_compress":   0.25,
-    "close_strength": 0.20,
-    "ud_vol":         0.10,
-    "vol_pickup":     0.10,
-    "range_tight":    0.10,
+    "vol_ratio":         0.22,
+    "atr_compress":      0.22,
+    "close_strength":    0.18,
+    "ud_vol":            0.10,
+    "vol_pickup":        0.08,
+    "range_tight":       0.08,
+    "trade_value_ratio": 0.12,
 }
 # 정규화 구간 (lo, hi) — _norm()에 그대로 사용. lo=0점 경계, hi=1점 경계.
 # lo > hi로 주면 "낮을수록 강함" 지표를 자동으로 역방향 정규화함
 # (atr_compress·range_tight가 이 경우).
 ACCUM_NORM_RANGES = {
-    "vol_ratio":      (1.0, 2.0),
-    "atr_compress":   (1.2, 0.5),    # 역방향: 1.2(약함)→0, 0.5(강함)→1
-    "close_strength": (0.3, 0.8),
-    "ud_vol":         (0.8, 1.6),
-    "vol_pickup":     (0.9, 1.6),
-    "range_tight":    (0.25, 0.10),  # 역방향: 0.25(ABC게이트 상한, 약함)→0, 0.10(강함)→1
+    "vol_ratio":         (1.0, 2.0),
+    "atr_compress":      (1.2, 0.5),    # 역방향: 1.2(약함)→0, 0.5(강함)→1
+    "close_strength":    (0.3, 0.8),
+    "ud_vol":            (0.8, 1.6),
+    "vol_pickup":        (0.9, 1.6),
+    "range_tight":       (0.25, 0.10),  # 역방향: 0.25(ABC게이트 상한, 약함)→0, 0.10(강함)→1
+    "trade_value_ratio": (0.4, 1.0),    # 1.0 = 6개월 고점 부근 거래대금과 동급
 }
 # "강함" 판정 임계값 (accum_parts의 pass 플래그용) — 스펙 표 그대로.
 ACCUM_PASS_THRESHOLDS = {
-    "vol_ratio":      ("ge", 1.3),
-    "atr_compress":   ("le", 0.8),
-    "close_strength": ("ge", 0.55),
-    "ud_vol":         ("ge", 1.1),
-    "vol_pickup":     ("ge", 1.15),
-    "range_tight":    ("le", 0.15),
+    "vol_ratio":         ("ge", 1.3),
+    "atr_compress":      ("le", 0.8),
+    "close_strength":    ("ge", 0.55),
+    "ud_vol":            ("ge", 1.1),
+    "vol_pickup":        ("ge", 1.15),
+    "range_tight":       ("le", 0.15),
+    "trade_value_ratio": ("ge", 0.8),
 }
 ACCUM_SYNERGY_BONUS = 10   # vol_ratio>=1.3 AND atr_compress<=0.8 동시 성립 시 가산
 ACCUM_BADGE_MIN = 65       # 🧲 배지 표시 하한
 ACCUM_MIN_A_BARS = 15
 ACCUM_MIN_PRIOR_BARS = 40
 ACCUM_MAX_BAD_VOL_BARS = 3   # A구간 내 거래량 0/NaN 허용 상한(이상이면 미달)
+TRADE_VALUE_LOOKBACK_BARS = 126   # 거래대금 고점 탐색 범위 ≈ 6개월(거래일 기준)
+TRADE_VALUE_PEAK_WINDOW = 10      # "고점 부근" = 고점 앞뒤로 이만큼(봉수)
 
 
 def _norm(value: float, lo: float, hi: float) -> float:
@@ -3297,6 +3302,23 @@ def accumulation_score(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series,
     a_hi_val, a_lo_val = float(a_h.max()), float(a_lo.min())
     raw["range_tight"] = (a_hi_val - a_lo_val) / a_lo_val if a_lo_val > 0 else 1.0
 
+    # 7) trade_value_ratio — A구간 평균 거래대금(거래량×종가) / 과거 6개월
+    #    고점 부근 평균 거래대금. "바닥에서 올라오는데 고점 때만큼 돈이
+    #    들어오는가" 자금 유입 신호. 고점은 Close 기준으로 찾는다(_pat_abc의
+    #    "상승 1파 고점" 탐지와 같은 관례 — High 대신 Close로 통일해서
+    #    "고점"이라는 개념이 이 코드베이스 안에서 하나로 일관되게 함).
+    peak_search_start = max(0, a_end - TRADE_VALUE_LOOKBACK_BARS)
+    c_search = c.iloc[peak_search_start:a_end]
+    if len(c_search) > 0:
+        peak_abs = peak_search_start + int(c_search.values.argmax())
+        pw_start = max(0, peak_abs - TRADE_VALUE_PEAK_WINDOW // 2)
+        pw_end = min(len(c), peak_abs + TRADE_VALUE_PEAK_WINDOW // 2 + 1)
+        peak_trade_value = float((v.iloc[pw_start:pw_end] * c.iloc[pw_start:pw_end]).mean())
+        a_trade_value = float((a_vol * a_c).mean())
+        raw["trade_value_ratio"] = (a_trade_value / peak_trade_value) if peak_trade_value > 0 else 0.0
+    else:
+        raw["trade_value_ratio"] = None
+
     # ── 정규화 + 가중합 (ud_vol None이면 그 가중치 제외하고 나머지 재정규화) ──
     parts = {}
     weight_sum = 0.0
@@ -3304,11 +3326,18 @@ def accumulation_score(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series,
     for key, w in ACCUM_WEIGHTS.items():
         r = raw[key]
         if r is None:
-            parts[key] = {"raw": None, "norm": None, "pass": None}
+            parts[key] = {"raw": None, "norm": None, "pass": None, "gated": False}
             continue
         lo_b, hi_b = ACCUM_NORM_RANGES[key]
         n = _norm(r, lo_b, hi_b)
-        parts[key] = {"raw": round(r, 3), "norm": round(n, 3), "pass": _accum_pass(key, r)}
+        # trade_value_ratio 단독 가점 금지: 거래대금이 커도 ud_vol이 분산
+        # (<1.0, 하락일에 거래량이 더 실림 = 투매 쪽)을 가리키면 매집 신호로
+        # 안 치고 가중합에서 통째로 제외한다(감점이 아니라 다른 미가용
+        # 요소와 동일하게 중립 처리 — raw/norm은 진단용으로 그대로 보여줌).
+        if key == "trade_value_ratio" and raw["ud_vol"] is not None and raw["ud_vol"] < 1.0:
+            parts[key] = {"raw": round(r, 3), "norm": round(n, 3), "pass": _accum_pass(key, r), "gated": True}
+            continue
+        parts[key] = {"raw": round(r, 3), "norm": round(n, 3), "pass": _accum_pass(key, r), "gated": False}
         weight_sum += w
         score_sum += w * n
 
