@@ -1710,7 +1710,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.30"
+VERSION = "v5.31"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1905,18 +1905,30 @@ def _universe_sig(market: str) -> str:
         return "u0"
 
 
+# v4.93: rs4→rs5 캐시버스트. 오늘(장마감 후) 저장된 rs4 파일이 v4.87~v4.89의
+# 버그(등락률 0%로 오염된 오늘 봉)를 그대로 물고 있어서, 그 뒤로 v4.90~v4.92를
+# 아무리 배포해도 디스크 캐시 히트 경로가 naver_kr.fetch()를 아예 다시
+# 안 불러 계속 오염된 값을 서빙하고 있었음(다음 거래일까지 캐시라 서버
+# 재배포로도 안 없어짐 — /data가 영구 볼륨이라 재시작해도 파일이 남음).
+# v5.28: rs5→rs6. 같은 이유로 다시 필요 — fetch 기간을 400일→730일(KR),
+# 1y→2y(US)로 늘렸는데 daykey(오늘 날짜)만으로는 이 파라미터 변경을
+# 못 알아채서, 배포 직전(옛 코드로) 오늘자 캐시가 이미 저장돼 있으면
+# 재배포 후에도 짧은 기간짜리 옛 캐시를 그대로 서빙하게 됨.
+# v5.31: _save_disk_cache의 정리 로직이 rs3/rs4는 무조건 삭제하면서 rs5는
+# "오늘 날짜면 보존"(rs5가 그 시점의 '현재' 네임스페이스였을 때 로직)으로
+# 남아있던 걸 발견 — rs6로 넘어온 뒤엔 rs5도 완전히 은퇴한 네임스페이스라
+# 똑같이 무조건 삭제해야 맞다(동작엔 영향 없음 — load는 항상 이 상수를 통해
+# 만든 경로만 읽으니 rs5 잔재가 다시 서빙될 일은 없고, 그냥 안 지워진
+# 파일이 볼륨에 남는 하우스키핑 문제였음). rs3/rs4/rs5를 일일이 나열하는
+# 대신 "현재 네임스페이스(_CACHE_NS)가 아니면 전부 삭제"로 일반화해서
+# 다음 마이그레이션(rs7 등) 때 이 리스트를 또 손보지 않아도 되게 함.
+_CACHE_NS = "rs6"   # 현재 디스크캐시 네임스페이스 — 스키마/기간 등이 바뀌어 캐시버스트가
+                    # 필요하면 이 값만 올린다. _save_disk_cache가 자동으로 이전 네임스페이스를 정리한다.
+
+
 def _disk_cache_path(market: str, daykey: str) -> str:
-    # v4.93: rs4→rs5 캐시버스트. 오늘(장마감 후) 저장된 rs4 파일이 v4.87~v4.89의
-    # 버그(등락률 0%로 오염된 오늘 봉)를 그대로 물고 있어서, 그 뒤로 v4.90~v4.92를
-    # 아무리 배포해도 디스크 캐시 히트 경로가 naver_kr.fetch()를 아예 다시
-    # 안 불러 계속 오염된 값을 서빙하고 있었음(다음 거래일까지 캐시라 서버
-    # 재배포로도 안 없어짐 — /data가 영구 볼륨이라 재시작해도 파일이 남음).
-    # v5.28: rs5→rs6. 같은 이유로 다시 필요 — fetch 기간을 400일→730일(KR),
-    # 1y→2y(US)로 늘렸는데 daykey(오늘 날짜)만으로는 이 파라미터 변경을
-    # 못 알아채서, 배포 직전(옛 코드로) 오늘자 캐시가 이미 저장돼 있으면
-    # 재배포 후에도 짧은 기간짜리 옛 캐시를 그대로 서빙하게 됨.
-    # u{N} = 유니버스 크기 시그니처.
-    return os.path.join(_disk_cache_dir(), f"datacache_rs6_{market}_{_universe_sig(market)}_{daykey}.pkl")
+    # u{N} = 유니버스 크기 시그니처(위 _universe_sig 참고).
+    return os.path.join(_disk_cache_dir(), f"datacache_{_CACHE_NS}_{market}_{_universe_sig(market)}_{daykey}.pkl")
 
 
 def _load_disk_cache(market: str, daykey: str):
@@ -1939,12 +1951,22 @@ def _save_disk_cache(market: str, daykey: str, bundle: dict):
         with open(tmp, "wb") as f:
             pickle.dump(bundle, f)
         os.replace(tmp, path)
-        # 오래된 캐시 정리(해당 시장의 다른 날짜 파일 삭제)
+        # 오래된 캐시 정리 — 은퇴한 네임스페이스(_CACHE_NS와 다름)는 날짜
+        # 상관없이 전부 삭제, 현재 네임스페이스는 오늘(daykey) 아닌 것만
+        # 삭제. 남기는 건 딱 하나(현재 네임스페이스 + 오늘)뿐이라 다음
+        # 마이그레이션 때도 이 로직을 안 건드려도 된다(v5.31).
         d = _disk_cache_dir()
         for fn in os.listdir(d):
-            if (fn.startswith(f"datacache_rs5_{market}_") and not fn.endswith(f"_{daykey}.pkl")) \
-               or fn.startswith(f"datacache_rs4_{market}_") \
-               or fn.startswith(f"datacache_rs3_{market}_"):
+            if not (fn.startswith("datacache_") and fn.endswith(".pkl")):
+                continue
+            parts = fn.split("_")
+            if len(parts) < 3:
+                continue
+            fn_ns, fn_market = parts[1], parts[2]
+            if fn_market != market:
+                continue
+            keep = fn_ns == _CACHE_NS and fn.endswith(f"_{daykey}.pkl")
+            if not keep:
                 try:
                     os.remove(os.path.join(d, fn))
                 except OSError:
