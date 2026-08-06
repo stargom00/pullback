@@ -5,6 +5,30 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.33 [도구] min_bars 감사 린터(test_min_bars_audit.py) 추가 — v5.32에서
+        사람이 코드를 한 줄씩 읽어서 찾은 "게이트는 통과하는데 내부
+        rolling/iloc이 더 많은 봉을 요구하는" 결함 클래스를 AST 정적분석
+        으로 재발 방지. scanner.py를 파싱해 각 analyze_*/헬퍼 함수의
+        min_bars 게이트(cfg 기본값 또는 `if len(x)<N: return`류)를
+        추출하고, 내부 rolling(N)/스칼라 iloc(N)이 게이트를 넘는지,
+        자기클램프(rolling(min(N,len)))나 인덱스클램프(price_ago류)
+        안티패턴이 있는지 검사. 헬퍼 호출은 인터프로시저로 전파(trend_grade
+        같은 헬퍼가 자기 게이트로 스스로 방어하면 호출부 게이트가 낮아도
+        안전 — 그렇지 않으면 헬퍼의 내부 요구치를 호출부 게이트와 대조).
+        [검증] v5.32 패치 전 scanner.py(git 36c92fc)에 대해 실행 → 이번에
+        고친 4건(rs_raw_score/rs_score_stage2의 INDEX_CLAMP, analyze_inverse
+        의 SELF_CLAMP_ROLLING 2건, boxbreak/pattern→trend_grade의
+        OWN_GATE_INSUFFICIENT+HELPER_EXCEEDS_GATE) 전부 FAIL로 재현 확인.
+        패치 후 현재 코드는 0 FAIL(WARN 2건은 analyze_surge/inverse의
+        `math.isnan(m200) or ...` 폴백 — 실제 보호돼 있음을 이미 확인한
+        패턴이라 non-blocking으로 유지). pytest로 실행 가능
+        (`test_no_min_bars_gaps`).
+        [부수 정리] analyze_inverse의 vol50 `rolling(min(50,len(v)))`(원래도
+        무해했음 — min_bars=60이 항상 커버) 및 rs_score_stage2의 price_ago
+        `-min(days,len(c)-1)-1`(자기 게이트 253이 항상 커버) — 둘 다 실제
+        결함은 아니었지만 린터가 안티패턴 모양 자체로 잡아서(게이트가 우연히
+        충분한 것과 코드가 안전한 건 다른 문제) 같이 정리, 클린 기준선
+        확보.
 v5.32 [버그수정] "min_bars는 통과하는데 내부가 더 요구" 클래스 결함 전수 감사
         (KR 485봉/US 501봉 기준 표로 정리) 후 확인된 4건 수정. fetch
         730일(KR)/2y(US) 확대(v5.28)의 부작용이 아니라 전부 원래 있던
@@ -1756,7 +1780,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.32"
+VERSION = "v5.33"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

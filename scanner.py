@@ -3010,7 +3010,7 @@ def analyze_inverse(df: pd.DataFrame, meta: dict | None = None,
     above_ma20 = close > m20
     ma20_slope = m20 > float(ma20.iloc[-6]) if len(ma20) > 6 else False  # 20일선 상승
     vol_mult = 0.0
-    vol50 = float(v.rolling(min(50, len(v))).mean().iloc[-1])
+    vol50 = float(v.rolling(50).mean().iloc[-1])  # min_bars=60>=50이라 클램프 불필요(무해했지만 정리)
     if vol50 > 0:
         vol_mult = float(v.iloc[-1]) / vol50
 
@@ -4129,8 +4129,8 @@ def rs_score_stage2(close: pd.Series) -> float | None:
     now = float(c.iloc[-1])
 
     def price_ago(days):
-        idx = -min(days, len(c) - 1) - 1
-        return float(c.iloc[idx])
+        # gate(253) > 252(최대 요구치)라 클램프 불필요 — 직접 인덱싱(v5.32 정리)
+        return float(c.iloc[-days - 1])
 
     p3, p6, p12 = price_ago(63), price_ago(126), price_ago(252)
     if min(now, p3, p6, p12) <= 0:
