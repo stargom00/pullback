@@ -449,7 +449,18 @@ def trend_grade(c: pd.Series, lo: pd.Series, h: pd.Series, rs_rank,
     """미너비니 Trend Template 8조건 채점 → A/B/C/D 등급 (v4.48.3).
     이 앱의 이평 체계(20/60/200)에 맞게 150일선 조건은 60일선으로 대응.
     A = 8/8 + RS 87+ (진짜 주도주) / B = 7+ / C = 5~6 / D = 그 이하.
-    각 카드에 등급 배지로 표시 — '수많은 종목 중 진짜'를 한 글자로."""
+    각 카드에 등급 배지로 표시 — '수많은 종목 중 진짜'를 한 글자로.
+
+    v5.32: len(c)<200이면 등급 자체를 매기지 않는다("?"). 예전엔 ma200/
+    ma200_prev가 NaN인데도 8조건 중 "200일선 위·200일선 상승·60>200일선"
+    3개가 비교 자체는 실행돼(NaN 비교는 예외를 안 던지고 그냥 False) 무조건
+    실패 처리됐다 — boxbreak(min_bars=140)/pattern(130) 탭의 신규 상장주가
+    실제론 D급이 아닌데도 33/33 전부 D로 나오던 원인. 200일선 조건은
+    "어려운 조건"이 아니라 상장 200일 미만이면 정의 자체가 안 되는
+    질문이라, 점수를 깎지 않고 판정 불가로 둔다. 프론트(static/index.html)
+    는 이미 grade==='?'일 때 등급 배지를 렌더링하지 않아 UI 변경 불필요."""
+    if len(c) < 200:
+        return {"grade": "?", "passed": 0, "fails": [], "ud_note": ""}
     try:
         close = float(c.iloc[-1])
         ma20 = float(c.rolling(20).mean().iloc[-1])
@@ -1219,25 +1230,29 @@ def rs_raw_score(close: pd.Series) -> float | None:
         폭발시켜, 현재 추락 중인 종목도 RS 99로 잡히는 버그가 있었음.
       - 로그수익률 ln(p0/p3)은 극단 폭등을 압축하고, ±0.7(±약100%)로 클립해
         저가주 왜곡을 막는다. 정상 추세주의 순위는 거의 보존.
-    """
+
+    v5.32: price_ago가 요청한 days만큼 데이터가 없으면(상장 200~252봉) 예전엔
+    가장 오래된 봉으로 조용히 클램프해 "상장 초기가 = 12개월 전 가격"으로
+    오인하는 분기를 만들었다(실측: 이 분기가 최종점수를 최대 ±0.14 왜곡,
+    KR 11건/US 17건). 이제 부족한 분기는 None 처리 후 제외하고 남은 가중치로
+    재정규화한다(accum_score와 동일 패턴, scanner.py의 ACCUM_WEIGHTS 참고).
+    outer gate가 200이라 63/126/189일은 항상 확보되고 252(q4)만 빠질 수
+    있지만, 향후 min_bars가 낮아져도 안전하도록 일반화해 두었다 — 남은
+    분기가 1개 이하면 추세강도 지표로 의미가 없어 None을 반환한다.
+    "이 종목 RS가 몇 분기짜리인지"는 rs_quarters_used()로 별도 조회 가능
+    (핫패스 비용을 피하려고 반환 시그니처 자체는 안 바꿈)."""
     import math
     c = close.dropna()
     if len(c) < 200:
         return None
     now = float(c.iloc[-1])
+    n = len(c)
 
     def price_ago(days):
-        idx = -min(days, len(c) - 1) - 1
+        idx = -days - 1
+        if n < days + 1:
+            return None
         return float(c.iloc[idx])
-
-    p0 = now
-    p3 = price_ago(63)
-    p6 = price_ago(126)
-    p9 = price_ago(189)
-    p12 = price_ago(252)
-
-    if min(p0, p3, p6, p9, p12) <= 0:
-        return None
 
     CLIP = 0.7  # 분기 로그수익률 상·하한 (≈ ±100%) — 저가주 폭등 왜곡 차단
 
@@ -1245,13 +1260,40 @@ def rs_raw_score(close: pd.Series) -> float | None:
         r = math.log(a / b)
         return max(-CLIP, min(CLIP, r))
 
-    q1 = logret(p0, p3)    # 최근 3개월
-    q2 = logret(p3, p6)
-    q3 = logret(p6, p9)
-    q4 = logret(p9, p12)   # 가장 오래된 3개월
+    p0 = now
+    p3 = price_ago(63)
+    p6 = price_ago(126)
+    p9 = price_ago(189)
+    p12 = price_ago(252)
 
-    # IBD 가중: 최근 분기 2배 (0.4 + 0.2 + 0.2 + 0.2 = 1.0)
-    return 0.4 * q1 + 0.2 * q2 + 0.2 * q3 + 0.2 * q4
+    # (가중치, 시작가, 끝가) — None이거나 <=0(오염 데이터)이면 그 분기 제외.
+    quarters = [
+        (0.4, p0, p3),   # q1: 최근 3개월
+        (0.2, p3, p6),   # q2
+        (0.2, p6, p9),   # q3
+        (0.2, p9, p12),  # q4: 가장 오래된 3개월
+    ]
+    parts = [
+        (w, logret(a, b)) for w, a, b in quarters
+        if a is not None and b is not None and a > 0 and b > 0
+    ]
+    if len(parts) < 2:
+        return None
+
+    wsum = sum(w for w, _ in parts)
+    return sum(w * q for w, q in parts) / wsum
+
+
+def rs_quarters_used(close: pd.Series) -> int | None:
+    """rs_raw_score()가 실제 사용한 분기 수(정상 4, 상장 200~252봉이면 3).
+    None이면 rs_raw_score 자체가 None. 전체 유니버스 스캔 핫패스에서는 호출
+    하지 않음(중복 계산) — /api/debug 등 특정 종목 진단용."""
+    c = close.dropna()
+    if len(c) < 200:
+        return None
+    n = len(c)
+    count = sum(1 for days in (63, 126, 189, 252) if n >= days + 1)
+    return count if count >= 2 else None
 
 
 def to_rs_rank(raw_scores: dict[str, float]) -> dict[str, int]:
@@ -2951,8 +2993,8 @@ def analyze_inverse(df: pd.DataFrame, meta: dict | None = None,
     c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
     ma20 = c.rolling(20).mean()
     ma60 = c.rolling(60).mean()
-    ma200 = c.rolling(min(200, len(c))).mean()
-    r = rsi(c)
+    ma200 = c.rolling(200).mean()  # v5.32: 자기 클램프 제거 — len<200이면 NaN이 그대로
+    r = rsi(c)                     # 나와야 아래 aligned의 isnan(m200) 폴백이 발동한다
 
     close = float(c.iloc[-1])
     m20, m60, m200 = float(ma20.iloc[-1]), float(ma60.iloc[-1]), float(ma200.iloc[-1])
@@ -4105,7 +4147,11 @@ def rs_score_stage2(close: pd.Series) -> float | None:
 
 
 STAGE2_CONFIG = {
-    "min_bars": 260,             # 200일선 + 52주 + 200일선 1개월 기울기 계산 여유
+    "min_bars": 262,             # 내부 최대 요구치 252(lo52/hi52 = c.iloc[-252:], 무가드)
+                                  # + 10봉 버퍼(다른 tab들의 200요구+210게이트 관례와 동일 폭).
+                                  # v5.32 이전엔 260(마진 8, 근거 없음) — rs_score_stage2가
+                                  # 253 요구인데 US period="1y"(251봉)로 100% 죽었던 것과
+                                  # 같은 구조라 재발 방지 차원에서 마진을 명시적으로 키움.
     "low52_mult": 1.30,          # 현재가 >= 52주 저점 * 1.30
     "high52_mult": 0.75,         # 현재가 >= 52주 고점 * 0.75 (고점 대비 -25% 이내)
     "ma200_rise_lookback": 20,   # 200일선 상승 판정 구간(거래일, ≈1개월)
