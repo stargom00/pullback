@@ -1710,7 +1710,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.27"
+VERSION = "v5.28"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -1763,7 +1763,10 @@ def _fetch(ticker: str):
         except Exception:
             return None
     try:
-        df = yf.Ticker(ticker).history(period="1y", interval="1d", auto_adjust=True)
+        # v5.28: KR을 400일(≈269봉)→730일(≈485봉)로 늘리면서 미국도 같이
+        # 2y로 맞춤 — 한쪽만 늘리면 시장 간 lookback 기준(52주 고저·RS
+        # 12개월 등 공용 지표)이 어긋나게 됨.
+        df = yf.Ticker(ticker).history(period="2y", interval="1d", auto_adjust=True)
         if df is None or df.empty:
             return None
         return _downcast(df)
@@ -1774,13 +1777,14 @@ def _fetch(ticker: str):
 def _fetch_us_batch(tickers: list[str]) -> dict:
     """미국 종목을 yf.download로 한 번에 받아 {ticker: df}로 분해.
     종목당 1요청 → 배치당 1요청으로 줄여 야후 부하/차단을 크게 낮춤.
-    개별 history()와 동일하게 auto_adjust=True, 1년치 일봉."""
+    개별 history()와 동일하게 auto_adjust=True, 2년치 일봉(v5.28, KR과 동일
+    lookback 기준으로 맞춤)."""
     out: dict = {}
     if not tickers:
         return out
     try:
         raw = yf.download(
-            tickers, period="1y", interval="1d",
+            tickers, period="2y", interval="1d",
             auto_adjust=True, group_by="ticker",
             threads=True, progress=False,
         )
@@ -1907,8 +1911,12 @@ def _disk_cache_path(market: str, daykey: str) -> str:
     # 아무리 배포해도 디스크 캐시 히트 경로가 naver_kr.fetch()를 아예 다시
     # 안 불러 계속 오염된 값을 서빙하고 있었음(다음 거래일까지 캐시라 서버
     # 재배포로도 안 없어짐 — /data가 영구 볼륨이라 재시작해도 파일이 남음).
+    # v5.28: rs5→rs6. 같은 이유로 다시 필요 — fetch 기간을 400일→730일(KR),
+    # 1y→2y(US)로 늘렸는데 daykey(오늘 날짜)만으로는 이 파라미터 변경을
+    # 못 알아채서, 배포 직전(옛 코드로) 오늘자 캐시가 이미 저장돼 있으면
+    # 재배포 후에도 짧은 기간짜리 옛 캐시를 그대로 서빙하게 됨.
     # u{N} = 유니버스 크기 시그니처.
-    return os.path.join(_disk_cache_dir(), f"datacache_rs5_{market}_{_universe_sig(market)}_{daykey}.pkl")
+    return os.path.join(_disk_cache_dir(), f"datacache_rs6_{market}_{_universe_sig(market)}_{daykey}.pkl")
 
 
 def _load_disk_cache(market: str, daykey: str):

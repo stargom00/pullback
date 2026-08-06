@@ -89,8 +89,22 @@ def _parse_sise(text: str) -> pd.DataFrame | None:
     return df if not df.empty else None
 
 
-def fetch_history(ticker: str, days: int = 400) -> pd.DataFrame | None:
-    """한국 종목 과거 일봉 (수정주가). 기본 400일 → 1년치 확보."""
+def fetch_history(ticker: str, days: int = 730) -> pd.DataFrame | None:
+    """한국 종목 과거 일봉 (수정주가). 기본 730일(≈2년, 거래일 약 485봉).
+
+    v5.28: 400일(≈거래일 269봉)이던 시절엔 A-B-C 상한가 패턴의 적응형 A구간
+    (A_MAX_LOOKBACK=250)이 126봉을 넘는 종목 전부(실측 214/214, 100%)가
+    trade_value_ratio 탐색창(A 이전 126봉)을 온전히 확보 못 했다. 730일로
+    늘리면 그중 213/214(99.5%)가 해소됨을 실측 확인. API 쪽 상한은 없음
+    (요청 기간에 그대로 비례해서 반환, 429/5xx 재시도 로직은 무관하게
+    작동) — fetch당 소요시간도 400/730/1095일 전부 요청당 약 1초로 동일
+    (페이로드 크기가 아니라 왕복 지연이 지배적). rs_raw_score·
+    rs_score_stage2·count_bases_since_bottom·late_stage_info·trend_grade·
+    off_high_pct·rr_info의 52주/12개월 지표는 전부 "끝에서부터 N봉"
+    trailing window라 이 변경과 무관(더 늘어난 과거 데이터가 앞에 붙을
+    뿐 최근 N봉 내용 자체는 그대로) — KR 유니버스 1503종목 실측 비교로
+    확인(7개 함수 전부 사실상 100% 동일값, 유일한 차이는 이전엔 데이터
+    부족으로 None/0 처리되던 종목 1건이 새로 계산 가능해진 것뿐)."""
     code = to_code(ticker)
     return _fetch_sise_history(code, days)
 
