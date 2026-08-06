@@ -3206,7 +3206,7 @@ ACCUM_MIN_A_BARS = 15
 ACCUM_MIN_PRIOR_BARS = 40
 ACCUM_MAX_BAD_VOL_BARS = 3   # A구간 내 거래량 0/NaN 허용 상한(이상이면 미달)
 TRADE_VALUE_LOOKBACK_BARS = 126   # 거래대금 고점 탐색 범위 ≈ 6개월(거래일 기준)
-TRADE_VALUE_PEAK_WINDOW = 10      # "고점 부근" = 고점 앞뒤로 이만큼(봉수)
+TRADE_VALUE_PEAK_WINDOW = 10      # "고점 부근" = 고점 당일 + 앞뒤 5봉씩 = 11봉 (주석 수치=봉수 아님, 절반값)
 
 
 def _norm(value: float, lo: float, hi: float) -> float:
@@ -3302,22 +3302,30 @@ def accumulation_score(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series,
     a_hi_val, a_lo_val = float(a_h.max()), float(a_lo.min())
     raw["range_tight"] = (a_hi_val - a_lo_val) / a_lo_val if a_lo_val > 0 else 1.0
 
-    # 7) trade_value_ratio — A구간 평균 거래대금(거래량×종가) / 과거 6개월
-    #    고점 부근 평균 거래대금. "바닥에서 올라오는데 고점 때만큼 돈이
+    # 7) trade_value_ratio (v5.27 탐색창 기준점 수정) — A구간 평균 거래대금
+    #    (거래량×종가) / 과거 6개월 고점 부근 평균 거래대금. "바닥에서 올라오는데 고점 때만큼 돈이
     #    들어오는가" 자금 유입 신호. 고점은 Close 기준으로 찾는다(_pat_abc의
     #    "상승 1파 고점" 탐지와 같은 관례 — High 대신 Close로 통일해서
     #    "고점"이라는 개념이 이 코드베이스 안에서 하나로 일관되게 함).
-    peak_search_start = max(0, a_end - TRADE_VALUE_LOOKBACK_BARS)
-    c_search = c.iloc[peak_search_start:a_end]
-    if len(c_search) > 0:
+    #    기준점은 반드시 a_start(A구간 이전만 검색) — a_end를 기준으로 하면
+    #    탐색창이 A구간 자신을 포함해버려서(v5.26 적응형 A구간이 126봉을
+    #    넘는 경우 탐색창이 100% A 내부가 됨), "지금 vs 과거 고점" 비교가
+    #    "A평균 vs A자기고점" 자기비교로 무너지고 값이 구조적으로 1.0
+    #    쪽에 편향됐다(재현 확인: a_len 126+ 구간 trade_value_ratio 평균이
+    #    ~50봉 구간 대비 약 2배, r=0.22~0.23). A 이전 비교 구간이 20봉도
+    #    안 되면(데이터 앞쪽에 붙은 경우) 비교 자체가 무의미하므로 None —
+    #    가중합 루프가 None을 이미 "그 요소 제외하고 재정규화"로 처리한다.
+    peak_search_start = max(0, a_start - TRADE_VALUE_LOOKBACK_BARS)
+    c_search = c.iloc[peak_search_start:a_start]
+    if len(c_search) < 20:
+        raw["trade_value_ratio"] = None
+    else:
         peak_abs = peak_search_start + int(c_search.values.argmax())
         pw_start = max(0, peak_abs - TRADE_VALUE_PEAK_WINDOW // 2)
         pw_end = min(len(c), peak_abs + TRADE_VALUE_PEAK_WINDOW // 2 + 1)
         peak_trade_value = float((v.iloc[pw_start:pw_end] * c.iloc[pw_start:pw_end]).mean())
         a_trade_value = float((a_vol * a_c).mean())
         raw["trade_value_ratio"] = (a_trade_value / peak_trade_value) if peak_trade_value > 0 else 0.0
-    else:
-        raw["trade_value_ratio"] = None
 
     # ── 정규화 + 가중합 (ud_vol None이면 그 가중치 제외하고 나머지 재정규화) ──
     parts = {}
