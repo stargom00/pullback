@@ -85,7 +85,7 @@ vols7 = [800_000] * 220 + [1_400_000] * 38
 df7 = pd.DataFrame({"Open": closes7, "High": [c*1.01 for c in closes7],
                     "Low": [c*0.99 for c in closes7], "Close": closes7,
                     "Volume": [float(v) for v in vols7]})
-r7 = analyze_turnaround(df7, rs_rank=55, rs_mom=35)
+r7 = analyze_turnaround(df7, rs_rank=72, rs_mom=35)  # rs_rank(v4411부터 TURN_CONFIG.rs_min=70, 원래 55는 게이트 자체를 못 넘음)
 print("Case7 추세전환:", f"탐지 ✓ score {r7['score']} | 정배열 D+{r7['align_days']} | 200선 +{r7['ma200_dist_pct']}%" if r7 else "미탐지 ✗")
 
 # ── Case 8: 같은 차트, RS 모멘텀 음수 (탈락해야) ──
@@ -103,9 +103,9 @@ print("Case9 장기 정배열:", "탈락 ✓ (전환 아님)" if r9 is None else
 # ── Case 10: RS 곱셈 — 모양 같으면 RS 높은 쪽이 점수 위 ──
 # Case1 차트 재사용 (df1, 위에서 정의됨)
 hi = analyze(df1, rs_rank=95)
-lo_ = analyze(df1, rs_rank=55)
+lo_ = analyze(df1, rs_rank=82)  # rs_rank(v4270부터 CONFIG.rs_min=80, 원래 55는 게이트 자체를 못 넘음)
 print("Case10 RS 곱셈:", "OK ✓" if hi and lo_ and hi["score"] > lo_["score"] + 5 else "오류 ✗",
-      f"(RS95 {hi['score'] if hi else '-'} vs RS55 {lo_['score'] if lo_ else '-'})")
+      f"(RS95 {hi['score'] if hi else '-'} vs RS82 {lo_['score'] if lo_ else '-'})")
 
 # ── Case 11: 인텔 패턴 — 급등 후 4주 횡보(20일선 평평), RS95만 탐지 ──
 rng11 = np.random.default_rng(21)

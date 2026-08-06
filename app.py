@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.34 [진단] /api/debug/{ticker}에 rs_raw_score/rs_quarters_used 추가.
+        price_ago 재정규화(v5.32)로 상장 200~252봉 종목이 3분기짜리
+        점수를 받는데, 지금까지는 이걸 눈으로 확인할 방법이 없었음(전체
+        유니버스 스캔에서는 최종 백분위만 남고 원점수·분기수는 버려짐).
+        진단 엔드포인트는 종목 1개만 처리해서 비용 무시할 만함(핫패스인
+        전체 스캔 루프에는 추가 안 함). 카드 표시는 보류 — API로 충분.
+        [테스트] test_scanner.py Case7/Case10이 v5.32 이전부터(각각
+        2026-06-28/06-19, TURN_CONFIG.rs_min 30→70·CONFIG.rs_min 50→80로
+        올라간 시점) 깨져 있던 걸 확인 — 시나리오 자체가 틀린 게 아니라
+        테스트가 하드코딩한 rs_rank=55가 그새 올라간 게이트를 못 넘어서
+        RS 필터에서 즉시 탈락하고 있었음(로직 버그 아님). rs_rank를
+        각 탭의 현재 rs_min보다 확실히 위(72/82)로 올려 수정 — 29개
+        케이스 전부 통과.
 v5.33 [도구] min_bars 감사 린터(test_min_bars_audit.py) 추가 — v5.32에서
         사람이 코드를 한 줄씩 읽어서 찾은 "게이트는 통과하는데 내부
         rolling/iloc이 더 많은 봉을 요구하는" 결함 클래스를 AST 정적분석
@@ -1780,7 +1793,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.33"
+VERSION = "v5.34"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -3539,7 +3552,7 @@ async def debug_ticker(ticker: str):
     import pandas as _pd
     from scanner import (analyze, analyze_turnaround, analyze_imminent,
                          analyze_breakout, analyze_leader, analyze_super, analyze_surge,
-                         analyze_boxbreak)
+                         analyze_boxbreak, rs_raw_score, rs_quarters_used)
     # 접미사(.KS/.KQ) 없이 숫자코드만 입력해도 유니버스에서 자동 매칭
     _uni = get_universe(None)
     if ticker not in _uni:
@@ -3593,11 +3606,20 @@ async def debug_ticker(ticker: str):
             box_info[f"박스{win}_상단"] = round(bh)
             box_info[f"박스{win}_돌파여부"] = close > bh * 1.005
 
+    # v5.34: RS 진단 — 유니버스 백분위(rs_ranks)는 여기서 못 구하지만(전체
+    # 유니버스가 있어야 percentile이 나옴), 원점수와 "몇 분기짜리인지"는
+    # 종목 하나만으로 계산 가능. price_ago 재정규화(v5.32) 후 상장
+    # 200~252봉 종목이 3분기 점수인지 눈으로 바로 확인하려고 추가.
+    rs_raw = rs_raw_score(c)
+    rs_q = rs_quarters_used(c)
+
     payload = {
         "ticker": ticker,
         "market": "KR" if is_kr else "US",
         "close": round(close),
         "modes": modes,
+        "rs_raw_score": round(rs_raw, 4) if rs_raw is not None else None,
+        "rs_quarters_used": rs_q,
         "indicators": {
             "ma20": round(ma20), "ma60": round(ma60),
             "ma200": round(ma200) if ma200 else None,
