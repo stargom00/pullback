@@ -1558,13 +1558,20 @@ function renderCards() {
   if (riskSort) {
     list.sort((a, b) => (a.risk_pct ?? 999) - (b.risk_pct ?? 999));
   }
-  // 매집순 정렬 (토글, ABC 패턴 전용 보조지표): 내림차순, 판정불가(null)는 맨 뒤
+  // 매집순 정렬 (토글, ABC 패턴 전용 보조지표): 내림차순, 판정불가(null)는 맨 뒤.
+  // v5.29: accum_score(int(round()))로만 정렬하면 상위 50자리가 서로 다른
+  // 값 15개에만 묶여(평균 3.3종목/점수) 동점 구간 순서가 사실상 임의로
+  // 갈렸음 — accum_score_raw(소수 2자리, 배지에는 안 씀)로 정렬해 동점을
+  // 없앤다. accum_score_raw가 없는(구버전 캐시 등) 경우는 accum_score로
+  // 폴백.
   if (accumSort && mode === 'pattern') {
+    const sortVal = r => r.accum_score_raw != null ? r.accum_score_raw : r.accum_score;
     list.sort((a, b) => {
-      if (a.accum_score == null && b.accum_score == null) return 0;
-      if (a.accum_score == null) return 1;
-      if (b.accum_score == null) return -1;
-      return b.accum_score - a.accum_score;
+      const va = sortVal(a), vb = sortVal(b);
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return vb - va;
     });
   }
   // 시간대별 시장 우선 정렬 (전체 탭에서만):

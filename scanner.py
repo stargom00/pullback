@@ -3226,23 +3226,27 @@ def _accum_pass(key: str, raw: float) -> bool:
 def accumulation_score(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series,
                        a_start: int, a_end: int) -> dict:
     """A구간(a_start~a_end, 절대 정수 위치, 오래된→최신 순)의 매집 흔적 채점.
-    반환: {"score": int|None, "reason": str|None, "parts": {...}|None, "synergy": bool|None}
+    반환: {"score": int|None, "score_raw": float|None, "reason": str|None,
+           "parts": {...}|None, "synergy": bool|None}
     데이터 부족 시 score=None + 구체적 reason — 0점으로 채우지 않음(None과
-    0점은 의미가 다름).
+    0점은 의미가 다름). score_raw(v5.29)는 int(round())로 뭉개지기 전
+    소수 2자리 원점수 — 정렬은 이걸로 해야 동점 뭉침(상위 50위가 서로
+    다른 값 15개에 묶이는 등)을 피할 수 있다. score(int)는 배지 표시용
+    으로 그대로 유지.
     """
     a_len = a_end - a_start
     if a_len < ACCUM_MIN_A_BARS:
-        return {"score": None, "reason": "A구간_15봉미만", "parts": None, "synergy": None}
+        return {"score": None, "score_raw": None, "reason": "A구간_15봉미만", "parts": None, "synergy": None}
 
     prior_start = max(0, a_start - 60)
     prior_len = a_start - prior_start
     if prior_len < ACCUM_MIN_PRIOR_BARS:
-        return {"score": None, "reason": "기준윈도우부족", "parts": None, "synergy": None}
+        return {"score": None, "score_raw": None, "reason": "기준윈도우부족", "parts": None, "synergy": None}
 
     a_vol = v.iloc[a_start:a_end]
     bad_vol = int(((a_vol.isna()) | (a_vol <= 0)).sum())
     if bad_vol >= ACCUM_MAX_BAD_VOL_BARS:
-        return {"score": None, "reason": "거래량데이터결측", "parts": None, "synergy": None}
+        return {"score": None, "score_raw": None, "reason": "거래량데이터결측", "parts": None, "synergy": None}
 
     a_c, a_h, a_lo = c.iloc[a_start:a_end], h.iloc[a_start:a_end], lo.iloc[a_start:a_end]
     p_vol = v.iloc[prior_start:a_start]
@@ -3354,7 +3358,7 @@ def accumulation_score(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series,
     final = base_score * 100 + (ACCUM_SYNERGY_BONUS if synergy else 0)
     final = max(0.0, min(100.0, final))
 
-    return {"score": int(round(final)), "reason": None, "parts": parts, "synergy": synergy}
+    return {"score": int(round(final)), "score_raw": round(final, 2), "reason": None, "parts": parts, "synergy": synergy}
 
 
 # ── 조용한 매집 스코어 (v5.24, Task 2) ──
@@ -3889,6 +3893,7 @@ def _pat_abc(c, h, lo, v):
             "a_start": a_start, "a_end": a_end,          # v5.19: 절대 정수 위치 노출
             "a_start_date": _a_start_date, "a_end_date": _a_end_date,
             "accum_score": _accum["score"],
+            "accum_score_raw": _accum["score_raw"],   # v5.29: 정렬 전용(동점 뭉침 방지), 배지는 accum_score(int) 그대로
             "accum_reason": _accum["reason"],
             "accum_parts": _accum["parts"],
             "accum_synergy": _accum["synergy"],
@@ -3971,6 +3976,7 @@ def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
     _is_abc = best["pattern"] == "ABC상한가"
     _accum_fields = {
         "accum_score": best.get("accum_score") if _is_abc else None,
+        "accum_score_raw": best.get("accum_score_raw") if _is_abc else None,
         "accum_reason": best.get("accum_reason") if _is_abc else None,
         "accum_parts": best.get("accum_parts") if _is_abc else None,
         "accum_synergy": best.get("accum_synergy") if _is_abc else None,
