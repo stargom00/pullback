@@ -3188,7 +3188,15 @@ ACCUM_NORM_RANGES = {
     "ud_vol":            (0.8, 1.6),
     "vol_pickup":        (0.9, 1.6),
     "range_tight":       (0.25, 0.10),  # 역방향: 0.25(ABC게이트 상한, 약함)→0, 0.10(강함)→1
-    "trade_value_ratio": (0.4, 1.0),    # 1.0 = 6개월 고점 부근 거래대금과 동급
+    # v5.30: peak 정의를 가격(종가) 기준→거래대금 기준으로 바꾸면서 raw
+    # 분포가 구조적으로 내려감(중앙값 0.4~0.5대) — (0.4,1.0)을 그대로 쓰면
+    # 중간 변별구간이 줄고 하한(norm=0) 쏠림이 악화됨. KR 유니버스를 시차를
+    # 두고 두 번 실측(863종목/896종목, 살아있는 시세라 한 스냅샷만 믿으면
+    # 안 됨 — p20/p80이 스냅샷마다 (0.11,0.71)~(0.16,1.03)으로 흔들림을
+    # 확인)한 뒤 두 표본을 합쳐(n=1759) p20/p80=(0.130, 0.864)으로 재산정,
+    # 반올림해서 (0.13, 0.86) — 두 스냅샷 각각에 다시 적용해도 중간구간
+    # 56.5%~63.3%로 안정적.
+    "trade_value_ratio": (0.13, 0.86),  # 0.86 = 자금고점(11봉 롤링평균 최대)과 동급
 }
 # "강함" 판정 임계값 (accum_parts의 pass 플래그용) — 스펙 표 그대로.
 ACCUM_PASS_THRESHOLDS = {
@@ -3198,15 +3206,26 @@ ACCUM_PASS_THRESHOLDS = {
     "ud_vol":            ("ge", 1.1),
     "vol_pickup":        ("ge", 1.15),
     "range_tight":       ("le", 0.15),
-    "trade_value_ratio": ("ge", 0.8),
+    # v5.30: norm 구간과 같은 이유로 재산정 — 기존 0.8이 옛 lo/hi(0.4,1.0)
+    # 구간에서 차지하던 상대위치(66.7% 지점)를 새 구간(0.13,0.86)에 그대로
+    # 적용: 0.13 + 0.667*(0.86-0.13) ≈ 0.62. 두 스냅샷 각각 실측 통과율
+    # 25.1%/39.0% (기존 가격peak 기준 0.8의 통과율 28.7%와 비슷한 범위).
+    "trade_value_ratio": ("ge", 0.62),
 }
 ACCUM_SYNERGY_BONUS = 10   # vol_ratio>=1.3 AND atr_compress<=0.8 동시 성립 시 가산
 ACCUM_BADGE_MIN = 65       # 🧲 배지 표시 하한
 ACCUM_MIN_A_BARS = 15
 ACCUM_MIN_PRIOR_BARS = 40
 ACCUM_MAX_BAD_VOL_BARS = 3   # A구간 내 거래량 0/NaN 허용 상한(이상이면 미달)
-TRADE_VALUE_LOOKBACK_BARS = 126   # 거래대금 고점 탐색 범위 ≈ 6개월(거래일 기준)
-TRADE_VALUE_PEAK_WINDOW = 10      # "고점 부근" = 고점 당일 + 앞뒤 5봉씩 = 11봉 (주석 수치=봉수 아님, 절반값)
+TRADE_VALUE_LOOKBACK_BARS = 126   # 자금고점 탐색 범위 ≈ 6개월(거래일 기준) — a_start 이전만 본다
+# v5.30: 자금고점(fund peak) 탐색 창 크기(봉수). v5.27까지는 "가격 종가가
+# 최고인 날 찾기"(1단계, 가격 기준) → "그 날 앞뒤 평균 거래대금 내기"
+# (2단계, TRADE_VALUE_PEAK_WINDOW=10이 절반값이라 앞뒤5+당일=11봉)로
+# 역할이 둘로 쪼개져 있었다. 이제 "거래대금 롤링평균이 최대인 지점 찾기"
+# 하나로 탐색과 값 계산이 합쳐져서 상수도 하나면 충분 — 그래서 옛
+# TRADE_VALUE_PEAK_WINDOW(절반값, 헷갈리는 단위)는 폐기하고 실제
+# 창 길이(11)를 그대로 값으로 쓰는 TRADE_VALUE_ROLL_WINDOW로 교체.
+TRADE_VALUE_ROLL_WINDOW = 11
 
 
 def _norm(value: float, lo: float, hi: float) -> float:
@@ -3306,30 +3325,45 @@ def accumulation_score(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series,
     a_hi_val, a_lo_val = float(a_h.max()), float(a_lo.min())
     raw["range_tight"] = (a_hi_val - a_lo_val) / a_lo_val if a_lo_val > 0 else 1.0
 
-    # 7) trade_value_ratio (v5.27 탐색창 기준점 수정) — A구간 평균 거래대금
-    #    (거래량×종가) / 과거 6개월 고점 부근 평균 거래대금. "바닥에서 올라오는데 고점 때만큼 돈이
-    #    들어오는가" 자금 유입 신호. 고점은 Close 기준으로 찾는다(_pat_abc의
-    #    "상승 1파 고점" 탐지와 같은 관례 — High 대신 Close로 통일해서
-    #    "고점"이라는 개념이 이 코드베이스 안에서 하나로 일관되게 함).
-    #    기준점은 반드시 a_start(A구간 이전만 검색) — a_end를 기준으로 하면
-    #    탐색창이 A구간 자신을 포함해버려서(v5.26 적응형 A구간이 126봉을
-    #    넘는 경우 탐색창이 100% A 내부가 됨), "지금 vs 과거 고점" 비교가
-    #    "A평균 vs A자기고점" 자기비교로 무너지고 값이 구조적으로 1.0
-    #    쪽에 편향됐다(재현 확인: a_len 126+ 구간 trade_value_ratio 평균이
-    #    ~50봉 구간 대비 약 2배, r=0.22~0.23). A 이전 비교 구간이 20봉도
-    #    안 되면(데이터 앞쪽에 붙은 경우) 비교 자체가 무의미하므로 None —
-    #    가중합 루프가 None을 이미 "그 요소 제외하고 재정규화"로 처리한다.
-    peak_search_start = max(0, a_start - TRADE_VALUE_LOOKBACK_BARS)
-    c_search = c.iloc[peak_search_start:a_start]
-    if len(c_search) < 20:
+    # 7) trade_value_ratio — A구간 평균 거래대금(거래량×종가) / 과거 6개월
+    #    "자금고점"(거래대금이 가장 몰렸던 구간) 평균 거래대금. "바닥에서
+    #    올라오는데 자금 유입이 그때만큼 강한가" 신호.
+    #
+    #    ⚠️ v5.30: "고점" 정의를 가격(종가) 기준 → 거래대금 기준으로 변경
+    #    (단순 버그 수정이 아니라 지표가 재는 개념 자체가 바뀐 것).
+    #    아래 fund_peak_*(자금고점)는 _pat_abc()의 peak_abs("상승 1파
+    #    고점" = 가격 고점, 여전히 종가 기준 그대로 — 피벗/타점 계산엔
+    #    가격 고점이 맞는 개념이라 안 바꿨다)와 서로 다른 개념이니 섞어
+    #    쓰지 말 것.
+    #
+    #    v5.27까지는 "종가가 가장 높았던 하루"를 고점으로 찍고 그 앞뒤
+    #    11봉 평균 거래대금을 분모로 썼는데, 그 하루가 거래대금 기준으론
+    #    딱히 특별하지 않은 경우가 흔했다(실측 706건 중 16%가 그 날
+    #    거래대금/창평균 배수 1.2배 미만, 8%는 1.0배 미만 — "고점"이라면서
+    #    거래대금은 평균 이하인 날을 분모로 삼고 있었다는 뜻). 이제 가격이
+    #    아니라 거래대금 자체의 TRADE_VALUE_ROLL_WINDOW(11)봉 롤링평균이
+    #    최대인 지점을 자금고점으로 잡는다 — 정의상 이 최댓값은 항상 창
+    #    평균 이상이라(실측 862건 전부 확인, 최소 배수 1.3배) 저품질
+    #    분모 문제가 구조적으로 해소된다. 탐색과 "고점 값" 계산이 이제
+    #    한 단계로 합쳐져서 상수도 TRADE_VALUE_ROLL_WINDOW 하나면 된다
+    #    (예전처럼 "고점일 찾기"+"그 주변 평균" 2단계로 안 쪼갠다).
+    #
+    #    기준점은 a_start(A구간 이전만 검색, v5.27) — a_end 기준이면
+    #    탐색창이 A구간 자신을 포함해 자기비교가 되는 문제가 있었다.
+    #    비교 구간이 20봉도 안 되면(데이터 앞쪽에 붙은 경우) 비교 자체가
+    #    무의미하므로 None — 가중합 루프가 None을 "그 요소 제외하고
+    #    재정규화"로 처리한다.
+    tv_search_start = max(0, a_start - TRADE_VALUE_LOOKBACK_BARS)
+    tv_search = v.iloc[tv_search_start:a_start] * c.iloc[tv_search_start:a_start]
+    if len(tv_search) < 20:
         raw["trade_value_ratio"] = None
     else:
-        peak_abs = peak_search_start + int(c_search.values.argmax())
-        pw_start = max(0, peak_abs - TRADE_VALUE_PEAK_WINDOW // 2)
-        pw_end = min(len(c), peak_abs + TRADE_VALUE_PEAK_WINDOW // 2 + 1)
-        peak_trade_value = float((v.iloc[pw_start:pw_end] * c.iloc[pw_start:pw_end]).mean())
+        fund_peak_trade_value = float(
+            tv_search.rolling(TRADE_VALUE_ROLL_WINDOW, center=True,
+                              min_periods=TRADE_VALUE_ROLL_WINDOW).mean().max()
+        )
         a_trade_value = float((a_vol * a_c).mean())
-        raw["trade_value_ratio"] = (a_trade_value / peak_trade_value) if peak_trade_value > 0 else 0.0
+        raw["trade_value_ratio"] = (a_trade_value / fund_peak_trade_value) if fund_peak_trade_value > 0 else 0.0
 
     # ── 정규화 + 가중합 (ud_vol None이면 그 가중치 제외하고 나머지 재정규화) ──
     parts = {}

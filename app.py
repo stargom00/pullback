@@ -1710,7 +1710,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.29"
+VERSION = "v5.30"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
