@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.36 [UI] 패턴 탭에 서브탭 추가(static/index.html) — 전체/☕컵앤핸들/
+        🚩치솟은깃발/🔻🔻더블바닥/🎆급등매집. 스캔은 그대로 1회(analyze_pattern
+        이 이미 4개 서브디텍터 중 quality 최고 하나만 `pattern` 필드로
+        반환) — 서브탭은 클라이언트에서 `h.pattern` 값으로 거르기만 함,
+        백엔드 변경 없음. 각 서브탭 라벨에 현재 시장·검색·주도주만 등
+        다른 필터를 전부 반영한 개수 표시(0개는 회색으로 흐리게, 클릭은
+        그대로 됨 — "조건 통과 종목 없음" 안내). 기존 필터(한국/미국/
+        주도주만/손절좁은순/적격만/매집순)와 자유 조합 가능. 서브필터
+        상태는 다른 탭으로 이동해도 유지되지만(기존 시장필터 관례와
+        동일), mode!=='pattern'일 때는 서브탭 바 숨김 + 필터 자체가
+        안 걸리게 이중으로 게이팅(`renderPatternSubTabs` 내부 체크 +
+        `renderCards`의 필터 적용 조건 둘 다 mode 확인). 패턴별 기본
+        정렬(예: 컵앤핸들 피벗근접순)은 범위 밖 — v1 제외.
 v5.35 [개명] 패턴 탭의 "ABC상한가" → "급등매집"(scanner.py 문자열/주석,
         app.py:3693 부근 디버그 엔드포인트, static/index.html:978, 내부
         함수명 `_pat_abc`→`_pat_surge_accum`). ABC(문서 방식) 신규 탭 조사
@@ -1800,7 +1813,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.35"
+VERSION = "v5.36"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
