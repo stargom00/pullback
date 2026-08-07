@@ -5,6 +5,34 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.37 [버그수정] analyze_pattern(패턴 탭)에 is_kr 파라미터가 아예 없어서
+        _rr_block()에 is_kr=False가 하드코딩돼 있던 것 수정. 조사 결과
+        analyze_pattern은 도입 커밋(2e33d2e, v4440, 2026-07-02)부터 이
+        상태였고, _rr_block 호출 6곳(analyze/turnaround/breakout/
+        boxbreak/imminent/pattern) 중 이 함수만 자기 is_kr을 못 넘기고
+        있었음(나머지 5곳은 정상). 영향은 제한적이었음을 실측 확인—
+        _risk_hard_ok()를 애초에 안 불러서 하드게이트로 종목이 사라지는
+        문제는 없었고, is_kr이 바꾸는 건 risk_warn 임계치(8→12%) 하나뿐
+        인데 프론트 진입신호등(entrySignal)은 risk_warn을 안 읽고
+        s.market으로 직접 재계산해서 신호등 등급엔 영향 없음 — 유일한
+        가시적 효과는 KR 히트 중 risk_pct 8~12% 구간(오늘 16건)의
+        `data.warn_count`(⚠️경보 배지) 과다계상뿐이었음.
+        [추가] is_kr이 없다 보니 badge_fields()(베이스품질/손절폭ATR판정/
+        약세장적격/UD신뢰도 — analyze·analyze_breakout·analyze_imminent가
+        쓰는 공통 헬퍼)도 통째로 안 불려서 패턴 탭 카드에만 이 배지들이
+        안 뜨고 있었음. badge_fields() 자체의 docstring이 "기존엔
+        analyze에만 있어 돌파임박 탭에 배지가 안 떴음"이라고 과거 같은
+        종류의 누락을 문서화해뒀는데도 patttern 탭 추가 시(v4440) 또
+        반복된 것 — 의도적 배제였다는 근거(주석 등)가 없어 누락으로
+        판단, 추가함. 프론트(static/index.html)는 base_badge/stop_wide/
+        bear_ok 렌더링에 mode 제외 조건이 없어(코드 확인) 프론트 수정
+        없이 자동으로 뜸.
+        [실측] 수정 전후 패턴 탭 히트 건수·등급분포 거의 동일(badge_fields
+        는 필터가 아니라 필드 추가라 정상) — 급등매집 0/6/57→0/6/57 등급
+        분포 불변. `vol_high`(ATR 변동성 체크)는 badge_fields에 없는
+        analyze() 전용 필드라 이번 수정으로도 여전히 안 채워짐(0건,
+        신호등 6번째 체크는 패턴 탭에서 계속 스킵 — 별도 결정 필요시
+        후속 작업).
 v5.36 [UI] 패턴 탭에 서브탭 추가(static/index.html) — 전체/☕컵앤핸들/
         🚩치솟은깃발/🔻🔻더블바닥/🎆급등매집. 스캔은 그대로 1회(analyze_pattern
         이 이미 4개 서브디텍터 중 quality 최고 하나만 `pattern` 필드로
@@ -1813,7 +1841,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.36"
+VERSION = "v5.37"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2910,7 +2938,7 @@ async def run_scan(market: str, mode: str) -> dict:
     _scan_timing = bundle.get("timing")
 
     fn = {"turnaround": analyze_turnaround, "leader": analyze_leader, "super": analyze_super, "breakout": analyze_breakout, "surge": analyze_surge, "imminent": analyze_imminent, "boxbreak": analyze_boxbreak, "breakdown": analyze_breakdown, "pattern": analyze_pattern}.get(mode, analyze)
-    supports_intraday = mode in ("pullback", "turnaround", "imminent", "boxbreak", "breakout", "breakdown")  # is_kr 인자를 받는 모드
+    supports_intraday = mode in ("pullback", "turnaround", "imminent", "boxbreak", "breakout", "breakdown", "pattern")  # is_kr 인자를 받는 모드
     alerts = load_alerts()
     hits = []
     # 진단용 시장별 카운터
@@ -3709,7 +3737,7 @@ async def debug_ticker(ticker: str):
     # v5.19: A-B-C 매집 스코어 진단 — 급등매집이 아니면 채점 대상 아님을 명시
     try:
         from scanner import analyze_pattern
-        _pat = analyze_pattern(df)
+        _pat = analyze_pattern(df, is_kr=is_kr)
         if _pat is None or _pat.get("pattern") != "급등매집":
             _found = _pat.get("pattern") if _pat else None
             payload["매집채점"] = {

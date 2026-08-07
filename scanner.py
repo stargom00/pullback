@@ -3984,7 +3984,7 @@ def _pat_surge_accum(c, h, lo, v):
 
 def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
                     rs_mom: int | None = None,
-                    cfg: dict = PATTERN_CONFIG) -> dict | None:
+                    cfg: dict = PATTERN_CONFIG, is_kr: bool = False) -> dict | None:
     """장기 패턴(컵앤핸들/치솟은깃발/더블바닥)이 거의 완성돼 피벗 근처인 종목."""
     if df is None or len(df) < cfg["min_bars"]:
         return None
@@ -4064,6 +4064,15 @@ def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
         "qa_components": best.get("qa_components") if _is_abc else None,
         "qa_reason": best.get("qa_reason") if _is_abc else None,
     }
+    # v5.37: is_kr을 이제 파라미터로 받아서 그대로 전달 — 예전엔 함수 자체에
+    # is_kr이 없어 항상 False 고정(리스크 경고 임계 8%가 한국 종목에도
+    # 적용됨 + badge_fields 자체가 아예 안 불려서 베이스품질/손절폭/약세장
+    # 적격/ATR변동성 배지가 패턴 탭에만 안 뜨고 있었음). rrb를 변수로 먼저
+    # 뽑아 badge_fields에도 그대로 넘긴다(analyze()와 동일 패턴).
+    rrb = _rr_block(pivot, stop, h, lo, c,
+                    base_low=float(best["stop_raw"]),
+                    entry=None, warn_pct=8.0, is_kr=is_kr,
+                    stop_struct=stop_struct, atr_buf=atr_buf)
     return {
         "mode": "pattern",
         "grade": _tt["grade"], "tt_pass": _tt["passed"], "tt_fails": _tt["fails"],
@@ -4093,10 +4102,10 @@ def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
         "ud_vol": up_down_volume(c, v, 50),
         "vol_dry": best["vol_dry"],
         "rsi": round(cur_rsi, 1),
-        **_rr_block(pivot, stop, h, lo, c,
-                    base_low=float(best["stop_raw"]),
-                    entry=None, warn_pct=8.0, is_kr=False,
-                    stop_struct=stop_struct, atr_buf=atr_buf),
+        **rrb,
+        # v5.37: 베이스품질/손절폭(ATR기반)/약세장적격/U-D신뢰도 배지 —
+        # analyze()/analyze_breakout()/analyze_imminent()와 동일하게 공통 헬퍼 사용.
+        **badge_fields(c, h, lo, v, pivot, is_kr, rs_rank, rrb),
         **volume_info(close, v),
         "avwap": anchored_vwap(h, lo, c, v),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
