@@ -366,7 +366,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.37</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.38</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -696,11 +696,13 @@ function entrySignal(s) {
     else if (s.rs >= 70) checks.push(['warn', `RS ${s.rs} — 주도주는 아님`, 'rs_mid']);
     else { checks.push(['danger', `RS ${s.rs} 약함`, 'rs_weak']); danger++; }
   }
-  // 3) 손익비
-  if (s.rr != null) {
-    if (s.rr >= 2) checks.push(['ok', `손익비 ${s.rr}R`, 'rr']);
-    else { checks.push(['danger', `손익비 ${s.rr}R — 가성비 낮음`, 'rr_low']); danger++; }
-  }
+  // v5.38: 손익비 체크 제거. rr_info()의 '최소 2R 보장' 폴백 때문에
+  // rr>=2는 실측 100% ok — 0비트짜리 체크였음. target_basis(전고/측정이동
+  // vs 2R폴백)로 바꿔봤지만, 2R폴백이 걸리는 이유 자체가 "리스크%가 넓어서
+  // 2R 바닥이 다른 목표보다 높다"라 리스크 항목과 같은 사실을 두 번 세는
+  // 꼴이었다(리스크 넓음 → 리스크warn + 2R폴백→목표근거warn, 사실 하나로
+  // warn 2개 자동 🔴). 정보를 늘리려다 다른 항목 신호를 덮어서 되돌림 —
+  // 항목 자체를 제거.
   // 4) 리스크(손절폭) — 한국 중소형주는 변동성이 커서 손절폭이 넓은 게 정상.
   //    시장별 기준 분리: 한국 12%, 미국 8%.
   if (s.risk_pct != null) {
