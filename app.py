@@ -5,6 +5,30 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.39 [버그수정] /api/debug '탈락_핵심사유'가 실제 스캔이 안 쓰는 box_info
+        (터치필터 없는 단순 20/40/60봉 최고가)로 사유를 지목하던 것 수정.
+        DELL에서 핵심사유가 "저항 486"이라 떴지만 돌파임박 게이트가 실제로
+        쓰는 select_pivot 값은 447.88(리테스트저항)이었음 — 통과한 조건을
+        탈락 사유로 잘못 표시해 "거래량 부족이 공통 원인"이라는 오판을
+        유발한 사고 확인 후 재작성.
+        [구조] analyze/analyze_turnaround/analyze_breakout/analyze_boxbreak/
+        analyze_imminent 5개 함수의 실제 게이트 순서를 그대로 재현하는
+        _trace_* 함수(app.py)를 새로 작성 — select_pivot/_rr_block/
+        _risk_hard_ok/late_stage_info/_merger_block 등 scanner.py의 실제
+        헬퍼를 그대로 호출해 로직 드리프트 방지. 각 게이트를 통과/탈락
+        여부와 함께 순서대로 기록해 어디서 처음 걸렸는지 정확히 노출.
+        [신규 필드] 게이트기준_실제피벗(select_pivot 결과 — 진짜 판정
+        기준), 게이트추적(전체 게이트 단계별 기록). box_info/수평저항은
+        "_주의" 필드로 참고용(게이트 기준 아님)임을 명시.
+        [부수 수정] modes 판정에서 analyze_breakout만 is_kr 전달이
+        빠져있던 버그 발견·수정 (KR 종목 리스크 하드게이트 한도가
+        8%[US]로 잘못 적용될 뻔한 경우였음 — trace 함수 통일 과정에서
+        확인). analyze_breakout에 base_high<=0 스킵 게이트 누락도 보강.
+        [프론트] static/index.html 진단 패널에 "🎯 실제 게이트 판정 피벗"
+        섹션 추가, 수평저항 섹션은 참고용 라벨로 톤다운.
+        [검증] test_scanner.py 29케이스 전부 통과, min_bars 감사 통과.
+        DELL 재현: pivot 447.88(리테스트저항)/risk_pct 9.06%로 이전 수동
+        진단과 정확히 일치 확인.
 v5.38 [UI] 패턴 탭 진입신호등(entrySignal, static/index.html)에서 손익비
         (rr>=2) 항목 제거. `rr_info()`가 목표를 "최소 2R 보장"으로 항상
         끌어올리는 구조라 rr은 절대 2 밑으로 안 내려감 — 실측(4패턴
@@ -1791,6 +1815,7 @@ v4.5.0  한국 종목(.KS/.KQ) 데이터 소스를 yfinance → 네이버(naver_
 v4.4.2  (이전 버전)
 """
 import asyncio
+import math
 import os
 import time
 import json as _json
@@ -1856,7 +1881,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.38"
+VERSION = "v5.39"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -3608,6 +3633,329 @@ async def lookup_ticker(ticker: str):
     return JSONResponse(payload)
 
 
+# v5.39: /api/debug의 "탈락_핵심사유"가 실제 스캔이 안 쓰는 값(box_info=단순
+# 최고가)으로 사유를 추측하고 있었음 — 실제로는 통과한 게이트(select_pivot의
+# 진짜 피벗)를 탈락 사유로 잘못 지목한 사례(DELL 486 vs 실제 447.88) 확인 후
+# 각 탭의 실제 게이트를 순서대로 그대로 재현해 "어디서 True/False로 return
+# None 됐는지"를 정확히 추적하는 함수로 교체. scanner.py 원본 함수의 게이트
+# 순서·조건이 바뀌면 이 트레이서도 같이 업데이트해야 함(단일 소스가 아니라
+# 재현이라 드리프트 위험 — analyze/analyze_turnaround/analyze_breakout/
+# analyze_boxbreak/analyze_imminent 본체와 대조해서 유지보수할 것).
+def _gate_step(steps, name, ok, detail=None):
+    steps.append({"gate": name, "ok": bool(ok), "detail": detail})
+    return ok
+
+
+def _trace_pullback(df, is_kr, rs_rank):
+    from scanner import (CONFIG as cfg, rsi as _rsi, select_pivot, significant_support,
+                         apply_atr_buffer, _rr_block, _risk_hard_ok, late_stage_info,
+                         _merger_block, anchored_vwap)
+    steps = []
+    n0 = len(df) if df is not None else 0
+    if not _gate_step(steps, "min_bars", df is not None and n0 >= cfg["min_bars"], f"{n0}봉 (요구 {cfg['min_bars']})"):
+        return {"passed": False, "fail_at": "min_bars", "steps": steps}
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if not _gate_step(steps, "min_bars_dropna", len(df) >= cfg["min_bars"], f"{len(df)}봉"):
+        return {"passed": False, "fail_at": "min_bars_dropna", "steps": steps}
+    if not _gate_step(steps, "rs_min", rs_rank is not None and rs_rank >= cfg["rs_min"], f"rs={rs_rank} (요구 {cfg['rs_min']}+)"):
+        return {"passed": False, "fail_at": "rs_min", "steps": steps}
+    is_leader = rs_rank is not None and rs_rank >= cfg["leader_rs"]
+    pb_min = cfg["leader_pullback_min"] if is_leader else cfg["pullback_min"]
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+    ma10 = c.rolling(cfg["ma_short"]).mean(); ma20 = c.rolling(cfg["ma_mid"]).mean()
+    ma60 = c.rolling(cfg["ma_long"]).mean(); ma200 = c.rolling(cfg["ma_trend"]).mean()
+    r = _rsi(c)
+    close = float(c.iloc[-1])
+    m10, m20, m60, m200 = float(ma10.iloc[-1]), float(ma20.iloc[-1]), float(ma60.iloc[-1]), float(ma200.iloc[-1])
+    cur_rsi = float(r.iloc[-1])
+    if not _gate_step(steps, "지표_계산가능", not any(math.isnan(x) for x in (m10, m20, m60, m200, cur_rsi)), "이평/RSI 중 NaN"):
+        return {"passed": False, "fail_at": "nan", "steps": steps}
+    slope_floor = 0.98 if is_leader else 1.0
+    ma20_slope = m20 > float(ma20.iloc[-11]) * slope_floor
+    in_uptrend = (close > m60) and (close > m200) and (m20 > m60) and ma20_slope
+    if not _gate_step(steps, "우상향추세", in_uptrend,
+                       f"close{'>' if close>m60 else '<='}MA60 · close{'>' if close>m200 else '<='}MA200 · MA20{'>' if m20>m60 else '<='}MA60 · 기울기{'OK' if ma20_slope else '꺾임'}"):
+        return {"passed": False, "fail_at": "우상향추세", "steps": steps}
+    prev_close = float(c.iloc[-2])
+    change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
+    breakout_day = change_pct >= 4.0
+    pb_max = cfg.get("pullback_max_kr" if is_kr else "pullback_max_us", cfg.get("pullback_max", 0.18))
+    if breakout_day:
+        high60_ref = float(h.iloc[-61:-1].max())
+        pullback = (high60_ref - prev_close) / high60_ref
+        _av = anchored_vwap(h, lo, c, v)
+        if not _gate_step(steps, "돌파일_AVWAP연장가드", _av.get("zone") not in ("extended", "overheated"), f"avwap zone={_av.get('zone')}"):
+            return {"passed": False, "fail_at": "avwap_extended", "steps": steps}
+    else:
+        last60_h = h.iloc[-60:]
+        pullback = (float(last60_h.max()) - close) / float(last60_h.max())
+    if not _gate_step(steps, "눌림폭", pb_min <= pullback <= pb_max, f"{pullback*100:.1f}% (허용 {pb_min*100:.1f}~{pb_max*100:.1f}%)"):
+        return {"passed": False, "fail_at": "눌림폭", "steps": steps}
+    dist10, dist20, dist60 = (close - m10) / m10, (close - m20) / m20, (close - m60) / m60
+    prox = cfg["ma_proximity"]
+    prox_allow = prox + max(0.0, change_pct / 100) if change_pct >= 4.0 else prox
+    near_ma = min(abs(dist10), abs(dist20), abs(dist60))
+    if not _gate_step(steps, "이평선지지", near_ma <= prox_allow, f"근접 {near_ma*100:.1f}% (허용 {prox_allow*100:.1f}%)"):
+        return {"passed": False, "fail_at": "이평선지지", "steps": steps}
+    rsi_eval = float(r.iloc[-2]) if breakout_day else cur_rsi
+    rsi_max = cfg["leader_rsi_max"] if is_leader else cfg["rsi_max"]
+    if not _gate_step(steps, "RSI중립권", cfg["rsi_min"] <= rsi_eval <= rsi_max, f"RSI {rsi_eval:.1f} (허용 {cfg['rsi_min']}~{rsi_max})"):
+        return {"passed": False, "fail_at": "RSI", "steps": steps}
+    pw = cfg["pivot_window"]
+    pivot, pivot_type, _, _ = select_pivot(h, lo, c, close, pw, is_kr=is_kr, v=v)
+    ma_below = [x for x in (m10, m20, m60) if x and x < close]
+    ma_stop = max(ma_below) * 0.99 if ma_below else None
+    sig_low = significant_support(lo, pw, min_touches=2, band=0.02, exclude=1)
+    cand = [x for x in (ma_stop, sig_low) if x is not None and x < close]
+    stop = max(cand) if cand else float(lo.iloc[-pw:].min())
+    stop, stop_struct, atr_buf = apply_atr_buffer(stop, h, lo, c, cfg.get("atr_stop_buffer", 0.0))
+    rrb = _rr_block(pivot, stop, h, lo, c, base_low=float(lo.iloc[-cfg["recent_high_window"]:].min()),
+                    entry=close, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf)
+    hard_ok = _risk_hard_ok(rrb, is_kr, pivot=pivot)
+    if not _gate_step(steps, "리스크하드게이트", hard_ok,
+                       f"피벗({pivot_type}) {round(pivot,2)}, risk_pct {rrb.get('risk_pct')}% (한도 {'12' if is_kr else '8'}%)"):
+        return {"passed": False, "fail_at": "risk_hard", "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type, "risk_pct": rrb.get("risk_pct")}
+    ls = late_stage_info(c, lo, h, v, is_kr)
+    if not _gate_step(steps, "후기스테이지", ls.get("late_level") != "danger", f"level={ls.get('late_level')} flags={ls.get('late_flags')}"):
+        return {"passed": False, "fail_at": "late_stage_danger", "steps": steps, "pivot": round(pivot, 2)}
+    mg = _merger_block(c, h, lo, v)
+    if not _gate_step(steps, "MA_특수상황", not mg.get("merger"), mg.get("merger_reasons")):
+        return {"passed": False, "fail_at": "merger", "steps": steps, "pivot": round(pivot, 2)}
+    return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type, "risk_pct": rrb.get("risk_pct")}
+
+
+def _trace_turnaround(df, is_kr, rs_rank, rs_mom):
+    from scanner import TURN_CONFIG as cfg, rsi as _rsi, select_pivot, count_bases_since_bottom
+    steps = []
+    n0 = len(df) if df is not None else 0
+    if not _gate_step(steps, "min_bars", df is not None and n0 >= cfg["min_bars"], f"{n0}봉"):
+        return {"passed": False, "fail_at": "min_bars", "steps": steps}
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if not _gate_step(steps, "min_bars_dropna", len(df) >= cfg["min_bars"], f"{len(df)}봉"):
+        return {"passed": False, "fail_at": "min_bars_dropna", "steps": steps}
+    if not _gate_step(steps, "rs_min", rs_rank is not None and rs_rank >= cfg["rs_min"], f"rs={rs_rank} (요구 {cfg['rs_min']}+)"):
+        return {"passed": False, "fail_at": "rs_min", "steps": steps}
+    if not _gate_step(steps, "RS모멘텀", rs_mom is None or rs_mom >= 0, f"rs_mom={rs_mom}"):
+        return {"passed": False, "fail_at": "rs_mom", "steps": steps}
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+    ma20 = c.rolling(20).mean(); ma60 = c.rolling(60).mean(); ma200 = c.rolling(200).mean()
+    r = _rsi(c)
+    close = float(c.iloc[-1])
+    m20, m60, m200 = float(ma20.iloc[-1]), float(ma60.iloc[-1]), float(ma200.iloc[-1])
+    cur_rsi = float(r.iloc[-1])
+    if not _gate_step(steps, "지표_계산가능", not any(math.isnan(x) for x in (m20, m60, m200, cur_rsi)), None):
+        return {"passed": False, "fail_at": "nan", "steps": steps}
+    aligned = (ma20 > ma60) & (ma60 > ma200) & (c > ma200)
+    if not _gate_step(steps, "정배열", bool(aligned.iloc[-1]), f"MA20{'>' if m20>m60 else '<='}MA60, MA60{'>' if m60>m200 else '<='}MA200, close{'>' if close>m200 else '<='}MA200"):
+        return {"passed": False, "fail_at": "정배열", "steps": steps}
+    align_days = 0
+    for val in reversed(aligned.tolist()):
+        if val:
+            align_days += 1
+        else:
+            break
+    if not _gate_step(steps, "전환신선도", align_days <= cfg["align_window"], f"{align_days}봉째 정배열 (허용 {cfg['align_window']}봉 이내)"):
+        return {"passed": False, "fail_at": "align_window", "steps": steps}
+    ma200_dist = (close - m200) / m200
+    if not _gate_step(steps, "200일선근접도", ma200_dist <= cfg["max_ma200_dist"], f"+{ma200_dist*100:.1f}% (허용 {cfg['max_ma200_dist']*100:.0f}% 이내)"):
+        return {"passed": False, "fail_at": "ma200_dist", "steps": steps}
+    lb = cfg["ma200_slope_lookback"]
+    ma200_rising = False
+    if len(ma200.dropna()) > lb:
+        m200_prev = float(ma200.iloc[-1 - lb])
+        if not math.isnan(m200_prev) and m200_prev > 0:
+            ma200_rising = (m200 - m200_prev) / m200_prev > cfg["ma200_rising_min"]
+    if not _gate_step(steps, "200일선기울기", ma200_rising, "200일선이 아직 안 들림(1단계 미졸업)"):
+        return {"passed": False, "fail_at": "ma200_rising", "steps": steps}
+    base_info = count_bases_since_bottom(c, lo, h, low_lookback=cfg["low_lookback"],
+                                         recent_bottom_max=cfg["recent_bottom_max"], correction_min=cfg["correction_min"])
+    if cfg.get("first_base_only", True) and not _gate_step(steps, "1차베이스여부", base_info["is_first_base"], f"조정 {base_info['corrections']}회, 바닥{base_info['bottom_ago']}봉전"):
+        return {"passed": False, "fail_at": "first_base_only", "steps": steps}
+    pivot, pivot_type, _, _ = select_pivot(h, lo, c, close, 20, is_kr=is_kr, v=v)
+    return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type}
+
+
+def _trace_breakout(df, is_kr, rs_rank):
+    from scanner import (BREAKOUT_CONFIG as cfg, rsi as _rsi, off_high_pct, apply_atr_buffer,
+                         _rr_block, _risk_hard_ok, late_stage_info, _merger_block)
+    steps = []
+    n0 = len(df) if df is not None else 0
+    if not _gate_step(steps, "min_bars", df is not None and n0 >= cfg["min_bars"], f"{n0}봉"):
+        return {"passed": False, "fail_at": "min_bars", "steps": steps}
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if not _gate_step(steps, "min_bars_dropna", len(df) >= cfg["min_bars"], f"{len(df)}봉"):
+        return {"passed": False, "fail_at": "min_bars_dropna", "steps": steps}
+    if not _gate_step(steps, "rs_min", rs_rank is not None and rs_rank >= cfg["rs_min"], f"rs={rs_rank} (요구 {cfg['rs_min']}+)"):
+        return {"passed": False, "fail_at": "rs_min", "steps": steps}
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+    ma200 = c.rolling(200).mean()
+    close = float(c.iloc[-1])
+    m200 = float(ma200.iloc[-1])
+    if not _gate_step(steps, "지표_계산가능", not math.isnan(m200), None):
+        return {"passed": False, "fail_at": "nan", "steps": steps}
+    if not _gate_step(steps, "200일선위", close >= m200, f"close {close} vs MA200 {round(m200,2)}"):
+        return {"passed": False, "fail_at": "close_below_ma200", "steps": steps}
+    ohp = off_high_pct(c)
+    if not _gate_step(steps, "고점대비낙폭", ohp >= -cfg["max_off_high"], f"{ohp:.1f}% (허용 -{cfg['max_off_high']}% 이내)"):
+        return {"passed": False, "fail_at": "off_high_pct", "steps": steps}
+    base = c.iloc[-(cfg["base_min_len"] + 1):-1]
+    if not _gate_step(steps, "베이스길이", len(base) >= cfg["base_min_len"], f"{len(base)}봉"):
+        return {"passed": False, "fail_at": "base_min_len", "steps": steps}
+    base_high, base_low = float(base.max()), float(base.min())
+    if not _gate_step(steps, "베이스상단유효", base_high > 0, f"base_high={base_high}"):
+        return {"passed": False, "fail_at": "base_high_invalid", "steps": steps}
+    base_range = (base_high - base_low) / base_high
+    if not _gate_step(steps, "베이스폭", base_range <= cfg["base_max_range"], f"{base_range*100:.1f}% (허용 {cfg['base_max_range']*100:.0f}% 이내), 베이스상단 {round(base_high,2)}"):
+        return {"passed": False, "fail_at": "base_max_range", "steps": steps}
+    pivot = base_high
+    if not _gate_step(steps, "돌파여부", close > pivot, f"close {close} vs 피벗(베이스상단) {round(pivot,2)}"):
+        return {"passed": False, "fail_at": "not_broken_yet", "steps": steps, "pivot": round(pivot, 2)}
+    ext = (close - pivot) / pivot
+    if not _gate_step(steps, "연장도", ext <= cfg["extended_max"], f"+{ext*100:.1f}% (허용 {cfg['extended_max']*100:.0f}% 이내)"):
+        return {"passed": False, "fail_at": "extended", "steps": steps, "pivot": round(pivot, 2)}
+    vol_avg = float(v.iloc[-51:-1].mean())
+    vol_mult = float(v.iloc[-1]) / vol_avg if vol_avg > 0 else 0.0
+    if not _gate_step(steps, "거래량동반", vol_mult >= cfg["vol_mult"], f"{vol_mult:.2f}배 (요구 {cfg['vol_mult']}배+)"):
+        return {"passed": False, "fail_at": "vol_mult", "steps": steps, "pivot": round(pivot, 2)}
+    stop = round(pivot * 0.97, 2)
+    stop, stop_struct, atr_buf = apply_atr_buffer(stop, h, lo, c, 0.15)
+    rrb = _rr_block(pivot, stop, h, lo, c, base_low=base_low, entry=close, warn_pct=8.0,
+                    is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf)
+    hard_ok = _risk_hard_ok(rrb, is_kr, pivot=pivot)
+    if not _gate_step(steps, "리스크하드게이트", hard_ok, f"risk_pct {rrb.get('risk_pct')}% (한도 {'12' if is_kr else '8'}%)"):
+        return {"passed": False, "fail_at": "risk_hard", "steps": steps, "pivot": round(pivot, 2), "risk_pct": rrb.get("risk_pct")}
+    ls = late_stage_info(c, lo, h, v, is_kr)
+    if not _gate_step(steps, "후기스테이지", ls.get("late_level") != "danger", f"level={ls.get('late_level')}"):
+        return {"passed": False, "fail_at": "late_stage_danger", "steps": steps, "pivot": round(pivot, 2)}
+    mg = _merger_block(c, h, lo, v)
+    if not _gate_step(steps, "MA_특수상황", not mg.get("merger"), mg.get("merger_reasons")):
+        return {"passed": False, "fail_at": "merger", "steps": steps, "pivot": round(pivot, 2)}
+    return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2), "risk_pct": rrb.get("risk_pct")}
+
+
+def _trace_boxbreak(df, is_kr, rs_rank):
+    from scanner import (BOXBREAK_CONFIG as cfg, off_high_pct, significant_resistance,
+                         apply_atr_buffer, _rr_block, _risk_hard_ok, late_stage_info, _merger_block)
+    steps = []
+    n0 = len(df) if df is not None else 0
+    if not _gate_step(steps, "min_bars", df is not None and n0 >= cfg["min_bars"], f"{n0}봉"):
+        return {"passed": False, "fail_at": "min_bars", "steps": steps}
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if not _gate_step(steps, "min_bars_dropna", len(df) >= cfg["min_bars"], f"{len(df)}봉"):
+        return {"passed": False, "fail_at": "min_bars_dropna", "steps": steps}
+    if not _gate_step(steps, "rs_min", rs_rank is not None and rs_rank >= cfg["rs_min"], f"rs={rs_rank} (요구 {cfg['rs_min']}+)"):
+        return {"passed": False, "fail_at": "rs_min", "steps": steps}
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+    close = float(c.iloc[-1])
+    ma_long = c.rolling(cfg["ma_long"]).mean()
+    m_long = float(ma_long.iloc[-1])
+    if not _gate_step(steps, "지표_계산가능", not math.isnan(m_long), None):
+        return {"passed": False, "fail_at": "nan", "steps": steps}
+    ohp = off_high_pct(c)
+    if not _gate_step(steps, "고점대비낙폭", ohp >= -cfg["max_off_high"], f"{ohp:.1f}% (허용 -{cfg['max_off_high']}% 이내)"):
+        return {"passed": False, "fail_at": "off_high_pct", "steps": steps}
+    if not _gate_step(steps, "장기선위", close >= m_long, f"close {close} vs MA{cfg['ma_long']} {round(m_long,2)}"):
+        return {"passed": False, "fail_at": "close_below_ma_long", "steps": steps}
+    vol_avg = float(v.iloc[-51:-1].mean())
+    vol_mult = float(v.iloc[-1]) / vol_avg if vol_avg > 0 else 0.0
+    if not _gate_step(steps, "거래량동반", vol_mult >= cfg["vol_mult"], f"{vol_mult:.2f}배 (요구 {cfg['vol_mult']}배+)"):
+        return {"passed": False, "fail_at": "vol_mult", "steps": steps}
+    best = None
+    box_detail = {}
+    for win in cfg["box_windows"]:
+        if len(c) < win + 2:
+            continue
+        box_h, box_l = h.iloc[-(win + 1):-1], lo.iloc[-(win + 1):-1]
+        sig_high = significant_resistance(h, win, min_touches=2, band=0.02, exclude=1)
+        box_high = float(sig_high) if sig_high is not None else float(box_h.max())
+        box_low = float(box_l.min())
+        if box_high <= 0:
+            continue
+        box_range = (box_high - box_low) / box_high
+        box_detail[f"{win}봉박스"] = {"상단": round(box_high, 2), "폭%": round(box_range * 100, 1),
+                                     "돌파여부": close > box_high * 1.005}
+        if box_range > cfg["box_max_range"] or close <= box_high * 1.005:
+            continue
+        ext = (close - box_high) / box_high
+        tightness = 1 - min(box_range / cfg["box_max_range"], 1.0)
+        quality = tightness * 0.5 + min(win / 60, 1.0) * 0.3 + min(vol_mult / 3, 1.0) * 0.2
+        cand = {"win": win, "box_high": box_high, "box_low": box_low, "ext": ext, "quality": quality}
+        if best is None or cand["quality"] > best["quality"]:
+            best = cand
+    if not _gate_step(steps, "박스돌파", best is not None, box_detail):
+        return {"passed": False, "fail_at": "no_box_broken", "steps": steps, "박스상세": box_detail}
+    pivot = best["box_high"]
+    stop = round(pivot * 0.97, 2)
+    stop, stop_struct, atr_buf = apply_atr_buffer(stop, h, lo, c, 0.15)
+    rrb = _rr_block(pivot, stop, h, lo, c, base_low=best["box_low"], entry=close, warn_pct=8.0,
+                    is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf)
+    hard_ok = _risk_hard_ok(rrb, is_kr, pivot=pivot)
+    if not _gate_step(steps, "리스크하드게이트", hard_ok, f"risk_pct {rrb.get('risk_pct')}% (한도 {'12' if is_kr else '8'}%)"):
+        return {"passed": False, "fail_at": "risk_hard", "steps": steps, "pivot": round(pivot, 2), "risk_pct": rrb.get("risk_pct"), "박스상세": box_detail}
+    ls = late_stage_info(c, lo, h, v, is_kr)
+    if not _gate_step(steps, "후기스테이지", ls.get("late_level") != "danger", f"level={ls.get('late_level')}"):
+        return {"passed": False, "fail_at": "late_stage_danger", "steps": steps, "pivot": round(pivot, 2), "박스상세": box_detail}
+    mg = _merger_block(c, h, lo, v)
+    if not _gate_step(steps, "MA_특수상황", not mg.get("merger"), mg.get("merger_reasons")):
+        return {"passed": False, "fail_at": "merger", "steps": steps, "pivot": round(pivot, 2), "박스상세": box_detail}
+    return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2), "risk_pct": rrb.get("risk_pct"), "박스상세": box_detail}
+
+
+def _trace_imminent(df, is_kr, rs_rank):
+    from scanner import (IMMINENT_CONFIG as cfg, rsi as _rsi, off_high_pct, select_pivot,
+                         significant_support, apply_atr_buffer, _rr_block, _risk_hard_ok,
+                         late_stage_info, _merger_block)
+    steps = []
+    n0 = len(df) if df is not None else 0
+    if not _gate_step(steps, "min_bars", df is not None and n0 >= cfg["min_bars"], f"{n0}봉 (요구 {cfg['min_bars']})"):
+        return {"passed": False, "fail_at": "min_bars", "steps": steps}
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if not _gate_step(steps, "min_bars_dropna", len(df) >= cfg["min_bars"], f"{len(df)}봉"):
+        return {"passed": False, "fail_at": "min_bars_dropna", "steps": steps}
+    if not _gate_step(steps, "rs_min", rs_rank is not None and rs_rank >= cfg["rs_min"], f"rs={rs_rank} (요구 {cfg['rs_min']}+)"):
+        return {"passed": False, "fail_at": "rs_min", "steps": steps}
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+    ma20 = c.rolling(20).mean(); ma60 = c.rolling(60).mean(); ma200 = c.rolling(200).mean()
+    r = _rsi(c)
+    close = float(c.iloc[-1])
+    m20, m60, m200 = float(ma20.iloc[-1]), float(ma60.iloc[-1]), float(ma200.iloc[-1])
+    cur_rsi = float(r.iloc[-1])
+    if not _gate_step(steps, "지표_계산가능", not any(math.isnan(x) for x in (m20, m60, m200, cur_rsi)), None):
+        return {"passed": False, "fail_at": "nan", "steps": steps}
+    if not _gate_step(steps, "200일선위", close >= m200, f"close {close} vs MA200 {round(m200,2)}"):
+        return {"passed": False, "fail_at": "close_below_ma200", "steps": steps}
+    if not _gate_step(steps, "정배열초입", m20 > m60, f"MA20 {round(m20,2)} vs MA60 {round(m60,2)}"):
+        return {"passed": False, "fail_at": "ma20_below_ma60", "steps": steps}
+    ohp = off_high_pct(c)
+    if not _gate_step(steps, "고점대비낙폭", ohp >= -cfg["max_off_high"], f"{ohp:.1f}% (허용 -{cfg['max_off_high']}% 이내)"):
+        return {"passed": False, "fail_at": "off_high_pct", "steps": steps}
+    pivot, pivot_type, _, _ = select_pivot(h, lo, c, close, cfg["pivot_window"], is_kr=is_kr, use_near=True, v=v)
+    near = (close - pivot) / pivot if pivot > 0 else -1.0
+    if not _gate_step(steps, "피벗근접", cfg["near_min"] <= near <= cfg["near_max"],
+                       f"실제 판정 피벗({pivot_type}) {round(pivot,2)}, near {near*100:.2f}% (허용 {cfg['near_min']*100:.0f}%~{cfg['near_max']*100:.0f}%)"):
+        return {"passed": False, "fail_at": "near_range", "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type, "near_pct": round(near * 100, 2)}
+    sig_sup = significant_support(lo, cfg["pivot_window"], min_touches=2, band=0.02, exclude=1)
+    cand = []
+    if sig_sup is not None and sig_sup < close:
+        cand.append(sig_sup)
+    if m20 * 0.98 < close:
+        cand.append(m20 * 0.98)
+    stop = max(cand) if cand else float(lo.iloc[-cfg["pivot_window"]:].min())
+    stop, stop_struct, atr_buf = apply_atr_buffer(stop, h, lo, c, 0.15)
+    rrb = _rr_block(pivot, stop, h, lo, c, base_low=float(lo.iloc[-cfg["pivot_window"]:].min()),
+                    entry=None, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf)
+    hard_ok = _risk_hard_ok(rrb, is_kr, pivot=pivot)
+    if not _gate_step(steps, "리스크하드게이트", hard_ok, f"risk_pct {rrb.get('risk_pct')}% (한도 {'12' if is_kr else '8'}%)"):
+        return {"passed": False, "fail_at": "risk_hard", "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type, "near_pct": round(near * 100, 2), "risk_pct": rrb.get("risk_pct")}
+    ls = late_stage_info(c, lo, h, v, is_kr)
+    if not _gate_step(steps, "후기스테이지", ls.get("late_level") != "danger", f"level={ls.get('late_level')}"):
+        return {"passed": False, "fail_at": "late_stage_danger", "steps": steps, "pivot": round(pivot, 2), "near_pct": round(near * 100, 2)}
+    mg = _merger_block(c, h, lo, v)
+    if not _gate_step(steps, "MA_특수상황", not mg.get("merger"), mg.get("merger_reasons")):
+        return {"passed": False, "fail_at": "merger", "steps": steps, "pivot": round(pivot, 2), "near_pct": round(near * 100, 2)}
+    return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type, "near_pct": round(near * 100, 2), "risk_pct": rrb.get("risk_pct")}
+
+
 @app.get("/api/debug/{ticker}")
 async def debug_ticker(ticker: str):
     """진단용: 종목의 최근 OHLC 원본 + ATR 분해 + 각 모드 통과/탈락 여부.
@@ -3632,17 +3980,40 @@ async def debug_ticker(ticker: str):
     tr = _pd.concat([h - lo, (h - prev_c).abs(), (lo - prev_c).abs()], axis=1).max(axis=1)
     close = float(c.iloc[-1])
 
-    # 각 모드 통과 여부 (RS 정보 없이 단독 호출 — 대략적 판정)
+    # 각 모드 통과 여부 (RS 정보 없이 단독 호출 — 대략적 판정, rs_rank=80 고정)
+    # v5.39: 예전엔 analyze_breakout이 이 kwargs 목록에서 빠져 is_kr이 항상
+    # False로 들어갔음(KR 종목의 리스크 하드게이트 한도가 8%로 잘못 적용될
+    # 수 있던 버그) — 아래 트레이스 함수들은 전부 is_kr을 명시적으로 받음.
+    # pullback/turnaround/breakout/boxbreak/imminent는 실제 게이트 순서를
+    # 그대로 재현하는 _trace_* 함수로 판정 — modes와 게이트추적/탈락_핵심사유가
+    # 서로 다른 계산에서 나와 어긋나는 일이 없도록 단일 소스로 통일.
     modes = {}
-    for name, fn in [("pullback", analyze), ("turnaround", analyze_turnaround),
-                     ("imminent", analyze_imminent), ("breakout", analyze_breakout),
-                     ("boxbreak", analyze_boxbreak),
-                     ("leader", analyze_leader), ("super", analyze_super), ("surge", analyze_surge)]:
+    traces = {}
+    try:
+        traces["pullback"] = _trace_pullback(df, is_kr, 80)
+    except Exception as e:
+        traces["pullback"] = {"passed": False, "fail_at": "에러", "steps": [{"gate": "에러", "ok": False, "detail": str(e)}]}
+    try:
+        traces["turnaround"] = _trace_turnaround(df, is_kr, 80, 5)
+    except Exception as e:
+        traces["turnaround"] = {"passed": False, "fail_at": "에러", "steps": [{"gate": "에러", "ok": False, "detail": str(e)}]}
+    try:
+        traces["breakout"] = _trace_breakout(df, is_kr, 80)
+    except Exception as e:
+        traces["breakout"] = {"passed": False, "fail_at": "에러", "steps": [{"gate": "에러", "ok": False, "detail": str(e)}]}
+    try:
+        traces["boxbreak"] = _trace_boxbreak(df, is_kr, 80)
+    except Exception as e:
+        traces["boxbreak"] = {"passed": False, "fail_at": "에러", "steps": [{"gate": "에러", "ok": False, "detail": str(e)}]}
+    try:
+        traces["imminent"] = _trace_imminent(df, is_kr, 80)
+    except Exception as e:
+        traces["imminent"] = {"passed": False, "fail_at": "에러", "steps": [{"gate": "에러", "ok": False, "detail": str(e)}]}
+    for name, t in traces.items():
+        modes[name] = "통과" if t.get("passed") else ("에러" if t.get("fail_at") == "에러" else "탈락")
+    for name, fn in [("leader", analyze_leader), ("super", analyze_super), ("surge", analyze_surge)]:
         try:
-            kwargs = {"rs_rank": 80, "rs_mom": 5}
-            if name in ("pullback", "turnaround", "imminent", "boxbreak"):
-                kwargs["is_kr"] = is_kr
-            res = fn(df, **kwargs)
+            res = fn(df, rs_rank=80, rs_mom=5)
             modes[name] = "통과" if res is not None else "탈락"
         except Exception as e:
             modes[name] = f"에러: {e}"
@@ -3703,6 +4074,7 @@ async def debug_ticker(ticker: str):
         from scanner import horizontal_levels
         _hl = horizontal_levels(h, lo, c)
         payload["수평저항"] = {
+            "_주의": "참고용 터치-빈도 분석 — 실제 게이트가 쓰는 피벗과 다를 수 있음. 게이트기준_실제피벗 참조.",
             "추천피벗": _hl["pivot"],
             "피벗_터치횟수": _hl["pivot_touches"],
             "저항": [f"{r['price']} ({r['touches']}회, {r['dist_pct']:+}%)" for r in _hl["resistances"][:4]],
@@ -3710,31 +4082,45 @@ async def debug_ticker(ticker: str):
         }
     except Exception as _e:
         payload["수평저항"] = {"error": str(_e)}
-    # v4.62: 탈락 사유 자동 판정 (사람이 지표 보고 유추 안 해도 되게)
-    # 각 모드가 '탈락'일 때, 지표로 가장 유력한 사유를 한 줄로.
+    # v5.39: 탈락 사유 재작성. 기존엔 box_info(단순 20/40/60봉 최고가, 터치
+    # 필터 없음)로 만든 '가장 가까운 저항' 하나를 모든 모드에 공통 사유로
+    # 붙였음 — 실제 게이트가 사용하는 select_pivot 값과 달라(DELL 486 vs
+    # 실제 447.88) 통과한 게이트를 탈락 사유로 잘못 지목하는 사고가 났음.
+    # 지금은 각 모드가 실제로 도는 게이트 순서를 _trace_*로 그대로 재현해
+    # '어디서 True/False로 return None 됐는지'를 직접 갖고 온다.
+    _mode_labels = {"pullback": "눌림목", "turnaround": "추세전환", "breakout": "돌파",
+                    "boxbreak": "박스돌파", "imminent": "돌파임박"}
     reasons = []
-    ind = payload["indicators"]
-    aligned = ind.get("정배열(20>60>200)")
-    if not aligned:
-        if ma200 is not None and not (close > ma200):
-            reasons.append("200일선 아래 — 추세 미달 (모든 추세 모드 탈락)")
-        elif ma200 is not None and not (ma20 > ma60):
-            reasons.append(f"정배열 깨짐: 20일선({round(ma20)}) < 60일선({round(ma60)}) — 눌림목/추세전환 탈락")
-        elif ma200 is not None and not (ma60 > ma200):
-            reasons.append(f"정배열 깨짐: 60일선({round(ma60)}) < 200일선({round(ma200)})")
-    # 돌파 계열
-    box_broken = any(box_info.get(f"박스{w}_돌파여부") for w in (20, 40, 60))
-    if not box_broken:
-        tops = [box_info.get(f"박스{w}_상단") for w in (20, 40, 60) if box_info.get(f"박스{w}_상단")]
-        near = min(tops, key=lambda t: abs(t - close)) if tops else None
-        if near:
-            gap = (near - close) / close * 100
-            reasons.append(f"박스 상단 미돌파 — 가장 가까운 저항 {near} (현재가 대비 {gap:+.1f}%) · 돌파/돌파임박/박스돌파 탈락")
-    if vol_mult is not None and vol_mult < 1.5:
-        reasons.append(f"거래량 부족: 50일 평균의 {vol_mult}배 (돌파는 1.5배+ 필요)")
+    gate_trace_payload = {}
+    real_pivots = {}
+    for name, label in _mode_labels.items():
+        t = traces.get(name, {})
+        steps = t.get("steps", [])
+        gate_trace_payload[label] = steps
+        if t.get("pivot") is not None:
+            real_pivots[label] = {
+                "피벗": t["pivot"], "종류": t.get("pivot_type"),
+                "near_pct": t.get("near_pct"), "risk_pct": t.get("risk_pct"),
+                "게이트결과": "통과" if t.get("passed") else f"'{t.get('fail_at')}'에서 탈락",
+            }
+        if t.get("passed"):
+            continue
+        if t.get("fail_at") == "에러":
+            reasons.append(f"{label}: 진단 중 에러 — {steps[-1].get('detail') if steps else ''}")
+            continue
+        if not steps:
+            reasons.append(f"{label}: 탈락(사유 추적 실패)")
+            continue
+        last = steps[-1]
+        reasons.append(f"{label}: [{last['gate']}] 탈락 — {last.get('detail')}")
     if not reasons:
-        reasons.append("주요 필터는 통과 — RS/세부 조건(거래량·눌림폭 등)에서 미세 탈락 가능. modes와 indicators 대조 필요")
+        reasons.append("5개 핵심 탭 모두 주요 게이트 통과 — RS/세부 조건에서 미세 탈락 가능성. modes와 게이트추적 대조 필요")
     payload["탈락_핵심사유"] = reasons
+    payload["게이트기준_실제피벗"] = real_pivots
+    payload["게이트추적"] = gate_trace_payload
+    # box_info/수평저항은 참고 정보일 뿐 위 게이트 판정에는 쓰이지 않음 — 실제
+    # 판정 피벗은 게이트기준_실제피벗을 볼 것.
+    payload["indicators"]["_주의"] = "박스20/40/60_상단은 터치 횟수 필터 없는 단순 최고가 — 실제 게이트 기준 아님. 게이트기준_실제피벗 참조."
     # v5.05: 실적(EPS/매출) 성장 진단 — Phase 1. 데이터 없으면 판정불가로 표시.
     try:
         _eg = await asyncio.get_event_loop().run_in_executor(_earnings_executor, _get_earnings_cached, ticker)
