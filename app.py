@@ -5,6 +5,32 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.40 [개선] _risk_hard_ok(pullback/breakout/boxbreak/imminent 4탭 공통 리스크
+        하드게이트)를 고정 US8%/KR12%에서 loosen-only ATR 완화로 변경.
+        한도 = max(고정 US8%/KR12%, min(ATR%×1.5, 15% 절대상한)). badge_fields의
+        stop_wide가 이미 쓰는 ATR×1.5를 그대로 재사용(새 배수 발명 안 함).
+        [배경] stop_wide는 v4.67에 ATR×1.5로 바뀌었는데 _risk_hard_ok는 고정
+        %로 남아있던 불일치 — 고ATR 미국주(DELL 등)가 배지엔 안 걸리는데
+        하드게이트에서만 탈락하는 모순이 있었음.
+        [측정→결정] 전체 유니버스(KR1503+US2109) 측정 결과: pure ATR×N
+        치환은 저ATR 종목을 새로 탈락시켜 저ATR 손해 발생(×1.5에서 오히려
+        전체 히트 감소) — loosen-only(max)만 순수 증가. N=1.5 채택(±2.0은
+        검토 결과 보류 — 임의로 결과에 기준을 맞추는 것이라 판단, badge와
+        동일 배수 재사용 원칙 우선).
+        [검증] 동일 캐시 데이터로 patch 전/후 실제 프로덕션 함수(analyze/
+        analyze_breakout/analyze_boxbreak/analyze_imminent) 재실행 후 히트
+        종목 집합 diff — 4탭 전부 탈락(lost) 0건 확인(loosen-only이므로
+        수학적으로 보장되지만 실측으로 재확인). 신규 진입: pullback +2,
+        imminent +9, breakout/boxbreak 오늘 시세 기준 0(경계 종목 없음).
+        15% 캡이 2건(006340.KS, 144960.KQ — ATR×1.5가 15%를 넘어 캡에
+        걸림)에서 실제로 작동 확인, 둘 다 캡 적용 후에도 통과.
+        [부수 발견] _risk_hard_ok의 판정 기준(피벗→손절 pivot 기준)과
+        카드에 표시되는 risk_pct(entry=close 기준, pullback/breakout/
+        boxbreak 한정 — imminent는 entry=None이라 pivot 기준으로 일치)가
+        다를 수 있음이 이번 검증 중 재확인됨(기존 설계, 이번 패치와 무관).
+        DELL 눌림목 카드엔 6.55%로 뜨지만 게이트 판정은 9.02%(피벗 기준)로
+        했음 — 표시값만 보고 게이트 통과 이유를 추측하면 오판 가능.
+        [설정] CONFIG에 risk_hard_atr_mult=1.5, risk_hard_atr_cap=15.0 추가.
 v5.39 [버그수정] /api/debug '탈락_핵심사유'가 실제 스캔이 안 쓰는 box_info
         (터치필터 없는 단순 20/40/60봉 최고가)로 사유를 지목하던 것 수정.
         DELL에서 핵심사유가 "저항 486"이라 떴지만 돌파임박 게이트가 실제로
@@ -1881,7 +1907,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.39"
+VERSION = "v5.40"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

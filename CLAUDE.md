@@ -55,6 +55,11 @@
 - 🚫손절폭넓음 배지와 bear_ok(💎) 둘 다 적용. `badge_fields`가 atr_pct + 동적 stop_limit_pct 반환.
 - **핵심 통찰:** "타이트함"은 손절폭/ATR 비율이지 절대 %가 아니다.
 
+### `_risk_hard_ok` loosen-only ATR 완화 (v5.40)
+- 한도 = `max(고정 US8%/KR12%, min(ATR%×1.5, 15%))`. `stop_wide`와 같은 ATR×1.5를 재사용(새 배수 발명 안 함). 저ATR 종목은 `max()`라 기존 통과분 영향 없음 — 순수 loosen-only(전체 유니버스 실측: 4탭 전부 탈락 신규 발생 0건).
+- 절대 상한 15% — ATR이 커도 무제한 완화는 게이트 무력화(예: 리스크 30%대 종목이 "고ATR"이라는 이유로 통과하면 안 됨).
+- **게이트와 배지가 같은 ATR×1.5를 쓰므로, 4개 게이트 탭(pullback/breakout/boxbreak/imminent)에서 `stop_wide`는 구조적으로 표시되지 않음(게이트를 통과한 결과는 정의상 `risk_pct ≤ ATR%×1.5`를 만족하므로). 의도된 동작 — turnaround/pattern 탭(이 게이트를 안 씀)에서는 계속 정상 작동.
+
 ### 알려진 설계 갭 (미변경, 검토 대상)
 - `analyze_imminent`(돌파임박) 추세 게이트가 `close >= ma200` AND `ma20 > ma60`뿐 → 단기 이평 아래로 깊게 눌린 종목도 통과함. Minervini 템플릿은 50일선 위를 요구. `price > ma20(or ma60)` 조건 추가 검토 중.
 - **fetch 730일(KR)/2y(US) 확대(v5.28) 후 돌파/박스돌파/돌파임박 탭 회귀 미검증.** 눌림목·추세전환·ABC·`off_high_pct`·`rs_raw_score`·`count_bases_since_bottom` 등은 전체 유니버스 재현으로 회귀 없음을 확인했지만(400일→730일 hit 건수·순위 완전 동일), 이 3개 탭은 검증 당일 시세에 통과 종목이 0건이라 `max_off_high` 게이트가 실제로 걸러본 적이 없다. 해당 탭에 hit이 나오는 날 다시 확인 필요.

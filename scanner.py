@@ -509,22 +509,35 @@ def trend_grade(c: pd.Series, lo: pd.Series, h: pd.Series, rs_rank,
 
 
 def _risk_hard_ok(rrb: dict, is_kr: bool, pivot: float | None = None) -> bool:
-    """리스크 기하 하드 게이트: 손절폭이 시장 한도(US 8%/KR 12%)를 넘으면
-    베이스가 너무 느슨한 것 → 후보 제외. (risk_warn 표시만 하던 것을 강제화)
+    """리스크 기하 하드 게이트: 손절폭이 한도를 넘으면 베이스가 너무 느슨한
+    것 → 후보 제외. (risk_warn 표시만 하던 것을 강제화)
 
     판정 기준은 '피벗 → 현실화 손절' 거리 (베이스의 구조적 느슨함).
     당일 급등한 돌파일의 종가 기준 리스크로 판정하면 정상 셋업까지 잘리므로
     (Case13 회귀), pivot이 주어지면 피벗 기준으로 계산한다.
-    BHE 사례(피벗 94.75, 손절 85 → 10.3%)는 피벗 기준으로도 차단됨."""
+    BHE 사례(피벗 94.75, 손절 85 → 10.3%)는 피벗 기준으로도 차단됨.
+
+    v5.40: 한도 = max(고정 US8%/KR12%, ATR%×1.5) — loosen-only. 고ATR
+    종목(예: DELL 9.06%/ATR 7.7%)이 구조적으로 탈락하던 문제(badge_fields의
+    stop_wide는 v4.67에 이미 ATR×1.5로 바뀌었는데 이 게이트만 고정 %로
+    남아있던 불일치) 해소. 저ATR 종목은 max()라 기존 통과분에 영향 없음
+    (loosen-only 실측: 4탭 전부 baseline 이하로 떨어지는 사례 0건).
+    절대 상한 15%는 유지 — ATR이 커도 무제한 완화는 게이트 무력화."""
     if not CONFIG.get("risk_hard_enforce", True):
         return True
-    limit = CONFIG.get("risk_hard_kr", 12.0) if is_kr else CONFIG.get("risk_hard_us", 8.0)
+    fixed_limit = CONFIG.get("risk_hard_kr", 12.0) if is_kr else CONFIG.get("risk_hard_us", 8.0)
     try:
         stop_eff = float(rrb.get("stop", 0.0))
         if pivot and pivot > 0 and stop_eff > 0:
             risk = (pivot - stop_eff) / pivot * 100.0
         else:
             risk = float(rrb.get("risk_pct", 0.0))
+        limit = fixed_limit
+        atr_pct = rrb.get("atr_pct")
+        if atr_pct is not None and atr_pct > 0:
+            atr_limit = min(atr_pct * CONFIG.get("risk_hard_atr_mult", 1.5),
+                            CONFIG.get("risk_hard_atr_cap", 15.0))
+            limit = max(fixed_limit, atr_limit)
         return risk <= limit
     except Exception:
         return True
@@ -755,6 +768,14 @@ CONFIG = {
     "risk_hard_kr": 12.0,
     "risk_hard_us": 8.0,
     "risk_hard_enforce": True,
+    # v5.40: loosen-only ATR 완화 — 고정 한도(8%/12%)는 그대로 두고,
+    # ATR%×1.5가 고정 한도보다 크면(=고ATR 종목) 그쪽을 한도로 채택.
+    # badge_fields의 stop_wide가 이미 쓰는 ATR×1.5를 게이트에도 그대로
+    # 적용(새 배수 발명 안 함). 절대 상한 15%는 유지 — ATR이 아무리 커도
+    # 손절폭이 15%를 넘으면 "완화"가 아니라 "게이트 무력화"라 무조건 탈락.
+    # 저ATR 종목은 영향 없음(max()라 기존 통과분이 새로 탈락하는 일 없음).
+    "risk_hard_atr_mult": 1.5,
+    "risk_hard_atr_cap": 15.0,
     "pullback_max": 0.18,      # (구버전 호환용 폴백 — 시장별 키 없을 때만 사용)
     "ma_proximity": 0.035,     # 이평선과의 거리 허용치 3.5%
     "vol_contraction": 0.85,   # 최근 3일 평균 거래량 < 20일 평균 × 0.85
