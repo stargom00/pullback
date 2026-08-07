@@ -5,6 +5,41 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.41 [버그수정] analyze_breakout/analyze_boxbreak의 _risk_hard_ok 호출을
+        피벗 기준→현재가(close) 기준으로 통일 + boxbreak에 extended_max(12%)
+        신설. pullback은 변경 안 함(Case13 회귀 방지 근거 documented, 유지).
+        [배경] 게이트(피벗 기준)와 카드 표시 risk_pct(entry=close 기준)가
+        달라 최대 25.2%p까지 벌어지는 사례 발견(전체 유니버스 측정).
+        박스돌파는 stop=pivot×0.97로 피벗에 고정되는데, 코드 자체 주석이
+        "이미 돌파한 상태 → 실제 진입은 현재가. 리스크/손익비 모두 현재가
+        기준으로 통일"이라고 명시해놓고 정작 하드게이트만 pivot을 넘겨
+        그 의도를 뒤집고 있었음. 051160.KQ 사례: 박스상단(피벗) 대비 이미
+        +35.5% 연장, 카드엔 리스크 29.0%로 정확히 뜨는데 게이트는 피벗
+        기준 3.79%로 계산해 손쉽게 통과시킴 — 추격 진입이 하드게이트를
+        무력화하는 구멍.
+        [측정→결정] boxbreak 현재 히트 24건의 ext 분포(중앙값 7.9%, 최대
+        35.5%) 확인 후 breakout과 같은 extended_max=0.12로 채택(연장 12%+
+        가 대부분은 아니었음, 5/24건).
+        [검증] 동일 캐시로 patch 전/후 실제 프로덕션 함수 재실행 diff:
+        pullback 변화 0건(의도대로 무변경), breakout 17→11(-6, 전부
+        close기준 전환으로 인한 조정), boxbreak 24→9(-15, close기준
+        전환+extended_max 결합효과 — 051160.KQ 포함 고연장 종목 전부 제외
+        확인). imminent는 이번 패치 대상 아니라 126건 그대로.
+        [부수 발견] 오늘 데이터 기준으론 boxbreak에서 extended_max가 단독
+        으로 추가 배제한 종목은 0건(연장 12%+ 종목은 close기준 전환만으로
+        도 이미 다 걸러짐, ATR 완화를 적용해도 한도 미달). 다만 논리적으론
+        고ATR 종목이 ATR 완화로 리스크 상한을 넉넉히 받는 동시에 심하게
+        연장된 경우 close기준 단독으론 못 거를 수 있어 이중 안전장치로서
+        의미는 있음(오늘 표본에 그 조합이 없었을 뿐).
+        [테스트 수정] test_scanner.py Case22가 +6% 연장을 썼는데, close
+        기준 전환으로 실제 리스크가 8.94%(고정 8% 초과)가 돼 탈락 판정으로
+        바뀜 — 의도된 동작(연장분이 진짜 리스크에 반영됨). 표본을 +4%
+        연장(risk 7.19%)으로 조정해 "정상 탐지" 케이스 의미를 유지.
+        [디버그 패널] _trace_pullback이 게이트기준(피벗) risk%와 카드기준
+        (현재가) risk%를 둘 다 표시하도록 확장(게이트기준_실제피벗 payload
+        + 프론트 🎯 섹션) — 두 값이 다를 때만 두 줄로, 같으면(이제 돌파/
+        박스돌파는 항상 같음) 한 줄만 표시. "34건 조용히 탈락" 문제(카드
+        숫자만 보면 통과처럼 보이는데 실제 게이트는 탈락) 대응.
 v5.40 [개선] _risk_hard_ok(pullback/breakout/boxbreak/imminent 4탭 공통 리스크
         하드게이트)를 고정 US8%/KR12%에서 loosen-only ATR 완화로 변경.
         한도 = max(고정 US8%/KR12%, min(ATR%×1.5, 15% 절대상한)). badge_fields의
@@ -1907,7 +1942,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.40"
+VERSION = "v5.41"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -3672,6 +3707,23 @@ def _gate_step(steps, name, ok, detail=None):
     return ok
 
 
+def _gate_risk_pct(rrb, pivot):
+    """_risk_hard_ok가 내부적으로 쓰는 판정용 risk%를 그대로 재현.
+    pivot이 주어지고 유효하면 피벗 기준(게이트 실제 판정), 아니면
+    rrb['risk_pct'](카드 표시값과 동일, entry 기준)로 폴백 — scanner.py의
+    _risk_hard_ok 본문과 반드시 같은 로직으로 유지할 것.
+    v5.41: pullback/imminent만 pivot을 넘겨 게이트=피벗 기준이고(각각
+    Case13 회귀 방지/아직 미돌파라 근거 문서화됨), breakout/boxbreak는
+    pivot 없이 호출해 게이트=카드(현재가) 기준으로 일치시킴(v5.41 수정)."""
+    try:
+        stop_eff = float(rrb.get("stop", 0.0))
+        if pivot and pivot > 0 and stop_eff > 0:
+            return round((pivot - stop_eff) / pivot * 100.0, 2)
+    except Exception:
+        pass
+    return rrb.get("risk_pct")
+
+
 def _trace_pullback(df, is_kr, rs_rank):
     from scanner import (CONFIG as cfg, rsi as _rsi, select_pivot, significant_support,
                          apply_atr_buffer, _rr_block, _risk_hard_ok, late_stage_info,
@@ -3738,16 +3790,21 @@ def _trace_pullback(df, is_kr, rs_rank):
     rrb = _rr_block(pivot, stop, h, lo, c, base_low=float(lo.iloc[-cfg["recent_high_window"]:].min()),
                     entry=close, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf)
     hard_ok = _risk_hard_ok(rrb, is_kr, pivot=pivot)
+    gate_risk = _gate_risk_pct(rrb, pivot)
+    card_risk = rrb.get("risk_pct")
+    _limit_note = f"한도 {'12' if is_kr else '8'}%(고정) or ATR%×1.5(≤15%캡)"
     if not _gate_step(steps, "리스크하드게이트", hard_ok,
-                       f"피벗({pivot_type}) {round(pivot,2)}, risk_pct {rrb.get('risk_pct')}% (한도 {'12' if is_kr else '8'}%)"):
-        return {"passed": False, "fail_at": "risk_hard", "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type, "risk_pct": rrb.get("risk_pct")}
+                       f"피벗({pivot_type}) {round(pivot,2)} · 게이트기준(피벗) risk {gate_risk}% vs 카드표시(현재가) risk {card_risk}% · {_limit_note}"):
+        return {"passed": False, "fail_at": "risk_hard", "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type,
+                "risk_pct": card_risk, "gate_risk_pct": gate_risk}
     ls = late_stage_info(c, lo, h, v, is_kr)
     if not _gate_step(steps, "후기스테이지", ls.get("late_level") != "danger", f"level={ls.get('late_level')} flags={ls.get('late_flags')}"):
         return {"passed": False, "fail_at": "late_stage_danger", "steps": steps, "pivot": round(pivot, 2)}
     mg = _merger_block(c, h, lo, v)
     if not _gate_step(steps, "MA_특수상황", not mg.get("merger"), mg.get("merger_reasons")):
         return {"passed": False, "fail_at": "merger", "steps": steps, "pivot": round(pivot, 2)}
-    return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type, "risk_pct": rrb.get("risk_pct")}
+    return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type,
+            "risk_pct": card_risk, "gate_risk_pct": gate_risk}
 
 
 def _trace_turnaround(df, is_kr, rs_rank, rs_mom):
@@ -3847,8 +3904,11 @@ def _trace_breakout(df, is_kr, rs_rank):
     stop, stop_struct, atr_buf = apply_atr_buffer(stop, h, lo, c, 0.15)
     rrb = _rr_block(pivot, stop, h, lo, c, base_low=base_low, entry=close, warn_pct=8.0,
                     is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf)
-    hard_ok = _risk_hard_ok(rrb, is_kr, pivot=pivot)
-    if not _gate_step(steps, "리스크하드게이트", hard_ok, f"risk_pct {rrb.get('risk_pct')}% (한도 {'12' if is_kr else '8'}%)"):
+    # v5.41: pivot 인자 제거 — scanner.py의 analyze_breakout이 이제 pivot 없이
+    # 호출(이미 돌파한 상태라 실제 진입은 현재가라는 코드 주석과 일치시킴).
+    # extended_max가 이미 있어 게이트/카드 값 차이는 애초에 작았음.
+    hard_ok = _risk_hard_ok(rrb, is_kr)
+    if not _gate_step(steps, "리스크하드게이트", hard_ok, f"risk_pct {rrb.get('risk_pct')}% (현재가 기준=게이트 기준과 동일) (한도 {'12' if is_kr else '8'}%(고정) or ATR%×1.5(≤15%캡))"):
         return {"passed": False, "fail_at": "risk_hard", "steps": steps, "pivot": round(pivot, 2), "risk_pct": rrb.get("risk_pct")}
     ls = late_stage_info(c, lo, h, v, is_kr)
     if not _gate_step(steps, "후기스테이지", ls.get("late_level") != "danger", f"level={ls.get('late_level')}"):
@@ -3903,20 +3963,25 @@ def _trace_boxbreak(df, is_kr, rs_rank):
         if box_range > cfg["box_max_range"] or close <= box_high * 1.005:
             continue
         ext = (close - box_high) / box_high
+        box_detail[f"{win}봉박스"]["연장%"] = round(ext * 100, 1)
+        if ext > cfg["extended_max"]:
+            box_detail[f"{win}봉박스"]["제외사유"] = f"연장 {ext*100:.1f}% > 허용 {cfg['extended_max']*100:.0f}%"
+            continue   # v5.41: 너무 연장됨 → 이 박스는 후보 제외 (breakout과 동일 기준 신설)
         tightness = 1 - min(box_range / cfg["box_max_range"], 1.0)
         quality = tightness * 0.5 + min(win / 60, 1.0) * 0.3 + min(vol_mult / 3, 1.0) * 0.2
         cand = {"win": win, "box_high": box_high, "box_low": box_low, "ext": ext, "quality": quality}
         if best is None or cand["quality"] > best["quality"]:
             best = cand
-    if not _gate_step(steps, "박스돌파", best is not None, box_detail):
+    if not _gate_step(steps, "박스돌파(연장12%이내)", best is not None, box_detail):
         return {"passed": False, "fail_at": "no_box_broken", "steps": steps, "박스상세": box_detail}
     pivot = best["box_high"]
     stop = round(pivot * 0.97, 2)
     stop, stop_struct, atr_buf = apply_atr_buffer(stop, h, lo, c, 0.15)
     rrb = _rr_block(pivot, stop, h, lo, c, base_low=best["box_low"], entry=close, warn_pct=8.0,
                     is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf)
-    hard_ok = _risk_hard_ok(rrb, is_kr, pivot=pivot)
-    if not _gate_step(steps, "리스크하드게이트", hard_ok, f"risk_pct {rrb.get('risk_pct')}% (한도 {'12' if is_kr else '8'}%)"):
+    # v5.41: pivot 인자 제거 — analyze_boxbreak과 동일(게이트=카드 기준 통일).
+    hard_ok = _risk_hard_ok(rrb, is_kr)
+    if not _gate_step(steps, "리스크하드게이트", hard_ok, f"risk_pct {rrb.get('risk_pct')}% (현재가 기준=게이트 기준과 동일) (한도 {'12' if is_kr else '8'}%(고정) or ATR%×1.5(≤15%캡))"):
         return {"passed": False, "fail_at": "risk_hard", "steps": steps, "pivot": round(pivot, 2), "risk_pct": rrb.get("risk_pct"), "박스상세": box_detail}
     ls = late_stage_info(c, lo, h, v, is_kr)
     if not _gate_step(steps, "후기스테이지", ls.get("late_level") != "danger", f"level={ls.get('late_level')}"):
@@ -3971,7 +4036,7 @@ def _trace_imminent(df, is_kr, rs_rank):
     rrb = _rr_block(pivot, stop, h, lo, c, base_low=float(lo.iloc[-cfg["pivot_window"]:].min()),
                     entry=None, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf)
     hard_ok = _risk_hard_ok(rrb, is_kr, pivot=pivot)
-    if not _gate_step(steps, "리스크하드게이트", hard_ok, f"risk_pct {rrb.get('risk_pct')}% (한도 {'12' if is_kr else '8'}%)"):
+    if not _gate_step(steps, "리스크하드게이트", hard_ok, f"risk_pct {rrb.get('risk_pct')}% (피벗 기준=카드 표시와 동일, entry=None) (한도 {'12' if is_kr else '8'}%(고정) or ATR%×1.5(≤15%캡))"):
         return {"passed": False, "fail_at": "risk_hard", "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type, "near_pct": round(near * 100, 2), "risk_pct": rrb.get("risk_pct")}
     ls = late_stage_info(c, lo, h, v, is_kr)
     if not _gate_step(steps, "후기스테이지", ls.get("late_level") != "danger", f"level={ls.get('late_level')}"):
@@ -4124,11 +4189,18 @@ async def debug_ticker(ticker: str):
         steps = t.get("steps", [])
         gate_trace_payload[label] = steps
         if t.get("pivot") is not None:
-            real_pivots[label] = {
+            entry = {
                 "피벗": t["pivot"], "종류": t.get("pivot_type"),
-                "near_pct": t.get("near_pct"), "risk_pct": t.get("risk_pct"),
+                "near_pct": t.get("near_pct"), "risk_pct(카드기준)": t.get("risk_pct"),
                 "게이트결과": "통과" if t.get("passed") else f"'{t.get('fail_at')}'에서 탈락",
             }
+            # v5.41: 눌림목만 게이트(피벗기준)≠카드(현재가기준) risk_pct일 수
+            # 있음 — Case13 회귀 방지 근거로 게이트만 피벗 기준 유지(CLAUDE.md
+            # 참조). 돌파/박스돌파는 v5.41에서 카드 기준으로 통일해 항상 일치.
+            if "gate_risk_pct" in t and t["gate_risk_pct"] != t.get("risk_pct"):
+                entry["risk_pct(게이트기준,피벗)"] = t["gate_risk_pct"]
+                entry["_주의"] = "게이트 판정과 카드 표시 risk_pct가 다름 — 게이트가 실제 통과/탈락을 결정한 값"
+            real_pivots[label] = entry
         if t.get("passed"):
             continue
         if t.get("fail_at") == "에러":

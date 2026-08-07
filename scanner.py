@@ -2490,7 +2490,10 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
     # ── v4.48 게이트: 리스크 기하 + 후기 스테이지 ──
     rrb = _rr_block(pivot, stop, h, lo, c, base_low=base_low,
                     entry=close, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf)
-    if not _risk_hard_ok(rrb, is_kr, pivot=pivot):
+    # v5.41: pivot 인자 제거 — boxbreak와 같은 이유(이미 돌파 상태라 실제
+    # 진입은 현재가). extended_max(12%)가 이미 연장을 제한해 영향은 작지만,
+    # 게이트/카드 기준을 일치시켜 두 값이 다르게 나오는 사례 자체를 없앰.
+    if not _risk_hard_ok(rrb, is_kr):
         return None
     _ls = late_stage_info(c, lo, h, v, is_kr)
     _tt = trend_grade(c, lo, h, rs_rank, ud=up_down_volume(c, v, 50))
@@ -2552,6 +2555,11 @@ BOXBREAK_CONFIG = {
     "box_max_range": 0.30,   # 박스 고저폭 ≤30% (국장 변동성 고려, 너무 넓으면 박스 아님)
     "vol_mult": 1.5,         # 돌파일 거래량 ≥ 평균 1.5배 (박스돌파의 핵심)
     "ma_long": 120,          # 장기선(120일) 위 — "장기선 위 박스탈출은 크게 간다"
+    # v5.41: breakout에 있던 extended_max가 boxbreak엔 없어서, 박스 상단
+    # 대비 손절은 여전히 타이트(피벗 기준)한데 실제로는 이미 크게 연장된
+    # 추격 진입(051160.KQ +35.5%)이 하드게이트를 그냥 통과하던 문제. 측정
+    # (오늘 히트 24건 중 5건이 12%+ 연장) 후 breakout과 같은 0.12로 채택.
+    "extended_max": 0.12,    # 박스 상단 +12% 넘으면 너무 연장 → 제외 (breakout과 동일 기준)
 }
 
 
@@ -2613,6 +2621,8 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
         if close <= box_high * 1.005:
             continue
         ext = (close - box_high) / box_high   # 박스 상단 대비 얼마나 위
+        if ext > cfg["extended_max"]:
+            continue                          # 너무 연장됨(+12% 초과) → 추격 금지, 이 박스는 후보 제외
         tightness = 1 - min(box_range / cfg["box_max_range"], 1.0)
         quality = tightness * 0.5 + min(win / 60, 1.0) * 0.3 + min(vol_mult / 3, 1.0) * 0.2
         cand = {
@@ -2653,7 +2663,13 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
     # ── v4.48 게이트: 리스크 기하 + 후기 스테이지 ──
     rrb = _rr_block(pivot, stop, h, lo, c, base_low=best["box_low"],
                     entry=close, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf)
-    if not _risk_hard_ok(rrb, is_kr, pivot=pivot):
+    # v5.41: pivot 인자 제거 — 이미 돌파한 상태라 "실제 진입은 현재가"라는
+    # 위 주석과 일치시킴. pivot을 안 넘기면 _risk_hard_ok가 rrb["risk_pct"]
+    # (entry=close 기준, 카드 표시값과 동일)를 그대로 씀. 예전엔 pivot 기준으로
+    # 판정해 카드엔 29% 뜨는데 게이트는 3.79%로 통과시키는 괴리가 있었음
+    # (051160.KQ 사례) — extended_max 게이트 추가로 애초에 그 정도 연장은
+    # 후보에서 빠지지만, 이 통일 자체도 별도로 필요한 수정.
+    if not _risk_hard_ok(rrb, is_kr):
         return None
     _ls = late_stage_info(c, lo, h, v, is_kr)
     _tt = trend_grade(c, lo, h, rs_rank, ud=up_down_volume(c, v, 50))

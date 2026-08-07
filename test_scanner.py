@@ -280,7 +280,11 @@ rally = list(100 * np.cumprod(1 + rng22.normal(0.006, 0.012, 200)))
 box_top = rally[-1]
 box = list(box_top * (1 + rng22.normal(0, 0.025, 25)))  # ±2.5% 횡보 박스
 box = [min(x, box_top * 1.02) for x in box]              # 천장 눌러둠
-today = [max(box) * 1.06]                                 # +6% 돌파
+today = [max(box) * 1.04]                                 # +4% 돌파
+# v5.41: analyze_breakout의 _risk_hard_ok가 피벗 기준→현재가(close) 기준으로
+# 바뀌면서, 연장분이 리스크%에 직접 반영됨 — +6%는 이제 risk_pct 8.94%로
+# 고정 8% 한도를 넘어 탈락(의도된 동작, 실제 추격매수 리스크를 정확히 반영).
+# +4%는 7.19%로 한도 안쪽이라 정상 탐지 케이스를 유지하려면 이 값이 맞음.
 closes22 = rally + box + today
 vols22 = [1_000_000.0]*225 + [3_500_000.0]               # 돌파일 거래량 3.5배
 df22 = pd.DataFrame({"Open": closes22, "High":[c*1.01 for c in closes22],

@@ -60,6 +60,12 @@
 - 절대 상한 15% — ATR이 커도 무제한 완화는 게이트 무력화(예: 리스크 30%대 종목이 "고ATR"이라는 이유로 통과하면 안 됨).
 - **게이트와 배지가 같은 ATR×1.5를 쓰므로, 4개 게이트 탭(pullback/breakout/boxbreak/imminent)에서 `stop_wide`는 구조적으로 표시되지 않음(게이트를 통과한 결과는 정의상 `risk_pct ≤ ATR%×1.5`를 만족하므로). 의도된 동작 — turnaround/pattern 탭(이 게이트를 안 씀)에서는 계속 정상 작동.
 
+### `_risk_hard_ok`의 판정 기준 = 카드 표시 risk_pct와 다를 수 있다 (v5.41로 pullback만 남음)
+- `_risk_hard_ok(rrb, is_kr, pivot=...)`는 `pivot`이 주어지면 **피벗→손절** 기준으로 risk%를 재계산해서 판정한다. 카드에 표시되는 `risk_pct`(`_rr_block`이 반환, `entry` 기준)와 분모가 다르면 두 값이 크게 벌어질 수 있다.
+- **pullback**: 여전히 `pivot=pivot`으로 호출(의도적 유지) — `_risk_hard_ok` docstring에 문서화된 이유(Case13: 돌파일 종가 기준으로 판정하면 정상 셋업이 잘림) 때문. 카드(`entry=close` 기준)와 게이트(피벗 기준) risk%가 다를 수 있음 — `/api/debug`의 "게이트기준_실제피벗"에 둘 다 표시됨.
+- **breakout/boxbreak**: v5.41부터 `pivot` 인자 없이 호출 → `rrb["risk_pct"]`(= entry=close 기준, 카드와 동일값)를 그대로 씀. 코드 자체 주석("이미 돌파한 상태 → 실제 진입은 현재가")과 일치시킨 것. boxbreak는 `stop=pivot×0.97`로 손절이 피벗에 고정돼 있어서, 연장(ext)이 클수록 피벗 기준 risk%는 작게 유지되고 close 기준만 커지는 구조 — pivot 기준으로 판정하면 이미 크게 연장된 추격 진입도 하드게이트를 쉽게 통과했음(051160.KQ: 피벗대비 risk 3.79% vs 실제 29.0%). boxbreak엔 breakout에 있던 `extended_max`(12%)도 없었어서 이중으로 안 걸렸음 — v5.41에서 `BOXBREAK_CONFIG["extended_max"]=0.12` 신설.
+- **imminent**: `_rr_block` 호출에 `entry=None`이라 애초에 `rrb["risk_pct"]`가 피벗 기준으로 계산됨 — `pivot=pivot`을 넘겨도 카드와 항상 일치. 손댈 필요 없음.
+
 ### 알려진 설계 갭 (미변경, 검토 대상)
 - `analyze_imminent`(돌파임박) 추세 게이트가 `close >= ma200` AND `ma20 > ma60`뿐 → 단기 이평 아래로 깊게 눌린 종목도 통과함. Minervini 템플릿은 50일선 위를 요구. `price > ma20(or ma60)` 조건 추가 검토 중.
 - **fetch 730일(KR)/2y(US) 확대(v5.28) 후 돌파/박스돌파/돌파임박 탭 회귀 미검증.** 눌림목·추세전환·ABC·`off_high_pct`·`rs_raw_score`·`count_bases_since_bottom` 등은 전체 유니버스 재현으로 회귀 없음을 확인했지만(400일→730일 hit 건수·순위 완전 동일), 이 3개 탭은 검증 당일 시세에 통과 종목이 0건이라 `max_off_high` 게이트가 실제로 걸러본 적이 없다. 해당 탭에 hit이 나오는 날 다시 확인 필요.
