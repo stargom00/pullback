@@ -5,6 +5,13 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.35 [개명] 패턴 탭의 "ABC상한가" → "급등매집"(scanner.py 문자열/주석,
+        app.py:3693 부근 디버그 엔드포인트, static/index.html:978, 내부
+        함수명 `_pat_abc`→`_pat_surge_accum`). ABC(문서 방식) 신규 탭 조사
+        중 이름이 겹쳐서 붙인 개명 — 그 탭 자체는 선별력 검증에서 음성
+        결과가 나와 보류(조사 기록: docs/abc_doc_style_tab_investigation.md).
+        accum_score/qa_score 등 매집 채점 함수는 이름에 "abc"가 안 들어가
+        있어 이번 개명과 무관, 그대로 재사용.
 v5.34 [진단] /api/debug/{ticker}에 rs_raw_score/rs_quarters_used 추가.
         price_ago 재정규화(v5.32)로 상장 200~252봉 종목이 3분기짜리
         점수를 받는데, 지금까지는 이걸 눈으로 확인할 방법이 없었음(전체
@@ -1793,7 +1800,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.34"
+VERSION = "v5.35"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -3686,14 +3693,14 @@ async def debug_ticker(ticker: str):
         }
     except Exception as _e:
         payload["실적성장"] = {"error": str(_e)}
-    # v5.19: A-B-C 매집 스코어 진단 — ABC상한가가 아니면 채점 대상 아님을 명시
+    # v5.19: A-B-C 매집 스코어 진단 — 급등매집이 아니면 채점 대상 아님을 명시
     try:
         from scanner import analyze_pattern
         _pat = analyze_pattern(df)
-        if _pat is None or _pat.get("pattern") != "ABC상한가":
+        if _pat is None or _pat.get("pattern") != "급등매집":
             _found = _pat.get("pattern") if _pat else None
             payload["매집채점"] = {
-                "상태": "ABC패턴 미검출 — 매집채점 대상 아님" + (f" (검출된 패턴: {_found})" if _found else ""),
+                "상태": "급등매집 패턴 미검출 — 매집채점 대상 아님" + (f" (검출된 패턴: {_found})" if _found else ""),
             }
         else:
             payload["매집채점"] = {

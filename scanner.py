@@ -3204,7 +3204,7 @@ PATTERN_CONFIG = {
 
 
 # ══════════════════════════════════════════════════════
-# A-B-C 매집 스코어 (v5.19) — ABC상한가 A구간(횡보 베이스)의 "조용한 물량
+# A-B-C 매집 스코어 (v5.19) — 급등매집 A구간(횡보 베이스)의 "조용한 물량
 # 수집" 흔적을 수치화. 순위 정렬용 보조 지표일 뿐, 진입 신호도 상한가
 # 확률도 아님. 승률/확률 문구 절대 사용 금지.
 #
@@ -3373,7 +3373,7 @@ def accumulation_score(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series,
     #
     #    ⚠️ v5.30: "고점" 정의를 가격(종가) 기준 → 거래대금 기준으로 변경
     #    (단순 버그 수정이 아니라 지표가 재는 개념 자체가 바뀐 것).
-    #    아래 fund_peak_*(자금고점)는 _pat_abc()의 peak_abs("상승 1파
+    #    아래 fund_peak_*(자금고점)는 _pat_surge_accum()의 peak_abs("상승 1파
     #    고점" = 가격 고점, 여전히 종가 기준 그대로 — 피벗/타점 계산엔
     #    가격 고점이 맞는 개념이라 안 바꿨다)와 서로 다른 개념이니 섞어
     #    쓰지 말 것.
@@ -3757,7 +3757,7 @@ def _pat_double_bottom(c, h, lo, v):
             "pat_ready": True, "pat_missing": []}
 
 
-def _pat_abc(c, h, lo, v):
+def _pat_surge_accum(c, h, lo, v):
     """A-B-C 상한가 패턴 (v4.55) — 급등구간 분리 + 동적 A/B 탐지.
 
     실데이터(광주·금호·삼화·디벨로먼트·마녀공장)로 배운 핵심:
@@ -3935,7 +3935,7 @@ def _pat_abc(c, h, lo, v):
         # v5.24: 조용한 매집 스코어(Task 2) — A구간에 부착. accum_score(v5.19)와
         # 별개 지표(원본 accum_score는 무변경, 새 필드만 추가). A구간 끝(a_end)
         # 까지의 전체 이력을 넘겨 window=A구간길이로 계산 — 여기서 실패해도
-        # _pat_abc 전체를 죽이면 안 되므로 별도 try/except로 격리.
+        # _pat_surge_accum 전체를 죽이면 안 되므로 별도 try/except로 격리.
         try:
             _qa_df = pd.DataFrame({"Close": c, "High": h, "Low": lo, "Volume": v}).iloc[:a_end]
             _qa = quiet_accumulation_score(_qa_df, window=max(5, a_end - a_start))
@@ -3944,7 +3944,7 @@ def _pat_abc(c, h, lo, v):
                    "disqualify_reason": "계산오류", "data_basis": "추정"}
 
         return {
-            "pattern": "ABC상한가",
+            "pattern": "급등매집",
             "pattern_emoji": "🎆",
             "pivot": round(pivot, 2),
             "stop_raw": round(stop_raw, 2),
@@ -3997,7 +3997,7 @@ def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
         return None
 
     hits = []
-    for det in (_pat_htf, _pat_cup_handle, _pat_double_bottom, _pat_abc):
+    for det in (_pat_htf, _pat_cup_handle, _pat_double_bottom, _pat_surge_accum):
         try:
             r = det(c, h, lo, v)
         except Exception:
@@ -4044,12 +4044,12 @@ def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
     _mg = _merger_block(c, h, lo, v)
     if _mg["merger"]:
         return None
-    # v5.19: 매집 스코어는 _pat_abc()가 계산해 best dict에 넣어두지만, 이
+    # v5.19: 매집 스코어는 _pat_surge_accum()가 계산해 best dict에 넣어두지만, 이
     # 함수는 best를 통째로 스프레드하지 않고 필드를 골라서 새 dict를 만들기
-    # 때문에 따로 안 퍼올리면 계산만 되고 API까지 안 감. ABC상한가가 최종
+    # 때문에 따로 안 퍼올리면 계산만 되고 API까지 안 감. 급등매집이 최종
     # 승자일 때만 의미있는 필드라(다른 3개 패턴엔 "A구간" 개념이 없음)
-    # best["pattern"] == "ABC상한가"일 때만 채운다.
-    _is_abc = best["pattern"] == "ABC상한가"
+    # best["pattern"] == "급등매집"일 때만 채운다.
+    _is_abc = best["pattern"] == "급등매집"
     _accum_fields = {
         "accum_score": best.get("accum_score") if _is_abc else None,
         "accum_score_raw": best.get("accum_score_raw") if _is_abc else None,
