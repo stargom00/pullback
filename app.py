@@ -5,6 +5,24 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.42 [UI] 손절폭 절대값 4단계 배지(static/index.html) 추가 — 예전
+        stop_wide(🚫손절폭넓음, ATR×1.5 상대기준) 배지 자리를 대체.
+        [배경] v5.40에서 _risk_hard_ok가 stop_wide와 같은 ATR×1.5를 게이트로
+        쓰게 되면서, pullback/breakout/boxbreak/imminent 4탭에서 stop_wide는
+        통과한 결과에 정의상 절대 안 뜨는 죽은 배지가 됐음. "ATR 대비
+        타이트해서 게이트 통과"와 "절대 손절폭이 실전에서 쓸만한가(+1R
+        도달 가능성)"는 다른 질문이라 후자를 새 배지로 답함.
+        [기준] risk_pct 기준 4단계 — 🔵 타이트 ≤5% · ⚪ 보통 5~8% ·
+        🟠 넓음 8~12% · 🔴 매우넓음 12%+. 실제 %값도 라벨에 같이 표시.
+        게이트 유무와 무관하게 risk_pct만 있으면 전 모드(turnaround/pattern
+        포함) 적용 — entrySignal 체크리스트(고정 8%US/12%KR 이진판정)와는
+        시각적으로 분리된 별도 배지 슬롯이라 "8%"가 두 군데 나와도 안 헷갈림.
+        [측정] 적용 전 실측(오늘자, 4개 게이트 탭 히트 전체): 눌림목
+        🔵69.4%(50/72, "3~5% 자리" 목표와 실측 일치) · 돌파 🔵27.3%/🟠18.2%
+        · 박스돌파 🔵22.2%/🟠22.2% · 돌파임박 🔵41.3%/🟠13.5%/🔴3.2%(v5.40
+        ATR완화로 새로 들어온 9건이 이 🟠🔴 구간에 몰림 — 배지로 정확히
+        드러남). 정렬("↕ 손절좁은순")과 배지가 같은 risk_pct 필드를 써서
+        항상 일치함을 코드로 확인(별도 계산 경로 없음).
 v5.41 [버그수정] analyze_breakout/analyze_boxbreak의 _risk_hard_ok 호출을
         피벗 기준→현재가(close) 기준으로 통일 + boxbreak에 extended_max(12%)
         신설. pullback은 변경 안 함(Case13 회귀 방지 근거 documented, 유지).
@@ -1942,7 +1960,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.41"
+VERSION = "v5.42"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
