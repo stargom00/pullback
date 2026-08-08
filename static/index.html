@@ -88,6 +88,9 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .entry-sig .chk-ok{color:var(--muted)}
 .entry-sig .chk-warn{color:#e6aa28}
 .entry-sig .chk-danger{color:var(--up)}
+.entry-sig .chk-ref{color:var(--muted);opacity:.5}
+.entry-sig .chk-reftag{font-size:9px;opacity:.8;border:1px solid currentColor;border-radius:4px;padding:0 3px;margin-left:3px}
+.entry-sig .sig-note{font-size:10px;color:var(--muted);opacity:.7;margin-bottom:5px}
 .fund-btn{width:100%;margin-top:10px;padding:7px;background:transparent;
   border:1px solid var(--line);color:var(--muted);border-radius:8px;font-size:12px;
   cursor:pointer;font-family:inherit;transition:all .12s}
@@ -384,7 +387,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.50</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.51</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -751,7 +754,25 @@ function renderRiskTierFilter() {
 }
 
 // 진입 신호등: 거래량·RS·손익비·리스크 종합 → 진입 양호/주의/자제 + 체크리스트
+// v5.51: 탭별 판정 항목 — docs/all_tabs_common_yardstick_investigation.md
+// "신호등 역방향 항목" 측정(시점매칭 대조군 대비 항목별 EV 분해) 결과 반영.
+// 눌림목/돌파임박/추세전환에서 거래량 항목이 역방향(ok가 오히려 EV 낮음)으로
+// 나와 판정에서 제외, 돌파는 RS가 같은 이유로 제외. 박스돌파는 역방향 항목
+// 없어 4항목 유지. 패턴 탭은 이미 탭 전체가 "검증실패" 취급이라 항목 튜닝
+// 근거를 별도로 재지 않고 4항목 유지(측정 안 함).
+const ENTRY_SIGNAL_ITEMS = {
+  pullback:   ['rs', 'risk'],              // 거래량·AVWAP 제외 (0.087→0.189, n356→1037)
+  imminent:   ['rs', 'risk', 'avwap'],     // 거래량 제외 (0.173→0.285, n567→1216)
+  turnaround: ['rs', 'risk', 'avwap'],     // 거래량 제외 (n71→170, 표본작아 EV변화는 노이즈 가능성 있음)
+  breakout:   ['vol', 'risk', 'avwap'],    // RS 제외 (n62→102, 위와 같은 이유)
+  boxbreak:   ['vol', 'rs', 'risk', 'avwap'],
+  pattern:    ['vol', 'rs', 'risk', 'avwap'],
+};
+const ENTRY_SIGNAL_ALL = ['vol', 'rs', 'risk', 'avwap'];
+
 function entrySignal(s) {
+  const activeItems = ENTRY_SIGNAL_ITEMS[s.mode] || ENTRY_SIGNAL_ALL;
+  const isActive = (key) => activeItems.includes(key);
   // 돌파류는 vol_mult, 눌림/임박은 vol_ratio 사용
   const volBreakout = s.vol_mult != null ? s.vol_mult : null;
   const volPullback = s.vol_ratio != null ? s.vol_ratio : null;
@@ -759,19 +780,24 @@ function entrySignal(s) {
   let warn = 0, danger = 0;
 
   // 1) 거래량 동반 (한올 교훈: 거래량 없는 돌파임박은 가짜 위험)
+  //    — 단, 판정 반영 여부는 탭별 실측(ENTRY_SIGNAL_ITEMS)에 따름. 제외된
+  //    탭에서도 정보로서의 값은 계속 표시(카드에서 거래량 정보가 사라지면
+  //    안 됨 — 판정에만 안 쓸 뿐).
+  const volActive = isActive('vol');
   if (volBreakout != null) {
-    if (volBreakout >= 1.5) checks.push(['ok', `거래량 ${volBreakout}× 동반`, 'vol']);
-    else { checks.push(['warn', `거래량 ${volBreakout}× — 동력 부족`, 'vol_weak']); warn++; }
+    if (volBreakout >= 1.5) checks.push(['ok', `거래량 ${volBreakout}× 동반`, 'vol', volActive]);
+    else { checks.push(['warn', `거래량 ${volBreakout}× — 동력 부족`, 'vol_weak', volActive]); if (volActive) warn++; }
   } else if (volPullback != null) {
-    if (volPullback <= 0.8) checks.push(['ok', `거래량 ${volPullback}× 수축(눌림 양호)`, 'vol']);
-    else if (volPullback < 1.5) checks.push(['warn', `거래량 ${volPullback}× — 애매`, 'vol_mid']);
-    else { checks.push(['ok', `거래량 ${volPullback}× 증가`, 'vol']); }
+    if (volPullback <= 0.8) checks.push(['ok', `거래량 ${volPullback}× 수축(눌림 양호)`, 'vol', volActive]);
+    else if (volPullback < 1.5) checks.push(['warn', `거래량 ${volPullback}× — 애매`, 'vol_mid', volActive]);
+    else { checks.push(['ok', `거래량 ${volPullback}× 증가`, 'vol', volActive]); }
   }
   // 2) RS (주도주 여부)
+  const rsActive = isActive('rs');
   if (s.rs != null) {
-    if (s.rs >= 90) checks.push(['ok', `RS ${s.rs} 주도주급`, 'rs']);
-    else if (s.rs >= 70) checks.push(['warn', `RS ${s.rs} — 주도주는 아님`, 'rs_mid']);
-    else { checks.push(['danger', `RS ${s.rs} 약함`, 'rs_weak']); danger++; }
+    if (s.rs >= 90) checks.push(['ok', `RS ${s.rs} 주도주급`, 'rs', rsActive]);
+    else if (s.rs >= 70) checks.push(['warn', `RS ${s.rs} — 주도주는 아님`, 'rs_mid', rsActive]);
+    else { checks.push(['danger', `RS ${s.rs} 약함`, 'rs_weak', rsActive]); if (rsActive) danger++; }
   }
   // v5.38: 손익비 체크 제거. rr_info()의 '최소 2R 보장' 폴백 때문에
   // rr>=2는 실측 100% ok — 0비트짜리 체크였음. target_basis(전고/측정이동
@@ -782,27 +808,30 @@ function entrySignal(s) {
   // 항목 자체를 제거.
   // 4) 리스크(손절폭) — 한국 중소형주는 변동성이 커서 손절폭이 넓은 게 정상.
   //    시장별 기준 분리: 한국 12%, 미국 8%.
+  const riskActive = isActive('risk');
   if (s.risk_pct != null) {
     const riskLimit = (s.market === 'kr') ? 12 : 8;
-    if (s.risk_pct <= riskLimit) checks.push(['ok', `리스크 ${s.risk_pct}%`, 'risk']);
-    else { checks.push(['warn', `리스크 ${s.risk_pct}% — 손절폭 넓음`, 'risk_wide']); warn++; }
+    if (s.risk_pct <= riskLimit) checks.push(['ok', `리스크 ${s.risk_pct}%`, 'risk', riskActive]);
+    else { checks.push(['warn', `리스크 ${s.risk_pct}% — 손절폭 넓음`, 'risk_wide', riskActive]); if (riskActive) warn++; }
   }
   // 5) Anchored VWAP (거래량 최대 봉 이후 평균 매입가 대비 위치)
+  const avwapActive = isActive('avwap');
   if (s.avwap && s.avwap.zone) {
     const z = s.avwap.zone, d = s.avwap.dist_pct;
-    if (z === 'healthy') checks.push(['ok', `AVWAP 위 +${d}% — 건강한 우위`, 'avwap']);
-    else if (z === 'extended') { checks.push(['warn', `AVWAP +${d}% — 연장(추격주의)`, 'avwap_ext']); warn++; }
-    else if (z === 'overheated') { checks.push(['warn', `AVWAP +${d}% — 과열(평균가서 멀어짐)`, 'avwap_hot']); warn++; }
-    else if (z === 'near') { checks.push(['warn', `AVWAP ${d}% — 살짝 아래(애매)`, 'avwap_near']); warn++; }
-    else if (z === 'below') { checks.push(['danger', `AVWAP ${d}% — 매물 부담 큼`, 'avwap_below']); danger++; }
+    if (z === 'healthy') checks.push(['ok', `AVWAP 위 +${d}% — 건강한 우위`, 'avwap', avwapActive]);
+    else if (z === 'extended') { checks.push(['warn', `AVWAP +${d}% — 연장(추격주의)`, 'avwap_ext', avwapActive]); if (avwapActive) warn++; }
+    else if (z === 'overheated') { checks.push(['warn', `AVWAP +${d}% — 과열(평균가서 멀어짐)`, 'avwap_hot', avwapActive]); if (avwapActive) warn++; }
+    else if (z === 'near') { checks.push(['warn', `AVWAP ${d}% — 살짝 아래(애매)`, 'avwap_near', avwapActive]); if (avwapActive) warn++; }
+    else if (z === 'below') { checks.push(['danger', `AVWAP ${d}% — 매물 부담 큼`, 'avwap_below', avwapActive]); if (avwapActive) danger++; }
   }
   // 6) 변동성(ATR%) — 미너비니: 손절폭은 종목 변동성에 맞춰라.
   //    고변동 종목은 하루 정상 변동이 커서 타이트한 손절이 노이즈에 털린다.
+  //    (탭별 측정 대상이 아니었던 항목 — 모든 탭에서 그대로 판정 반영)
   if (s.atr_pct != null && s.vol_high) {
     if (s.atr_tight) {
-      checks.push(['danger', `변동성 ATR ${s.atr_pct}% — 손절 대비 큼(노이즈 손절 위험)`, 'atr_tight']); danger++;
+      checks.push(['danger', `변동성 ATR ${s.atr_pct}% — 손절 대비 큼(노이즈 손절 위험)`, 'atr_tight', true]); danger++;
     } else {
-      checks.push(['warn', `고변동 ATR ${s.atr_pct}% — 비중 축소 권장`, 'atr_high']); warn++;
+      checks.push(['warn', `고변동 ATR ${s.atr_pct}% — 비중 축소 권장`, 'atr_high', true]); warn++;
     }
   }
 
@@ -811,9 +840,11 @@ function entrySignal(s) {
   else if (warn >= 2) { level = 'danger'; label = '🔴 진입 자제'; }
   else if (warn === 1) { level = 'warn'; label = '🟡 주의'; }
   else { level = 'ok'; label = '🟢 진입 양호'; }
-  // 경고/위험이었던 항목 태그만 추출 (검증용 — 어떤 경고가 과했는지 집계)
-  const flags = checks.filter(c => c[0] === 'warn' || c[0] === 'danger').map(c => c[2]).filter(Boolean);
-  return { level, label, checks, flags };
+  // 경고/위험이었던 항목 태그만 추출 (검증용 — 어떤 경고가 과했는지 집계). 판정에
+  // 반영된(active) 항목만 집계 — 참고용 항목의 warn/danger는 여기 안 잡힘.
+  const flags = checks.filter(c => (c[0] === 'warn' || c[0] === 'danger') && c[3]).map(c => c[2]).filter(Boolean);
+  const activeCount = activeItems.length;
+  return { level, label, checks, flags, activeItems, activeCount };
 }
 
 function breakdownCard(s) {
@@ -1136,9 +1167,15 @@ function card(s) {
     </div>`}
     ${(s.mode === 'pullback' || s.mode === 'turnaround' || s.mode === 'breakout' || s.mode === 'imminent' || s.mode === 'boxbreak' || s.mode === 'pattern') ? (() => {
       const sig = entrySignal(s);
-      const items = sig.checks.map(([lv, txt]) => `<span class="chk chk-${lv}">${lv==='ok'?'✓':lv==='warn'?'△':'✕'} ${txt}</span>`).join('');
+      const items = sig.checks.map(([lv, txt, tag, active]) => {
+        if (active) return `<span class="chk chk-${lv}">${lv==='ok'?'✓':lv==='warn'?'△':'✕'} ${txt}</span>`;
+        return `<span class="chk chk-ref">· ${txt}<span class="chk-reftag">참고</span></span>`;
+      }).join('');
+      const allFour = sig.activeCount >= 4;
+      const note = allFour ? '' : `<div class="sig-note" title="탭마다 실측 결과가 달라 판정에 쓰는 항목 수가 다릅니다 (docs/all_tabs_common_yardstick_investigation.md)">이 탭에서 검증된 ${sig.activeCount}개 항목만 판정에 반영 중 · 참고 항목은 값만 표시</div>`;
       return `<div class="entry-sig sig-${sig.level}">
         <div class="sig-head">${sig.label}</div>
+        ${note}
         <div class="sig-list">${items}</div>
       </div>`;
     })() : ''}
