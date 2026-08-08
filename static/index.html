@@ -387,7 +387,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.51</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.52</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -760,15 +760,28 @@ function renderRiskTierFilter() {
 // 나와 판정에서 제외, 돌파는 RS가 같은 이유로 제외. 박스돌파는 역방향 항목
 // 없어 4항목 유지. 패턴 탭은 이미 탭 전체가 "검증실패" 취급이라 항목 튜닝
 // 근거를 별도로 재지 않고 4항목 유지(측정 안 함).
+// v5.52: 리스크 항목의 탭별 통과율(ok rate)을 전수 확인한 결과 눌림목
+// 99.4%·돌파임박 97.1%·돌파 99.2%·박스돌파 98.3%로 전부 0비트 체크(어제
+// 손익비 100% 통과와 같은 유형) — 90% 이상인 탭은 전부 참고용으로 격하.
+// 추세전환만 71.9%로 실제 변별력 있어 유지. 눌림목은 이미 거래량·AVWAP도
+// 제외돼 있던 터라 리스크까지 빠지면 RS 단일 판정만 남음(체크리스트
+// 문구로 별도 고지, 아래 entrySignalNoteHtml 참고).
 const ENTRY_SIGNAL_ITEMS = {
-  pullback:   ['rs', 'risk'],              // 거래량·AVWAP 제외 (0.087→0.189, n356→1037)
-  imminent:   ['rs', 'risk', 'avwap'],     // 거래량 제외 (0.173→0.285, n567→1216)
-  turnaround: ['rs', 'risk', 'avwap'],     // 거래량 제외 (n71→170, 표본작아 EV변화는 노이즈 가능성 있음)
-  breakout:   ['vol', 'risk', 'avwap'],    // RS 제외 (n62→102, 위와 같은 이유)
-  boxbreak:   ['vol', 'rs', 'risk', 'avwap'],
+  pullback:   ['rs'],                      // 리스크도 격하 (ok 99.4%, 0비트) — RS 단일 판정
+  imminent:   ['rs', 'avwap'],             // 리스크 격하 (ok 97.1%, 0비트)
+  turnaround: ['rs', 'risk', 'avwap'],     // 리스크는 유지 (ok 71.9%, 실제 변별력 있음)
+  breakout:   ['vol', 'avwap'],            // 리스크 격하 (ok 99.2%, 0비트)
+  boxbreak:   ['vol', 'rs', 'avwap'],      // 리스크 격하 (ok 98.3%, 0비트)
   pattern:    ['vol', 'rs', 'risk', 'avwap'],
 };
 const ENTRY_SIGNAL_ALL = ['vol', 'rs', 'risk', 'avwap'];
+const ENTRY_SIGNAL_ITEM_LABEL = { vol: '거래량', rs: 'RS', risk: '리스크', avwap: 'AVWAP' };
+// 단일 항목으로 축소된 탭의 "🟢의 의미" 문구 — 탭별로 다르게(뭉뚱그리면 오해 소지)
+const ENTRY_SIGNAL_SINGLE_HINT = { rs: 'RS 90 이상', risk: '리스크 기준 이내', vol: '거래량 기준 충족', avwap: 'AVWAP 건강 구간' };
+// 단일 항목 탭에서 "왜 이렇게 됐는지" 구조적 설명 — 탭별 게이트 문맥이 달라 하드코딩
+const ENTRY_SIGNAL_STRUCTURAL_NOTE = {
+  pullback: '눌림목 히트는 이미 RS 80 게이트를 통과한 집단이라 그 안에서 절반 이상이 RS 90+인 게 정상입니다.',
+};
 
 function entrySignal(s) {
   const activeItems = ENTRY_SIGNAL_ITEMS[s.mode] || ENTRY_SIGNAL_ALL;
@@ -845,6 +858,21 @@ function entrySignal(s) {
   const flags = checks.filter(c => (c[0] === 'warn' || c[0] === 'danger') && c[3]).map(c => c[2]).filter(Boolean);
   const activeCount = activeItems.length;
   return { level, label, checks, flags, activeItems, activeCount };
+}
+
+// 체크리스트 상단 안내 — 탭마다 판정 항목 수가 달라 "신호등"이라는 이름이
+// 과장될 수 있는 지점(특히 1항목 탭)을 명시. sig.activeItems/activeCount는
+// entrySignal()이 채워줌.
+function entrySignalNoteHtml(s, sig) {
+  if (sig.activeCount >= 4) return '';
+  const names = sig.activeItems.map(k => ENTRY_SIGNAL_ITEM_LABEL[k]).join('·');
+  if (sig.activeCount === 1) {
+    const key = sig.activeItems[0];
+    const hint = ENTRY_SIGNAL_SINGLE_HINT[key] || `${names} 기준 통과`;
+    const structural = ENTRY_SIGNAL_STRUCTURAL_NOTE[s.mode] || '이 탭 히트는 이미 상위 게이트를 통과한 집단이라 그 안에서 다수가 추가 기준도 통과하는 게 정상입니다.';
+    return `<div class="sig-note" title="docs/all_tabs_common_yardstick_investigation.md">이 탭에서 판정에 쓰는 항목: ${names} 1개 (나머지는 통과율이 너무 높아 변별력이 없어 참고용)<br>🟢은 ${hint}을 뜻할 뿐, 진입 적합 판정이 아님<br>${structural}</div>`;
+  }
+  return `<div class="sig-note" title="탭마다 실측 결과가 달라 판정에 쓰는 항목 수가 다릅니다 (docs/all_tabs_common_yardstick_investigation.md)">이 탭에서 검증된 ${sig.activeCount}개 항목만 판정에 반영 중 · 참고 항목은 값만 표시</div>`;
 }
 
 function breakdownCard(s) {
@@ -1171,8 +1199,7 @@ function card(s) {
         if (active) return `<span class="chk chk-${lv}">${lv==='ok'?'✓':lv==='warn'?'△':'✕'} ${txt}</span>`;
         return `<span class="chk chk-ref">· ${txt}<span class="chk-reftag">참고</span></span>`;
       }).join('');
-      const allFour = sig.activeCount >= 4;
-      const note = allFour ? '' : `<div class="sig-note" title="탭마다 실측 결과가 달라 판정에 쓰는 항목 수가 다릅니다 (docs/all_tabs_common_yardstick_investigation.md)">이 탭에서 검증된 ${sig.activeCount}개 항목만 판정에 반영 중 · 참고 항목은 값만 표시</div>`;
+      const note = entrySignalNoteHtml(s, sig);
       return `<div class="entry-sig sig-${sig.level}">
         <div class="sig-head">${sig.label}</div>
         ${note}
