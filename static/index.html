@@ -252,6 +252,9 @@ tr.editing{background:rgba(242,179,61,.06)}
 .schip b{color:var(--amber);margin-left:5px}
 .schip .clear{color:var(--muted)}
 .schip.empty{opacity:.45}
+/* v5.45: 손절폭 필터 칩 — 다중선택이라 둥근 pill(섹터=단일선택 브라우징)과
+   구분되게 사각 모서리로. on 상태는 각 tier 고유색(JS 인라인)이 이미 입혀짐. */
+.schip.risktier{border-radius:8px;font-weight:500}
 @media (max-width:600px){.sectorbar{padding:0 16px 12px}}
 
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));
@@ -366,7 +369,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.44</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.45</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -400,6 +403,12 @@ tr.editing{background:rgba(242,179,61,.06)}
   </div>
   <button class="refresh" id="refresh">다시 스캔</button>
 </header>
+
+<!-- v5.45: 손절폭 절대값 4단계 필터(다중선택) — risk_pct 있는 모드에서만
+     노출(renderRiskTierFilter가 매번 mode 확인). 필터 줄(전체/한국/미국/…)
+     바로 아래, 섹터 칩보다 위에 둬서 "필터 그룹"으로 묶임(섹터 칩은 브라우징용
+     이라 아래로 분리). -->
+<div class="sectorbar" id="riskTierBar" style="display:none"></div>
 
 <div class="idxbar" id="idxbar"></div>
 
@@ -684,14 +693,41 @@ function scoreRing(score) {
 // 경계(5/8/12%)는 게이트 여부와 무관 — 패턴 탭처럼 하드게이트가 없는
 // 탭도 risk_pct만 있으면 그대로 적용(패턴 탭은 리스크 중앙값 21%라
 // 대부분 🔴로 뜨는 게 정상적인 사실 반영).
+// v5.45: 필터(riskTierFilter)와 배지가 같은 경계값을 쓰도록 단일 소스로 분리.
+const RISK_TIERS = [
+  { key: 'tight',  emoji: '🔵', label: '타이트', range: '≤5%',   max: 5,        color: '#7dd3fc', bg: '#0f2a3a', border: '#1d5a8c' },
+  { key: 'normal', emoji: '⚪', label: '보통',   range: '5~8%',  max: 8,        color: '#9ca3af', bg: '#26262e', border: '#3f3f4a' },
+  { key: 'wide',   emoji: '🟠', label: '넓음',   range: '8~12%', max: 12,       color: '#fbbf24', bg: '#2a1a0f', border: '#6b5518' },
+  { key: 'vwide',  emoji: '🔴', label: '매우넓음', range: '12%+', max: Infinity, color: '#f87171', bg: '#341418', border: '#6b2028' },
+];
+function riskTierOf(riskPct) {
+  if (riskPct == null) return null;
+  return RISK_TIERS.find(t => riskPct <= t.max) || RISK_TIERS[RISK_TIERS.length - 1];
+}
 function riskTierBadge(riskPct) {
-  if (riskPct == null) return '';
-  let tier, color, bg, border;
-  if (riskPct <= 5) { tier = '🔵 타이트'; color = '#7dd3fc'; bg = '#0f2a3a'; border = '#1d5a8c'; }
-  else if (riskPct <= 8) { tier = '⚪ 보통'; color = '#9ca3af'; bg = '#26262e'; border = '#3f3f4a'; }
-  else if (riskPct <= 12) { tier = '🟠 넓음'; color = '#fbbf24'; bg = '#2a1a0f'; border = '#6b5518'; }
-  else { tier = '🔴 매우넓음'; color = '#f87171'; bg = '#341418'; border = '#6b2028'; }
-  return ` <span class="climax-tag" style="background:${bg};color:${color};border:1px solid ${border}" title="절대 손절폭 기준(ATR 무관, 게이트와 별개): ≤5% 타이트 · 5~8% 보통 · 8~12% 넓음 · 12%+ 매우넓음. +1R 목표=손절폭만큼 상승이라 넓을수록 도달 전 손절 확률↑. '손절좁은순' 정렬과 같은 risk_pct 기준.">${tier} ${riskPct}%</span>`;
+  const t = riskTierOf(riskPct);
+  if (!t) return '';
+  return ` <span class="climax-tag" style="background:${t.bg};color:${t.color};border:1px solid ${t.border}" title="절대 손절폭 기준(ATR 무관, 게이트와 별개): ≤5% 타이트 · 5~8% 보통 · 8~12% 넓음 · 12%+ 매우넓음. +1R 목표=손절폭만큼 상승이라 넓을수록 도달 전 손절 확률↑. '손절좁은순' 정렬과 같은 risk_pct 기준.">${t.emoji} ${t.label} ${riskPct}%</span>`;
+}
+// risk_pct 필드가 있는 모드만 — 없는 탭(대장후보/슈퍼대장/Stage2/IBD9/실적우수/
+// 급등/인버스/붕괴/섹터/마감정리/일지)에선 배지도 필터도 표시하지 않음.
+const RISK_TIER_MODES = new Set(['pullback', 'turnaround', 'breakout', 'boxbreak', 'imminent', 'pattern', 'strong_pivot']);
+let riskTierFilter = new Set();   // 선택된 tier key들 (비어있으면 필터 없음)
+function renderRiskTierFilter() {
+  const bar = document.getElementById('riskTierBar');
+  if (!bar) return;
+  if (!RISK_TIER_MODES.has(mode)) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  bar.innerHTML = RISK_TIERS.map(t =>
+    `<span class="schip risktier ${riskTierFilter.has(t.key) ? 'on' : ''}" data-key="${t.key}"
+       style="border-color:${t.border};${riskTierFilter.has(t.key) ? `background:${t.bg};color:${t.color}` : ''}"
+       title="손절폭 ${t.range} 종목만 보기 (다중선택 가능)">${t.emoji} ${t.label} <span style="opacity:.7">${t.range}</span></span>`
+  ).join('');
+  bar.querySelectorAll('.risktier').forEach(ch => ch.addEventListener('click', () => {
+    const k = ch.dataset.key;
+    if (riskTierFilter.has(k)) riskTierFilter.delete(k); else riskTierFilter.add(k);
+    renderCards();
+  }));
 }
 
 // 진입 신호등: 거래량·RS·손익비·리스크 종합 → 진입 양호/주의/자제 + 체크리스트
@@ -1618,6 +1654,14 @@ function renderCards() {
   renderPatternSubTabs(list);
   if (mode === 'pattern' && patternSubFilter !== 'all') {
     list = list.filter(h => h.pattern === patternSubFilter);
+  }
+  // v5.45: 손절폭 절대값 4단계 필터(다중선택) — risk_pct 있는 모드에서만.
+  renderRiskTierFilter();
+  if (RISK_TIER_MODES.has(mode) && riskTierFilter.size > 0) {
+    list = list.filter(h => {
+      const t = riskTierOf(h.risk_pct);
+      return t && riskTierFilter.has(t.key);
+    });
   }
   // 손절 좁은 순 정렬 (토글): 리스크% 오름차순 — 타이트한 진입 자리가 위로
   if (riskSort) {
