@@ -5,6 +5,30 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.44 [신규] 일지 관찰(watch) 항목에 돌파임박 "확인 후 진입" 트리거 배지.
+        [배경] 안C 조사(docs/imminent_stop_entry_investigation.md 3.6)
+        결론 — 돌파임박 신호의 실제 가치는 손절/진입가 공식이 아니라
+        "거래량 동반 확인 전엔 진입하지 않는다"는 규율 자체(미진입 80.6%를
+        안A로 채워넣으면 EV가 오히려 0.199R→0.163R로 하락). 화면이 그 규율을
+        실행할 수 있게 트리거 정보를 관찰 등록 시점에 스냅샷.
+        [데이터] analyze_imminent에 signal_high(오늘 고가) 필드 추가.
+        일지 '관찰' 카테고리로 저장 시(돌파임박 한정) trigger_price(=등록일
+        고가), trigger_volume(=avg_volume×1.5), trigger_date(=등록일),
+        trigger_pivot_dist_pct(=등록 시점 피벗까지 거리) 스냅샷 — 라벨은
+        "신호일 고가"가 아니라 "등록일 고가"로 표시(측정 방법론은 신호
+        최초감지일 기준이라 다름을 명시).
+        [판정] 등록 다음 영업일부터 판정(당일 비교는 트리거가 자기 자신이라
+        항상 자명하게 충족되는 문제 방지). 3영업일(측정 N=3과 동일) 경과 시
+        "확인 기간 종료" — 자동 삭제·기록 수정 없음(기존 원칙 유지), 숫자는
+        만료 후에도 계속 표시.
+        [백엔드] /api/prices가 highs/volumes도 반환하도록 확장(기존
+        prices/closed에 필드 추가, 기존 소비자 영향 없음) — 오늘 고가·거래량이
+        트리거 조건을 충족했는지 비교용. 이미 fetch하는 df에서 뽑는 거라
+        추가 네트워크 비용 없음.
+        [부수 수정] 가격 추적 대상 판정을 `_isPriceTrackable()` 헬퍼로 통일
+        하면서, 관찰(watch)이 진입/대기 손절·목표 추적 로직을 잘못 태울 수
+        있던 경로를 명시적으로 분리(entry/stop 없는 관찰 항목이 있으면
+        NaN 손절폭으로 흘러들어갈 뻔한 지점 차단).
 v5.43 [개선] 눌림목/돌파임박 score 계산에서 tightening(VCP 캔들수축) 가점
         완전 제거(눌림목 5점/돌파임박 20점), 돌파임박 vol_dry(거래량수축)
         20점 절벽을 항상 연속식(vol_ratio 기반)으로 통일.
@@ -1988,7 +2012,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.43"
+VERSION = "v5.44"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -5388,9 +5412,14 @@ async def save_journal(request: Request):
 @app.post("/api/prices")
 async def batch_prices(request: Request):
     """추적용 현재가 일괄 조회. body: {"tickers": ["AAPL", "005930.KS", ...]}
-    반환: {"prices": {"AAPL": 123.4, ...}, "closed": {"AAPL": true, ...}} (실패 종목은 prices에서 생략).
+    반환: {"prices": {"AAPL": 123.4, ...}, "closed": {"AAPL": true, ...},
+           "highs": {...}, "volumes": {...}} (실패 종목은 각 dict에서 생략).
     v4.68: closed = 해당 티커 시장이 지금 장중이 아닌지. 일지 자동 손절 판정을
-    장중 순간가가 아니라 종가로만 하기 위해 프론트에서 이 플래그로 게이트한다."""
+    장중 순간가가 아니라 종가로만 하기 위해 프론트에서 이 플래그로 게이트한다.
+    v5.44: highs/volumes 추가 — 일지 관찰(imminent) 트리거 확인 배지용(오늘
+    고가·거래량이 등록 시점 트리거 조건을 충족했는지). 이미 fetch하는 df에서
+    같이 뽑는 거라 추가 네트워크 비용 없음. 기존 소비자는 새 키를 그냥
+    무시하면 되니 하위호환 문제없음."""
     body = await request.json()
     tickers = body.get("tickers", []) if isinstance(body, dict) else []
     if not tickers or not isinstance(tickers, list):
@@ -5405,26 +5434,34 @@ async def batch_prices(request: Request):
                 # 일봉(fetch_history)이 이미 오늘 행을 실시간에 가깝게 채워준다.
                 df = naver_kr.fetch_history(tk, days=10)
                 if df is not None and not df.empty:
-                    return tk, float(df["Close"].iloc[-1])
+                    row = df.iloc[-1]
+                    return tk, float(df["Close"].iloc[-1]), float(row.get("High", row["Close"])), float(row.get("Volume", 0) or 0)
             else:
                 info = yf.Ticker(tk).fast_info
                 p = getattr(info, "last_price", None)
-                if p and p > 0:
-                    return tk, float(p)
                 df = yf.Ticker(tk).history(period="5d", interval="1d")
+                hi, vol = None, None
                 if df is not None and not df.empty:
-                    return tk, float(df["Close"].iloc[-1])
+                    row = df.iloc[-1]
+                    hi = float(row.get("High", row["Close"]))
+                    vol = float(row.get("Volume", 0) or 0)
+                if p and p > 0:
+                    return tk, float(p), (hi if hi is not None else float(p)), (vol or 0.0)
+                if df is not None and not df.empty:
+                    return tk, float(df["Close"].iloc[-1]), hi, vol
         except Exception:
             pass
-        return tk, None
+        return tk, None, None, None
 
     loop = asyncio.get_event_loop()
     results = await asyncio.gather(*[
         loop.run_in_executor(_executor, _one_price, tk) for tk in tickers
     ])
-    prices = {tk: p for tk, p in results if p is not None}
+    prices = {tk: p for tk, p, _, _ in results if p is not None}
+    highs = {tk: h for tk, _, h, _ in results if h is not None}
+    volumes = {tk: vol for tk, _, _, vol in results if vol is not None}
     closed = {tk: (not _is_market_open_now(naver_kr.is_kr(tk))) for tk in prices}
-    return JSONResponse({"prices": prices, "closed": closed})
+    return JSONResponse({"prices": prices, "closed": closed, "highs": highs, "volumes": volumes})
 
 
 _NO_CACHE_HEADERS = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"}

@@ -366,7 +366,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.43</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.44</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -2124,13 +2124,71 @@ function tvUrl(tickerOrObj, market) {
   return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(ticker.replace(/\./g, ''))}`;
 }
 
+// v5.44: 가격 추적 대상 판정 — 기존(진입가 있는 진입/대기/추적종목) OR
+// 트리거 확인 대기 중인 관찰(watch) 항목(trigger_price 있음, entry/stop 무관).
+// 트리거 관찰은 entry가 비어있는 경우가 많아(관찰은 손절 필수 아님) 기존
+// 조건 `r.entry && ...`에 안 걸려서 그냥 두면 last_price/today_high가 영영
+// 안 갱신됨 — 별도 OR 절로 구제.
+function _isPriceTrackable(r) {
+  if (r.result_r !== '' || r.status === 'missed') return false;
+  if (r.trigger_price != null) return true;
+  return !!(r.entry && (r.stop || r.status === 'watch')
+            && (r.tracking || r.status === 'pending' || r.status === 'entered'));
+}
+
+// v5.44: trigger_date(관찰 등록일)로부터 영업일(주말 제외) 며칠 지났는지.
+// "다음 영업일부터 판정"(등록 당일 자기 자신과 비교하는 자명한 충족 방지) /
+// "3거래일 만료"(안C 조사 방법론과 동일 N=3) 계산용. 공휴일은 미고려 —
+// 이 프로젝트 전반의 기존 컨벤션(scanner.py의 is_kr_market_open과 동일하게
+// 주말만 걸러내는 근사).
+function businessDaysSince(dateStr) {
+  if (!dateStr) return 0;
+  const start = new Date(dateStr + 'T00:00:00');
+  const now = new Date(kstStr() + 'T00:00:00');
+  let count = 0;
+  const d = new Date(start);
+  while (d < now) {
+    d.setDate(d.getDate() + 1);
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+  }
+  return count;
+}
+
+// v5.44: 돌파임박 관찰(watch) 행의 "확인 후 진입" 트리거 정보 — 안C 조사
+// (docs/imminent_stop_entry_investigation.md 3.6) 결론("진짜 가치는 손절
+// 공식이 아니라 확인 후 진입 규율")을 화면이 도와주는 배지. 만료돼도 숫자
+// 자체(트리거가·거래량)는 계속 보이게 — 회색조는 상태 문구에만 적용.
+function triggerInfoHtml(r) {
+  if (r.trigger_price == null) return '';
+  const isKr = /\.(KS|KQ)$/i.test(r.ticker || '');
+  const fmt = v => v == null ? '-' : (isKr ? Math.round(v).toLocaleString() : parseFloat(v).toFixed(2));
+  const bdays = businessDaysSince(r.trigger_date);
+  const eligible = bdays >= 1;   // 등록 다음 영업일부터 판정 (당일 자기 자신 비교 방지)
+  const expired = bdays >= 3;    // 측정 방법론과 동일 N=3영업일
+  const confirmed = eligible && r.today_high != null && r.today_volume != null
+    && r.today_checked_date && r.today_checked_date > r.trigger_date
+    && r.today_high >= r.trigger_price && r.today_volume >= r.trigger_volume;
+  const statusHtml = confirmed
+    ? `<span style="color:#4ade80;font-weight:700">🟢 확인됨(거래량 동반 돌파)</span>`
+    : expired
+      ? `<span style="color:var(--muted)">⏳ 확인 기간 종료(3영업일)</span>`
+      : eligible
+        ? `<span style="color:var(--amber)">확인 대기중</span>`
+        : `<span style="color:var(--muted)">등록 당일 — 내일부터 판정</span>`;
+  return `<div style="font-size:9px;color:var(--muted);margin-top:2px;line-height:1.5">
+    트리거 <b style="color:inherit">${fmt(r.trigger_price)}</b> / 거래량 <b style="color:inherit">${r.trigger_volume != null ? Math.round(r.trigger_volume).toLocaleString() : '-'}</b>필요
+    <span style="opacity:.7">(등록일 ${r.trigger_date || '-'}${r.trigger_pivot_dist_pct != null ? `, 당시 피벗까지 ${r.trigger_pivot_dist_pct}%` : ''})</span>
+    ${r.today_high != null ? `<br>오늘 고가 ${fmt(r.today_high)} · 거래량 ${Math.round(r.today_volume || 0).toLocaleString()}` : ''}
+    <br>${statusHtml}
+  </div>`;
+}
+
 // 수동 현재가 갱신: 추적을 즉시 돌리고 성공/실패를 사용자에게 알림.
 // "추적대기"가 안 풀릴 때 원인 진단용.
 async function refreshPrices() {
   const j = getJournal();
-  const active = j.filter(r => r.result_r === '' && r.status !== 'missed'
-                            && r.entry && (r.stop || r.status === 'watch')
-                            && (r.tracking || r.status === 'pending' || r.status === 'entered'));
+  const active = j.filter(_isPriceTrackable);
   if (active.length === 0) { alert('추적할 진입/대기 종목이 없어요.'); return; }
   let prices = {}, mclosed = {};
   let errMsg = '';
@@ -2198,12 +2256,13 @@ async function updateTracking(prefetched, prefetchedClosed) {
   const j = getJournal();
   // 추적 대상: 미종료 + entry/stop 있음. 진입(entered)·대기(pending) 모두 가격 갱신.
   // status==='missed'만 제외. (과거에 tracking 플래그가 꺼진 진입 종목도 포함되게 보강)
-  const active = j.filter(r => r.result_r === '' && r.status !== 'missed'
-                            && r.entry && (r.stop || r.status === 'watch')
-                            && (r.tracking || r.status === 'pending' || r.status === 'entered'));
+  // v5.44: _isPriceTrackable로 통일 — 트리거 확인 대기 중인 관찰(watch, entry/stop
+  // 없어도 trigger_price 있으면 포함)도 갱신 대상에 넣기 위함.
+  const active = j.filter(_isPriceTrackable);
   if (active.length === 0) return;
   let prices = prefetched || {};
   let mclosed = prefetchedClosed || {};
+  let highs = {}, volumes = {};
   if (!prefetched) {
     try {
       const res = await fetch('/api/prices', {
@@ -2213,6 +2272,8 @@ async function updateTracking(prefetched, prefetchedClosed) {
       const j2 = await res.json();
       prices = j2.prices || {};
       mclosed = j2.closed || {};
+      highs = j2.highs || {};
+      volumes = j2.volumes || {};
     } catch(e) { return; }
   }
 
@@ -2232,6 +2293,18 @@ async function updateTracking(prefetched, prefetchedClosed) {
     if (wasEntered && prevPx > 0) {
       const dropPct = (px - prevPx) / prevPx * 100;
       if (dropPct <= FLASH_DROP_PCT) notifyFlashDrop(r, prevPx, px, dropPct);
+    }
+    // v5.44: 관찰(watch)은 entry/stop이 없을 수 있어(관찰은 손절 필수 아님)
+    // 아래 진입/대기 손절·목표 추적 로직을 태우면 안 됨 — 트리거 확인용
+    // today_high/today_volume만 갱신하고 여기서 끝낸다.
+    if ((r.status || 'entered') === 'watch') {
+      if (r.trigger_price != null) {
+        if (highs[r.ticker] != null) r.today_high = highs[r.ticker];
+        if (volumes[r.ticker] != null) r.today_volume = volumes[r.ticker];
+        r.today_checked_date = kstStr(today);
+      }
+      changed = true;
+      continue;
     }
     const entry = parseFloat(r.entry), stop = parseFloat(r.stop);
     const target = parseFloat(r.target);
@@ -2713,7 +2786,15 @@ async function saveJournal() {
     shares: sized ? sized.shares : '',
     r_value_krw: sized ? sized.rKrw : '',
     alert: s.alert || '', note,
-    exit: '', result_r: '', held_days: '', review: ''
+    exit: '', result_r: '', held_days: '', review: '',
+    // v5.44: 돌파임박 관찰 등록 시 "확인 후 진입" 트리거 스냅샷 — 안C 조사
+    // (docs/imminent_stop_entry_investigation.md 3.6) 결론 반영. 라벨은
+    // "신호일 고가"가 아니라 "등록일 고가"로 표시할 것 — 측정한 방법론(신호
+    // 최초 감지일 기준)과 다르게 여기선 관찰 등록 시점 기준이라 구분 필요.
+    trigger_price: (_cat === '관찰' && s.mode === 'imminent' && s.signal_high != null) ? s.signal_high : null,
+    trigger_volume: (_cat === '관찰' && s.mode === 'imminent' && s.avg_volume != null) ? Math.round(s.avg_volume * 1.5) : null,
+    trigger_date: (_cat === '관찰' && s.mode === 'imminent') ? kstStr() : null,
+    trigger_pivot_dist_pct: (_cat === '관찰' && s.mode === 'imminent' && s.pivot_dist_pct != null) ? s.pivot_dist_pct : null,
   };
   const j = getJournal(); j.unshift(rec);
   journalCache = j;
@@ -3125,10 +3206,11 @@ function viewRow(r) {
         : st === 'missed'
             ? `<span style="color:var(--muted);font-size:11px">무산</span>${r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:''}`
         // 관찰(watch)은 손절이 없을 수 있어 R 계산 대신 현재가만 표시 (v4.72)
+        // v5.44: trigger_price 있으면(돌파임박 관찰) "확인 후 진입" 트리거 정보 추가.
         : st === 'watch'
             ? (r.last_price
-                ? `<span style="color:var(--muted);font-size:11px">${/\.(KS|KQ)$/i.test(r.ticker||'') ? Math.round(parseFloat(r.last_price)).toLocaleString() : parseFloat(r.last_price).toFixed(2)}</span>`
-                : `<span style="color:var(--muted);font-size:11px">관찰중</span>`)
+                ? `<span style="color:var(--muted);font-size:11px">${/\.(KS|KQ)$/i.test(r.ticker||'') ? Math.round(parseFloat(r.last_price)).toLocaleString() : parseFloat(r.last_price).toFixed(2)}</span>${triggerInfoHtml(r)}`
+                : `<span style="color:var(--muted);font-size:11px">관찰중</span>${triggerInfoHtml(r)}`)
         : (r.tracking && r.last_price && r.entry && r.stop
             ? (() => {
                 const entryN = parseFloat(r.entry), stopN = parseFloat(r.stop);

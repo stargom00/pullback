@@ -2885,6 +2885,10 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
         "tl_break": tl_break,
         "tl_break_intraday": tl_break_intraday,
         "pivot_dist_pct": round(pivot_dist_pct, 2),
+        # v5.44: 오늘 고가 — "확인 후 진입"(안C 조사, docs/imminent_stop_
+        # entry_investigation.md 3.6) 배지용. 관찰 등록 시점의 트리거가로
+        # 프론트에서 그대로 스냅샷.
+        "signal_high": round(float(h.iloc[-1]), 2),
         "touch_count": touch_count,
         "vol_ratio": round(vol_ratio, 2),
         "ud_vol": up_down_volume(c, v, 50),
