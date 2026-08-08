@@ -5,6 +5,15 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.49 [버그수정] favorites_user.txt/alerts_user.txt를 journal_user.json과
+        같은 영구 볼륨(/data) 우선 경로로 저장 — 지금까지는 앱 코드 폴더에만
+        저장돼 Railway 재배포할 때마다 사라질 수 있었음(journal은 이미
+        v4.48.1부터 /data 우선이었는데 이 두 파일만 그 로직이 없었음).
+        `_resolve_persistent_path()`로 일반화(환경변수 JOURNAL_DIR → /data →
+        앱 폴더 순 우선순위, journal의 `_resolve_journal_path()`와 동일 원리)
+        + 앱 폴더에 기존 파일 있으면 새 경로로 1회 자동 마이그레이션(둘 다
+        없어질 걱정 없이 그대로 이전). 경보종목(투경/투주/정지/단기과열)은
+        수동으로 매핑해둔 목록이라 날아가면 복구가 번거로워 우선순위 높음.
 v5.48 [문서] /guide(GUIDE.md) v4.49.2→v5.47 기준으로 전면 갱신. v4.49 이후
         쌓인 변경(손절폭 절대값 4단계 배지, 패턴 서브탭, 급등매집 개명,
         일지 관찰 트리거 🟢확인됨, 진입신호등 4항목으로 축소, boxbreak
@@ -2062,7 +2071,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.48"
+VERSION = "v5.49"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -3504,7 +3513,50 @@ async def _start_scheduler():
     asyncio.create_task(_scheduler_loop())
 
 
-ALERTS_USER_PATH = os.path.join(os.path.dirname(__file__), "alerts_user.txt")
+def _resolve_persistent_path(filename: str) -> str:
+    """지정 파일명을 영구 볼륨(/data) 우선으로 저장할 경로 결정 + 앱 폴더에
+    옛 파일이 있으면 1회 마이그레이션 (v5.49). journal(_resolve_journal_path,
+    아래쪽에 정의)과 같은 이유 — Railway는 재배포 시 앱 코드 폴더를 새로
+    체크아웃해서 거기 저장된 파일은 날아가지만 /data(마운트된 영구 볼륨)는
+    유지된다. favorites_user.txt/alerts_user.txt가 이 로직 없이 앱 폴더에만
+    저장돼 재배포마다 사라질 수 있던 버그 수정 — 경보종목은 수동으로 매핑해둔
+    거라 날아가면 복구가 번거로움.
+    우선순위: 1) 환경변수 JOURNAL_DIR(journal과 같은 볼륨 재사용)
+              2) /data  3) 앱 폴더(로컬 개발 폴백, 배포 시엔 휘발)
+    """
+    candidates = []
+    env_dir = os.environ.get("JOURNAL_DIR")
+    if env_dir:
+        candidates.append(env_dir)
+    candidates.append("/data")
+    candidates.append(os.path.dirname(__file__))
+    resolved = None
+    for d in candidates:
+        try:
+            os.makedirs(d, exist_ok=True)
+            test = os.path.join(d, ".write_test")
+            with open(test, "w") as f:
+                f.write("ok")
+            os.remove(test)
+            resolved = os.path.join(d, filename)
+            break
+        except OSError:
+            continue
+    if resolved is None:
+        resolved = os.path.join(os.path.dirname(__file__), filename)
+    # 마이그레이션: 새 경로에 파일이 아직 없고, 앱 폴더(구 경로)에 기존 파일이
+    # 있으면 1회 복사 — 지금까지 앱 폴더에 쌓인 즐겨찾기/경보종목을 보존.
+    old_path = os.path.join(os.path.dirname(__file__), filename)
+    if resolved != old_path and not os.path.exists(resolved) and os.path.exists(old_path):
+        try:
+            import shutil
+            shutil.copy2(old_path, resolved)
+        except OSError:
+            pass
+    return resolved
+
+
+ALERTS_USER_PATH = _resolve_persistent_path("alerts_user.txt")
 
 
 @app.get("/api/alerts")
@@ -3546,7 +3598,7 @@ async def add_alert(request: Request):
 
 
 # ── 즐겨찾기 (서버 저장, alerts와 동일 패턴) ──
-FAVORITES_PATH = os.path.join(os.path.dirname(__file__), "favorites_user.txt")
+FAVORITES_PATH = _resolve_persistent_path("favorites_user.txt")
 
 
 def load_favorites() -> list[str]:
