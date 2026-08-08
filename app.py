@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.48 [문서] /guide(GUIDE.md) v4.49.2→v5.47 기준으로 전면 갱신. v4.49 이후
+        쌓인 변경(손절폭 절대값 4단계 배지, 패턴 서브탭, 급등매집 개명,
+        일지 관찰 트리거 🟢확인됨, 진입신호등 4항목으로 축소, boxbreak
+        extended_max 등)이 가이드에 전혀 반영 안 돼 있던 걸 정리.
+        [핵심 추가] 0.5장 "이렇게 쓰세요" 4줄 빠른참조 신설. 4장(돌파임박)에
+        안C 조사(docs/imminent_stop_entry_investigation.md) 실측 근거를
+        넣어 "왜 즉시매수 대신 관찰 등록 후 확인해야 하는지"를 숫자로 설명
+        (EV 0.20R→확인 후 0.80R). 6장의 "게이트는 피벗 기준" 문구는 v5.41로
+        이미 틀린 서술이 돼 있어 수정(카드=게이트 기준으로 통일됨). 7장에
+        급등매집 "관찰용, 진입용 아님" 명시(ABC 문서 패턴 조사에서 역선택
+        방향 나온 사례 인용). 9장에 신호등 4항목(거래량/RS/리스크/AVWAP,
+        손익비 항목 제거 반영) 및 관찰 종료 액션 3종 설명 추가. 부록에
+        🔵⚪🟠🔴/🟢확인됨 배지 추가.
 v5.47 [UI] 일지 관찰(watch) 종료 처리 — 무한정 쌓이던 문제 대응.
         [1] 관찰중 행에 종료 액션 3종: ▶진입함(실제 매매로 전환, category를
         관찰에서 빼고 status='entered'+편집모드로 진입가/손절가 입력)
@@ -2049,7 +2062,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.47"
+VERSION = "v5.48"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -5270,7 +5283,7 @@ RSETTINGS_DEFAULT = {
 
 @app.get("/guide.md")
 async def guide_md():
-    """활용 가이드 원문 (v4.49.1) — /guide 페이지가 fetch해서 렌더."""
+    """활용 가이드 원문 (v5.47) — /guide 페이지가 fetch해서 렌더."""
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "GUIDE.md")
     if not os.path.exists(path):
         return Response("가이드 파일이 없습니다.", media_type="text/plain")
