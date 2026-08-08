@@ -167,10 +167,12 @@ def distribution_check(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series) 
             signals.append("최대급락일")
             danger = True
 
-        # 3) U/D 악화 (매집→분산)
+        # 3) U/D — v5.59: 신호(및 caution 레벨) 기여 제거. 실측(보유종목
+        # 맥락, docs/ud_volume_ratio_investigation.md) 결과 U/D<1.0
+        # 종목의 20일내 -10%하락 비율(29.4%)이 시점매칭 대조군(31.7%)보다
+        # 오히려 낮음 — "분산 경고"가 반대 방향. detail.ud는 참고용으로
+        # 계속 채움(신호에는 안 넣음).
         ud = up_down_volume(c, v, 50)
-        if ud is not None and ud < 1.0:
-            signals.append(f"U/D {ud} 분산")
 
         # 4) 이평 '이탈' — 위에서 아래로 깨는 순간만 분산 신호.
         # (버그 수정: 단순히 'close < ma50'이면 이미 한참 전 하락해 바닥에서
@@ -224,13 +226,17 @@ def distribution_check(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series) 
             if "소진성거래량" in cx_reasons or vol_confirms:
                 danger = True
 
+        # v5.59: U/D는 더 이상 signals에 안 들어가지만 참고값으로는 계속
+        # 노출 — signals 유무와 무관하게 detail.ud를 채운다(전에는 signals
+        # 있을 때만 detail 자체가 생겨서, U/D가 유일한 신호였던 케이스가
+        # 이제 signals=[]가 되며 ud 값도 같이 사라지는 문제가 있었음).
+        out["detail"] = {"vol_ratio": round(vol_ratio, 2),
+                         "day_ret_pct": round(day_ret * 100, 1),
+                         "ud": ud}
         if not signals:
             return out
         out["signals"] = signals
         out["level"] = "danger" if danger else "caution"
-        out["detail"] = {"vol_ratio": round(vol_ratio, 2),
-                         "day_ret_pct": round(day_ret * 100, 1),
-                         "ud": ud}
         return out
     except Exception:
         return out
