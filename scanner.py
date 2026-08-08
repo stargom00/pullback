@@ -1228,19 +1228,6 @@ def select_pivot(h, lo, c, close, recent_high_window: int, is_kr: bool = False,
     return pivot, ptype, tl_break, tl_break_intraday
 
 
-def ud_volume_ratio(c: pd.Series, v: pd.Series, days: int = 50) -> float:
-    """상승일 거래량 합 / 하락일 거래량 합 (최근 N일). 1보다 크면 매집 우위.
-    days=50: IBD/MarketSmith/트레이딩뷰 표준 (U/D Volume Ratio).
-    기관 매집은 수개월에 걸쳐 일어나므로 10일은 노이즈가 커 50일이 정석."""
-    ret = c.diff().iloc[-days:]
-    vv = v.iloc[-days:]
-    up = float(vv[ret > 0].sum())
-    down = float(vv[ret < 0].sum())
-    if down <= 0:
-        return 9.9
-    return round(min(up / down, 9.9), 2)
-
-
 def rs_raw_score(close: pd.Series) -> float | None:
     """
     IBD / MarketSmith 공식 RS Rating에 맞춘 상대강도 원점수.
@@ -1542,7 +1529,8 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     if not _risk_hard_ok(rrb, is_kr, pivot=pivot):
         return None
     _ls = late_stage_info(c, lo, h, v, is_kr)
-    _tt = trend_grade(c, lo, h, rs_rank, ud=up_down_volume(c, v, 50))
+    _ud50 = up_down_volume(c, v, 50)
+    _tt = trend_grade(c, lo, h, rs_rank, ud=_ud50)
     if _ls["late_level"] == "danger" and cfg.get("late_stage_exclude", True):
         return None
     # v4.80: M&A/특수상황 의심 종목은 배지로 표시만 하던 걸 아예 스캔 결과에서 제외.
@@ -1588,7 +1576,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "pivot_type": pivot_type,
         "tl_break": tl_break,
         "tl_break_intraday": tl_break_intraday,
-        "ud": ud_volume_ratio(c, v),
+        "ud": _ud50,
         "pivot_dist_pct": round(pivot_dist_pct, 2),
         "atr_pct": atr_pct,
         "vol_high": vol_high,
@@ -2099,7 +2087,7 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
 
     # 피벗: 20봉 고가/타이트존/하락추세선 중 가장 가까운 트리거, 손절은 60일선 -2%
     pivot, pivot_type, tl_break, tl_break_intraday = select_pivot(h, lo, c, close, 20, is_kr=is_kr, v=v)
-    ud = ud_volume_ratio(c, v)
+    ud = up_down_volume(c, v, 50)
     stop = m60 * 0.98
     candidates = [x for x in (stop, float(lo.iloc[-10:].min())) if x < close]
     stop = max(candidates) if candidates else float(lo.iloc[-10:].min())
@@ -2125,16 +2113,13 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
     score += 10 * max(0.0, 1 - bot_ago / cfg["recent_bottom_max"])             # 바닥 최근성
     if base_info["corrections"] == 0:
         score += 5                                                             # 조정 0회(가장 이른 첫 베이스) 보너스
-    # U/D Volume: 매집 확증. 전환이면 1↑이 정상(오를 때 거래량↑).
-    # 1 미만이면 분산 우세 = 매집 미확증 → 감점 + 경고.
-    if ud is not None:
-        if ud >= 1.0:
-            score += 10 * min((ud - 1.0) / 1.0, 1.0)        # U/D 1~2: 매집 강도 가점
-        else:
-            score -= 12 * (1.0 - ud)                         # U/D<1: 분산 우세 감점(최대 -12)
-    ud_weak = (ud is not None and ud < 1.0)                  # 매집 미확증 경고 플래그
-    # 배점 총합이 125(25+20+10+10+10+15+10+10+5+10)라 100점 만점으로 정규화
-    score = max(0.0, min(100.0, score * (100.0 / 125.0)))
+    # v5.57: U/D의 점수 가감·ud_weak 경고 플래그 제거 — 실측(2R 레이스 EV)
+    # 결과가 정반대였음(눌림목 0.33R vs 0.14R, 돌파임박 0.33R vs 0.23R,
+    # U/D<1 그룹이 오히려 더 좋음). "매집 미확증=경계" 프레이밍이 근거 없이
+    # 반대 방향이라 판정(점수·플래그)에서 완전히 빼고 ud 원값만 참고로 남김
+    # (docs/all_tabs_common_yardstick_investigation.md 참고).
+    # 배점 총합이 115(25+20+10+10+10+15+10+10+5, U/D 10점 제외)라 100점 만점으로 정규화
+    score = max(0.0, min(100.0, score * (100.0 / 115.0)))
 
     prev_close = float(c.iloc[-2])
     change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
@@ -2172,7 +2157,6 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
         "tl_break": tl_break,
         "tl_break_intraday": tl_break_intraday,
         "ud": ud,
-        "ud_weak": ud_weak,
         "pivot_dist_pct": round(pivot_dist_pct, 2),
         **_rr_block(pivot, stop, h, lo, c,
                     base_low=float(lo.iloc[-30:].min()),
@@ -4342,7 +4326,7 @@ def analyze_stage2(df: pd.DataFrame, rs_pctile: int | None, cfg: dict = STAGE2_C
 # yfinance 무료 데이터로 IBD 원본과 동일한 정확한 개수를 못 구해서
 # heldPercentInstitutions(기관 보유 비율)로 대체 — 근사치임을 명시.
 # 1번(A/D Rating)도 IBD 고유 알고리즘(13주 가중 가격·거래량)이 아니라
-# 기존 ud_volume_ratio(U/D Volume Ratio, 50일)를 등급으로 변환한 근사치.
+# 기존 up_down_volume(U/D Volume Ratio, 50일)을 등급으로 변환한 근사치.
 # ══════════════════════════════════════════════════════
 
 def analyze_ibd9_cheap(df: pd.DataFrame) -> dict | None:
@@ -4403,7 +4387,7 @@ def analyze_ibd9_full(df: pd.DataFrame, cheap: dict, beta: float | None,
         return None
 
     c, v = df["Close"], df["Volume"]
-    ud = ud_volume_ratio(c, v, days=50)
+    ud = up_down_volume(c, v, 50) or 0.0
     grade = ("A" if ud >= 1.5 else "B" if ud >= 1.15 else
              "C" if ud >= 0.87 else "D" if ud >= 0.65 else "E")
     if grade not in ("A", "B"):

@@ -5,6 +5,43 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.57 [버그수정] U/D Volume Ratio(매집/분산) 방향성 재검증 — 코텍(052330)
+        U/D가 우리 계산(0.92)과 MarketSmith 주봉 차트(2.0)에서 2배
+        차이난다는 리포트로 시작. [원인 규명] up_down_volume()/
+        ud_volume_ratio() 계산 자체(50일, 종가 vs 전일종가, 상승/하락일
+        거래량 합)는 IBD/MarketSmith 표준과 정확히 일치 — 다만 MarketSmith
+        는 "현재 보고 있는 차트 단위로 50개 봉"이라 주봉 차트에선 50주
+        기준이었음(우리는 항상 50일 고정). 코텍을 주봉 50주로 재현하니
+        정확히 2.0 일치. 전체 유니버스 확인 결과 이 격차(2배 이상)가
+        19.7%에서 발생하는 흔한 현상. [성과 상관관계] 일봉50일(현행)/
+        주봉50주(MarketSmith)/일봉250일 세 방식 다 눌림목·돌파·돌파임박
+        2R 레이스 EV와 일관된 정방향 관계가 없음 — 오히려 현행(일봉50일)
+        은 3개 탭 전부 역방향(U/D<1 그룹이 EV 더 높음: 눌림목 0.33R vs
+        0.14R, 돌파임박 0.33R vs 0.23R). 주봉으로 바꿔도 안 고쳐짐(눌림목
+        여전히 역방향, 돌파임박은 거의 0비트). [반영] ①카드 배지 색상
+        (초록/주황)을 방향성 암시 없는 중립색으로 통일. ②추세전환의
+        "📉 매집미확증" 배지·경고 배너 제거, `ud_weak` 필드·score의 U/D
+        가감(±12점, 배점 총합 125→115 재정규화) 전부 제거 — 배지만 빼고
+        점수는 남겨두면 몰래 계속 반영되는 상태라 같이 뺌. ③강한피벗
+        (실험) 탭의 STRONG_PIVOT_MIN_UD(U/D<1.0 하드 제외) 게이트 제거 —
+        실측 결과 게이트가 걸러내던 그룹(ud<1.0)이 EV 0.361로 셋 중
+        최고(게이트 있음 0.224, 없음 전체 0.252)였음. strength_score의
+        U/D 기반 accum_score_component(최대 20점)도 같은 이유로 제거.
+        [함수 정리] up_down_volume()과 ud_volume_ratio()가 완전히 같은
+        계산(창 길이만 window/days로 이름 다름)이라 중복 확인 — 호출부
+        4곳(scanner.py 3곳+app.py 1곳)을 up_down_volume()으로 통일,
+        ud_volume_ratio() 삭제. ud_volume_detail()(상위1·3일 제외 분해)은
+        용도가 달라 유지. [전수 감사] U/D가 쓰이는 모든 곳을 표시/점수/
+        게이트 3분류로 확인(docs/all_tabs_common_yardstick_investigation.md).
+        아직 미반영: trend_grade() 8조건 중 5개+U/D강등 로직이 탭마다
+        방향이 다르거나 반대라 A/B/C/D 등급 자체가 성과를 못 가름(눌림목은
+        A등급 EV 0.140 vs D등급 0.385로 완전히 역순) — 재설계 필요,
+        방향 확인 후 진행 예정. distribution_check()(보유종목 분산 경보,
+        봇이 실제 알림 발송)의 U/D 신호는 오늘 측정한 "진입 전 스크리닝"과
+        다른 질문(보유 중 종목 모니터링)이라 별도 측정 필요. 얼마냐봇의
+        "눌림 지지 진입" 알림(/api/pullback-signal)이 U/D≥1.5를 하드
+        게이트로 쓰고 있음을 확인 — 봇 쪽 코드라 이 레포에서 수정 불가,
+        사용자에게 별도 전달 필요.
 v5.56 [UI] 탭별 필터/정렬 버튼 유효성 전수조사 — v5.55로 슈퍼대장에
         risk_pct가 생기면서 다른 필터(주도주만/적격만/매집순/손절좁은순)도
         탭마다 실제로 유효한지 확인. 가설은 "필드는 있는데 통과율 100%
@@ -934,7 +971,7 @@ v5.03 [신규] 🇺🇸IBD9 탭 — IBD/MarketSmith식 9조건 스크린(사용�
         데이터로 IBD 원본과 동일한 정확한 개수를 못 구해서
         heldPercentInstitutions(기관 보유 비율)로 대체 — 참고용, 필터링엔
         안 씀. 1번(A/D Rating)도 IBD 고유 알고리즘(13주 가중)이 아니라
-        기존 ud_volume_ratio(U/D Volume Ratio, 50일)를 등급(A~E)으로 변환한
+        기존 up_down_volume(U/D Volume Ratio, 50일)을 등급(A~E)으로 변환한
         근사치. 카드/설명에 전부 "근사치" 명시.
         [구현] 적용 순서: 가격데이터만으로 되는 저비용 5개(조건2~6, 캐시된
         일봉으로 즉시 계산) 먼저 → 통과한 종목 중 3개월수익률 상위 60개만
@@ -2230,7 +2267,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.56"
+VERSION = "v5.57"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2855,16 +2892,17 @@ async def _run_scan_stage2(bundle: dict) -> dict:
 # 1층(하드컷): 후기 스테이지/과확장 제외 — 이 탭의 목적은 "아직 초기인" 피벗만
 #   보는 것이라, 이미 크게 오른 뒤의 베이스(late_level≠none)나 200일선과
 #   너무 멀어진 종목(ext200_pct 초과)은 대상이 아님.
-# 2층(매집 필수화): 품질풀(Stage2/IBD9) OR게이트 통과 + U/D Volume Ratio가
-#   1.0 이상(매집 우위 확인)이어야 함 — 게이트만으로는 "구조가 좋다"까지만
-#   보장하고 "지금 매집 중이다"는 못 보장하므로 별도 컷으로 분리.
+# 2층(매집 필수화, v5.57에서 제거): 원래 U/D Volume Ratio 1.0 미만 하드
+#   제외였으나, 실측(docs/all_tabs_common_yardstick_investigation.md)
+#   결과 U/D<1.0 그룹이 오히려 EV가 가장 높았음(게이트 있음 0.224 vs
+#   없음 0.252 vs 새로 추가되는 ud<1.0 그룹만 0.361 — 최고). 게이트가
+#   최우수 후보를 걸러내고 있었던 것이 확인돼 제거.
 # 3층(강도 스코어): 남은 후보를 strength_score로 다시 랭킹하고, pool_count가
 #   2(Stage2+IBD9 동시 통과)면 그 자체로 최상위 신호로 보고 강도 컷을 면제,
-#   아니면 strength_score 임계를 넘는 것만 최종 통과.
-# 임계 상수 3개(MAX_EXT200/MIN_UD/MIN_STRENGTH)는 모두 파일 상단에 빼서
-# 배포 후 diag의 단계별 탈락 수를 보고 완화할 수 있게 한다.
+#   아니면 strength_score 임계를 넘는 것만 최종 통과. U/D 기반
+#   accum_score_component(v5.57에서 제거)도 같은 이유 — 방향이 틀린 값을
+#   점수에 남겨두면 하드 게이트만 없앤 채 계속 불리하게 반영됨.
 STRONG_PIVOT_MAX_EXT200 = 30    # 200일선 이격 +30% 초과면 과확장으로 제외(1층)
-STRONG_PIVOT_MIN_UD = 1.0       # U/D Volume Ratio 1.0 미만이면 매집 우위 아님(2층)
 STRONG_PIVOT_MIN_STRENGTH = 40  # strength_score 최소 컷 — pool_count>=2면 면제(3층)
 
 
@@ -2888,7 +2926,7 @@ async def _run_scan_strong_pivot(bundle: dict) -> dict:
     diag = {"kr_universe": 0, "us_universe": 0, "kr_fetched": 0, "us_fetched": 0,
             "kr_hits": 0, "us_hits": 0, "imminent_pass": 0,
             "dropped_late": 0, "dropped_ext200": 0, "gate_pass": 0,
-            "dropped_accum": 0, "dropped_weak": 0, "final_hits": 0}
+            "dropped_weak": 0, "final_hits": 0}
     for t in universe:
         if naver_kr.is_kr(t): diag["kr_universe"] += 1
         else: diag["us_universe"] += 1
@@ -2923,12 +2961,6 @@ async def _run_scan_strong_pivot(bundle: dict) -> dict:
             continue
         diag["gate_pass"] += 1
 
-        # ── 2층: 매집 필수화 — U/D Volume Ratio 1.0 미만이면 제외 ──
-        ud = result.get("ud_vol")
-        if ud is None or ud < STRONG_PIVOT_MIN_UD:
-            diag["dropped_accum"] += 1
-            continue
-
         # ── 저유동성 하드 필터 — 기존 run_scan과 동일 기준 (KR 3억원/US $2M) ──
         avg_turn = result.get("avg_turnover") or 0
         if avg_turn > 0:
@@ -2939,19 +2971,19 @@ async def _run_scan_strong_pivot(bundle: dict) -> dict:
 
         # ── 3층: 강도 스코어 (가중치 근거는 위 주석 참고) ──
         # pool_count 20점/개(최대 40) — 이 탭의 핵심 선별 기준이라 최우선.
-        # 매집강도 최대 20점 — 게이트(1.0)를 넘은 만큼을 0~2.0 구간에서 선형 환산.
         # 두드림(touch_count) 최대 15점(회당 3점, 5회 캡) — 매물벽 약화 신호.
         # 거래량수축/변동폭축소 각 10점 고정 — "조용히 준비 중"인 초기 국면의 직접 증거.
         # RS 최대 15점 — 이미 여러 게이트를 통과했으므로 추가 변별력은 작게만.
+        # v5.57: U/D 기반 accum_score_component(최대 20점) 제거 — 방향이
+        # 틀린 값이라 점수에서도 빼야 하드 게이트 제거의 취지가 산다.
         touch = result.get("touch_count") or 0
         rs = result.get("rs") or 0
         pool_score = len(pools) * 20
-        accum_score_component = 20 * max(0.0, min((ud - STRONG_PIVOT_MIN_UD) / 2.0, 1.0))
         touch_score = min(touch, 5) * 3
         vol_dry_score = 10 if result.get("vol_dry") else 0
         tightening_score = 10 if result.get("tightening") else 0
         rs_score = 15 * rs / 99
-        strength_score = round(pool_score + accum_score_component + touch_score
+        strength_score = round(pool_score + touch_score
                                + vol_dry_score + tightening_score + rs_score, 1)
         strength_score = min(strength_score, 100.0)
 
@@ -4010,8 +4042,8 @@ async def lookup_ticker(ticker: str):
     else:
         rsi = float((100 - 100 / (1 + gain / loss)).iloc[-1])
     # U/D Volume (50일)
-    from scanner import ud_volume_ratio
-    ud = ud_volume_ratio(c, v)
+    from scanner import up_down_volume
+    ud = up_down_volume(c, v, 50)
 
     # 52주 고저 대비 위치
     hi52 = float(c.iloc[-252:].max()) if len(c) >= 252 else float(c.max())
