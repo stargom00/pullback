@@ -1368,8 +1368,13 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     trend_above_ma60 = close > m60
     above_ma200 = close > m200          # 200일선 위 = Stage 2 추세만
     ma_stack = m20 > m60
-    # 주도주(RS90+)는 20일선이 평평해도 허용 (VCP 베이스 빌딩 중 정상)
-    slope_floor = 0.98 if is_leader else 1.0  # 주도주는 10봉간 -2%까지 허용
+    # v5.60: 20일선 10봉간 -2%까지 허용을 전 종목으로 확대(기존엔 주도주
+    # RS90+만). 전체 유니버스 실측(offset 60~250 step10, n=1963 히트)에서
+    # floor 1.0→0.98 완화는 통과율만 오르고 EV는 그대로(+0.078→+0.079R,
+    # 일반군만 봐도 +0.068→+0.067R) — 조건의 변별력 자체는 살아있으면서
+    # (통과 EV+0.081R vs 미통과-0.036R) 문턱만 불필요하게 빡빡했던 것.
+    # 근거: docs/rs_definition_and_slope_investigation.md 2b.
+    slope_floor = 0.98  # 10봉간 -2%까지는 VCP 베이스 빌딩으로 허용(주도주 한정 아님)
     ma20_slope = m20 > float(ma20.iloc[-11]) * slope_floor
     in_uptrend = trend_above_ma60 and above_ma200 and ma_stack and ma20_slope
     if not in_uptrend:
@@ -2404,7 +2409,11 @@ def analyze_super(df: pd.DataFrame, rs_rank: int | None = None,
 # ══════════════════════════════════════════════════════
 BREAKOUT_CONFIG = {
     "min_bars": 210,
-    "rs_min": 85,            # 돌파는 강한 종목만 의미 있음 (주도주 위주 85)
+    # v5.60: 85→80. 전체 유니버스 실측(offset 60~250 step10, n=1505)에서
+    # 80-85 구간 EV가 85-90보다 같거나 높음(절대RS 기준 85-90은 오히려
+    # -0.034R) — 85라는 문턱 자체에 EV 근거가 없었음. 눌림목(rs_min=80)과
+    # 통일. 근거: docs/rs_definition_and_slope_investigation.md 2.
+    "rs_min": 80,
     "max_off_high": 25,      # 1년 고점 대비 -25% 넘게 빠진 종목 제외
     "base_min_len": 20,      # 베이스(횡보) 최소 길이
     "base_max_range": 0.25,  # 베이스 고저 폭이 25% 이내여야 "타이트한 베이스"
@@ -2556,7 +2565,9 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
 # ══════════════════════════════════════════════════════
 BOXBREAK_CONFIG = {
     "min_bars": 140,         # 120일선 + 여유
-    "rs_min": 85,            # 박스 탈출은 강한 종목이 크게 감 (주도주 위주 85)
+    # v5.60: 85→80, breakout과 같은 근거(80-85 EV가 85-90과 같거나 높음,
+    # n=1268 실측). docs/rs_definition_and_slope_investigation.md 2 참고.
+    "rs_min": 80,
     "max_off_high": 25,      # 1년 고점 대비 -25% 넘게 빠진 종목 제외
     "box_windows": [20, 40, 60],   # 짧/중/장 박스 동시 확인
     "box_max_range": 0.30,   # 박스 고저폭 ≤30% (국장 변동성 고려, 너무 넓으면 박스 아님)
@@ -2729,7 +2740,10 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
 # ══════════════════════════════════════════════════════
 IMMINENT_CONFIG = {
     "min_bars": 210,
-    "rs_min": 85,            # 돌파 직전 대기 — 주도주만 (기존 50→85)
+    # v5.60: 85→80, breakout/boxbreak와 같은 근거 — 가장 표본이 큰 이
+    # 탭(n=19232)에서도 80-85 EV(+0.114R/+0.080R)가 85-90(+0.046R/+0.076R)
+    # 보다 낮지 않음. docs/rs_definition_and_slope_investigation.md 2 참고.
+    "rs_min": 80,
     "max_off_high": 25,      # 1년 고점 대비 -25% 넘게 빠진 종목 제외(무너진 종목의 가짜 돌파 차단)
     "near_min": -0.05,   # 피벗 대비 현재가 하한 (-5%: 천장 5% 아래까지)
     "near_max": 0.0,     # 상한 0%: 아직 안 뚫음 (피벗 이하)
