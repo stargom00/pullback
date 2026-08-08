@@ -387,7 +387,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.55</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.56</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -733,10 +733,26 @@ function riskTierBadge(riskPct) {
   if (!t) return '';
   return ` <span class="climax-tag" style="background:${t.bg};color:${t.color};border:1px solid ${t.border}" title="절대 손절폭 기준(ATR 무관, 게이트와 별개): ≤5% 타이트 · 5~8% 보통 · 8~12% 넓음 · 12%+ 매우넓음. +1R 목표=손절폭만큼 상승이라 넓을수록 도달 전 손절 확률↑. '손절좁은순' 정렬과 같은 risk_pct 기준.">${t.emoji} ${t.label} ${riskPct}%</span>`;
 }
-// risk_pct 필드가 있는 모드만 — 없는 탭(대장후보/슈퍼대장/Stage2/IBD9/실적우수/
-// 급등/인버스/붕괴/섹터/마감정리/일지)에선 배지도 필터도 표시하지 않음.
+// risk_pct 필드가 있는 모드만 — 없는 탭(대장후보/Stage2/IBD9/실적우수/급등/
+// 인버스/붕괴/섹터/마감정리/일지)에선 배지도 필터도 표시하지 않음. v5.55:
+// 슈퍼대장에 risk_pct(ATR×2 손절)가 생겨 추가.
 const RISK_TIER_MODES = new Set(['pullback', 'turnaround', 'breakout', 'boxbreak', 'imminent', 'pattern', 'strong_pivot', 'super']);
 let riskTierFilter = new Set();   // 선택된 tier key들 (비어있으면 필터 없음)
+// v5.56: 탭별 필터 유효성 전수조사 결과 반영. 필드가 없는 탭에서 필터를
+// 걸면 "아무 일도 안 함"이 아니라 조건에 따라 결과가 다름 — RISK_TIER_MODES
+// 처럼 각 필터가 의존하는 필드 유무로 유효 탭 Set을 만들고, 버튼 표시 여부와
+// 필터 적용 여부를 둘 다 같은 Set으로 판정(따로 관리하면 또 어긋날 수 있음).
+// docs/all_tabs_common_yardstick_investigation.md v5.56 섹션 참고.
+//
+// 주도주만(strictMode): rs·(vol_mult|vol_ratio)·rr·risk_pct 전부 필요.
+// 대장후보(rr·risk_pct 없음)·슈퍼대장(거래량 필드 자체가 없음)·급등(rr·
+// risk_pct 없음)은 필드가 없어서 걸면 항상 0건이 됨(통과율 0%, 100%가 아님).
+const STRICT_MODE_VALID = new Set(['pullback', 'turnaround', 'breakout', 'imminent', 'boxbreak', 'pattern', 'strong_pivot']);
+// 적격만(bearOkOnly): bear_ok는 badge_fields()를 호출하는 4곳(+상속하는
+// 강한피벗)에만 있음 — 추세전환/대장후보/슈퍼대장/박스돌파/급등은 항상 0건.
+const BEAR_OK_VALID = new Set(['pullback', 'breakout', 'imminent', 'pattern', 'strong_pivot']);
+// 매집순(accumSort): accum_score는 패턴 탭의 급등매집 서브패턴에서만 채워짐.
+const ACCUM_SORT_VALID = new Set(['pattern']);
 function renderRiskTierFilter() {
   const bar = document.getElementById('riskTierBar');
   if (!bar) return;
@@ -1308,7 +1324,24 @@ const DESC = {
   breakdown: '🩸 Stage 4 숏 셋업 · 역배열(20<60<200)+200일선 하락+지지 이탈+하락 거래량+RS 약세 · ⚠️ 숏은 손실 무한·숏스퀴즈·급반등 위험, 한국은 개인 공매도 제약 · 미국 종목 위주'
 };
 
+// v5.56: 필터/정렬 버튼 표시 여부 — renderCards()가 안 도는 뷰(인버스/섹터/
+// 마감정리)로 전환할 때도 버튼이 이전 탭 상태로 남아있지 않게 load() 진입
+// 시점에 항상 먼저 정리. renderCards() 안의 동일 로직과 소스가 같음
+// (STRICT_MODE_VALID 등) — 이 뷰들은 어차피 전부 Set에 없어서 다 숨겨짐.
+function hideFilterButtonsIfNotApplicable() {
+  const ids = {
+    strictToggle: STRICT_MODE_VALID, bearOkToggle: BEAR_OK_VALID,
+    accumSortToggle: ACCUM_SORT_VALID, riskSortToggle: RISK_TIER_MODES,
+    superOnlyToggle: new Set(['pullback']),
+  };
+  for (const [id, validSet] of Object.entries(ids)) {
+    const btn = document.getElementById(id);
+    if (btn) btn.style.display = validSet.has(mode) ? '' : 'none';
+  }
+}
+
 async function load(refresh = false) {
+  hideFilterButtonsIfNotApplicable();
   if (mode === 'inverse') { return loadInverse(refresh); }
   if (mode === 'sectors') { return loadSectors(); }
   if (mode === 'eod') { return loadEod(); }
@@ -1771,10 +1804,19 @@ function renderCards() {
   // 주도주 엄격모드 필터: RS90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓
   // 주도주(RS90+) 필터는 롱 전용 — 숏(붕괴)은 약한 종목이라 적용하지 않음
   // v4.65: 💎 약세장적격만 — bear_ok(탄탄베이스+RS90+손절폭적정) 3조건 충족만
-  if (bearOkOnly && mode !== 'breakdown' && mode !== 'stage2' && mode !== 'ibd9' && mode !== 'earnings') {
+  // v5.56: 버튼 표시/필터 적용을 STRICT_MODE_VALID/BEAR_OK_VALID/ACCUM_SORT_VALID로 통일.
+  const strictBtn = document.getElementById('strictToggle');
+  if (strictBtn) strictBtn.style.display = STRICT_MODE_VALID.has(mode) ? '' : 'none';
+  const bearOkBtn = document.getElementById('bearOkToggle');
+  if (bearOkBtn) bearOkBtn.style.display = BEAR_OK_VALID.has(mode) ? '' : 'none';
+  const accumBtn = document.getElementById('accumSortToggle');
+  if (accumBtn) accumBtn.style.display = ACCUM_SORT_VALID.has(mode) ? '' : 'none';
+  const riskSortBtn = document.getElementById('riskSortToggle');
+  if (riskSortBtn) riskSortBtn.style.display = RISK_TIER_MODES.has(mode) ? '' : 'none';
+  if (bearOkOnly && BEAR_OK_VALID.has(mode)) {
     list = list.filter(h => h.bear_ok === true);
   }
-  if (strictMode && mode !== 'breakdown' && mode !== 'stage2' && mode !== 'ibd9' && mode !== 'earnings') {
+  if (strictMode && STRICT_MODE_VALID.has(mode)) {
     list = list.filter(h => {
       const rsOk = (h.rs ?? 0) >= 90;
       const volOk = (h.vol_mult ?? 0) >= 1.5 || (h.vol_ratio ?? 0) >= 1.0;
@@ -1806,7 +1848,8 @@ function renderCards() {
     });
   }
   // 손절 좁은 순 정렬 (토글): 리스크% 오름차순 — 타이트한 진입 자리가 위로
-  if (riskSort) {
+  // v5.56: risk_pct 없는 탭은 전부 동점 정렬이라 무의미 — RISK_TIER_MODES로 게이트.
+  if (riskSort && RISK_TIER_MODES.has(mode)) {
     list.sort((a, b) => (a.risk_pct ?? 999) - (b.risk_pct ?? 999));
   }
   // 매집순 정렬 (토글, ABC 패턴 전용 보조지표): 내림차순, 판정불가(null)는 맨 뒤.
@@ -1815,7 +1858,7 @@ function renderCards() {
   // 갈렸음 — accum_score_raw(소수 2자리, 배지에는 안 씀)로 정렬해 동점을
   // 없앤다. accum_score_raw가 없는(구버전 캐시 등) 경우는 accum_score로
   // 폴백.
-  if (accumSort && mode === 'pattern') {
+  if (accumSort && ACCUM_SORT_VALID.has(mode)) {
     const sortVal = r => r.accum_score_raw != null ? r.accum_score_raw : r.accum_score;
     list.sort((a, b) => {
       const va = sortVal(a), vb = sortVal(b);
@@ -1939,6 +1982,7 @@ document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click'
   document.querySelectorAll('[data-mode]').forEach(x => x.classList.remove('active'));
   t.classList.add('active');
   mode = t.dataset.mode;
+  hideFilterButtonsIfNotApplicable();   // v5.56: journal은 load() 자체를 안 타서 여기서도 호출
   const isJournal = mode === 'journal';
   document.getElementById('content').style.display = isJournal ? 'none' : '';
   document.getElementById('journalView').style.display = isJournal ? 'block' : 'none';

@@ -5,6 +5,26 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.56 [UI] 탭별 필터/정렬 버튼 유효성 전수조사 — v5.55로 슈퍼대장에
+        risk_pct가 생기면서 다른 필터(주도주만/적격만/매집순/손절좁은순)도
+        탭마다 실제로 유효한지 확인. 가설은 "필드는 있는데 통과율 100%
+        (0비트)"였으나 실제로는 정반대 — **필드 자체가 없어서 통과율 0%**.
+        [발견] 주도주만(rs·거래량·rr·risk_pct 4개 다 필요): 대장후보(rr·
+        risk_pct 없음)/슈퍼대장(거래량 필드 자체가 없음)/급등(rr·risk_pct
+        없음)은 클릭하면 항상 0건. 적격만(bear_ok, badge_fields() 호출하는
+        4곳에만 존재): 추세전환/대장후보/슈퍼대장/박스돌파/급등 5개 탭
+        항상 0건. 손절좁은순: risk_pct 없는 탭은 전부 999 동점이라 정렬
+        무의미. 매집순: 코드 자체가 mode==='pattern' 게이트라 다른 탭은
+        원래도 no-op(문제 아님). [반영] 버튼 표시 여부와 필터 적용 조건을
+        같은 Set으로 통일(RISK_TIER_MODES 패턴 재사용) —
+        STRICT_MODE_VALID/BEAR_OK_VALID/ACCUM_SORT_VALID 신설, 손절좁은순은
+        기존 RISK_TIER_MODES 그대로 재사용. 필드 없는 탭에서 버튼을
+        display:none으로 숨김. hideFilterButtonsIfNotApplicable()을
+        load() 진입 시점 + 탭 클릭 핸들러(journal은 load()를 안 타서
+        별도 호출) 양쪽에서 호출해 인버스/섹터/마감정리/일지로 전환할 때도
+        이전 탭 버튼이 안 남게 함. [참고] rr≥2 서브조건은 _rr_block 쓰는
+        모든 탭에서 사실상 0비트(2R 최소보장 폴백 때문)지만 전체 필터가
+        0건까지는 아니라 문서에만 기록, 미반영.
 v5.55 [기능] 슈퍼대장 명단 활용법 재설계 — 안1(buy_zone 대기) 탈락 이후
         "명단으로만 두기 전에" 3가지 추가 측정(docs/all_tabs_common_
         yardstick_investigation.md v5.55 섹션). [①눌림목 필터] 눌림목
@@ -2210,7 +2230,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.55"
+VERSION = "v5.56"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
