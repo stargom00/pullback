@@ -1499,7 +1499,12 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     score += 15 * (1 - min(abs(cur_rsi - 45) / 20, 1))
     if rs_rank is not None:                     # RS 기여 (최대 15점)
         score += 15 * max(0.0, (rs_rank - 50) / 49)
-    score += 5 if tightening else 0
+    # v5.43: tightening(캔들 수축 VCP 보너스, 5점) 채점 반영 제거 — 전체
+    # 유니버스 실측(과거 체크포인트 3600+건, 돌파임박 기준)에서 True/False간
+    # 도달률·손절률 차이가 1.5%p로 오차범위 수준이라 근거 없음 확인. `tightening`
+    # 변수/필드 자체는 남겨둠(카드 배지 "변동폭 축소" 표시, 강한피벗 풀
+    # strength_score에서 여전히 사용) — 여기서 제거하는 건 이 score 계산의
+    # 가점 반영뿐.
     score += 5 if recent_high_ok else 0
     score += 3 if (rs_mom is not None and rs_mom >= 10) else 0
     # RS 곱셈 반영: 힘(RS) × 모양 — 둘 다 좋아야 고득점
@@ -2818,12 +2823,22 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
     risk_pct = (pivot - stop) / pivot * 100 if pivot > 0 else 0.0   # 피벗 진입 기준
 
     # ── 점수 (100점) ──
-    # 피벗 근접도 35 (가까울수록↑) + 거래량수축 20 + VCP 20 + RS 15 + 200일선위 10
+    # 피벗 근접도 35 (가까울수록↑) + 거래량(연속식) 20 + RS 15 + 200일선위 10
+    # v5.43: 거래량수축(vol_dry) 20점 절벽 제거 — 항상 연속식(vol_ratio 기반)
+    # 사용. VCP(tightening) 20점 가점도 제거. 둘 다 전체 유니버스 실측(과거
+    # 체크포인트 3600+건)에서 실증 근거 없음 확인:
+    #  - vol_dry(수축) True일 때 이후 10봉 내 실제 거래량동반돌파 비율 39.6%,
+    #    False일 때 46.7% — 오히려 역방향(수축이 폭증 돌파를 예고 못 함).
+    #  - tightening True/False간 도달률·손절률 차이 1.5%p로 오차범위 수준.
+    #  둘 다 "VCP(압축 후 확장)"라는 같은 전제를 코드화한 것인데 실증이 뒷받침
+    #  안 함. vol_dry는 연속값(vol_ratio) 정보 자체는 남기고 절벽만 없앰(정보
+    #  손실 최소화하며 top30 영향도 가장 적은 방식으로 측정 후 선택).
+    #  tightening_used와 vol_dry 필드 자체는 남겨둠(카드 배지·강한피벗 풀
+    #  strength_score에서 계속 사용) — 여기서 빠지는 건 이 score 반영뿐.
     near_score = 35 * (1 - min(abs(near) / 0.05, 1.0))   # 0%면 35, -5%면 0
     score = (
         near_score
-        + (20 if vol_dry else 20 * max(0.0, min((1.1 - vol_ratio) / 0.5, 1.0)))
-        + (20 if tightening else 0)
+        + 20 * max(0.0, min((1.1 - vol_ratio) / 0.5, 1.0))
         + 15 * max(0.0, (rs_rank - 50) / 49)
         + 10
     )
