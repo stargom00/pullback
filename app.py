@@ -5,6 +5,28 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.54 [기능] 대장후보→눌림목 전환 관찰. Script D(전 탭 공통잣대 조사)에서
+        확인한 대장후보 히트의 74%가 60봉 내 눌림목 전환(median 6봉)을
+        기존 감시(⚡)/관찰(👁) 인프라로 알려줌. [카드] 대장후보 카드의
+        ⚡감시 버튼(대장후보엔 pivot이 없어 원래 항상 "피벗없음"으로
+        실패하던 죽은 버튼)을 "👁 눌림목 전환 관찰"로 교체 — 클릭 시
+        손절 없음·봇 알림 없음으로 관찰 등록, 등록 시점 RS·20일선
+        위치·현재가 스냅샷 저장. [백엔드] `/api/watch/quick`에
+        `category` 파라미터 추가(`관찰`이면 pivot 불필요, status='watch').
+        신규 `/api/watch/leader-check`: 관찰 티커만 받아 `analyze()`로
+        눌림목 게이트 판정 — 전용 fetch 없이 기존 시장 데이터 캐시
+        (`_fetch_market_data`, 다른 탭 로드로 이미 채워짐)를 재사용해
+        캐시가 따뜻하면 사실상 즉시 응답, 콜드면 pending 반환 후 다음
+        폴링에 재시도(비용 실측: docs/leader_to_pullback_watch.md).
+        [만료] 26영업일(p90) — 트리거 관찰의 3영업일과 다르게 설정(대장후보는
+        RS95+ 리스트 소속이 핵심인 느린 신호). 만료돼도 스냅샷 값은
+        유지, 회색조 처리, 기존 일괄정리 버튼이 관찰 종류별로 다른
+        만료일수를 쓰도록 일반화(watchExpiryDays/isWatchResolved).
+        [필드명] trigger_date→watch_start_date로
+        개명(관찰 종류를 불문한 공통 "관찰 시작일" 개념인데 트리거 관찰
+        전용 이름이 남아있던 문제 — 오늘 여러 번 잡은 것과 같은 유형).
+        읽는 쪽은 watchStartDate(r)가 옛 trigger_date로 폴백해 기존
+        레코드 호환.
 v5.53 [UI] entrySignal() 거래량 항목도 돌파·박스돌파에서 참고용으로
         격하 — ok율 100.0%로 확인(v5.52의 리스크 90%+보다 더 심한
         0비트). 원인도 리스크와 동일: scanner.py BREAKOUT_CONFIG/
@@ -2157,7 +2179,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.53"
+VERSION = "v5.54"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -5517,24 +5539,40 @@ async def watch_quick(request: Request):
 
     body: {ticker, name, market, pivot, stop}
     중복: 같은 ticker의 pending 항목이 이미 있으면 새로 안 만들고 exists 반환.
+
+    v5.54: category='관찰' 분기 추가 — 대장후보→눌림목 전환 관찰(👁 버튼)이
+    이 엔드포인트를 재사용. 이 경우 pivot 없이도 등록 허용(대장후보엔
+    피벗 개념 자체가 없음), status='watch'(봇 알림 대상 아님, 손절 없음),
+    watch_kind로 관찰 종류 구분(cleanupExpiredWatches 등에서 트리거 관찰과
+    다른 만료 기간 적용). 기존 category='추세추종'(기본값) 경로는 무변경.
     """
     body = await request.json()
     ticker = (body.get("ticker") or "").strip()
     if not ticker:
         return JSONResponse({"ok": False, "error": "ticker 필요"}, status_code=400)
+    category = body.get("category") or "추세추종"
+    is_observe = category == "관찰"
     try:
         pivot = float(body.get("pivot") or 0) or None
         stop = float(body.get("stop") or 0) or None
     except (TypeError, ValueError):
         pivot, stop = None, None
-    if not pivot:
+    if not pivot and not is_observe:
         return JSONResponse({"ok": False, "error": "pivot 필요"}, status_code=400)
 
+    watch_kind = body.get("watch_kind") or None
     j = load_journal()
-    for r in j:
-        if r.get("ticker") == ticker and r.get("status") == "pending":
-            return JSONResponse({"ok": True, "exists": True, "id": r.get("id"),
-                                 "msg": "이미 대기 감시 중"})
+    if is_observe:
+        for r in j:
+            if (r.get("ticker") == ticker and r.get("status") == "watch"
+                    and r.get("watch_kind") == watch_kind):
+                return JSONResponse({"ok": True, "exists": True, "id": r.get("id"),
+                                     "msg": "이미 관찰 중"})
+    else:
+        for r in j:
+            if r.get("ticker") == ticker and r.get("status") == "pending":
+                return JSONResponse({"ok": True, "exists": True, "id": r.get("id"),
+                                     "msg": "이미 대기 감시 중"})
     import time as _t
     rec = {
         "id": int(_t.time() * 1000),
@@ -5542,17 +5580,23 @@ async def watch_quick(request: Request):
         "ticker": ticker,
         "name": body.get("name") or ticker,
         "market": body.get("market") or ("KR" if ticker[:1].isdigit() else "US"),
-        "status": "pending",
-        "category": "추세추종",
-        "cat": "추세추종",
+        "status": "watch" if is_observe else "pending",
+        "category": category,
+        "cat": category,
         "tab": body.get("tab") or "돌파임박",
         "signal": "",
         "pivot": pivot,
-        "entry": pivot,          # 대기 항목의 entry=피벗(베이스 천장) 관례
+        "entry": pivot if not is_observe else None,   # 대기 항목만 entry=피벗 관례, 관찰은 없음
         "stop": stop,
         "pivot_type": "원클릭",
         "setup_score": body.get("score") or "",
     }
+    if is_observe:
+        rec["watch_kind"] = watch_kind
+        rec["watch_start_date"] = rec["date"]
+        rec["rs"] = body.get("rs")
+        rec["leader_snapshot_price"] = body.get("leader_snapshot_price")
+        rec["leader_snapshot_ma20_dist_pct"] = body.get("leader_snapshot_ma20_dist_pct")
     j.append(rec)
     try:
         d = os.path.dirname(JOURNAL_PATH)
@@ -5569,6 +5613,59 @@ async def watch_quick(request: Request):
     except OSError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
     return JSONResponse({"ok": True, "id": rec["id"], "pivot": pivot, "stop": stop})
+
+
+@app.post("/api/watch/leader-check")
+async def watch_leader_check(request: Request):
+    """v5.54 대장후보→눌림목 전환 관찰(watch_kind='leader_conversion') 판정.
+
+    [배경] 프론트는 scanner.analyze()(눌림목 게이트)를 직접 못 돌린다(백엔드
+    전용). 후보안 (a)일지 탭 열 때 전용 눌림목 스캔 (b)관찰 티커만 골라
+    analyze() (c)봇 폴링용 API만 우선 신설 중 (b) 채택 — 실측 결과 시장
+    데이터가 이미 캐시돼 있으면(_fetch_market_data, 다른 탭 로드로 하루 한 번
+    이상은 채워짐) 이 엔드포인트는 새 네트워크 호출 없이 딕셔너리 조회만
+    하므로 사실상 즉시 응답, 캐시가 아직 없으면(콜드 스타트) 그냥
+    pending=True로 즉시 반환하고(이 요청이 직접 fetch를 걸지 않음 — 다른
+    탭 로드가 캐시를 채울 때까지 기다림), 다음 폴링 주기(60초)에 재시도.
+    전체 유니버스 재스캔과 달리 요청받은 티커만 골라 analyze() 호출이라
+    연산 자체도 무시할 만한 수준(20개 기준 수십 ms, scanner.py 로직
+    자체는 순수 pandas 연산이라 가벼움).
+
+    body: {tickers: [...]}
+    """
+    body = await request.json()
+    tickers = body.get("tickers") or []
+    if not isinstance(tickers, list) or not tickers:
+        return JSONResponse({"ok": True, "converted": [], "pending": False})
+
+    bundle = await _fetch_market_data("all")
+    if bundle is None:
+        return JSONResponse({"ok": True, "converted": [], "pending": True})
+
+    data = bundle["data"]
+    rs_ranks = bundle["rs_ranks"]
+    rs_moms = bundle["rs_moms"]
+    converted = []
+    for t in tickers:
+        df = data.get(t)
+        if df is None:
+            continue
+        is_kr = t.endswith((".KS", ".KQ"))
+        try:
+            result = analyze(df, rs_rank=rs_ranks.get(t), rs_mom=rs_moms.get(t), is_kr=is_kr)
+        except Exception:
+            continue
+        if result is None:
+            continue
+        # run_scan과 동일한 저유동성 하드 필터 — 실제 눌림목 탭에 뜨는 기준과
+        # 일치시켜야 "전환됨" 배지가 진짜 탭 히트와 어긋나지 않음.
+        avg_turn = result.get("avg_turnover") or 0
+        floor_ = 3e8 if is_kr else 2e6
+        if avg_turn > 0 and avg_turn < floor_:
+            continue
+        converted.append(t)
+    return JSONResponse({"ok": True, "converted": converted, "pending": False,
+                         "checked_at": time.strftime("%Y-%m-%d %H:%M:%S")})
 
 
 @app.post("/api/journal")

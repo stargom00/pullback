@@ -387,7 +387,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.53</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.54</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1239,7 +1239,7 @@ function card(s) {
       </div>`;
     })() : ''}
     ${s.ticker ? `
-    <button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button><button class="journal-btn" style="margin-left:6px;background:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'};border-color:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'}" onclick="quickWatch(this,'${s.ticker}')" ${isPendingWatch(s.ticker) ? 'disabled' : ''} title="원클릭 봇 감시 등록">${isPendingWatch(s.ticker) ? '✓ 감시중' : '⚡ 감시'}</button>` : ''}
+    <button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button>${s.mode === 'leader' ? `<button class="journal-btn" style="margin-left:6px;background:${isLeaderConversionWatch(s.ticker) ? '#12351f' : '#1a2a3f'};border-color:${isLeaderConversionWatch(s.ticker) ? '#12351f' : '#1a2a3f'};color:${isLeaderConversionWatch(s.ticker) ? 'inherit' : '#7fb8ff'}" onclick="watchLeaderConversion(this,'${s.ticker}')" ${isLeaderConversionWatch(s.ticker) ? 'disabled' : ''} title="눌림목 전환 관찰 등록 — 손절 없음, 봇 알림 없음. 대장후보 히트의 74%가 60봉 내 눌림목 탭에 전환(중앙값 6봉). 눌림목 탭을 열 때마다 자동으로 전환 여부를 확인해요.">${isLeaderConversionWatch(s.ticker) ? '✓ 관찰중' : '👁 눌림목 전환 관찰'}</button>` : `<button class="journal-btn" style="margin-left:6px;background:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'};border-color:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'}" onclick="quickWatch(this,'${s.ticker}')" ${isPendingWatch(s.ticker) ? 'disabled' : ''} title="원클릭 봇 감시 등록">${isPendingWatch(s.ticker) ? '✓ 감시중' : '⚡ 감시'}</button>`}` : ''}
   </div>`;
 }
 
@@ -2208,6 +2208,10 @@ function getJournal() { return journalCache; }
 function isPendingWatch(ticker) {
   return (journalCache || []).some(r => r.ticker === ticker && r.status === 'pending');
 }
+// v5.54: 대장후보→눌림목 전환 관찰 중복 등록 방지 — quickWatch의 isPendingWatch와 같은 패턴.
+function isLeaderConversionWatch(ticker) {
+  return (journalCache || []).some(r => r.ticker === ticker && r.status === 'watch' && r.watch_kind === 'leader_conversion');
+}
 
 function setJournal(arr) {
   journalCache = arr;
@@ -2279,6 +2283,11 @@ async function loadJournalFromServer() {
 // ── 페이퍼 추적: 앱 열 때 추적 종목 현재가 갱신 + 자동 종료 판정 ──
 const TRACK_DAYS = 14;   // 추적 기간 2주
 const WATCH_DAYS = 14;   // 대기 유효기간 (돌파 셋업은 이 안에 터져야 유효, 지나면 자동 무산)
+// v5.54: 대장후보→눌림목 전환 관찰 만료(영업일). 측정 결과(n=876) median 6봉,
+// p75=13봉(누적 77.5%), p90=26봉(누적 86.5~92.2% 사이). 돌파임박 트리거(3영업일)
+// 와 성격이 달라(RS95+ 리스트 소속이 핵심인 느린 신호) p90 채택 — p75로 하면
+// 실제 전환의 22.5%를 만료 전에 놓침. docs/leader_to_pullback_watch.md 참고.
+const LEADER_WATCH_EXPIRY_DAYS = 26;
 // 트레이딩뷰 차트 URL — 한국주는 KRX, 미국주는 거래소 자동판별 대신 심볼만
 function tvUrl(tickerOrObj, market) {
   // 카드는 객체(s)를, 일지는 (ticker, market)을 넘김 — 둘 다 처리
@@ -2305,15 +2314,24 @@ function tvUrl(tickerOrObj, market) {
 function _isPriceTrackable(r) {
   if (r.result_r !== '' || r.status === 'missed') return false;
   if (r.trigger_price != null) return true;
+  if (r.watch_kind === 'leader_conversion' && (r.status || 'watch') === 'watch') return true;
   return !!(r.entry && (r.stop || r.status === 'watch')
             && (r.tracking || r.status === 'pending' || r.status === 'entered'));
 }
 
-// v5.44: trigger_date(관찰 등록일)로부터 영업일(주말 제외) 며칠 지났는지.
+// v5.54: 관찰 시작일 — 기존엔 트리거(돌파임박) 관찰 전용 필드명 trigger_date를
+// 그대로 썼는데, 대장후보→눌림목 전환 관찰도 같은 "관찰 시작일" 개념을 쓰게
+// 되면서 필드명이 실제 의미(관찰 종류 불문 공통 시작일)와 어긋남 — 새 이름
+// watch_start_date로 통일. 이미 저장된 옛 레코드(트리거 관찰)는 trigger_date로
+// 남아있으니 폴백으로 계속 읽음.
+function watchStartDate(r) { return r.watch_start_date ?? r.trigger_date; }
+
+// v5.44: 관찰 시작일로부터 영업일(주말 제외) 며칠 지났는지.
 // "다음 영업일부터 판정"(등록 당일 자기 자신과 비교하는 자명한 충족 방지) /
-// "3거래일 만료"(안C 조사 방법론과 동일 N=3) 계산용. 공휴일은 미고려 —
-// 이 프로젝트 전반의 기존 컨벤션(scanner.py의 is_kr_market_open과 동일하게
-// 주말만 걸러내는 근사).
+// "N거래일 만료"(트리거 관찰은 안C 조사와 동일 N=3, 대장후보 전환 관찰은
+// N=26 — docs/leader_to_pullback_watch_investigation.md) 계산용. 공휴일은
+// 미고려 — 이 프로젝트 전반의 기존 컨벤션(scanner.py의 is_kr_market_open과
+// 동일하게 주말만 걸러내는 근사).
 function businessDaysSince(dateStr) {
   if (!dateStr) return 0;
   const start = new Date(dateStr + 'T00:00:00');
@@ -2336,16 +2354,18 @@ function businessDaysSince(dateStr) {
 // "이미 확인된 건 자동정리 대상에서 빼야" 해서 재사용.
 function isTriggerConfirmed(r) {
   if (r.trigger_price == null) return false;
-  const eligible = businessDaysSince(r.trigger_date) >= 1;
+  const wsd = watchStartDate(r);
+  const eligible = businessDaysSince(wsd) >= 1;
   return !!(eligible && r.today_high != null && r.today_volume != null
-    && r.today_checked_date && r.today_checked_date > r.trigger_date
+    && r.today_checked_date && r.today_checked_date > wsd
     && r.today_high >= r.trigger_price && r.today_volume >= r.trigger_volume);
 }
 function triggerInfoHtml(r) {
   if (r.trigger_price == null) return '';
   const isKr = /\.(KS|KQ)$/i.test(r.ticker || '');
   const fmt = v => v == null ? '-' : (isKr ? Math.round(v).toLocaleString() : parseFloat(v).toFixed(2));
-  const bdays = businessDaysSince(r.trigger_date);
+  const wsd = watchStartDate(r);
+  const bdays = businessDaysSince(wsd);
   const eligible = bdays >= 1;   // 등록 다음 영업일부터 판정 (당일 자기 자신 비교 방지)
   const expired = bdays >= 3;    // 측정 방법론과 동일 N=3영업일
   const confirmed = isTriggerConfirmed(r);
@@ -2358,8 +2378,30 @@ function triggerInfoHtml(r) {
         : `<span style="color:var(--muted)">등록 당일 — 내일부터 판정</span>`;
   return `<div style="font-size:9px;color:var(--muted);margin-top:2px;line-height:1.5">
     트리거 <b style="color:inherit">${fmt(r.trigger_price)}</b> / 거래량 <b style="color:inherit">${r.trigger_volume != null ? Math.round(r.trigger_volume).toLocaleString() : '-'}</b>필요
-    <span style="opacity:.7">(등록일 ${r.trigger_date || '-'}${r.trigger_pivot_dist_pct != null ? `, 당시 피벗까지 ${r.trigger_pivot_dist_pct}%` : ''})</span>
+    <span style="opacity:.7">(등록일 ${wsd || '-'}${r.trigger_pivot_dist_pct != null ? `, 당시 피벗까지 ${r.trigger_pivot_dist_pct}%` : ''})</span>
     ${r.today_high != null ? `<br>오늘 고가 ${fmt(r.today_high)} · 거래량 ${Math.round(r.today_volume || 0).toLocaleString()}` : ''}
+    <br>${statusHtml}
+  </div>`;
+}
+
+// v5.54: 대장후보→눌림목 전환 관찰(watch_kind==='leader_conversion') 정보.
+// triggerInfoHtml과 같은 자리에서 나란히 호출 — trigger_price 유무로
+// 갈라지는 기존 흐름과 다른 종류라 별도 함수로 분리(관찰 종류가 늘어도
+// 서로 안 얽히게).
+function leaderWatchInfoHtml(r) {
+  if (r.watch_kind !== 'leader_conversion') return '';
+  const wsd = watchStartDate(r);
+  const bdays = businessDaysSince(wsd);
+  const expired = bdays >= LEADER_WATCH_EXPIRY_DAYS;
+  const converted = !!r.leader_converted;
+  const statusHtml = converted
+    ? `<span style="color:#4ade80;font-weight:700">🎯 눌림목 전환됨${r.leader_converted_date ? ` (${r.leader_converted_date})` : ''}</span>`
+    : expired
+      ? `<span style="color:var(--muted)">⏳ 관찰 기간 종료(${LEADER_WATCH_EXPIRY_DAYS}영업일)</span>`
+      : `<span style="color:var(--amber)">전환 대기중 (D+${bdays})</span>`;
+  return `<div style="font-size:9px;color:var(--muted);margin-top:2px;line-height:1.5">
+    등록 시점 RS <b style="color:inherit">${r.rs ?? '-'}</b> · 20일선 위 <b style="color:inherit">${r.leader_snapshot_ma20_dist_pct != null ? '+' + r.leader_snapshot_ma20_dist_pct + '%' : '-'}</b> · 등록가 <b style="color:inherit">${r.leader_snapshot_price ?? '-'}</b>
+    <span style="opacity:.7">(등록일 ${wsd || '-'})</span>
     <br>${statusHtml}
   </div>`;
 }
@@ -2561,6 +2603,43 @@ async function updateTracking(prefetched, prefetchedClosed) {
     setJournal(j);
     if (document.getElementById('journalView').style.display !== 'none') renderJournal();
   }
+  await checkLeaderConversions(active);
+}
+
+// v5.54: 대장후보→눌림목 전환 판정. updateTracking()과 같은 시점(일지 로드 시,
+// 진입 종목 있으면 60초 폴링)에 같이 돈다 — 트리거 관찰(today_high 갱신)도
+// 같은 주기라 새 폴러를 따로 안 만듦. 서버가 시장 데이터 캐시(다른 탭 로드로
+// 하루 한 번 이상 채워짐)를 재사용해 판정하므로 새 네트워크 fetch 없이
+// 사실상 즉시 응답 — 캐시가 아직 없으면(pending) 이번 주기는 그냥 건너뛰고
+// 다음 주기에 재시도.
+async function checkLeaderConversions(active) {
+  const targets = (active || []).filter(r =>
+    r.watch_kind === 'leader_conversion' && (r.status || 'watch') === 'watch' && !r.leader_converted);
+  if (!targets.length) return;
+  try {
+    const res = await fetch('/api/watch/leader-check', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickers: targets.map(r => r.ticker) })
+    });
+    const j2 = await res.json();
+    if (!j2.ok || j2.pending) return;
+    const converted = new Set(j2.converted || []);
+    if (!converted.size) return;
+    const j = getJournal();
+    let changed = false;
+    for (const r of j) {
+      if (r.watch_kind === 'leader_conversion' && (r.status || 'watch') === 'watch'
+          && !r.leader_converted && converted.has(r.ticker)) {
+        r.leader_converted = true;
+        r.leader_converted_date = kstStr();
+        changed = true;
+      }
+    }
+    if (changed) {
+      setJournal(j); await _saveJournalToServer(j);
+      if (document.getElementById('journalView').style.display !== 'none') renderJournal();
+    }
+  } catch (e) { /* 다음 주기에 재시도 */ }
 }
 
 let pendingStock = null;
@@ -2700,6 +2779,38 @@ async function quickWatch(btn, ticker) {
       // v4.80: /api/watch/quick은 서버 일지에만 저장하고 클라이언트 journalCache는
       // 안 건드려서, 등록 직후 '내 일지' 탭으로 가면 옛 캐시가 그대로 보여
       // 방금 감시 등록한 종목이 안 보이던 문제. 서버에서 다시 읽어와 캐시 동기화.
+      await loadJournalFromServer();
+    } else {
+      btn.textContent = '실패'; btn.disabled = false;
+    }
+  } catch (e) { btn.textContent = '실패'; btn.disabled = false; }
+}
+
+// v5.54: 대장후보→눌림목 전환 관찰 원클릭 등록. quickWatch와 같은 엔드포인트
+// (/api/watch/quick)를 category='관찰'로 재사용 — 대장후보엔 피벗 개념이
+// 없어(analyze_leader에 stop/pivot 필드 자체가 없음) 손절 없이, 봇 알림도
+// 없이 순수 관찰만. 등록 시점 스냅샷(RS·20일선 위치·현재가)을 같이 보내
+// 나중에 "얼마나 안 쉰 상태에서 등록했나" 복기할 수 있게.
+// (docs/leader_to_pullback_watch.md — 대장후보 히트 74%가 60봉 내 눌림목
+// 전환, median 6봉)
+async function watchLeaderConversion(btn, ticker) {
+  const s = lastHits.find(h => h.ticker === ticker);
+  if (!s) return;
+  btn.disabled = true; btn.textContent = '등록중…';
+  try {
+    const res = await fetch('/api/watch/quick', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ticker: s.ticker, name: s.name, market: s.market,
+        category: '관찰', watch_kind: 'leader_conversion',
+        tab: modeTab(s.mode), score: s.score, rs: s.rs,
+        leader_snapshot_price: s.close, leader_snapshot_ma20_dist_pct: s.ma20_dist_pct,
+      })
+    });
+    const j = await res.json();
+    if (j.ok) {
+      btn.textContent = j.exists ? '✓ 관찰중' : '✓ 등록됨';
+      btn.style.background = '#12351f';
       await loadJournalFromServer();
     } else {
       btn.textContent = '실패'; btn.disabled = false;
@@ -2973,7 +3084,10 @@ async function saveJournal() {
     // 최초 감지일 기준)과 다르게 여기선 관찰 등록 시점 기준이라 구분 필요.
     trigger_price: (_cat === '관찰' && s.mode === 'imminent' && s.signal_high != null) ? s.signal_high : null,
     trigger_volume: (_cat === '관찰' && s.mode === 'imminent' && s.avg_volume != null) ? Math.round(s.avg_volume * 1.5) : null,
-    trigger_date: (_cat === '관찰' && s.mode === 'imminent') ? kstStr() : null,
+    // v5.54: trigger_date → watch_start_date로 개명(관찰 종류를 불문하고 공통으로
+    // 쓰는 "관찰 시작일" 필드가 됨 — 옛 이름은 트리거 관찰에만 해당하는 이름이라
+    // 의미가 어긋났음). 읽는 쪽은 watchStartDate(r)가 옛 trigger_date로 폴백.
+    watch_start_date: (_cat === '관찰' && s.mode === 'imminent') ? kstStr() : null,
     trigger_pivot_dist_pct: (_cat === '관찰' && s.mode === 'imminent' && s.pivot_dist_pct != null) ? s.pivot_dist_pct : null,
   };
   const j = getJournal(); j.unshift(rec);
@@ -3406,10 +3520,13 @@ function viewRow(r) {
             ? `<span style="color:var(--muted);font-size:11px">무산</span>${r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:''}`
         // 관찰(watch)은 손절이 없을 수 있어 R 계산 대신 현재가만 표시 (v4.72)
         // v5.44: trigger_price 있으면(돌파임박 관찰) "확인 후 진입" 트리거 정보 추가.
+        // v5.54: watch_kind==='leader_conversion'이면 눌림목 전환 관찰 정보도 추가
+        // (한 레코드가 둘 다에 해당할 일은 없지만, 둘 다 빈 문자열 반환하는
+        // 가드가 있어 나란히 이어붙여도 안전).
         : st === 'watch'
             ? (r.last_price
-                ? `<span style="color:var(--muted);font-size:11px">${/\.(KS|KQ)$/i.test(r.ticker||'') ? Math.round(parseFloat(r.last_price)).toLocaleString() : parseFloat(r.last_price).toFixed(2)}</span>${triggerInfoHtml(r)}`
-                : `<span style="color:var(--muted);font-size:11px">관찰중</span>${triggerInfoHtml(r)}`)
+                ? `<span style="color:var(--muted);font-size:11px">${/\.(KS|KQ)$/i.test(r.ticker||'') ? Math.round(parseFloat(r.last_price)).toLocaleString() : parseFloat(r.last_price).toFixed(2)}</span>${triggerInfoHtml(r)}${leaderWatchInfoHtml(r)}`
+                : `<span style="color:var(--muted);font-size:11px">관찰중</span>${triggerInfoHtml(r)}${leaderWatchInfoHtml(r)}`)
         : (r.tracking && r.last_price && r.entry && r.stop
             ? (() => {
                 const entryN = parseFloat(r.entry), stopN = parseFloat(r.stop);
@@ -3550,15 +3667,26 @@ async function reopenWatch(id) {
   r.closed_date = '';
   setJournal(j); await _saveJournalToServer(j); renderJournal();
 }
-// 확인 기간(3영업일) 지난 트리거 관찰을 일괄로 '관찰종료(자동정리)' 처리.
-// 이미 🟢확인된 건은 대상에서 제외(isTriggerConfirmed) — 사용자가 직접 판단할 몫.
+// v5.54: 관찰 종류별 만료 기간·해소(더 이상 정리 대상 아님) 판정 — 관찰
+// 종류가 늘어도 cleanupExpiredWatches/renderWatchCleanupBar를 안 건드리게
+// 여기 한 군데로 모음.
+function watchExpiryDays(r) {
+  if (r.watch_kind === 'leader_conversion') return LEADER_WATCH_EXPIRY_DAYS;
+  return 3;   // 돌파임박 트리거 관찰 — 안C 조사 방법론과 동일 N=3영업일
+}
+function isWatchResolved(r) {
+  if (r.watch_kind === 'leader_conversion') return !!r.leader_converted;
+  return isTriggerConfirmed(r);
+}
+// 확인/전환 기간이 지난 관찰을 일괄로 '관찰종료(자동정리)' 처리.
+// 이미 해소된(🟢확인·🎯전환) 건은 대상에서 제외 — 사용자가 직접 판단할 몫.
 async function cleanupExpiredWatches() {
   const j = getJournal();
   const targets = j.filter(r => (r.status || 'watch') === 'watch'
-    && (r.category || '') === '관찰' && r.trigger_date
-    && businessDaysSince(r.trigger_date) >= 3 && !isTriggerConfirmed(r));
+    && (r.category || '') === '관찰' && watchStartDate(r)
+    && businessDaysSince(watchStartDate(r)) >= watchExpiryDays(r) && !isWatchResolved(r));
   if (!targets.length) { alert('정리할 만료 관찰이 없어요.'); return; }
-  if (!confirm(`확인 기간(3영업일)이 지난 관찰 ${targets.length}건을 종료 처리할까요?\n(통계에는 안 잡히고, 관찰 뷰의 "종료된 관찰"로 접혀 들어가요. 되돌릴 수 있어요.)`)) return;
+  if (!confirm(`확인/전환 기간이 지난 관찰 ${targets.length}건을 종료 처리할까요?\n(통계에는 안 잡히고, 관찰 뷰의 "종료된 관찰"로 접혀 들어가요. 되돌릴 수 있어요.)`)) return;
   const today = kstStr();
   for (const r of targets) {
     r.status = 'missed';
@@ -3585,9 +3713,9 @@ function renderWatchRows(rows) {
 // 관찰 뷰 상단의 일괄정리 버튼 — 만료 대상이 있을 때만 노출.
 function renderWatchCleanupBar(all) {
   const n = all.filter(r => (r.status || 'watch') === 'watch' && (r.category || '') === '관찰'
-    && r.trigger_date && businessDaysSince(r.trigger_date) >= 3 && !isTriggerConfirmed(r)).length;
+    && watchStartDate(r) && businessDaysSince(watchStartDate(r)) >= watchExpiryDays(r) && !isWatchResolved(r)).length;
   if (!n) return '';
-  return `<div style="margin:6px 0"><button class="exp" style="background:#3a2a1a;border-color:#8c6d2d;color:#f2b33d" onclick="cleanupExpiredWatches()">🧹 확인기간 종료 관찰 일괄정리 (${n}건)</button></div>`;
+  return `<div style="margin:6px 0"><button class="exp" style="background:#3a2a1a;border-color:#8c6d2d;color:#f2b33d" onclick="cleanupExpiredWatches()">🧹 확인/전환 기간 종료 관찰 일괄정리 (${n}건)</button></div>`;
 }
 
 // v4.85: 부분익절 입력 행 — 청산비율(%)·청산가만 받는다. R은 진입가/손절로 자동계산.
