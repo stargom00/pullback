@@ -5,6 +5,23 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.47 [UI] 일지 관찰(watch) 종료 처리 — 무한정 쌓이던 문제 대응.
+        [1] 관찰중 행에 종료 액션 3종: ▶진입함(실제 매매로 전환, category를
+        관찰에서 빼고 status='entered'+편집모드로 진입가/손절가 입력)
+        / ✖무산(셋업 붕괴, status='missed') / ⏹종료(승패 판단 없이 그냥
+        종료, status='missed'지만 closed_reason으로 구분). 종료된 관찰은
+        재관찰(🔓) 버튼으로 되돌릴 수 있음(기존 종료→진입중 reopenRow와
+        같은 패턴).
+        [2] 확인 기간(3영업일, v5.44) 지난 트리거 관찰 일괄정리 버튼 —
+        이미 🟢확인된 건은 자동 제외(isTriggerConfirmed 재사용), 확인 안
+        된 것만 대상.
+        [3] 관찰 뷰에서 종료된 관찰은 삭제 대신 "종료된 관찰 (N건)"으로
+        접혀 하단에(기본 접힘, 클릭해서 펼침) — 기존 종료 탭의 월별 접기
+        (renderClosedMonths)와 같은 UX 패턴.
+        [기반 확인] 기존 종료 처리(entered→closed, pending→missed 등)가
+        전부 status/tracking 필드 갱신 → setJournal→서버저장→렌더 패턴임을
+        확인 후 관찰에도 동일 패턴 적용 — 새 인프라 없이 기존 상태기계
+        재사용.
 v5.46 [UI] 패턴 탭 서브탭(전체/컵앤핸들/치솟은깃발/더블바닥/급등매집)을
         섹터 칩(.schip, 둥근 pill·amber)과 시각적으로 완전히 분리 — 전용
         스타일(.psub, 사각 모서리·보라 액센트)과 전용 위치(필터 줄 바로
@@ -2032,7 +2049,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.46"
+VERSION = "v5.47"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

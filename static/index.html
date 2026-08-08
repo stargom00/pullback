@@ -380,7 +380,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.46</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.47</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -2216,6 +2216,15 @@ function businessDaysSince(dateStr) {
 // (docs/imminent_stop_entry_investigation.md 3.6) 결론("진짜 가치는 손절
 // 공식이 아니라 확인 후 진입 규율")을 화면이 도와주는 배지. 만료돼도 숫자
 // 자체(트리거가·거래량)는 계속 보이게 — 회색조는 상태 문구에만 적용.
+// v5.47: confirmed 판정을 별도 함수로 분리 — 일괄정리(cleanupExpiredWatches)에서도
+// "이미 확인된 건 자동정리 대상에서 빼야" 해서 재사용.
+function isTriggerConfirmed(r) {
+  if (r.trigger_price == null) return false;
+  const eligible = businessDaysSince(r.trigger_date) >= 1;
+  return !!(eligible && r.today_high != null && r.today_volume != null
+    && r.today_checked_date && r.today_checked_date > r.trigger_date
+    && r.today_high >= r.trigger_price && r.today_volume >= r.trigger_volume);
+}
 function triggerInfoHtml(r) {
   if (r.trigger_price == null) return '';
   const isKr = /\.(KS|KQ)$/i.test(r.ticker || '');
@@ -2223,9 +2232,7 @@ function triggerInfoHtml(r) {
   const bdays = businessDaysSince(r.trigger_date);
   const eligible = bdays >= 1;   // 등록 다음 영업일부터 판정 (당일 자기 자신 비교 방지)
   const expired = bdays >= 3;    // 측정 방법론과 동일 N=3영업일
-  const confirmed = eligible && r.today_high != null && r.today_volume != null
-    && r.today_checked_date && r.today_checked_date > r.trigger_date
-    && r.today_high >= r.trigger_price && r.today_volume >= r.trigger_volume;
+  const confirmed = isTriggerConfirmed(r);
   const statusHtml = confirmed
     ? `<span style="color:#4ade80;font-weight:700">🟢 확인됨(거래량 동반 돌파)</span>`
     : expired
@@ -2949,6 +2956,7 @@ function flagStats(closed) {
 let journalTab = 'entered';        // entered | pending | closed | missed — 상태별 주 탭
 let journalCatFilter = 'all';      // all | 추세추종 | 단타 | 관찰 — 탭 안에서 한 번 더 좁히는 보조 필터
 const closedMonthOpen = new Set(); // 펼쳐둔 종료월(YYYY-MM) — 기본은 전부 접힘
+let watchClosedOpen = false;       // v5.47: 관찰 뷰의 "종료된 관찰" 펼침 상태 — 기본 접힘
 let editingId = null;
 let partialEditingId = null;   // v4.85: 부분익절 입력 행 펼침 상태
 
@@ -3092,6 +3100,7 @@ function renderJournal() {
   const mainTab = (key, label) => `<button class="jrnl-tab ${(journalTab===key && journalCatFilter!=='관찰')?'on':''}" onclick="journalTab='${key}';journalCatFilter=(journalCatFilter==='관찰'?'all':journalCatFilter);renderJournal()">${label} <span style="opacity:.6;font-size:12px">${tabCount(key)}</span></button>`;
   const catBtn = (key, label) => `<button class="fbtn ${journalCatFilter===key?'on':''}" onclick="journalCatFilter='${key}';renderJournal()">${label}</button>`;
   const isClosedTab = journalTab === 'closed' && journalCatFilter !== '관찰';
+  const isWatchView = journalCatFilter === '관찰';   // v5.47: 관찰 전용 렌더(종료건 접기) 분기
 
   // ── R 리스크 대시보드 ──
   const _open = openRiskR();
@@ -3158,7 +3167,7 @@ function renderJournal() {
       </div>
       <div class="statcard">
         <div class="statcard-t">👁 관찰</div>
-        <div class="statcard-v">${all.filter(r => (r.category||'추세추종')==='관찰').length}종목 추적 중 · 매매 통계 제외</div>
+        <div class="statcard-v">${all.filter(r => (r.category||'추세추종')==='관찰' && (r.status||'watch')==='watch').length}종목 관찰중${(() => { const n = all.filter(r => (r.category||'추세추종')==='관찰' && (r.status||'watch')!=='watch').length; return n ? ` (종료 ${n})` : ''; })()} · 매매 통계 제외</div>
       </div>
       <div class="statcard">
         <div class="statcard-t">⚡ 단타</div>
@@ -3175,6 +3184,7 @@ function renderJournal() {
       ${catBtn('all','전체')} ${catBtn('추세추종','📈 추세')} ${catBtn('단타','⚡ 단타')} ${catBtn('관찰','👁 관찰')}
     </div>
     ${isClosedTab ? renderClosedSummary(closedTabStats(j)) : ''}
+    ${isWatchView ? renderWatchCleanupBar(all) : ''}
     <div style="overflow-x:auto">
     <table class="jtable">
       <thead><tr>
@@ -3183,6 +3193,7 @@ function renderJournal() {
       </tr></thead>
       <tbody>
         ${isClosedTab ? renderClosedMonths(j)
+          : isWatchView ? renderWatchRows(j)
           : j.map(r => r.id === partialEditingId ? partialRow(r) : (r.id === editingId ? editRow(r) : viewRow(r))).join('')}
       </tbody>
     </table></div>`;
@@ -3200,10 +3211,25 @@ function viewRow(r) {
       ? `<span class="st-badge" style="background:#3a2a2a;color:var(--muted)">✖무산</span>`
       : `<span class="st-badge" style="background:#2a2a3a;color:var(--muted)">✔종료</span>`;
   const watch = (r.category || '추세추종') === '관찰';
-  const watchBadge = watch ? `<span class="st-badge" style="background:#1a2a3f;color:#7fb8ff">👁관찰</span>` : '';
-  const borderCol = watch ? '#3b6ea5' : st === 'entered' ? '#40916c' : st === 'pending' ? '#a8842c' : st === 'missed' ? '#333' : '#3a3a4a';
+  const watchActive = watch && st === 'watch';
+  // v5.47: 종료된 관찰(status가 더 이상 'watch'가 아님)은 실제 종결상태
+  // 배지(✖무산/✔종료 등, stBadge)를 그대로 보여줌 — 예전엔 category만 보고
+  // 무조건 "👁관찰" 배지를 달아서 종료됐는지 구분이 안 됐음.
+  const watchBadge = watchActive ? `<span class="st-badge" style="background:#1a2a3f;color:#7fb8ff">👁관찰</span>` : '';
+  const borderCol = watchActive ? '#3b6ea5' : st === 'entered' ? '#40916c' : st === 'pending' ? '#a8842c' : st === 'missed' ? '#333' : '#3a3a4a';
+  // 관찰중: 진입함/무산/종료 세 갈래. 종료된 관찰: 재관찰 되돌리기만.
   // 대기 중이면 진입/무산, 진입 중이면 종료 빠른 버튼
-  const stActions = st === 'pending'
+  const stActions = watchActive
+      ? `<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">
+           <span class="st-act" onclick="markWatchEntered(${r.id})" title="실제 매매로 전환" style="border-color:#40916c;color:#7fe0a7">▶진입함</span>
+           <span class="st-act" onclick="markWatchMissed(${r.id})" title="셋업 무산 — 관찰 종료" style="border-color:#8c4040;color:#ff9b9b">✖무산</span>
+           <span class="st-act" onclick="markWatchClosed(${r.id})" title="그냥 관찰 종료 (승패 판단 없음)" style="border-color:#666;color:#aaa">⏹종료</span>
+         </div>`
+    : (watch && st !== 'watch')
+      ? `<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">
+           <span class="st-act" onclick="reopenWatch(${r.id})" title="실수로 종료했으면 다시 관찰중으로" style="border-color:#666;color:#aaa">🔓재관찰</span>
+         </div>`
+    : st === 'pending'
       ? `<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">
            <span class="st-act" onclick="markEntered(${r.id})" title="실제 진입함" style="border-color:#40916c;color:#7fe0a7">▶진입</span>
            <span class="st-act" onclick="markMissed(${r.id})" title="돌파 안 옴 · 무산" style="border-color:#8c4040;color:#ff9b9b">✖무산</span>
@@ -3225,7 +3251,7 @@ function viewRow(r) {
   const subInfo = [r.tab, r.rs != null ? 'RS '+r.rs : '', r.sector].filter(Boolean).join(' · ');
   return `<tr class="${r.result_r===''&&st!=='missed'&&!broken?'open-pos':''}" style="border-left:3px solid ${borderCol};${st==='missed'||broken?'opacity:.5':st==='closed'?'opacity:.78':''}">
     <td class="mono">${r.date}</td>
-    <td style="white-space:nowrap">${watch ? watchBadge : stBadge}${watch ? '' : stActions}${broken?`<div class="st-badge" style="background:#3a2020;color:#ff6b6b;margin-top:3px" title="손절가가 진입가보다 높음 — 과거 버그로 저장된 깨진 데이터. 통계에서 제외됨. 삭제 권장.">⚠️데이터오류</div>`:''}</td>
+    <td style="white-space:nowrap">${watchActive ? watchBadge : stBadge}${stActions}${broken?`<div class="st-badge" style="background:#3a2020;color:#ff6b6b;margin-top:3px" title="손절가가 진입가보다 높음 — 과거 버그로 저장된 깨진 데이터. 통계에서 제외됨. 삭제 권장.">⚠️데이터오류</div>`:''}</td>
     <td><a href="${tvUrl(r.ticker, r.market)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${r.name} <span style="font-size:9px;opacity:.5">↗</span>${r.manual?`<span class="st-badge" style="background:#1e3a2e;color:#5fd99a;margin-left:4px;font-size:9px">수동</span>`:''}<div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div>${subInfo?`<div style="font-size:10px;color:var(--muted);opacity:.8">${subInfo}</div>`:''}</a></td>
     <td class="mono">${(() => {
       const isKr = /\.(KS|KQ)$/i.test(r.ticker || '');
@@ -3354,6 +3380,98 @@ async function reopenRow(id) {
   r.closed_date = '';
   r.target_reached = false;
   setJournal(j); await _saveJournalToServer(j); renderJournal();
+}
+
+// ── v5.47: 관찰(watch) 종료 처리 — 무산 / 진입함 / 그냥종료 세 갈래 ──
+// 기존 진입/대기 상태전이 함수(markEntered/markMissed/reopenRow)와 같은
+// 패턴(status·tracking 갱신 → setJournal → 서버저장 → 렌더). "관찰이
+// 무한정 남는 문제" 대응 — status만 'watch'가 아니게 바뀌면 관찰 뷰에서
+// "종료된 관찰"로 접혀 들어간다(renderWatchRows).
+
+// 관찰 → 진입: 실제 매매로 전환. 카테고리를 관찰에서 빼서(모드 기본 카테고리로)
+// 일반 진입중 종목이 되게 하고, 진입가/손절가를 바로 채울 수 있게 편집모드로.
+async function markWatchEntered(id) {
+  const j = getJournal();
+  const r = j.find(x => x.id === id); if (!r) return;
+  if (!confirm(`${r.name}을(를) 실제 매매 기록으로 전환할까요?\n관찰에서 빠지고 진입중 상태가 됩니다 — 다음 화면에서 진입가·손절가를 확인/수정해주세요.`)) return;
+  r.category = modeCategory(r.mode_raw || '');
+  r.cat = r.category;
+  r.status = 'entered';
+  r.tracking = !!(r.entry && r.stop);
+  r.date = kstStr();
+  r.closed_reason = '';
+  setJournal(j); await _saveJournalToServer(j);
+  editingId = id;
+  renderJournal();
+}
+// 관찰 → 무산: 셋업이 깨졌음(예: 돌파임박인데 눌림 붕괴). 통계 제외.
+async function markWatchMissed(id) {
+  const j = getJournal();
+  const r = j.find(x => x.id === id); if (!r) return;
+  r.status = 'missed';
+  r.tracking = false;
+  r.closed_reason = '관찰종료(무산)';
+  r.closed_date = kstStr();
+  setJournal(j); await _saveJournalToServer(j); renderJournal();
+}
+// 관찰 → 그냥 종료: 셋업 붕괴는 아니지만 더 안 지켜봄(승패 판단 없음).
+// missed와 같은 종결 상태를 재사용(통계 제외 로직 그대로 활용)하되 사유만 구분.
+async function markWatchClosed(id) {
+  const j = getJournal();
+  const r = j.find(x => x.id === id); if (!r) return;
+  r.status = 'missed';
+  r.tracking = false;
+  r.closed_reason = '관찰종료(수동)';
+  r.closed_date = kstStr();
+  setJournal(j); await _saveJournalToServer(j); renderJournal();
+}
+// 종료된 관찰 → 다시 관찰중으로 (실수로 종료했을 때).
+async function reopenWatch(id) {
+  const j = getJournal();
+  const r = j.find(x => x.id === id); if (!r) return;
+  r.status = 'watch';
+  r.closed_reason = '';
+  r.closed_date = '';
+  setJournal(j); await _saveJournalToServer(j); renderJournal();
+}
+// 확인 기간(3영업일) 지난 트리거 관찰을 일괄로 '관찰종료(자동정리)' 처리.
+// 이미 🟢확인된 건은 대상에서 제외(isTriggerConfirmed) — 사용자가 직접 판단할 몫.
+async function cleanupExpiredWatches() {
+  const j = getJournal();
+  const targets = j.filter(r => (r.status || 'watch') === 'watch'
+    && (r.category || '') === '관찰' && r.trigger_date
+    && businessDaysSince(r.trigger_date) >= 3 && !isTriggerConfirmed(r));
+  if (!targets.length) { alert('정리할 만료 관찰이 없어요.'); return; }
+  if (!confirm(`확인 기간(3영업일)이 지난 관찰 ${targets.length}건을 종료 처리할까요?\n(통계에는 안 잡히고, 관찰 뷰의 "종료된 관찰"로 접혀 들어가요. 되돌릴 수 있어요.)`)) return;
+  const today = kstStr();
+  for (const r of targets) {
+    r.status = 'missed';
+    r.tracking = false;
+    r.closed_reason = '확인기간종료(자동정리)';
+    r.closed_date = today;
+  }
+  setJournal(j); await _saveJournalToServer(j); renderJournal();
+}
+// 관찰 뷰 전용 행 렌더 — 진행중은 그대로, 종료된 건 접어서 하단에(기본 접힘).
+function renderWatchRows(rows) {
+  const activeRows = rows.filter(r => (r.status || 'watch') === 'watch');
+  const closedRows = rows.filter(r => (r.status || 'watch') !== 'watch');
+  const rowHtml = r => r.id === editingId ? editRow(r) : viewRow(r);
+  const activeHtml = activeRows.map(rowHtml).join('');
+  if (!closedRows.length) return activeHtml;
+  const head = `<tr onclick="watchClosedOpen=!watchClosedOpen;renderJournal()" style="cursor:pointer;background:var(--surface)">
+    <td colspan="8" style="padding:9px 12px;font-weight:700">
+      ${watchClosedOpen ? '▾' : '▸'} 종료된 관찰 <span style="font-weight:400;color:var(--muted);font-size:12px">— ${closedRows.length}건 (진입함/무산/수동종료 포함)</span>
+    </td></tr>`;
+  const body = watchClosedOpen ? closedRows.map(rowHtml).join('') : '';
+  return activeHtml + head + body;
+}
+// 관찰 뷰 상단의 일괄정리 버튼 — 만료 대상이 있을 때만 노출.
+function renderWatchCleanupBar(all) {
+  const n = all.filter(r => (r.status || 'watch') === 'watch' && (r.category || '') === '관찰'
+    && r.trigger_date && businessDaysSince(r.trigger_date) >= 3 && !isTriggerConfirmed(r)).length;
+  if (!n) return '';
+  return `<div style="margin:6px 0"><button class="exp" style="background:#3a2a1a;border-color:#8c6d2d;color:#f2b33d" onclick="cleanupExpiredWatches()">🧹 확인기간 종료 관찰 일괄정리 (${n}건)</button></div>`;
 }
 
 // v4.85: 부분익절 입력 행 — 청산비율(%)·청산가만 받는다. R은 진입가/손절로 자동계산.
