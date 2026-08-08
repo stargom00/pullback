@@ -5,6 +5,37 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.55 [기능] 슈퍼대장 명단 활용법 재설계 — 안1(buy_zone 대기) 탈락 이후
+        "명단으로만 두기 전에" 3가지 추가 측정(docs/all_tabs_common_
+        yardstick_investigation.md v5.55 섹션). [①눌림목 필터] 눌림목
+        히트를 슈퍼대장 소속/비소속으로 나누면 EV 0.151→0.266로 개선
+        (돌파/박스돌파/돌파임박은 도움 안 되거나 나빠 미적용). 슈퍼대장은
+        신호등 RS≥90의 완전한 부분집합(소속 100%가 RS≥90)이지만 RS90단독
+        (EV 0.190)보다 한 단계 더 엄격해 별도 필터 가치 있음. RS≥95 근사
+        판정은 실제 analyze_super()보다 24.2% 더 잡는데 EV가 낮아(0.244
+        vs 0.266) 근사 대신 실제 판정 채택 — 비용 차이 없음(이미 fetch된
+        데이터에 연산 한 번 추가). run_scan()이 mode=='pullback'일 때
+        각 히트에 is_super 필드 부착, 카드에 "👑 슈퍼대장만" 토글(눌림목
+        전용, 기존 필터 줄에 배치, 신호등과 별개 필터임을 툴팁에 명시).
+        [②즉시 진입] 안1 실패 원인이 "이 종목을 사서"가 아니라 "기다려서"
+        였는지 검증 — 진입=신호일 종가(무조건, 생존편향 함정 없음), 손절
+        4안(20일선-2%/50일선-2%/ATR×2/significant_support) 2R 레이스
+        전부 안1(EV 0.26)을 크게 웃돎(EV 0.52~0.72). EV 1위는 50일선-2%
+        (0.718)지만 손절폭 median 17.2%로 실행이 어려워, ATR×2(EV 0.641,
+        median 10.3% — 절반)를 채택. analyze_super()에 is_kr 파라미터
+        추가, _rr_block으로 진입(현재가)/손절(ATR×2)/리스크%/손익비 계산,
+        카드에 metrics + 전용 경고 배너("되돌림 기다리지 않고 즉시 진입
+        ... buy_zone 대기는 검증 실패") 추가. RISK_TIER_MODES에 super
+        추가해 기존 🔵⚪🟠🔴 배지·필터 재사용. buy_zone 근접/status "✓"
+        표기가 진입신호로 오인될 수 있어("매수 확인✓"/"담을곳 근접" 배지
+        제거, status는 회색조 참고 칩으로, 담을곳엔 "참고, 진입기준 아님"
+        명시) — Script D(near_buy_zone 무차이)와 ③(아래) 둘 다 이 표시가
+        근거 없었음을 뒷받침. [③status 하방] ATR×2 기준 status(7종)별
+        2R EV — "20일선 지지✓"(이름상 확인됨)가 손절률 최고(51.0%)·EV
+        최저(0.448), "조정 깊음"(이름상 나쁜 신호)이 손절률 최저·EV
+        2위(0.855)로 라벨과 실제 성과가 반대. 다만 최악 status 제외해도
+        전체 EV 개선이 +2%뿐이라(신고가/눌림진행/20일선테스트가 81% 차지)
+        별도 필터는 구현 안 하고 보류 — ②의 badge 정리로 충분하다고 판단.
 v5.54 [기능] 대장후보→눌림목 전환 관찰. Script D(전 탭 공통잣대 조사)에서
         확인한 대장후보 히트의 74%가 60봉 내 눌림목 전환(median 6봉)을
         기존 감시(⚡)/관찰(👁) 인프라로 알려줌. [카드] 대장후보 카드의
@@ -2179,7 +2210,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.54"
+VERSION = "v5.55"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -3276,7 +3307,7 @@ async def run_scan(market: str, mode: str) -> dict:
     _scan_timing = bundle.get("timing")
 
     fn = {"turnaround": analyze_turnaround, "leader": analyze_leader, "super": analyze_super, "breakout": analyze_breakout, "surge": analyze_surge, "imminent": analyze_imminent, "boxbreak": analyze_boxbreak, "breakdown": analyze_breakdown, "pattern": analyze_pattern}.get(mode, analyze)
-    supports_intraday = mode in ("pullback", "turnaround", "imminent", "boxbreak", "breakout", "breakdown", "pattern")  # is_kr 인자를 받는 모드
+    supports_intraday = mode in ("pullback", "turnaround", "imminent", "boxbreak", "breakout", "breakdown", "pattern", "super")  # is_kr 인자를 받는 모드
     alerts = load_alerts()
     hits = []
     # 진단용 시장별 카운터
@@ -3311,6 +3342,15 @@ async def run_scan(market: str, mode: str) -> dict:
         alert_kind = alerts.get(t.upper())
         # 미너비니식 클라이맥스(과열/매도) 경고 — 모든 모드에 부착
         cw = climax_warning(df["Close"], df["High"], df["Low"], df["Volume"])
+        # v5.55: 눌림목 전용 — 슈퍼대장(RS95+ + 모멘텀) 소속 여부. 측정 결과
+        # (docs/all_tabs_common_yardstick_investigation.md 후속) 눌림목
+        # 히트를 슈퍼대장 소속으로만 좁히면 EV 0.151→0.266로 개선, RS≥90
+        # 신호등의 완전한 부분집합이라 신호등을 대체하는 게 아니라 그보다
+        # 한 단계 더 엄격한 별도 필터. 근사(RS≥95만)보다 실제 analyze_super()
+        # 호출이 EV 0.244→0.266로 더 정확해 그대로 사용(비용 차이 없음).
+        if mode == "pullback":
+            result["is_super"] = analyze_super(df, rs_rank=rs_ranks.get(t),
+                                               rs_mom=rs_moms.get(t), is_kr=is_kr) is not None
         hits.append({"ticker": t, "name": universe[t], "market": mkt,
                      "sector": _sector_of(t), "alert": alert_kind,
                      "climax": cw["climax"], "climax_reasons": cw["reasons"],

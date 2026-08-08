@@ -2291,7 +2291,8 @@ SUPER_CONFIG = {
 
 
 def analyze_super(df: pd.DataFrame, rs_rank: int | None = None,
-                  rs_mom: int | None = None, cfg: dict = SUPER_CONFIG) -> dict | None:
+                  rs_mom: int | None = None, is_kr: bool = False,
+                  cfg: dict = SUPER_CONFIG) -> dict | None:
     """RS 95+ 종목을 위치(신고가/눌림/이평선 부근) 무관하게 모두 포착.
     현재 상태를 status로 분류해 '담을곳'인지 '대기'인지 판단 보조."""
     if df is None or len(df) < cfg["min_bars"]:
@@ -2369,6 +2370,16 @@ def analyze_super(df: pd.DataFrame, rs_rank: int | None = None,
                   + (10 if at_new_high else 0)
                   + (10 * max(0.0, min(rs_mom or 0, 30)) / 30), 1)
 
+    # v5.55: 진입 좌표 — buy_zone 대기 안(안1)이 검증 실패했음이 확인됨
+    # (docs/all_tabs_common_yardstick_investigation.md Script F — 60봉 내
+    # 미터치 27.9%가 오히려 median +75.4%로 더 강해서, 대기=최고 수익 기회를
+    # 놓치는 구조). 대신 즉시 진입(entry=현재가) + ATR×2 손절로 재측정한
+    # 4개 손절 안(20일선-2%/50일선-2%/ATR×2/significant_support) 중
+    # ATR×2가 EV(0.641)와 손절폭(median 10.3%, 다른 3안의 절반 수준) 균형이
+    # 가장 실전적이라 채택. `_rr_block`으로 카드용 stop/risk_pct/rr 통일.
+    rr = _rr_block(close, close - atr(h, lo, c, 14) * 2, h, lo, c,
+                   entry=close, is_kr=is_kr)
+
     return {
         "mode": "super",
         "mom_3m_pct": round(_mom * 100, 1),
@@ -2388,6 +2399,7 @@ def analyze_super(df: pd.DataFrame, rs_rank: int | None = None,
         "buy_zone": round(buy_zone, 2),
         "rsi": round(cur_rsi, 1),
         "vol_dry": False,
+        **rr,
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
             None if math.isnan(x) else round(float(x), 4)

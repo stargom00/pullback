@@ -387,7 +387,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.54</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.55</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -421,6 +421,7 @@ tr.editing{background:rgba(242,179,61,.06)}
     <button class="tab" id="riskSortToggle" title="손절폭(리스크%) 좁은 순으로 정렬 — 타이트한 진입 자리가 위로. 단 ATR(일상 변동)보다 좁은 손절은 노이즈에 털릴 수 있어 ⚠️ 표시">↕ 손절좁은순</button>
     <button class="tab" id="bearOkToggle" title="약세장 적격(💎)만 표시 — 탄탄한베이스 + RS90+ + 손절폭적정, 3조건 전부 충족. 게이트 🟡🔴일 때 125개 후보에서 옥석을 가리는 필터. 대부분 걸러져서 몇 개만 남는 게 정상.">💎 적격만</button>
     <button class="tab" id="accumSortToggle" title="🧲 매집흔적 점수(A-B-C 패턴 전용, 보조 지표) 높은 순 정렬 — 판정 불가(데이터 부족) 종목은 맨 뒤로">🧲 매집순</button>
+    <button class="tab" id="superOnlyToggle" style="display:none" title="슈퍼대장(RS95+ · 3개월 모멘텀15%+) 소속 종목만 — 신호등 🟢(RS≥90)의 부분집합이라 더 엄격한 별도 필터. 실측: 전체 EV 0.151R → 슈퍼대장 소속만 0.266R (docs/all_tabs_common_yardstick_investigation.md)">👑 슈퍼대장만</button>
   </div>
   <button class="refresh" id="refresh">다시 스캔</button>
 </header>
@@ -734,7 +735,7 @@ function riskTierBadge(riskPct) {
 }
 // risk_pct 필드가 있는 모드만 — 없는 탭(대장후보/슈퍼대장/Stage2/IBD9/실적우수/
 // 급등/인버스/붕괴/섹터/마감정리/일지)에선 배지도 필터도 표시하지 않음.
-const RISK_TIER_MODES = new Set(['pullback', 'turnaround', 'breakout', 'boxbreak', 'imminent', 'pattern', 'strong_pivot']);
+const RISK_TIER_MODES = new Set(['pullback', 'turnaround', 'breakout', 'boxbreak', 'imminent', 'pattern', 'strong_pivot', 'super']);
 let riskTierFilter = new Set();   // 선택된 tier key들 (비어있으면 필터 없음)
 function renderRiskTierFilter() {
   const bar = document.getElementById('riskTierBar');
@@ -1070,11 +1071,18 @@ function card(s) {
       <div class="metric"><div class="k">ATR</div><div class="v" title="일간 변동성(ATR/현재가). 손절폭 넓음 판정 기준(ATR×1.5)의 근거값.">${s.atr_pct != null ? s.atr_pct + '%' : '-'}</div></div>
     </div>` : s.mode === 'super' ? `
     <div class="metrics mono">
-      <div class="metric"><div class="k">상태</div><div class="v" style="font-size:12px">${s.status}</div></div>
+      <div class="metric"><div class="k">진입 <span style="font-size:9px;opacity:.6">(즉시)</span></div><div class="v">${fmtPrice(s.close, s.market)}</div></div>
+      <div class="metric"><div class="k">손절 <span style="font-size:9px;opacity:.6">(ATR×2)</span></div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
+      <div class="metric"><div class="k">리스크</div><div class="v">${s.risk_pct}%</div></div>
+      <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
+    </div>
+    <div class="metrics mono" style="border-top:none;padding-top:0">
+      <div class="metric"><div class="k">상태 <span style="font-size:9px;opacity:.6">(참고)</span></div><div class="v" style="font-size:12px;opacity:.75">${s.status}</div></div>
       <div class="metric"><div class="k">고점까지</div><div class="v">${s.dist_from_high_pct}%</div></div>
-      <div class="metric"><div class="k">담을곳</div><div class="v">${fmtPrice(s.buy_zone, s.market)}</div></div>
+      <div class="metric"><div class="k">담을곳 <span style="font-size:9px;opacity:.6" title="참고용 — 진입 기준 아님(실측: 담을곳 근접 여부로 성과 구분 안 됨)">(참고)</span></div><div class="v" style="opacity:.6">${fmtPrice(s.buy_zone, s.market)}</div></div>
       <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
-    </div>` : s.mode === 'stage2' ? `
+    </div>
+    <div class="surge-warn" style="background:rgba(255,107,107,.06);border-color:rgba(255,107,107,.25);margin-top:8px">⚠️ 슈퍼대장은 되돌림을 기다리지 않고 즉시 진입하는 탭입니다. buy_zone 대기 방식은 검증 실패했습니다(되돌림 없이 가는 종목이 오히려 더 강함). 대신 손절폭이 median 10%로 다른 탭(눌림목 3.3%)보다 넓으니 포지션 크기를 줄이세요.</div>` : s.mode === 'stage2' ? `
     <div class="metrics mono">
       <div class="metric"><div class="k">RS(3·6·12M)</div><div class="v" style="color:var(--rs)">${s.rs ?? '-'}</div></div>
       <div class="metric"><div class="k">고점까지</div><div class="v">-${s.dist_from_high_pct}%</div></div>
@@ -1170,15 +1178,7 @@ function card(s) {
     </div>` : s.mode === 'super' ? `
     <div class="badges">
       <span class="badge on">RS ${s.rs}</span>
-      ${(() => {
-        if (s.status === '신고가') return '<span class="badge">추격 주의</span>';
-        if (s.status && s.status.includes('지지✓')) return '<span class="badge on">매수 확인✓</span>';
-        if (s.status && s.status.includes('지지')) return '<span class="badge on">매수 확인✓</span>';
-        if (s.status && s.status.includes('테스트')) return '<span class="badge on">지지 테스트중</span>';
-        if (s.near_buy_zone) return '<span class="badge on">담을곳 근접</span>';
-        if (s.status === '조정 깊음') return '<span class="badge">추세 점검</span>';
-        return `<span class="badge">담을곳 -${s.buy_zone_dist_pct}%</span>`;
-      })()}
+      <span class="badge" style="opacity:.65" title="참고용 표시일 뿐 진입 신호가 아닙니다 — 실측 결과 status·담을곳 근접 여부로 성과가 갈리지 않았습니다. 이 탭은 즉시 진입(entry=현재가) 방식이며 status는 현재 위치를 알려주는 정보일 뿐입니다.">${s.status}${s.status === '신고가' ? ' (추격 주의)' : ''}</span>
       ${s.rs_mom >= 10 ? '<span class="badge on">RS 개선↗</span>' : ''}
     </div>` : s.mode === 'stage2' ? `
     <div class="badges">
@@ -1252,6 +1252,7 @@ let strictMode = false;
 let riskSort = false;
 let bearOkOnly = false;   // v4.65: 💎 약세장적격만
 let accumSort = false;    // v5.19: 🧲 매집순 (ABC 패턴 전용)
+let superOnlyFilter = false;   // v5.55: 👑 슈퍼대장만 (눌림목 전용)
 let patternSubFilter = 'all';  // v5.36: 패턴 탭 서브필터 — 'all' 또는 s.pattern 값 그대로
 
 const PATTERN_SUBTABS = [
@@ -1279,6 +1280,11 @@ document.getElementById('riskSortToggle').addEventListener('click', (e) => {
 document.getElementById('accumSortToggle').addEventListener('click', (e) => {
   accumSort = !accumSort;
   e.target.classList.toggle('active', accumSort);
+  renderCards();
+});
+document.getElementById('superOnlyToggle').addEventListener('click', (e) => {
+  superOnlyFilter = !superOnlyFilter;
+  e.target.classList.toggle('active', superOnlyFilter);
   renderCards();
 });
 let favorites = [];
@@ -1776,6 +1782,13 @@ function renderCards() {
       const riskOk = (h.risk_pct ?? 99) <= 8;
       return rsOk && volOk && rrOk && riskOk;
     });
+  }
+  // v5.55: 👑 슈퍼대장만 — 눌림목 전용. 신호등 RS≥90의 부분집합(슈퍼대장은
+  // RS≥95+모멘텀)이라 신호등을 대체하는 게 아니라 그보다 엄격한 별도 필터.
+  const superToggleBtn = document.getElementById('superOnlyToggle');
+  if (superToggleBtn) superToggleBtn.style.display = (mode === 'pullback') ? '' : 'none';
+  if (superOnlyFilter && mode === 'pullback') {
+    list = list.filter(h => h.is_super === true);
   }
   // v5.36: 패턴 서브탭 — 카운트는 여기까지의 필터(시장·검색·주도주만 등) 반영,
   // 서브필터 자체 적용은 카운트 계산 다음에(0개면 그대로 빈 리스트가 되고
