@@ -5,6 +5,22 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.50 [UI] 전 탭 공통 잣대 측정(docs/all_tabs_common_yardstick_investigation.md,
+        Script A~F) 결과 반영. 패턴 4종(급등매집/컵앤핸들/더블바닥/치솟은깃발)과
+        Stage2가 시점매칭 대조군 대비 우위가 없거나(급등매집: EV 0.154=0.154
+        동일) 역선택(컵앤핸들 0.075<0.110, 더블바닥 0.114<0.147, 치솟은깃발
+        0.030≪0.145 약 5배 격차, Stage2는 유동성필터 후에도 상승우위
+        +2.3%p뿐인데 하락위험은 오히려 4.2%p 더 나쁨)임이 실측 확인돼,
+        지우지 않고 "보이되 오해하지 않게" 처리. [1] #modeTabs에서 두 탭을
+        tab-exp 클러스터 끝(섹터 앞)으로 재배치, 배지를 "실험"→"검증실패"
+        (.exp-tag.danger, 빨간색)로 변경. [2] 카드에 서브패턴별로 다른 경고
+        문구 배너 추가(치솟은깃발처럼 격차가 큰 탭을 공통 문구로 뭉뚱그리면
+        정보 손실이라 patternWarningText()로 분리) + Stage2 전용 경고 배너.
+        [참고] 같은 라운드에서 슈퍼대장 안1(진입=buy_zone 즉시체결 가정, EV
+        1.22)도 buy_zone 실제 터치율을 재검증(Script F)했더니 60봉 내
+        72.1%만 터치하고 미터치 종목이 오히려 median +75.4%로 더 크게
+        가는 생존편향(안C와 동일 함정) 확인 — EV가 0.26~0.361로 재추정돼
+        카드 반영은 보류, 재설계 필요(이번 커밋에는 미포함).
 v5.49 [버그수정] favorites_user.txt/alerts_user.txt를 journal_user.json과
         같은 영구 볼륨(/data) 우선 경로로 저장 — 지금까지는 앱 코드 폴더에만
         저장돼 Railway 재배포할 때마다 사라질 수 있었음(journal은 이미
@@ -2071,7 +2087,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.49"
+VERSION = "v5.50"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
