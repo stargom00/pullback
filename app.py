@@ -5,6 +5,28 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.62 [버그수정] app.py _trace_*(진단 재현) 함수의 scanner.py 상수 복사
+        전수감사 — v5.61 slope_floor 동기화 누락 사고가 다른 곳에도
+        있는지 확인해달라는 요청. 5개 _trace_* 전부 점검: CONFIG 값은
+        전부 cfg[...] 참조라 문제 없음(v5.60 rs_min 85→80 등은 자동
+        반영됨). CONFIG 밖 판정 로직 2건 발견·수정 —
+        (1) _gate_risk_pct가 _risk_hard_ok의 risk% 계산식을 리터럴로
+        재구현하고 있었음(기존엔 "반드시 같은 로직으로 유지" 주석만
+        존재) → scanner.py에 _risk_pct_at_gate() 공용 헬퍼로 뽑아내
+        _risk_hard_ok와 _gate_risk_pct 둘 다 이걸 호출하게 변경 —
+        계산식이 물리적으로 한 곳에만 있어 이제 드리프트 불가능.
+        (2) ma20_slope_floor(0.98)가 scanner.analyze() 본문의 지역
+        변수였던 걸 CONFIG로 승격 — _trace_pullback도 cfg[...]로
+        직접 읽게. 나머지(손절 배수 0.97/0.98/0.15/0.99 등)는
+        scanner.py 자신도 CONFIG 밖 지역 리터럴이라 구조상 cfg[...]
+        참조로 못 바꿈 — 4곳에 "scanner.py와 동기화 필요" 주석 남김.
+        [린터] test_trace_const_audit.py 신규 — _trace_* 함수에서
+        "X = 리터럴 if 조건 else 리터럴" 모양(정확히 이번 사고 패턴)을
+        FAIL로 자동 감지, 그 외 float 리터럴은 INFO 체크리스트로 나열
+        (완전자동 대조는 어느 리터럴이 scanner.py 어느 함수와 짝인지
+        코드만으론 판별 불가해 구조적으로 무리 — CLAUDE.md에 수동
+        확인 원칙 추가로 보완). docs/rs_definition_and_slope_
+        investigation.md 6절 갱신.
 v5.61 [버그수정] /api/debug의 RS 근사치가 화면에 안 보이던 문제 — v5.60
         삼성화재 조사에서 드러남(라이브 디버그가 rs=80 고정 근사치를 썼는데
         정식 percentile은 75라, "5점차 억울한 탈락"이라는 잘못된 결론으로
@@ -2361,7 +2383,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.61"
+VERSION = "v5.62"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -4174,17 +4196,19 @@ def _gate_step(steps, name, ok, detail=None):
 
 
 def _gate_risk_pct(rrb, pivot):
-    """_risk_hard_ok가 내부적으로 쓰는 판정용 risk%를 그대로 재현.
-    pivot이 주어지고 유효하면 피벗 기준(게이트 실제 판정), 아니면
-    rrb['risk_pct'](카드 표시값과 동일, entry 기준)로 폴백 — scanner.py의
-    _risk_hard_ok 본문과 반드시 같은 로직으로 유지할 것.
+    """게이트 실제 판정에 쓰인 risk% 표시용.
+    v5.61: 리터럴 재구현 대신 scanner._risk_pct_at_gate를 그대로 호출 —
+    _risk_hard_ok와 계산식이 물리적으로 한 곳에만 있어 드리프트 불가능
+    (기존엔 이 파일에 수식을 복사해두고 "반드시 같은 로직으로 유지" 주석만
+    있었음, docs/rs_definition_and_slope_investigation.md 6절).
     v5.41: pullback/imminent만 pivot을 넘겨 게이트=피벗 기준이고(각각
     Case13 회귀 방지/아직 미돌파라 근거 문서화됨), breakout/boxbreak는
     pivot 없이 호출해 게이트=카드(현재가) 기준으로 일치시킴(v5.41 수정)."""
+    from scanner import _risk_pct_at_gate
     try:
         stop_eff = float(rrb.get("stop", 0.0))
         if pivot and pivot > 0 and stop_eff > 0:
-            return round((pivot - stop_eff) / pivot * 100.0, 2)
+            return round(_risk_pct_at_gate(rrb, pivot), 2)
     except Exception:
         pass
     return rrb.get("risk_pct")
@@ -4214,7 +4238,11 @@ def _trace_pullback(df, is_kr, rs_rank):
     cur_rsi = float(r.iloc[-1])
     if not _gate_step(steps, "지표_계산가능", not any(math.isnan(x) for x in (m10, m20, m60, m200, cur_rsi)), "이평/RSI 중 NaN"):
         return {"passed": False, "fail_at": "nan", "steps": steps}
-    slope_floor = 0.98  # v5.61: scanner.analyze()의 v5.60 변경(전 종목 0.98)과 동기화
+    # v5.61: 리터럴 사본 대신 scanner.py CONFIG["ma20_slope_floor"]에서 직접
+    # 읽음 — v5.60 때 이 값이 app.py에 별도 사본으로 있다가 동기화가 안 됐던
+    # 사고 재발 방지(전수 감사, docs/rs_definition_and_slope_investigation.md
+    # 6절). 앞으로 scanner.py에서 이 값을 바꾸면 진단 화면도 자동으로 따라옴.
+    slope_floor = cfg["ma20_slope_floor"]
     ma20_slope = m20 > float(ma20.iloc[-11]) * slope_floor
     in_uptrend = (close > m60) and (close > m200) and (m20 > m60) and ma20_slope
     if not _gate_step(steps, "우상향추세", in_uptrend,
@@ -4247,6 +4275,12 @@ def _trace_pullback(df, is_kr, rs_rank):
         return {"passed": False, "fail_at": "RSI", "steps": steps}
     pw = cfg["pivot_window"]
     pivot, pivot_type, _, _ = select_pivot(h, lo, c, close, pw, is_kr=is_kr, v=v)
+    # v5.61 감사: 0.99/이하 stop 계산 리터럴은 scanner.analyze()의 손절 계산과
+    # 동일한 값을 이 함수 안에 그대로 복사한 것 — CONFIG에 없는(scanner.py
+    # 자신도 지역 리터럴로 쓰는) 값이라 cfg[...] 참조로 못 바꿈. scanner.py
+    # 쪽 이 리터럴이 바뀌면 여기도 같이 고칠 것(전수감사,
+    # docs/rs_definition_and_slope_investigation.md 6절 — ma20_slope_floor는
+    # CONFIG로 승격해 해결했지만 이건 구조상 어려움).
     ma_below = [x for x in (m10, m20, m60) if x and x < close]
     ma_stop = max(ma_below) * 0.99 if ma_below else None
     sig_low = significant_support(lo, pw, min_touches=2, band=0.02, exclude=1)
@@ -4366,6 +4400,10 @@ def _trace_breakout(df, is_kr, rs_rank):
     vol_mult = float(v.iloc[-1]) / vol_avg if vol_avg > 0 else 0.0
     if not _gate_step(steps, "거래량동반", vol_mult >= cfg["vol_mult"], f"{vol_mult:.2f}배 (요구 {cfg['vol_mult']}배+)"):
         return {"passed": False, "fail_at": "vol_mult", "steps": steps, "pivot": round(pivot, 2)}
+    # v5.61 감사: 0.97/0.15는 scanner.analyze_breakout()의 손절 계산 리터럴
+    # 복사 — scanner.py 자신도 CONFIG 밖 지역 리터럴이라 cfg[...] 참조로 못
+    # 바꿈. scanner.py 쪽이 바뀌면 여기도 같이 고칠 것(전수감사,
+    # docs/rs_definition_and_slope_investigation.md 6절).
     stop = round(pivot * 0.97, 2)
     stop, stop_struct, atr_buf = apply_atr_buffer(stop, h, lo, c, 0.15)
     rrb = _rr_block(pivot, stop, h, lo, c, base_low=base_low, entry=close, warn_pct=8.0,
@@ -4441,6 +4479,9 @@ def _trace_boxbreak(df, is_kr, rs_rank):
     if not _gate_step(steps, "박스돌파(연장12%이내)", best is not None, box_detail):
         return {"passed": False, "fail_at": "no_box_broken", "steps": steps, "박스상세": box_detail}
     pivot = best["box_high"]
+    # v5.61 감사: 0.97/0.15는 scanner.analyze_boxbreak()의 손절 계산 리터럴
+    # 복사 — breakout과 같은 사유로 cfg[...] 참조 불가(전수감사,
+    # docs/rs_definition_and_slope_investigation.md 6절).
     stop = round(pivot * 0.97, 2)
     stop, stop_struct, atr_buf = apply_atr_buffer(stop, h, lo, c, 0.15)
     rrb = _rr_block(pivot, stop, h, lo, c, base_low=best["box_low"], entry=close, warn_pct=8.0,
@@ -4491,6 +4532,9 @@ def _trace_imminent(df, is_kr, rs_rank):
     if not _gate_step(steps, "피벗근접", cfg["near_min"] <= near <= cfg["near_max"],
                        f"실제 판정 피벗({pivot_type}) {round(pivot,2)}, near {near*100:.2f}% (허용 {cfg['near_min']*100:.0f}%~{cfg['near_max']*100:.0f}%)"):
         return {"passed": False, "fail_at": "near_range", "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type, "near_pct": round(near * 100, 2)}
+    # v5.61 감사: 0.98/0.15는 scanner.analyze_imminent()의 손절 계산 리터럴
+    # 복사 — 위와 같은 사유로 cfg[...] 참조 불가(전수감사,
+    # docs/rs_definition_and_slope_investigation.md 6절).
     sig_sup = significant_support(lo, cfg["pivot_window"], min_touches=2, band=0.02, exclude=1)
     cand = []
     if sig_sup is not None and sig_sup < close:

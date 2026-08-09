@@ -514,6 +514,21 @@ def trend_grade(c: pd.Series, lo: pd.Series, h: pd.Series, rs_rank,
         return {"grade": "?", "passed": 0, "fails": [], "ud_note": ""}
 
 
+def _risk_pct_at_gate(rrb: dict, pivot: float | None) -> float:
+    """_risk_hard_ok가 실제 판정에 쓰는 risk%(게이트 기준) 계산 그 자체.
+    pivot이 주어지고 유효하면 '피벗→현실화손절' 기준(구조적 판정), 아니면
+    rrb['risk_pct'](entry 기준, 카드 표시와 동일)로 폴백.
+
+    v5.61: app.py의 진단 화면(_gate_risk_pct)이 이 계산을 리터럴로 복사해
+    쓰고 있던 걸 여기로 뽑아내 공용화 — scanner.py 쪽 계산식이 바뀌어도
+    진단 화면이 따로 안 바뀌는 사고를 원천 차단(slope_floor와 같은 계열,
+    docs/rs_definition_and_slope_investigation.md 6절)."""
+    stop_eff = float(rrb.get("stop", 0.0))
+    if pivot and pivot > 0 and stop_eff > 0:
+        return (pivot - stop_eff) / pivot * 100.0
+    return float(rrb.get("risk_pct", 0.0))
+
+
 def _risk_hard_ok(rrb: dict, is_kr: bool, pivot: float | None = None) -> bool:
     """리스크 기하 하드 게이트: 손절폭이 한도를 넘으면 베이스가 너무 느슨한
     것 → 후보 제외. (risk_warn 표시만 하던 것을 강제화)
@@ -533,11 +548,7 @@ def _risk_hard_ok(rrb: dict, is_kr: bool, pivot: float | None = None) -> bool:
         return True
     fixed_limit = CONFIG.get("risk_hard_kr", 12.0) if is_kr else CONFIG.get("risk_hard_us", 8.0)
     try:
-        stop_eff = float(rrb.get("stop", 0.0))
-        if pivot and pivot > 0 and stop_eff > 0:
-            risk = (pivot - stop_eff) / pivot * 100.0
-        else:
-            risk = float(rrb.get("risk_pct", 0.0))
+        risk = _risk_pct_at_gate(rrb, pivot)
         limit = fixed_limit
         atr_pct = rrb.get("atr_pct")
         if atr_pct is not None and atr_pct > 0:
@@ -798,6 +809,11 @@ CONFIG = {
     # 노이즈(지지선 살짝 깨고 반등)에 털리는 걸 방지. 종목 변동성 자동 반영.
     # 추적하며 조정: 0.3(타이트)~0.5(여유). 0이면 버퍼 없음.
     "atr_stop_buffer": 0.3,
+    # v5.61: analyze() 함수 본문의 지역변수였던 걸 CONFIG로 승격 — app.py의
+    # _trace_pullback(진단 재현)이 이 값을 자기 리터럴 사본으로 갖고 있다가
+    # v5.60(전 종목 0.98로 통일) 때 동기화가 안 됐던 사고 재발 방지. 이제
+    # _trace_pullback도 cfg["ma20_slope_floor"]로 여기서 직접 읽는다.
+    "ma20_slope_floor": 0.98,  # 20일선 10봉간 이 비율 이상이면 "평평/우상향" 허용
 }
 
 
@@ -1374,7 +1390,10 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     # 일반군만 봐도 +0.068→+0.067R) — 조건의 변별력 자체는 살아있으면서
     # (통과 EV+0.081R vs 미통과-0.036R) 문턱만 불필요하게 빡빡했던 것.
     # 근거: docs/rs_definition_and_slope_investigation.md 2b.
-    slope_floor = 0.98  # 10봉간 -2%까지는 VCP 베이스 빌딩으로 허용(주도주 한정 아님)
+    # v5.61: 리터럴 대신 cfg["ma20_slope_floor"]에서 — app.py의 _trace_pullback
+    # (진단 재현 함수)도 같은 cfg를 읽으므로 여기 값을 바꾸면 진단 화면도
+    # 자동으로 따라옴(v5.60 slope_floor 동기화 누락 사고 재발 방지).
+    slope_floor = cfg["ma20_slope_floor"]
     ma20_slope = m20 > float(ma20.iloc[-11]) * slope_floor
     in_uptrend = trend_above_ma60 and above_ma200 and ma_stack and ma20_slope
     if not in_uptrend:

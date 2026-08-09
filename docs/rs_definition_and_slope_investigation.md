@@ -223,6 +223,46 @@ v5.61에서 수정(6절 참고) — 이제 근사/정식 여부가 명시되고,
 imminent의 rs_min(80)을 턱걸이 통과시켰던 것. 이제 근사 경로에선 이게 approx 라벨과
 함께 뜨고, 캐시가 데워지면 정식값(75, rs_min 자체 미달)으로 정정됨.
 
+## 7. `_trace_*` scanner.py 상수 복사 전수감사 (v5.62)
+
+6절의 slope_floor 사고가 다른 `_trace_*`(진단 재현) 함수에도 있는지 요청받아 5개
+전부(`_trace_pullback`/`_trace_turnaround`/`_trace_breakout`/`_trace_boxbreak`/
+`_trace_imminent`) 코드를 한 줄씩 대조.
+
+**CONFIG 딕셔너리 값**(rs_min·extended_max·box_max_range·align_window 등): 전부
+`cfg[...]`로 직접 참조 — scanner.py의 CONFIG를 import해서 쓰므로 오늘 바뀐 rs_min
+85→80 등은 이미 자동으로 반영돼 있었음. 문제 없음.
+
+**CONFIG 밖 판정 로직**(scanner.py 함수 본문의 지역 변수/리터럴) — 2건 발견·수정:
+1. `_gate_risk_pct`(app.py)가 `_risk_hard_ok`의 risk% 계산식 `(pivot-stop_eff)/pivot*100`을
+   리터럴로 재구현하고 있었음 — "반드시 같은 로직으로 유지할 것" 주석만 있고 강제 장치는
+   없었음. → `scanner._risk_pct_at_gate()`로 공용 헬퍼 추출, `_risk_hard_ok`와
+   `_gate_risk_pct` 둘 다 이걸 호출. 계산식이 물리적으로 한 곳에만 있어 이제 드리프트
+   자체가 불가능.
+2. `ma20_slope_floor`(0.98)를 `scanner.CONFIG`로 승격(6절에서 fix한 slope_floor의
+   나머지 절반 — 그때는 조건분기만 고치고 리터럴 0.98 자체는 여전히 scanner.py
+   본문과 app.py 사본 양쪽에 있었음). `_trace_pullback`도 이제 `cfg["ma20_slope_floor"]`로
+   직접 읽음.
+
+**구조상 못 고친 것**(scanner.py 자신도 CONFIG 밖 지역 리터럴이라 `cfg[...]` 참조로
+바꿀 대상 자체가 없음) — 4곳에 "scanner.py와 동기화 필요" 주석만 남김:
+- `_trace_pullback`: `ma_stop = max(ma_below) * 0.99`
+- `_trace_breakout`/`_trace_boxbreak`: `stop = round(pivot * 0.97, 2)` +
+  `apply_atr_buffer(..., 0.15)`
+- `_trace_imminent`: `m20 * 0.98`(손절 후보) + `apply_atr_buffer(..., 0.15)`
+
+이 4곳을 CONFIG로 승격하려면 scanner.py의 5개 `analyze_*` 함수 손절 계산 자체를
+건드려야 해서(실거래 로직, 진단 전용 코드보다 훨씬 리스크 큼) 이번엔 안 함 — 필요해지면
+별도로 검토.
+
+**린터**: `test_trace_const_audit.py` 신규. `_trace_*` 함수에서 `X = <리터럴> if 조건
+else <리터럴>`(정확히 이번 slope_floor 사고 모양) 패턴을 AST로 잡아 FAIL — 재현
+테스트로 검증(원래 버그 코드를 임시로 넣어보니 정확히 탐지). 그 외 float 리터럴은
+INFO로 목록만 나열(32건) — 어떤 리터럴이 scanner.py의 어느 값과 "짝"인지는 코드
+구조만으론 자동 판별이 안 돼서, 완전 자동 FAIL 판정은 이 좁은 패턴에만 걸었음. 이걸로
+못 잡는 나머지는 CLAUDE.md에 "CONFIG/판정 상수 바꾸면 `_trace_*` 사본 확인" 원칙
+추가로 보완.
+
 ## 결론 / 선택지 (원 조사 시점 기록, 위 5절이 최종 반영 상태)
 
 1. **RS 산식**: 절대RS로 바꾸면 삼성화재(94)를 포함해 KR 다수 종목의 순위가 크게 바뀜(85%가
