@@ -46,6 +46,15 @@ with open(FIXTURE_PATH, "rb") as f:
 RS_VALUES = [82, 95]
 RS_MOM_HIGH = 20
 
+# v5.65: 셋업별 최소 커버리지 — stop/risk_pct를 실제로 비교한(둘 다 통과한)
+# 건수가 이 아래면 테스트를 FAIL시킨다. v5.64에서 turnaround/breakout/boxbreak가
+# 0건인 채로 "통과" 취급되던 걸 발견(통과/탈락 일치만 봤지 값 비교는 한 번도
+# 안 돌았음) — 그때는 print 경고만 달아놨는데, CI가 초록불이면 아무도 로그를
+# 안 읽는다는 지적을 받고 hard FAIL로 바꿈. 3 = 현재 최소 셋업(turnaround/
+# breakout)의 6건보다 낮게 잡은 여유치 — 픽스처를 나중에 줄이더라도 "최소
+# 검증은 됐다"를 보장하는 하한선.
+MIN_COVERAGE = 3
+
 
 def _is_kr(ticker):
     return ticker.endswith((".KS", ".KQ"))
@@ -131,11 +140,13 @@ def test_trace_matches_analyze(setup, ticker, rs_rank):
         )
 
 
-def _summary():
-    """pytest 없이 직접 실행 시 통과/탈락/비교 분포 요약 출력."""
-    n_pass_agree = n_pass_disagree = n_both_passed = n_value_mismatch = 0
+def _compute_coverage():
+    """전 조합을 돌려 셋업별 (통과/탈락 일치 여부, 둘다통과 목록, 값불일치 목록)을 계산.
+    test_min_coverage_per_setup와 _summary()가 같은 계산을 공유 — 둘이
+    따로 계산하다 갈리는 일이 없게."""
     both_passed_by_setup = {s: [] for s in SETUPS}
-    mismatches = []
+    pass_disagreements = []
+    value_mismatches = []
     for setup, ticker, rs_rank in CASES:
         df = SAMPLE[ticker]
         is_kr = _is_kr(ticker)
@@ -143,31 +154,59 @@ def _summary():
         passed_real = real is not None
         passed_trace = bool(trace["passed"])
         if passed_real != passed_trace:
-            n_pass_disagree += 1
-            mismatches.append((setup, ticker, rs_rank, "PASS/FAIL 불일치"))
+            pass_disagreements.append((setup, ticker, rs_rank))
             continue
-        n_pass_agree += 1
         if not passed_real:
             continue
-        n_both_passed += 1
         both_passed_by_setup[setup].append(f"{ticker}/rs{rs_rank}")
         stop_ok = trace.get("stop") == pytest.approx(real.get("stop"), abs=0.01)
         risk_ok = trace.get("risk_pct") == pytest.approx(real.get("risk_pct"), abs=0.01)
         if not (stop_ok and risk_ok):
-            n_value_mismatch += 1
-            mismatches.append((setup, ticker, rs_rank,
-                               f"stop/risk_pct 불일치 real={real.get('stop')}/{real.get('risk_pct')} "
-                               f"trace={trace.get('stop')}/{trace.get('risk_pct')}"))
-    print(f"총 {len(CASES)}조합 — 통과/탈락 일치 {n_pass_agree}, 불일치 {n_pass_disagree}, "
-          f"둘다통과(값비교대상) {n_both_passed}, 값불일치 {n_value_mismatch}")
-    print("\n셋업별 커버리지(stop/risk_pct 값을 실제로 비교한 건수 — 0건이면 그 셋업은")
-    print("한 번도 검증된 적이 없다는 뜻, 픽스처에 그 셋업을 통과시키는 종목 추가 필요):")
+            value_mismatches.append((setup, ticker, rs_rank,
+                                     real.get("stop"), real.get("risk_pct"),
+                                     trace.get("stop"), trace.get("risk_pct")))
+    return both_passed_by_setup, pass_disagreements, value_mismatches
+
+
+def test_min_coverage_per_setup():
+    """셋업별로 stop/risk_pct를 실제로 비교한(둘 다 통과한) 건수가
+    MIN_COVERAGE 미만이면 FAIL — v5.64에서 turnaround/breakout/boxbreak가
+    0건인 채 발견됐던 사고(경고 print만 있어서 CI 초록불에 묻혔음) 재발 방지.
+    이 테스트가 잡는 것: "픽스처를 나중에 손대다가(종목 교체·축소 등) 특정
+    셋업의 값 비교 표본이 조용히 사라지는" 케이스. test_trace_matches_analyze
+    자체는 값 비교 대상이 0건이어도 전부 통과해버리므로(비교할 게 없으니
+    fail할 것도 없음) 이 테스트가 없으면 아무도 못 잡는다."""
+    both_passed_by_setup, _, _ = _compute_coverage()
+    under_threshold = {s: len(v) for s, v in both_passed_by_setup.items() if len(v) < MIN_COVERAGE}
+    all_counts = {s: len(v) for s, v in both_passed_by_setup.items()}
+    assert not under_threshold, (
+        f"셋업별 커버리지(stop/risk_pct 값을 실제로 비교한 건수) 미달 "
+        f"(기준 MIN_COVERAGE={MIN_COVERAGE}):\n"
+        + "\n".join(f"  {s}: {n}건 (부족 {MIN_COVERAGE - n}건)" for s, n in under_threshold.items())
+        + f"\n전체 분포: {all_counts}\n"
+        + "→ test_fixtures/sample_tickers.pkl에 이 셋업을 실제로 통과시키는 "
+          "종목을 추가할 것 (유니버스 스캔으로 후보 탐색, v5.64 커밋 참고)."
+    )
+
+
+def _summary():
+    """pytest 없이 직접 실행 시 통과/탈락/비교 분포 요약 출력."""
+    both_passed_by_setup, pass_disagreements, value_mismatches = _compute_coverage()
+    n_both_passed = sum(len(v) for v in both_passed_by_setup.values())
+    print(f"총 {len(CASES)}조합 — 통과/탈락 일치 {len(CASES) - len(pass_disagreements)}, "
+          f"불일치 {len(pass_disagreements)}, 둘다통과(값비교대상) {n_both_passed}, "
+          f"값불일치 {len(value_mismatches)}")
+    print(f"\n셋업별 커버리지(stop/risk_pct 값을 실제로 비교한 건수 — MIN_COVERAGE={MIN_COVERAGE} "
+          f"미만이면 test_min_coverage_per_setup가 FAIL):")
     for setup in SETUPS:
         n = len(both_passed_by_setup[setup])
-        flag = "  ⚠️ 0건 — 미검증!" if n == 0 else ""
+        flag = f"  ⚠️ 기준({MIN_COVERAGE}) 미달!" if n < MIN_COVERAGE else ""
         print(f"  {setup}: {n}건{flag}")
-    for setup, ticker, rs_rank, detail in mismatches:
-        print(f"  [{setup}/{ticker}/rs{rs_rank}] {detail}")
+    for setup, ticker, rs_rank in pass_disagreements:
+        print(f"  [{setup}/{ticker}/rs{rs_rank}] PASS/FAIL 불일치")
+    for setup, ticker, rs_rank, rs_stop, rs_risk, tr_stop, tr_risk in value_mismatches:
+        print(f"  [{setup}/{ticker}/rs{rs_rank}] stop/risk_pct 불일치 "
+              f"real={rs_stop}/{rs_risk} trace={tr_stop}/{tr_risk}")
 
 
 if __name__ == "__main__":

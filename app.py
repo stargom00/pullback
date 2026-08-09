@@ -5,6 +5,16 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.65 [테스트] test_trace_parity.py 셋업별 커버리지 미달 시 hard FAIL —
+        v5.64에서 0건 발견 후 print 경고("⚠️")만 달아놨는데, "CI가 초록불
+        이면 아무도 로그를 안 읽는다"는 지적을 받고 정식 assert로 전환.
+        MIN_COVERAGE=3 상수 신설, `test_min_coverage_per_setup` 테스트
+        추가 — 셋업별로 stop/risk_pct를 실제로 비교한 건수가 미달이면
+        FAIL, 메시지에 어느 셋업이 몇 건 부족한지 그대로 출력. 재현 검증:
+        MIN_COVERAGE를 일부러 100으로 올려서 5개 셋업 전부(부족 86~94건)
+        정확히 FAIL하는 것 확인 후 원복. `_compute_coverage()`로 계산
+        로직을 이 테스트와 `_summary()`가 공유하게 리팩터(따로 계산하다
+        갈리는 일 방지). docs/rs_definition_and_slope_investigation.md 8절.
 v5.64 [테스트] test_trace_parity.py 커버리지 점검 — v5.63 신설 직후 셋업별
         분포를 실제로 뽑아보니 pullback 6건/imminent 10건만 있었고
         turnaround/breakout/boxbreak는 0건(둘 다 통과하는 조합 자체가 초기
@@ -2426,7 +2436,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.64"
+VERSION = "v5.65"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
