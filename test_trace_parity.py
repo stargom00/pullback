@@ -8,8 +8,14 @@
 몇 개든 어디 있든 무관 — 둘이 갈라지는 순간(게이트 통과/탈락 불일치, 또는
 stop/risk_pct 값 불일치) 바로 잡힌다.
 
-데이터: test_fixtures/sample_tickers.pkl — 실제 KR 14종목 + US 15종목(총 29),
+데이터: test_fixtures/sample_tickers.pkl — 실제 KR 23종목 + US 15종목(총 38),
 2026-08-07 종가까지 300봉(체크인된 고정 스냅샷 — CI 네트워크 의존 없음, 결정론적).
+초기 29종목 표본은 turnaround/breakout/boxbreak 3개 셋업에서 stop/risk_pct
+비교 대상(둘 다 통과)이 0건이었음(pullback/imminent만 우연히 걸림) — 5개
+셋업 전부 최소 커버리지를 확보하려고 유니버스 전체를 스캔해 각 셋업을
+실제로 통과하는 종목을 골라 9개 추가(v5.64). `_summary()`가 셋업별 커버리지를
+출력하니, 앞으로 픽스처를 바꿀 일이 있으면 `python3 test_trace_parity.py`로
+0건인 셋업이 생기지 않는지 확인할 것.
 
 rs_rank는 두 값을 다 돈다 — 82(모든 셋업의 rs_min 80~88을 넘되 leader_rs=90
 미만, "일반" 분기)와 95(leader_rs 이상, "주도주" 분기). 하나만 쓰면 안 되는
@@ -128,6 +134,7 @@ def test_trace_matches_analyze(setup, ticker, rs_rank):
 def _summary():
     """pytest 없이 직접 실행 시 통과/탈락/비교 분포 요약 출력."""
     n_pass_agree = n_pass_disagree = n_both_passed = n_value_mismatch = 0
+    both_passed_by_setup = {s: [] for s in SETUPS}
     mismatches = []
     for setup, ticker, rs_rank in CASES:
         df = SAMPLE[ticker]
@@ -143,6 +150,7 @@ def _summary():
         if not passed_real:
             continue
         n_both_passed += 1
+        both_passed_by_setup[setup].append(f"{ticker}/rs{rs_rank}")
         stop_ok = trace.get("stop") == pytest.approx(real.get("stop"), abs=0.01)
         risk_ok = trace.get("risk_pct") == pytest.approx(real.get("risk_pct"), abs=0.01)
         if not (stop_ok and risk_ok):
@@ -152,6 +160,12 @@ def _summary():
                                f"trace={trace.get('stop')}/{trace.get('risk_pct')}"))
     print(f"총 {len(CASES)}조합 — 통과/탈락 일치 {n_pass_agree}, 불일치 {n_pass_disagree}, "
           f"둘다통과(값비교대상) {n_both_passed}, 값불일치 {n_value_mismatch}")
+    print("\n셋업별 커버리지(stop/risk_pct 값을 실제로 비교한 건수 — 0건이면 그 셋업은")
+    print("한 번도 검증된 적이 없다는 뜻, 픽스처에 그 셋업을 통과시키는 종목 추가 필요):")
+    for setup in SETUPS:
+        n = len(both_passed_by_setup[setup])
+        flag = "  ⚠️ 0건 — 미검증!" if n == 0 else ""
+        print(f"  {setup}: {n}건{flag}")
     for setup, ticker, rs_rank, detail in mismatches:
         print(f"  [{setup}/{ticker}/rs{rs_rank}] {detail}")
 

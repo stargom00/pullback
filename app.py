@@ -5,6 +5,20 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.64 [테스트] test_trace_parity.py 커버리지 점검 — v5.63 신설 직후 셋업별
+        분포를 실제로 뽑아보니 pullback 6건/imminent 10건만 있었고
+        turnaround/breakout/boxbreak는 0건(둘 다 통과하는 조합 자체가 초기
+        29종목 표본에 하나도 없었음 — stop/risk_pct 비교가 이 3개 셋업에선
+        한 번도 실행된 적이 없었다는 뜻, 테스트 파일은 "통과"했지만 사실상
+        미검증 상태). 전체 유니버스(KR+US, kr_bundle/us_data 캐시)를 스캔해
+        각 셋업을 실제로 통과하는 종목을 찾아 9개 추가(turnaround: 021240.KS/
+        078130.KQ/082640.KS, breakout: 007070.KS/028670.KS/041960.KQ,
+        boxbreak: 078340.KQ/145020.KQ/282330.KS) — 픽스처 29→38종목. 결과:
+        5개 셋업 전부 6건 이상(목표 2~3건 상회). `_summary()`가 이제 셋업별
+        커버리지를 출력하고 0건인 셋업을 ⚠️로 표시 — 픽스처를 바꿀 때마다
+        `python3 test_trace_parity.py`로 커버리지 회귀를 바로 확인 가능.
+        전 조합(380개) 재확인: 통과/탈락 일치 380, 값불일치 0.
+        docs/rs_definition_and_slope_investigation.md 8절.
 v5.63 [테스트] _trace_*(app.py 진단 재현) vs analyze_*(scanner.py 실제 스캔)
         차등(differential) 테스트 신규 — v5.62의 AST 상수감사가 "리터럴이
         CONFIG 밖에 있는지"만 보고 값 자체의 일치는 못 본다는 한계를 다른
@@ -2412,7 +2426,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.63"
+VERSION = "v5.64"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
