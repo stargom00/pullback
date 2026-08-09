@@ -18,3 +18,5 @@ jobs:
       - run: pip install -r requirements.txt pytest
       - run: python3 test_scanner.py
       - run: pytest test_min_bars_audit.py -v
+      - run: pytest test_trace_const_audit.py -v
+      - run: pytest test_trace_parity.py -v

@@ -5,6 +5,35 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.63 [테스트] _trace_*(app.py 진단 재현) vs analyze_*(scanner.py 실제 스캔)
+        차등(differential) 테스트 신규 — v5.62의 AST 상수감사가 "리터럴이
+        CONFIG 밖에 있는지"만 보고 값 자체의 일치는 못 본다는 한계를 다른
+        방식으로 보완. 실제 KR 14 + US 15종목(test_fixtures/sample_tickers.pkl,
+        2026-08-07 종가 300봉, 체크인된 고정 스냅샷 — CI 네트워크 의존 없음)에
+        rs_rank 82(일반 분기)/95(주도주 분기) 두 값으로 5개 셋업 전부(눌림목/
+        추세전환/돌파/박스돌파/돌파임박) 돌려 (1) 통과·탈락 일치 (2) 둘 다
+        통과 시 stop·risk_pct 완전 일치를 assert. 상수 이름/위치를 아예 안 보고
+        실행 결과만 비교해서 AST 한계를 안 받음. [설계 교훈] 처음엔 rs_rank=95
+        하나만 썼다가, v5.60 slope_floor 버그(주도주만 0.98 적용하던 옛 코드)를
+        일부러 재현해 넣어도 이 테스트가 통과해버리는 걸 발견 — 95는 항상
+        is_leader=True라 옛 코드의 "if is_leader" 분기만 타서 새 코드(무조건
+        0.98)와 우연히 같은 값이 나왔음. rs_rank 82(비주도주)를 추가하니
+        재현 버그를 정확히 잡음(290조합 중 2건 PASS/FAIL 불일치, 정확히
+        rs82 지점) — 조건부 로직을 다루는 차등 테스트는 조건의 양쪽 분기를
+        다 밟는 입력이 필요하다는 게 이번 발견. [부수] _trace_* 5개 함수의
+        return dict에 stop 필드 추가(기존엔 risk_pct/pivot만 노출, 비교
+        가능하게 stop도 노출 — _trace_turnaround는 아예 stop을 계산 안 하고
+        있어서 통과 시점에 계산 추가, 게이트에는 원래도 영향 없었음).
+        [CI] test_trace_const_audit.py가 파일만 있고 워크플로에 안 물려있어
+        아무도 안 보는 상태였음(내일 오전 8시 예정 스케줄 실행에도 안 걸렸을
+        것) — .github/workflows/test.yml에 이 파일과 test_trace_parity.py
+        둘 다 추가. [구조 질문] _trace_*가 app.py에 분리된 이유: analyze_*가
+        게이트에서 막히면 bare None만 반환해(핫패스 성능 트레이드오프,
+        v5.39 당시 의도적 설계) "어디서 막혔는지" 정보가 안 남는다 — 구조적
+        제약은 아니고, analyze_*에 optional trace 파라미터를 추가하면(기본
+        None, 핫패스 무변화) 사본 자체를 없앨 수 있음. 실거래 스캔 함수
+        5개의 게이트 시퀀스를 직접 건드리는 리팩터라 이번엔 안 함 — 필요해
+        지면 검토. docs/rs_definition_and_slope_investigation.md 8절.
 v5.62 [버그수정] app.py _trace_*(진단 재현) 함수의 scanner.py 상수 복사
         전수감사 — v5.61 slope_floor 동기화 누락 사고가 다른 곳에도
         있는지 확인해달라는 요청. 5개 _trace_* 전부 점검: CONFIG 값은
@@ -2383,7 +2412,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.62"
+VERSION = "v5.63"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -4296,19 +4325,20 @@ def _trace_pullback(df, is_kr, rs_rank):
     if not _gate_step(steps, "리스크하드게이트", hard_ok,
                        f"피벗({pivot_type}) {round(pivot,2)} · 게이트기준(피벗) risk {gate_risk}% vs 카드표시(현재가) risk {card_risk}% · {_limit_note}"):
         return {"passed": False, "fail_at": "risk_hard", "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type,
-                "risk_pct": card_risk, "gate_risk_pct": gate_risk}
+                "risk_pct": card_risk, "gate_risk_pct": gate_risk, "stop": round(stop, 2)}
     ls = late_stage_info(c, lo, h, v, is_kr)
     if not _gate_step(steps, "후기스테이지", ls.get("late_level") != "danger", f"level={ls.get('late_level')} flags={ls.get('late_flags')}"):
-        return {"passed": False, "fail_at": "late_stage_danger", "steps": steps, "pivot": round(pivot, 2)}
+        return {"passed": False, "fail_at": "late_stage_danger", "steps": steps, "pivot": round(pivot, 2), "stop": round(stop, 2)}
     mg = _merger_block(c, h, lo, v)
     if not _gate_step(steps, "MA_특수상황", not mg.get("merger"), mg.get("merger_reasons")):
-        return {"passed": False, "fail_at": "merger", "steps": steps, "pivot": round(pivot, 2)}
+        return {"passed": False, "fail_at": "merger", "steps": steps, "pivot": round(pivot, 2), "stop": round(stop, 2)}
     return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type,
-            "risk_pct": card_risk, "gate_risk_pct": gate_risk}
+            "risk_pct": card_risk, "gate_risk_pct": gate_risk, "stop": round(stop, 2)}
 
 
 def _trace_turnaround(df, is_kr, rs_rank, rs_mom):
-    from scanner import TURN_CONFIG as cfg, rsi as _rsi, select_pivot, count_bases_since_bottom
+    from scanner import (TURN_CONFIG as cfg, rsi as _rsi, select_pivot, count_bases_since_bottom,
+                         apply_atr_buffer, _rr_block)
     steps = []
     n0 = len(df) if df is not None else 0
     if not _gate_step(steps, "min_bars", df is not None and n0 >= cfg["min_bars"], f"{n0}봉"):
@@ -4355,7 +4385,20 @@ def _trace_turnaround(df, is_kr, rs_rank, rs_mom):
     if cfg.get("first_base_only", True) and not _gate_step(steps, "1차베이스여부", base_info["is_first_base"], f"조정 {base_info['corrections']}회, 바닥{base_info['bottom_ago']}봉전"):
         return {"passed": False, "fail_at": "first_base_only", "steps": steps}
     pivot, pivot_type, _, _ = select_pivot(h, lo, c, close, 20, is_kr=is_kr, v=v)
-    return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type}
+    # v5.63: 손절/risk_pct 계산 — analyze_turnaround엔 이걸 막는 게이트가
+    # 없어서(하드 리스크게이트 자체가 없음, CLAUDE.md 참고) trace 흐름에
+    # 영향은 없지만, test_trace_parity.py가 stop/risk_pct를 비교하려면
+    # 필요해서 통과 시점에 같이 계산(scanner.analyze_turnaround와 동일 리터럴
+    # 0.98/0.3 — 이것도 CONFIG 밖 지역 리터럴이라 cfg[...] 참조 불가, 전수감사
+    # 대상, docs/rs_definition_and_slope_investigation.md 6/7절).
+    stop = m60 * 0.98
+    _cand = [x for x in (stop, float(lo.iloc[-10:].min())) if x < close]
+    stop = max(_cand) if _cand else float(lo.iloc[-10:].min())
+    stop, stop_struct, atr_buf = apply_atr_buffer(stop, h, lo, c, 0.3)
+    rrb = _rr_block(pivot, stop, h, lo, c, base_low=float(lo.iloc[-30:].min()),
+                    entry=close, warn_pct=15.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf)
+    return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type,
+            "stop": rrb.get("stop"), "risk_pct": rrb.get("risk_pct")}
 
 
 def _trace_breakout(df, is_kr, rs_rank):
@@ -4413,14 +4456,16 @@ def _trace_breakout(df, is_kr, rs_rank):
     # extended_max가 이미 있어 게이트/카드 값 차이는 애초에 작았음.
     hard_ok = _risk_hard_ok(rrb, is_kr)
     if not _gate_step(steps, "리스크하드게이트", hard_ok, f"risk_pct {rrb.get('risk_pct')}% (현재가 기준=게이트 기준과 동일) (한도 {'12' if is_kr else '8'}%(고정) or ATR%×1.5(≤15%캡))"):
-        return {"passed": False, "fail_at": "risk_hard", "steps": steps, "pivot": round(pivot, 2), "risk_pct": rrb.get("risk_pct")}
+        return {"passed": False, "fail_at": "risk_hard", "steps": steps, "pivot": round(pivot, 2),
+                "risk_pct": rrb.get("risk_pct"), "stop": rrb.get("stop")}
     ls = late_stage_info(c, lo, h, v, is_kr)
     if not _gate_step(steps, "후기스테이지", ls.get("late_level") != "danger", f"level={ls.get('late_level')}"):
-        return {"passed": False, "fail_at": "late_stage_danger", "steps": steps, "pivot": round(pivot, 2)}
+        return {"passed": False, "fail_at": "late_stage_danger", "steps": steps, "pivot": round(pivot, 2), "stop": rrb.get("stop")}
     mg = _merger_block(c, h, lo, v)
     if not _gate_step(steps, "MA_특수상황", not mg.get("merger"), mg.get("merger_reasons")):
-        return {"passed": False, "fail_at": "merger", "steps": steps, "pivot": round(pivot, 2)}
-    return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2), "risk_pct": rrb.get("risk_pct")}
+        return {"passed": False, "fail_at": "merger", "steps": steps, "pivot": round(pivot, 2), "stop": rrb.get("stop")}
+    return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2),
+            "risk_pct": rrb.get("risk_pct"), "stop": rrb.get("stop")}
 
 
 def _trace_boxbreak(df, is_kr, rs_rank):
@@ -4489,14 +4534,18 @@ def _trace_boxbreak(df, is_kr, rs_rank):
     # v5.41: pivot 인자 제거 — analyze_boxbreak과 동일(게이트=카드 기준 통일).
     hard_ok = _risk_hard_ok(rrb, is_kr)
     if not _gate_step(steps, "리스크하드게이트", hard_ok, f"risk_pct {rrb.get('risk_pct')}% (현재가 기준=게이트 기준과 동일) (한도 {'12' if is_kr else '8'}%(고정) or ATR%×1.5(≤15%캡))"):
-        return {"passed": False, "fail_at": "risk_hard", "steps": steps, "pivot": round(pivot, 2), "risk_pct": rrb.get("risk_pct"), "박스상세": box_detail}
+        return {"passed": False, "fail_at": "risk_hard", "steps": steps, "pivot": round(pivot, 2),
+                "risk_pct": rrb.get("risk_pct"), "stop": rrb.get("stop"), "박스상세": box_detail}
     ls = late_stage_info(c, lo, h, v, is_kr)
     if not _gate_step(steps, "후기스테이지", ls.get("late_level") != "danger", f"level={ls.get('late_level')}"):
-        return {"passed": False, "fail_at": "late_stage_danger", "steps": steps, "pivot": round(pivot, 2), "박스상세": box_detail}
+        return {"passed": False, "fail_at": "late_stage_danger", "steps": steps, "pivot": round(pivot, 2),
+                "stop": rrb.get("stop"), "박스상세": box_detail}
     mg = _merger_block(c, h, lo, v)
     if not _gate_step(steps, "MA_특수상황", not mg.get("merger"), mg.get("merger_reasons")):
-        return {"passed": False, "fail_at": "merger", "steps": steps, "pivot": round(pivot, 2), "박스상세": box_detail}
-    return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2), "risk_pct": rrb.get("risk_pct"), "박스상세": box_detail}
+        return {"passed": False, "fail_at": "merger", "steps": steps, "pivot": round(pivot, 2),
+                "stop": rrb.get("stop"), "박스상세": box_detail}
+    return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2),
+            "risk_pct": rrb.get("risk_pct"), "stop": rrb.get("stop"), "박스상세": box_detail}
 
 
 def _trace_imminent(df, is_kr, rs_rank):
@@ -4547,14 +4596,18 @@ def _trace_imminent(df, is_kr, rs_rank):
                     entry=None, warn_pct=8.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf)
     hard_ok = _risk_hard_ok(rrb, is_kr, pivot=pivot)
     if not _gate_step(steps, "리스크하드게이트", hard_ok, f"risk_pct {rrb.get('risk_pct')}% (피벗 기준=카드 표시와 동일, entry=None) (한도 {'12' if is_kr else '8'}%(고정) or ATR%×1.5(≤15%캡))"):
-        return {"passed": False, "fail_at": "risk_hard", "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type, "near_pct": round(near * 100, 2), "risk_pct": rrb.get("risk_pct")}
+        return {"passed": False, "fail_at": "risk_hard", "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type,
+                "near_pct": round(near * 100, 2), "risk_pct": rrb.get("risk_pct"), "stop": rrb.get("stop")}
     ls = late_stage_info(c, lo, h, v, is_kr)
     if not _gate_step(steps, "후기스테이지", ls.get("late_level") != "danger", f"level={ls.get('late_level')}"):
-        return {"passed": False, "fail_at": "late_stage_danger", "steps": steps, "pivot": round(pivot, 2), "near_pct": round(near * 100, 2)}
+        return {"passed": False, "fail_at": "late_stage_danger", "steps": steps, "pivot": round(pivot, 2),
+                "near_pct": round(near * 100, 2), "stop": rrb.get("stop")}
     mg = _merger_block(c, h, lo, v)
     if not _gate_step(steps, "MA_특수상황", not mg.get("merger"), mg.get("merger_reasons")):
-        return {"passed": False, "fail_at": "merger", "steps": steps, "pivot": round(pivot, 2), "near_pct": round(near * 100, 2)}
-    return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type, "near_pct": round(near * 100, 2), "risk_pct": rrb.get("risk_pct")}
+        return {"passed": False, "fail_at": "merger", "steps": steps, "pivot": round(pivot, 2),
+                "near_pct": round(near * 100, 2), "stop": rrb.get("stop")}
+    return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type,
+            "near_pct": round(near * 100, 2), "risk_pct": rrb.get("risk_pct"), "stop": rrb.get("stop")}
 
 
 @app.get("/api/debug/{ticker}")
