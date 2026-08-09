@@ -388,7 +388,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.60</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.61</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -4049,6 +4049,11 @@ async function runDiag() {
           <div>지지: ${supList || '<span style="color:var(--muted);font-size:12px">없음</span>'}</div>
         </div>`;
     }
+    // v5.61: RS가 근사치(유니버스 캐시 콜드)인지 정식 백분위인지 색으로 구분 —
+    // 근사치를 정식값으로 오인해 "몇 점차 억울한 탈락" 식 오판을 막기 위함.
+    const rsBadge = d.rs_percentile != null ? (d.rs_percentile_is_approx
+      ? `<span title="${d.rs_percentile_note || ''}" style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:6px;background:#3a2d12;color:#fbbf24;font-size:11px;font-weight:600;vertical-align:2px">RS ${d.rs_percentile} (근사)</span>`
+      : `<span title="${d.rs_percentile_note || ''}" style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:6px;background:#12351f;color:#4ade80;font-size:11px;font-weight:600;vertical-align:2px">RS ${d.rs_percentile} (정식)</span>`) : '';
     const ind = d.indicators || {};
     const keyInd = [
       ['정배열', ind['정배열(20>60>200)'] ? '✅ 정배열' : '❌ 깨짐'],
@@ -4058,7 +4063,7 @@ async function runDiag() {
     ].map(([k, v]) => `<span style="color:var(--muted);font-size:12px;margin-right:12px">${k}: <b style="color:var(--text)">${v}</b></span>`).join('');
     out.innerHTML = `
       <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px">
-        <div style="font-size:15px;font-weight:700;margin-bottom:8px">${d.ticker} · ${fmtPrice(d.close, d.market)}</div>
+        <div style="font-size:15px;font-weight:700;margin-bottom:8px">${d.ticker} · ${fmtPrice(d.close, d.market)}${rsBadge}</div>
         <div style="margin-bottom:10px">${modeChips}</div>
         <div style="font-size:13px;font-weight:600;color:#fbbf24;margin-bottom:4px">📋 핵심 사유</div>
         <ul style="margin:0 0 10px;padding-left:18px">${reasons}</ul>

@@ -5,6 +5,26 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.61 [버그수정] /api/debug의 RS 근사치가 화면에 안 보이던 문제 — v5.60
+        삼성화재 조사에서 드러남(라이브 디버그가 rs=80 고정 근사치를 썼는데
+        정식 percentile은 75라, "5점차 억울한 탈락"이라는 잘못된 결론으로
+        이어짐). box_info 사고(DELL 486 vs 실제 447.88, v5.39에서 라벨링
+        완료)와 같은 클래스. [반영] debug_ticker()가 leader-check(v5.54)와
+        같은 패턴으로 _fetch_market_data("all") 캐시를 재사용 — 캐시가
+        따뜻하면(보통 이미 그럼) 딕셔너리 조회만으로 정식 RS/RS모멘텀을
+        가져와 5개 _trace_*·leader/super/surge 판정 전부에 사용, 콜드면
+        (블로킹 없이 즉시 폴백) 기존처럼 80/5로 폴백하되 payload에
+        rs_percentile_is_approx로 명시하고 탈락사유 전체에 근사 캐치올
+        접미사. static/index.html 진단 헤더에 정식/근사 색상 배지 추가.
+        전수 확인 결과 RS 외 다른 근사 필드는 없음(box_info/수평저항은
+        이미 라벨링 완료, 나머지 트레이스 함수는 scanner.py 함수를 직접
+        import해 써서 드리프트 위험 없음) — 단 이 과정에서 app.py의
+        _trace_pullback이 v5.60 slope_floor 변경(전 종목 0.98)과 별개로
+        자체 사본을 갖고 있어 동기화가 안 됐던 버그를 추가로 발견해 같이
+        수정. 콜드/워밍 캐시 비교 검증: 콜드에선 근사치 80이 우연히
+        돌파임박 rs_min(80)을 턱걸이 통과시켜 "돌파임박 통과"로 오판정
+        했었음 — 워밍(정식 75)에선 8개 모드 전부 정확히 탈락으로 정정됨.
+        docs/rs_definition_and_slope_investigation.md 6절.
 v5.60 [반영] 삼성화재 조사(docs/rs_definition_and_slope_investigation.md)
         결론 2건. (1) 눌림목 ma20_slope의 slope_floor(0.98) 완화를
         전 종목으로 확대(기존 주도주RS90+ 한정) — 실측(offset 60~250
@@ -2341,7 +2361,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.60"
+VERSION = "v5.61"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -4194,7 +4214,7 @@ def _trace_pullback(df, is_kr, rs_rank):
     cur_rsi = float(r.iloc[-1])
     if not _gate_step(steps, "지표_계산가능", not any(math.isnan(x) for x in (m10, m20, m60, m200, cur_rsi)), "이평/RSI 중 NaN"):
         return {"passed": False, "fail_at": "nan", "steps": steps}
-    slope_floor = 0.98 if is_leader else 1.0
+    slope_floor = 0.98  # v5.61: scanner.analyze()의 v5.60 변경(전 종목 0.98)과 동기화
     ma20_slope = m20 > float(ma20.iloc[-11]) * slope_floor
     in_uptrend = (close > m60) and (close > m200) and (m20 > m60) and ma20_slope
     if not _gate_step(steps, "우상향추세", in_uptrend,
@@ -4512,45 +4532,62 @@ async def debug_ticker(ticker: str):
     if df is None or df.empty:
         return JSONResponse({"error": "데이터 없음", "ticker": ticker})
     is_kr = ticker.endswith((".KS", ".KQ"))
+
+    # v5.61 [버그수정] RS는 유니버스 전체 상대순위라 종목 하나만으로는 정식
+    # 백분위를 못 구해서, 예전엔 무조건 rs_rank=80/rs_mom=5 고정 근사치를
+    # 썼음 — 화면에 근사 표시가 없어 "정식 판정"처럼 보였고, 삼성화재
+    # 진단에서 근사치 80을 정식 RS 75로 오인해 "5점차 억울한 탈락"이라는
+    # 잘못된 결론으로 이어진 사고가 있었음(docs/rs_definition_and_slope_
+    # investigation.md). leader-check(v5.54)가 이미 같은 문제를 같은
+    # 방법으로 풀어놨음 — _fetch_market_data 캐시(다른 탭 로드로 보통 이미
+    # 따뜻함)를 재사용해 정식 rs_ranks/rs_moms를 dict 조회만으로 가져온다.
+    # 캐시가 콜드면(_fetch_market_data가 새 fetch를 걸지 않고 즉시 None
+    # 반환 — 이 요청을 블로킹하지 않음) 근사치로 폴백하고 근사임을 명시.
+    _bundle = await _fetch_market_data("all")
+    _real_rs = _bundle["rs_ranks"].get(ticker) if _bundle else None
+    _real_rs_mom = _bundle["rs_moms"].get(ticker) if _bundle else None
+    rs_is_approx = _real_rs is None
+    rs_used = _real_rs if _real_rs is not None else 80
+    rs_mom_used = _real_rs_mom if _real_rs_mom is not None else 5
+
     h, lo, c = df["High"], df["Low"], df["Close"]
     prev_c = c.shift(1)
     tr = _pd.concat([h - lo, (h - prev_c).abs(), (lo - prev_c).abs()], axis=1).max(axis=1)
     close = float(c.iloc[-1])
 
-    # 각 모드 통과 여부 (RS 정보 없이 단독 호출 — 대략적 판정, rs_rank=80 고정)
-    # v5.39: 예전엔 analyze_breakout이 이 kwargs 목록에서 빠져 is_kr이 항상
-    # False로 들어갔음(KR 종목의 리스크 하드게이트 한도가 8%로 잘못 적용될
-    # 수 있던 버그) — 아래 트레이스 함수들은 전부 is_kr을 명시적으로 받음.
+    # 각 모드 통과 여부 (RS는 위에서 정한 rs_used/rs_mom_used — 정식이면 그대로,
+    # 근사면 폴백값 80/5. is_kr은 항상 명시적으로 넘김: v5.39 버그 재발 방지
+    # 주석 유지.)
     # pullback/turnaround/breakout/boxbreak/imminent는 실제 게이트 순서를
     # 그대로 재현하는 _trace_* 함수로 판정 — modes와 게이트추적/탈락_핵심사유가
     # 서로 다른 계산에서 나와 어긋나는 일이 없도록 단일 소스로 통일.
     modes = {}
     traces = {}
     try:
-        traces["pullback"] = _trace_pullback(df, is_kr, 80)
+        traces["pullback"] = _trace_pullback(df, is_kr, rs_used)
     except Exception as e:
         traces["pullback"] = {"passed": False, "fail_at": "에러", "steps": [{"gate": "에러", "ok": False, "detail": str(e)}]}
     try:
-        traces["turnaround"] = _trace_turnaround(df, is_kr, 80, 5)
+        traces["turnaround"] = _trace_turnaround(df, is_kr, rs_used, rs_mom_used)
     except Exception as e:
         traces["turnaround"] = {"passed": False, "fail_at": "에러", "steps": [{"gate": "에러", "ok": False, "detail": str(e)}]}
     try:
-        traces["breakout"] = _trace_breakout(df, is_kr, 80)
+        traces["breakout"] = _trace_breakout(df, is_kr, rs_used)
     except Exception as e:
         traces["breakout"] = {"passed": False, "fail_at": "에러", "steps": [{"gate": "에러", "ok": False, "detail": str(e)}]}
     try:
-        traces["boxbreak"] = _trace_boxbreak(df, is_kr, 80)
+        traces["boxbreak"] = _trace_boxbreak(df, is_kr, rs_used)
     except Exception as e:
         traces["boxbreak"] = {"passed": False, "fail_at": "에러", "steps": [{"gate": "에러", "ok": False, "detail": str(e)}]}
     try:
-        traces["imminent"] = _trace_imminent(df, is_kr, 80)
+        traces["imminent"] = _trace_imminent(df, is_kr, rs_used)
     except Exception as e:
         traces["imminent"] = {"passed": False, "fail_at": "에러", "steps": [{"gate": "에러", "ok": False, "detail": str(e)}]}
     for name, t in traces.items():
         modes[name] = "통과" if t.get("passed") else ("에러" if t.get("fail_at") == "에러" else "탈락")
     for name, fn in [("leader", analyze_leader), ("super", analyze_super), ("surge", analyze_surge)]:
         try:
-            res = fn(df, rs_rank=80, rs_mom=5)
+            res = fn(df, rs_rank=rs_used, rs_mom=rs_mom_used)
             modes[name] = "통과" if res is not None else "탈락"
         except Exception as e:
             modes[name] = f"에러: {e}"
@@ -4577,10 +4614,9 @@ async def debug_ticker(ticker: str):
             box_info[f"박스{win}_상단"] = round(bh)
             box_info[f"박스{win}_돌파여부"] = close > bh * 1.005
 
-    # v5.34: RS 진단 — 유니버스 백분위(rs_ranks)는 여기서 못 구하지만(전체
-    # 유니버스가 있어야 percentile이 나옴), 원점수와 "몇 분기짜리인지"는
-    # 종목 하나만으로 계산 가능. price_ago 재정규화(v5.32) 후 상장
-    # 200~252봉 종목이 3분기 점수인지 눈으로 바로 확인하려고 추가.
+    # v5.34: RS 원점수 진단 — "몇 분기짜리인지"는 종목 하나만으로 계산 가능.
+    # price_ago 재정규화(v5.32) 후 상장 200~252봉 종목이 3분기 점수인지
+    # 눈으로 바로 확인하려고 추가. (v5.61: 백분위 자체는 위 rs_used로 확보됨)
     rs_raw = rs_raw_score(c)
     rs_q = rs_quarters_used(c)
 
@@ -4589,6 +4625,14 @@ async def debug_ticker(ticker: str):
         "market": "KR" if is_kr else "US",
         "close": round(close),
         "modes": modes,
+        "rs_percentile": rs_used,
+        "rs_percentile_is_approx": rs_is_approx,
+        "rs_percentile_note": (
+            "⚠️ 근사치 — 유니버스 캐시가 콜드라 고정값 80 사용(정식 백분위 아님). "
+            "스캐너 탭을 한 번 로드해 캐시를 데운 뒤 재조회하면 정식값이 반영됨."
+            if rs_is_approx else
+            "정식 유니버스 percentile RS (지수 대비 초과성과 기준)"
+        ),
         "rs_raw_score": round(rs_raw, 4) if rs_raw is not None else None,
         "rs_quarters_used": rs_q,
         "indicators": {
@@ -4659,6 +4703,12 @@ async def debug_ticker(ticker: str):
         reasons.append(f"{label}: [{last['gate']}] 탈락 — {last.get('detail')}")
     if not reasons:
         reasons.append("5개 핵심 탭 모두 주요 게이트 통과 — RS/세부 조건에서 미세 탈락 가능성. modes와 게이트추적 대조 필요")
+    # v5.61: RS가 근사치면 rs_min 게이트뿐 아니라 is_leader 분기(눌림목
+    # pullback_min/rsi_max, leader_rs=90 경계 등) 전체가 실제와 다를 수
+    # 있어 이 종목의 모든 탈락 사유에 캐치올로 붙인다 — rs_min 게이트 문구
+    # 하나만 고치면 "RS가 진짜 원인인 다른 게이트"를 놓치기 때문.
+    if rs_is_approx:
+        reasons = [f"{r} [⚠️ RS 근사치({rs_used}) 기준 — 정식 백분위 아님]" for r in reasons]
     payload["탈락_핵심사유"] = reasons
     payload["게이트기준_실제피벗"] = real_pivots
     payload["게이트추적"] = gate_trace_payload
