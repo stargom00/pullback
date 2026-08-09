@@ -4243,6 +4243,21 @@ async def lookup_ticker(ticker: str):
 # 순서·조건이 바뀌면 이 트레이서도 같이 업데이트해야 함(단일 소스가 아니라
 # 재현이라 드리프트 위험 — analyze/analyze_turnaround/analyze_breakout/
 # analyze_boxbreak/analyze_imminent 본체와 대조해서 유지보수할 것).
+#
+# [v5.63] 이 사본이 존재하는 이유: analyze_*가 게이트 탈락 시 None만 반환해서
+# 진단 정보가 안 남기 때문(v5.39 당시 핫패스 성능 선택 — 구조적 제약은
+# 아님). analyze_*에 trace: list | None = None 선택적 파라미터를 추가하면
+# (기본 None → 실제 스캔 동작 무변화) 이 사본을 없앨 수 있지만, 실거래
+# 함수 5개의 게이트 본문을 건드려야 해서 리스크가 크다 — test_trace_
+# parity.py(app.py의 _trace_*와 scanner.py의 analyze_*를 실제 종목으로
+# 돌려 stop/risk_pct 값 불일치를 잡는 차등 테스트)가 있는 한 지금은 보류.
+# 다음 중 하나라도 해당되면 그때는 제거를 실행할 것:
+#   ① test_trace_parity.py가 못 잡는 종류의 불일치가 한 번이라도 실제로 발생
+#   ② 여기에 새 진단 항목을 추가해야 해서 사본에 또 손대야 하는 시점
+# 실행 방법: analyze_*에 trace 파라미터 추가 → 게이트 탈락 지점마다 사유를
+# trace에 append → 이 파일의 _trace_* 함수들 삭제.
+# (CLAUDE.md "_trace_* 사본 보류 이유와 제거 트리거" 항목과 이 내용을
+# 동기화해서 유지할 것 — docs/rs_definition_and_slope_investigation.md 8절)
 def _gate_step(steps, name, ok, detail=None):
     steps.append({"gate": name, "ok": bool(ok), "detail": detail})
     return ok
