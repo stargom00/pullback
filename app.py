@@ -5,6 +5,32 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.68 [측정인프라+기능] v5.67의 진짜 원인("Script A 원본이 저장소에 안
+        남아있어 대조 불가")이 이 조사 하나만의 문제가 아니라, 오늘 기준
+        최소 5개 결정(패턴탭 검증실패 라벨/신호등 U/D 제거/tightening·
+        vol_dry 조정/rs_min 85→80/슈퍼대장 진입좌표)이 같은 이유로 재현
+        불가 상태라는 지적을 받고 재발 방지 조치.
+        (1) `scripts/measurements/` 신설 — 결정 근거가 되는 측정은 스크립트를
+        커밋하는 관례 도입(README.md에 규칙 + 기존 7개 docs 전수 감사표,
+        오늘 것 빼고 전부 재현 불가로 확인). (2) `scripts/measurements/harness.py`
+        신설 — 유니버스 fetch/체크포인트 RS재계산/저유동성 필터/2R레이스를
+        공용화해 "스크립트마다 제각각 구현하다 기준선이 갈리는" 유형의
+        사고를 구조적으로 차단. v5.67 스크립트를 이 하네스로 리팩터해
+        재실행 → 리팩터 전과 완전 동일(부동소수점까지 일치) 확인.
+        (3) 5개 결정에 재측정 우선순위 부여(신호등 U/D·패턴탭 라벨 1·2순위 —
+        실거래 알림 영향 크고 사용자도 최우선 지목; rs_min 85→80은 3순위 —
+        오늘 뒤집힌 손절폭 타이어 비교와 같은 "인접구간 이진비교" 구조라
+        재현성 의심이 제일 구체적; 슈퍼대장 진입좌표 4순위 — 다중조건
+        단조패턴이라 상대적으로 튼튼; tightening/vol_dry 5순위 — 효과
+        크기 작거나 이미 절충 반영). 근거·표: docs/pullback_stop_width_and_entry_timing.md
+        "Script A 기반 결정 재측정 우선순위" 절. 각 영향 문서 상단에도
+        재현 불가 노트 추가.
+        (4) ③ 관찰 트리거를 눌림목으로 확장(구현 완료, 지난 라운드엔 측정만
+        하고 보류했던 것) — `analyze()`(눌림목)에 `signal_high` 필드 추가,
+        `static/index.html` 저장 로직의 `mode==='imminent'` 단일 체크를
+        `TRIGGER_WATCH_MODES` Set(`imminent`,`pullback`)으로 교체. 확인
+        판정/추적 로직은 이미 trigger_price 유무로만 판정하는 모드 무관
+        구조라 그대로 재사용 — 새 UI 없이 저장 조건만 확장.
 v5.67 [측정] v5.66 눌림목 재측정치의 기준선 불일치 조사. 재측정한 눌림목
         전체 EV(0.286R)가 기존 all_tabs_common_yardstick_investigation.md의
         Script A 기록(0.172R, n=1787 vs 재측정 n=1648)과 66% 차이가 나서
@@ -2479,7 +2505,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.67"
+VERSION = "v5.68"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

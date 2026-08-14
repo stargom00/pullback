@@ -399,7 +399,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.67</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.68</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -750,6 +750,12 @@ function riskTierBadge(riskPct) {
 // 인버스/붕괴/섹터/마감정리/일지)에선 배지도 필터도 표시하지 않음. v5.55:
 // 슈퍼대장에 risk_pct(ATR×2 손절)가 생겨 추가.
 const RISK_TIER_MODES = new Set(['pullback', 'turnaround', 'breakout', 'boxbreak', 'imminent', 'pattern', 'strong_pivot', 'super']);
+// v5.68: "확인 후 진입" 일지 트리거(signal_high/avg_volume 기반) 유효 모드.
+// scanner.py에서 signal_high 필드를 실제로 채우는 analyze 함수가 있는 탭만
+// (돌파임박은 v5.44부터, 눌림목은 v5.68부터) — 다른 탭에서 트리거를 걸면
+// signal_high가 없어 null로 저장돼 조용히 no-op이 되므로 RISK_TIER_MODES와
+// 같은 패턴으로 Set을 명시.
+const TRIGGER_WATCH_MODES = new Set(['imminent', 'pullback']);
 let riskTierFilter = new Set();   // 선택된 tier key들 (비어있으면 필터 없음)
 // v5.56: 탭별 필터 유효성 전수조사 결과 반영. 필드가 없는 탭에서 필터를
 // 걸면 "아무 일도 안 함"이 아니라 조건에 따라 결과가 다름 — RISK_TIER_MODES
@@ -3171,13 +3177,18 @@ async function saveJournal() {
     // (docs/imminent_stop_entry_investigation.md 3.6) 결론 반영. 라벨은
     // "신호일 고가"가 아니라 "등록일 고가"로 표시할 것 — 측정한 방법론(신호
     // 최초 감지일 기준)과 다르게 여기선 관찰 등록 시점 기준이라 구분 필요.
-    trigger_price: (_cat === '관찰' && s.mode === 'imminent' && s.signal_high != null) ? s.signal_high : null,
-    trigger_volume: (_cat === '관찰' && s.mode === 'imminent' && s.avg_volume != null) ? Math.round(s.avg_volume * 1.5) : null,
+    // v5.68: 눌림목도 추가 — docs/pullback_stop_width_and_entry_timing.md ③
+    // 측정(안C' EV 0.923R vs 안D' 0.268R, n=261, 3영업일 이내 거래량1.5배+
+    // 고가돌파 확인)이 돌파임박과 같은 패턴이라 같은 트리거 인프라 재사용
+    // (isTriggerConfirmed/triggerInfoHtml은 이미 mode 무관 — trigger_price
+    // 유무로만 판정해서 새 UI 없이 이 스냅샷 라인만 추가하면 됨).
+    trigger_price: (_cat === '관찰' && TRIGGER_WATCH_MODES.has(s.mode) && s.signal_high != null) ? s.signal_high : null,
+    trigger_volume: (_cat === '관찰' && TRIGGER_WATCH_MODES.has(s.mode) && s.avg_volume != null) ? Math.round(s.avg_volume * 1.5) : null,
     // v5.54: trigger_date → watch_start_date로 개명(관찰 종류를 불문하고 공통으로
     // 쓰는 "관찰 시작일" 필드가 됨 — 옛 이름은 트리거 관찰에만 해당하는 이름이라
     // 의미가 어긋났음). 읽는 쪽은 watchStartDate(r)가 옛 trigger_date로 폴백.
-    watch_start_date: (_cat === '관찰' && s.mode === 'imminent') ? kstStr() : null,
-    trigger_pivot_dist_pct: (_cat === '관찰' && s.mode === 'imminent' && s.pivot_dist_pct != null) ? s.pivot_dist_pct : null,
+    watch_start_date: (_cat === '관찰' && TRIGGER_WATCH_MODES.has(s.mode)) ? kstStr() : null,
+    trigger_pivot_dist_pct: (_cat === '관찰' && TRIGGER_WATCH_MODES.has(s.mode) && s.pivot_dist_pct != null) ? s.pivot_dist_pct : null,
   };
   const j = getJournal(); j.unshift(rec);
   journalCache = j;

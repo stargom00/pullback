@@ -1,5 +1,11 @@
 # 대장후보 → 눌림목 전환 관찰 (v5.54)
 
+> **⚠️ v5.68 노트: 이 문서와 인용하는 `leader_check_cost.py`/
+> `leader_to_pullback_dist.py`는 저장소에 안 남아있어 재현 불가**
+> (`scripts/measurements/README.md` 감사 표 참고). 전환율 74%·중앙값
+> 6봉이라는 수치, 그리고 이걸 근거로 만든 만료 기간(아래 참고) 모두
+> 재측정 전까지는 검증되지 않은 상태.
+
 `docs/all_tabs_common_yardstick_investigation.md` Script D에서 대장후보 히트의 74%가 60봉 내 눌림목 탭에 전환된다는 걸 확인한 뒤(중앙값 6봉), 기존 감시(⚡)/관찰(👁) 인프라를 재사용해 이 전환을 알려주는 기능을 만든 기록.
 
 ## 설계 결정

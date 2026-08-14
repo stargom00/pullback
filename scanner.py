@@ -1587,6 +1587,12 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "rs_mom": rs_mom,
         "leader": is_leader,
         "mode": "pullback",
+        # v5.68: 돌파임박(v5.44)과 같은 "확인 후 진입" 일지 트리거용 —
+        # docs/pullback_stop_width_and_entry_timing.md ③ 측정(안C' EV 0.923R
+        # vs 안D' 0.268R, n=261) 근거. avg_volume(volume_info, 트레일링 50일
+        # 평균)와 조합해 static/index.html이 trigger_volume=avg_volume×1.5로
+        # 계산한다 — analyze_imminent와 동일 관례.
+        "signal_high": round(float(h.iloc[-1]), 2),
         "qa_score": _qa["score"],
         "qa_grade": _qa["grade"],
         "qa_components": _qa["components"],

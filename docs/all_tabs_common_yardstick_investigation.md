@@ -7,6 +7,15 @@
 > 재현 가능성을 근거로 재측정치를 채택했다. 최신 수치·조사 경위는
 > `docs/pullback_stop_width_and_entry_timing.md`(기준선 불일치 조사 절) 참고 —
 > 이 문서의 Script A 절대 수치는 신뢰하지 말 것(방향성 정도만 참고).
+>
+> 이 문서가 인용하는 나머지 스크립트(Script B~F, `entrysignal_before_after.py`,
+> `item_pass_rates_all5.py`, `super_immediate_entry.py`,
+> `super_pullback_prefilter_check.py`, `super_status_atr2.py`,
+> `surge_accum_followup.py`)도 전부 저장소에 안 남아있어 마찬가지로 재현
+> 불가(`scripts/measurements/README.md` 감사 표). **이 조사 근거의 결정
+> 중 패턴탭 "검증실패" 라벨과 슈퍼대장 즉시진입(ATR×2) 좌표는 재측정
+> 우선순위 1순위** — `docs/pullback_stop_width_and_entry_timing.md`
+> "Script A 기반 결정 재측정 우선순위" 절 참고.
 
 `docs/abc_doc_style_tab_investigation.md`에서 쓴 시점매칭 대조군 방식을 전 탭으로 확장해, "탭을 정리하기 전에 전 탭 성과를 같은 잣대로 재자"는 요청에 따라 진행한 측정 기록. 급등매집→탭전이 조사에서 "매집 흔적 → 곧 터진다"는 전제가 무너졌던 경험이 이번에도 반복됐다.
 
