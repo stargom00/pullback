@@ -1,12 +1,13 @@
 # RS 정의(지수대비 vs 절대) · ma20_slope · 고점후수렴 탭 조사 (2026-08-09)
 
-> **⚠️ v5.68 노트: 이 문서의 측정 스크립트(80-85/85-90 구간 EV 비교 등)는
+> **⚠️ v5.68 노트: 이 문서의 원 측정 스크립트(80-85/85-90 구간 EV 비교 등)는
 > 재현 불가** — 저장소에 안 남아있음(`scripts/measurements/README.md`
-> 감사 표 참고). **v5.60에서 반영된 rs_min 85→80(돌파/박스돌파/돌파임박)과
-> ma20_slope_floor 전종목 0.98은 재측정 우선순위 1순위**로 판단함
-> (되돌리기 어려운 CONFIG 변경 + 격차가 크지 않았던 경계 근처 결정이라
-> 노이즈에 취약할 수 있음) — `docs/pullback_stop_width_and_entry_timing.md`
-> "Script A 기반 결정 재측정 우선순위" 절 참고.
+> 감사 표 참고). **v5.69 업데이트**: rs_min 85→80(돌파/박스돌파/돌파임박)은
+> `scripts/measurements/2026-08-14_rs_min_bucket_ev_breakout_boxbreak_imminent.py`로
+> 재측정 완료 — "80-85가 85-90보다 EV 같거나 높다"는 원 근거가 3개 탭
+> 전부 재현됨, **rs_min=80 유지**(상세: `docs/pullback_stop_width_and_entry_timing.md`
+> 5절). **ma20_slope_floor 전종목 0.98은 아직 재측정 안 함** — 별도 검증
+> 대상으로 남음.
 
 삼성화재(000810.KS)가 돌파/박스돌파/돌파임박(rs_min=85)에서 RS 5점차로 탈락하고,
 눌림목에서는 ma20_slope(기울기꺾임)로 탈락한 데서 시작한 조사. v5.59 기준으로

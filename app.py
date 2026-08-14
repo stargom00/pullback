@@ -5,6 +5,22 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.69 [측정] rs_min 85→80(v5.60, breakout/boxbreak/imminent) 재측정 —
+        v5.68에서 매긴 재측정 우선순위 3위. 새 스크립트
+        `scripts/measurements/2026-08-14_rs_min_bucket_ev_breakout_boxbreak_imminent.py`
+        (v5.68의 공통 하네스 재사용, 오늘 이미 받아둔 유니버스 데이터로
+        100초 만에 완료) — CONFIG rs_min을 측정 전용 사본에서만 70으로
+        낮춰 75-80/80-85 구간이 함수 내부 게이트에 안 걸리게 한 뒤, 실제
+        rs_rank로 5구간(75-80/80-85/85-90/90-95/95-99) 사후 분류해 2R
+        레이스 EV 비교. 결과: v5.60 결정의 핵심 근거("80-85가 85-90보다
+        EV 같거나 높음")가 **3개 탭 전부 재현**(돌파 0.309R>0.186R,
+        박스돌파 0.171R>0.121R, 돌파임박 0.262R>0.236R, 전 구간 n≥30) —
+        rs_min=80 유지. 부가 발견: 돌파·박스돌파는 75-80이 오히려 전
+        구간 최고치인 반면 돌파임박은 75-80이 최저치라, 세 탭이 공유하는
+        단일 rs_min=80이 돌파임박엔 딱 맞고 다른 둘엔 다소 보수적일 수
+        있음(탭별 분리는 다음 라운드 후보로 남김, 지금 당장 문제는 아님).
+        scanner.py의 v5.60 주석 3곳에 재현 결과 추가. 상세:
+        docs/pullback_stop_width_and_entry_timing.md 5절.
 v5.68 [측정인프라+기능] v5.67의 진짜 원인("Script A 원본이 저장소에 안
         남아있어 대조 불가")이 이 조사 하나만의 문제가 아니라, 오늘 기준
         최소 5개 결정(패턴탭 검증실패 라벨/신호등 U/D 제거/tightening·
@@ -2505,7 +2521,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.68"
+VERSION = "v5.69"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

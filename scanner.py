@@ -2438,6 +2438,11 @@ BREAKOUT_CONFIG = {
     # 80-85 구간 EV가 85-90보다 같거나 높음(절대RS 기준 85-90은 오히려
     # -0.034R) — 85라는 문턱 자체에 EV 근거가 없었음. 눌림목(rs_min=80)과
     # 통일. 근거: docs/rs_definition_and_slope_investigation.md 2.
+    # v5.69: 원 스크립트 소실로 재현 불가 상태였던 걸
+    # scripts/measurements/2026-08-14_rs_min_bucket_ev_breakout_boxbreak_imminent.py
+    # (공통 하네스, 커밋됨)로 재측정 — 80-85(0.309R,n=136) > 85-90(0.186R,
+    # n=118) 재현 확인, rs_min=80 유지. docs/pullback_stop_width_and_entry_timing.md
+    # 5절.
     "rs_min": 80,
     "max_off_high": 25,      # 1년 고점 대비 -25% 넘게 빠진 종목 제외
     "base_min_len": 20,      # 베이스(횡보) 최소 길이
@@ -2592,6 +2597,8 @@ BOXBREAK_CONFIG = {
     "min_bars": 140,         # 120일선 + 여유
     # v5.60: 85→80, breakout과 같은 근거(80-85 EV가 85-90과 같거나 높음,
     # n=1268 실측). docs/rs_definition_and_slope_investigation.md 2 참고.
+    # v5.69: 재측정 재현 확인(80-85 0.171R,n=111 > 85-90 0.121R,n=99) —
+    # scripts/measurements/2026-08-14_rs_min_bucket_ev_breakout_boxbreak_imminent.py
     "rs_min": 80,
     "max_off_high": 25,      # 1년 고점 대비 -25% 넘게 빠진 종목 제외
     "box_windows": [20, 40, 60],   # 짧/중/장 박스 동시 확인
@@ -2768,6 +2775,11 @@ IMMINENT_CONFIG = {
     # v5.60: 85→80, breakout/boxbreak와 같은 근거 — 가장 표본이 큰 이
     # 탭(n=19232)에서도 80-85 EV(+0.114R/+0.080R)가 85-90(+0.046R/+0.076R)
     # 보다 낮지 않음. docs/rs_definition_and_slope_investigation.md 2 참고.
+    # v5.69: 재측정 재현 확인(80-85 0.262R,n=1490 > 85-90 0.236R,n=1363) —
+    # scripts/measurements/2026-08-14_rs_min_bucket_ev_breakout_boxbreak_imminent.py.
+    # 부가발견: 75-80 구간(0.156R)이 오히려 전 구간 최저 — 다른 두 탭(75-80이
+    # 최고치)과 반대 방향이라, 셋이 공유하는 rs_min=80은 이 탭엔 딱 맞는
+    # 지점이고 돌파/박스돌파엔 다소 보수적일 수 있음(탭별 분리는 다음 라운드).
     "rs_min": 80,
     "max_off_high": 25,      # 1년 고점 대비 -25% 넘게 빠진 종목 제외(무너진 종목의 가짜 돌파 차단)
     "near_min": -0.05,   # 피벗 대비 현재가 하한 (-5%: 천장 5% 아래까지)
