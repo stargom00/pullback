@@ -399,7 +399,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.66</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.67</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1865,20 +1865,22 @@ function renderCards() {
   if (riskSort && RISK_TIER_MODES.has(mode)) {
     list.sort((a, b) => (a.risk_pct ?? 999) - (b.risk_pct ?? 999));
   }
-  // v5.66: 눌림목에서 🔵타이트 필터나 손절좁은순 정렬을 켜면 "타이트=좋음"으로
-  // 오해하기 쉬움 — 그런데 전 탭 체크포인트 실측(off=60~250, 20지점,
-  // docs/pullback_stop_width_and_entry_timing.md)에서 방향이 탭마다 다르고
-  // (돌파·박스돌파는 타이트가 훨씬 우세, 추세전환은 타이트가 열세, 돌파임박은
-  // 무차이) 눌림목 자체도 예전에 관찰됐던 "타이트가 열세" 방향이 최신
-  // 재측정(n=1648)에선 재현되지 않았다(오히려 근소 우세) — 즉 방향 자체가
-  // 안정적이지 않다는 게 결론이라, 특정 수치를 단정하는 대신 "품질 신호로
-  // 읽지 말라"는 문구로 통일.
+  // v5.66/v5.67: 눌림목에서 🔵타이트 필터나 손절좁은순 정렬을 켜면 "타이트=
+  // 좋음"으로 오해하기 쉬움 — 그런데 전 탭 체크포인트 실측(off=60~250,
+  // 20지점, docs/pullback_stop_width_and_entry_timing.md)에서 방향이 탭마다
+  // 다르고(돌파·박스돌파는 타이트가 훨씬 우세, 추세전환은 타이트가 열세,
+  // 돌파임박은 무차이) 눌림목 자체도 예전에 관찰됐던 "타이트가 열세" 방향이
+  // 최신 재측정(n=1623, 저유동성 필터 포함)에선 재현되지 않았다(오히려 근소
+  // 우세) — 즉 방향 자체가 안정적이지 않다는 게 결론이라, 특정 수치를
+  // 단정하는 대신 "품질 신호로 읽지 말라"는 문구로 통일. v5.67: 이 수치의
+  // 기준선 자체가 기존 all_tabs 조사(0.172R)와 안 맞아 원인 조사 후 재측정치로
+  // 교체(docs 문서의 "기준선 불일치 조사" 절 참고).
   const stopWarnBar = document.getElementById('stopWidthWarnBanner');
   if (stopWarnBar) {
     const showStopWarn = mode === 'pullback' && (riskSort || riskTierFilter.has('tight'));
     stopWarnBar.style.display = showStopWarn ? '' : 'none';
     if (showStopWarn) {
-      stopWarnBar.innerHTML = 'ℹ️ 손절폭과 EV의 관계는 탭·시점마다 방향이 다릅니다(눌림목 최신 실측 n=1648: 손절≤5% 0.295R vs 5%+ 0.240R — 방향 자체가 고정돼 있지 않음). ' +
+      stopWarnBar.innerHTML = 'ℹ️ 손절폭과 EV의 관계는 탭·시점마다 방향이 다릅니다(눌림목 최신 실측 n=1623: 손절≤5% 0.300R vs 5%+ 0.246R — 방향 자체가 고정돼 있지 않음). ' +
         '이 배지·정렬은 포지션 크기 결정용이지, 타이트할수록 좋은 진입이라는 뜻이 아닙니다.';
     }
   }
