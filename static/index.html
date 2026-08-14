@@ -51,6 +51,12 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .tab{border:none;background:none;color:var(--muted);font:inherit;font-size:13px;
   padding:6px 14px;border-radius:6px;cursor:pointer}
 .tab.active{background:var(--surface2);color:var(--text);font-weight:500}
+/* v5.66: 슈퍼대장 필터 — 실측 EV 0.266R로 눌림목 필터 중 가장 효과적인데
+   다른 버튼과 톤이 같아 묻혀 있었음(사용자 지적). 금색 톤으로 상시 구분,
+   켜졌을 때 더 진하게 — docs/pullback_stop_width_and_entry_timing.md 참고. */
+#superOnlyToggle{border:1px solid rgba(250,204,21,.35);color:#facc15;font-weight:600}
+#superOnlyToggle:hover{background:rgba(250,204,21,.1)}
+#superOnlyToggle.active{background:rgba(250,204,21,.2);color:#fde68a;border-color:#facc15}
 .tab:focus-visible,button:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
 
 .refresh{border:1px solid var(--line);background:var(--surface);color:var(--text);
@@ -225,6 +231,11 @@ tr.editing{background:rgba(242,179,61,.06)}
 .exp-tag.danger{background:rgba(255,107,107,.25);color:#ff9b9b}
 .surge-warn{background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.3);
   border-radius:8px;padding:8px 11px;font-size:11px;color:#c084fc;margin-top:8px;line-height:1.5}
+/* v5.66: 손절폭 배지/필터가 "타이트=고품질"로 오독되는 걸 막는 안내줄.
+   눌림목 탭에서 🔵 필터나 손절좁은순 정렬을 켰을 때만 노출(renderCards). */
+.stopwidth-warn{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);
+  border-radius:8px;padding:8px 11px;font-size:12px;color:#fbbf24;margin:0 24px 12px;line-height:1.5}
+@media (max-width:600px){.stopwidth-warn{margin:0 16px 12px}}
 .legend{display:flex;gap:18px;flex-wrap:wrap;padding:0 24px 10px;font-size:12px}
 .legend .lg{color:var(--muted);cursor:help;display:inline-flex;align-items:center;gap:5px}
 .legend .lg-h{color:var(--text);opacity:.7}
@@ -388,7 +399,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.65</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.66</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -432,6 +443,7 @@ tr.editing{background:rgba(242,179,61,.06)}
      바로 아래, 섹터 칩보다 위에 둬서 "필터 그룹"으로 묶임(섹터 칩은 브라우징용
      이라 아래로 분리). -->
 <div class="sectorbar" id="riskTierBar" style="display:none"></div>
+<div class="stopwidth-warn" id="stopWidthWarnBanner" style="display:none"></div>
 <!-- v5.36: 패턴 탭 전용 서브탭(전체/컵앤핸들/치솟은깃발/더블바닥/급등매집).
      mode==='pattern'일 때만 렌더링·표시 — renderPatternSubTabs()가 매번
      mode를 확인해서 그 외엔 숨김+필터 미적용. v5.46: 섹터 칩(.schip)과
@@ -732,7 +744,7 @@ function riskTierOf(riskPct) {
 function riskTierBadge(riskPct) {
   const t = riskTierOf(riskPct);
   if (!t) return '';
-  return ` <span class="climax-tag" style="background:${t.bg};color:${t.color};border:1px solid ${t.border}" title="절대 손절폭 기준(ATR 무관, 게이트와 별개): ≤5% 타이트 · 5~8% 보통 · 8~12% 넓음 · 12%+ 매우넓음. +1R 목표=손절폭만큼 상승이라 넓을수록 도달 전 손절 확률↑. '손절좁은순' 정렬과 같은 risk_pct 기준.">${t.emoji} ${t.label} ${riskPct}%</span>`;
+  return ` <span class="climax-tag" style="background:${t.bg};color:${t.color};border:1px solid ${t.border}" title="포지션 크기 결정용 — 좁다고 좋은 게 아님. 절대 손절폭 기준(ATR 무관, 게이트와 별개): ≤5% 타이트 · 5~8% 보통 · 8~12% 넓음 · 12%+ 매우넓음. 전 탭 실측 결과 손절폭과 EV의 관계는 탭·시점마다 방향이 다름(docs/pullback_stop_width_and_entry_timing.md) — 타이트가 항상 좋은 자리라는 보장 없음, 진입 품질 신호로 쓰지 말 것. '손절좁은순' 정렬과 같은 risk_pct 기준.">${t.emoji} ${t.label} ${riskPct}%</span>`;
 }
 // risk_pct 필드가 있는 모드만 — 없는 탭(대장후보/Stage2/IBD9/실적우수/급등/
 // 인버스/붕괴/섹터/마감정리/일지)에선 배지도 필터도 표시하지 않음. v5.55:
@@ -1852,6 +1864,23 @@ function renderCards() {
   // v5.56: risk_pct 없는 탭은 전부 동점 정렬이라 무의미 — RISK_TIER_MODES로 게이트.
   if (riskSort && RISK_TIER_MODES.has(mode)) {
     list.sort((a, b) => (a.risk_pct ?? 999) - (b.risk_pct ?? 999));
+  }
+  // v5.66: 눌림목에서 🔵타이트 필터나 손절좁은순 정렬을 켜면 "타이트=좋음"으로
+  // 오해하기 쉬움 — 그런데 전 탭 체크포인트 실측(off=60~250, 20지점,
+  // docs/pullback_stop_width_and_entry_timing.md)에서 방향이 탭마다 다르고
+  // (돌파·박스돌파는 타이트가 훨씬 우세, 추세전환은 타이트가 열세, 돌파임박은
+  // 무차이) 눌림목 자체도 예전에 관찰됐던 "타이트가 열세" 방향이 최신
+  // 재측정(n=1648)에선 재현되지 않았다(오히려 근소 우세) — 즉 방향 자체가
+  // 안정적이지 않다는 게 결론이라, 특정 수치를 단정하는 대신 "품질 신호로
+  // 읽지 말라"는 문구로 통일.
+  const stopWarnBar = document.getElementById('stopWidthWarnBanner');
+  if (stopWarnBar) {
+    const showStopWarn = mode === 'pullback' && (riskSort || riskTierFilter.has('tight'));
+    stopWarnBar.style.display = showStopWarn ? '' : 'none';
+    if (showStopWarn) {
+      stopWarnBar.innerHTML = 'ℹ️ 손절폭과 EV의 관계는 탭·시점마다 방향이 다릅니다(눌림목 최신 실측 n=1648: 손절≤5% 0.295R vs 5%+ 0.240R — 방향 자체가 고정돼 있지 않음). ' +
+        '이 배지·정렬은 포지션 크기 결정용이지, 타이트할수록 좋은 진입이라는 뜻이 아닙니다.';
+    }
   }
   // 매집순 정렬 (토글, ABC 패턴 전용 보조지표): 내림차순, 판정불가(null)는 맨 뒤.
   // v5.29: accum_score(int(round()))로만 정렬하면 상위 50자리가 서로 다른
