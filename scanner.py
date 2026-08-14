@@ -2441,9 +2441,20 @@ BREAKOUT_CONFIG = {
     # v5.69: 원 스크립트 소실로 재현 불가 상태였던 걸
     # scripts/measurements/2026-08-14_rs_min_bucket_ev_breakout_boxbreak_imminent.py
     # (공통 하네스, 커밋됨)로 재측정 — 80-85(0.309R,n=136) > 85-90(0.186R,
-    # n=118) 재현 확인, rs_min=80 유지. docs/pullback_stop_width_and_entry_timing.md
-    # 5절.
-    "rs_min": 80,
+    # n=118) 재현 확인. 다만 75-80(0.368R)이 그보다도 높아 "80 밑이 더
+    # 나쁘다"는 가정 자체가 이 탭엔 안 맞았음.
+    # v5.70: 80→75. scripts/measurements/2026-08-14_breakout_boxbreak_rs_reversal_deep_dive.py
+    # 로 65/70/75/80/60 임계값 전부 실측(외삽 아님) — 75로 낮추면 EV가
+    # 오히려 오르면서(0.212→0.248R) 히트도 늘어남(일평균 19.1→25.0,
+    # "free lunch"). 70 이하부터는 EV가 다시 떨어져(70:0.208, 65:0.199,
+    # 60:0.175) 75가 자연스러운 하한선 — "RS 낮을수록 좋다"로 무한정
+    # 내리는 함정이 아니라 데이터가 실제로 멈추는 지점. 메커니즘: RS
+    # 구간별 200일선 이격(ext200_pct) median이 16.5%(60-65)→72.0%(95-99)로
+    # 강한 단조 증가 — RS가 높을수록 이미 많이 오른(extended) 종목이라
+    # EV가 나빠지는 것으로 보임(RS 자체보다 확장도가 진짜 원인일 가능성,
+    # 다음 라운드에서 ext200 직접 게이트 검토 후보). 근거·전체 표:
+    # docs/pullback_stop_width_and_entry_timing.md 6절.
+    "rs_min": 75,
     "max_off_high": 25,      # 1년 고점 대비 -25% 넘게 빠진 종목 제외
     "base_min_len": 20,      # 베이스(횡보) 최소 길이
     "base_max_range": 0.25,  # 베이스 고저 폭이 25% 이내여야 "타이트한 베이스"
@@ -2599,7 +2610,11 @@ BOXBREAK_CONFIG = {
     # n=1268 실측). docs/rs_definition_and_slope_investigation.md 2 참고.
     # v5.69: 재측정 재현 확인(80-85 0.171R,n=111 > 85-90 0.121R,n=99) —
     # scripts/measurements/2026-08-14_rs_min_bucket_ev_breakout_boxbreak_imminent.py
-    "rs_min": 80,
+    # v5.70: 80→75, breakout과 같은 근거·같은 데이터로 결정(75가 EV
+    # 0.161→0.196R 개선 + 일평균 15.9→21.2 증가, 70 이하부턴 다시 하락).
+    # scripts/measurements/2026-08-14_breakout_boxbreak_rs_reversal_deep_dive.py,
+    # docs/pullback_stop_width_and_entry_timing.md 6절.
+    "rs_min": 75,
     "max_off_high": 25,      # 1년 고점 대비 -25% 넘게 빠진 종목 제외
     "box_windows": [20, 40, 60],   # 짧/중/장 박스 동시 확인
     "box_max_range": 0.30,   # 박스 고저폭 ≤30% (국장 변동성 고려, 너무 넓으면 박스 아님)
@@ -2779,7 +2794,11 @@ IMMINENT_CONFIG = {
     # scripts/measurements/2026-08-14_rs_min_bucket_ev_breakout_boxbreak_imminent.py.
     # 부가발견: 75-80 구간(0.156R)이 오히려 전 구간 최저 — 다른 두 탭(75-80이
     # 최고치)과 반대 방향이라, 셋이 공유하는 rs_min=80은 이 탭엔 딱 맞는
-    # 지점이고 돌파/박스돌파엔 다소 보수적일 수 있음(탭별 분리는 다음 라운드).
+    # 지점이고 돌파/박스돌파엔 다소 보수적일 수 있음.
+    # v5.70: 탭별 분리 실행 — 돌파/박스돌파는 75로 낮춤(위 부가발견대로
+    # 그쪽엔 80이 보수적이었던 게 확인됨), 돌파임박은 80 유지(이 탭만
+    # 75-80이 최저치라 낮출 근거가 없음). docs/pullback_stop_width_and_entry_timing.md
+    # 6절.
     "rs_min": 80,
     "max_off_high": 25,      # 1년 고점 대비 -25% 넘게 빠진 종목 제외(무너진 종목의 가짜 돌파 차단)
     "near_min": -0.05,   # 피벗 대비 현재가 하한 (-5%: 천장 5% 아래까지)

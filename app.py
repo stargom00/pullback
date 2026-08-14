@@ -5,6 +5,25 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.70 [측정+CONFIG] 돌파·박스돌파 RS 역방향 심층 조사 — v5.69에서 나온
+        부가 발견("돌파·박스돌파는 75-80이 오히려 최고치, 90+에서 비단조")이
+        신호등에서 돌파 RS를 뺀 이유(ok군 0.232R < warn군 0.482R)와 같은
+        방향이라는 지적을 받고 후속 측정. 새 스크립트
+        `scripts/measurements/2026-08-14_breakout_boxbreak_rs_reversal_deep_dive.py`
+        (하네스 재사용, 53초 완료). (1) rs_min을 60까지 실측(외삽 아님) —
+        75 밑으로는 개선 없음(70-75 돌파 0.035R로 급락, 60-65/65-70 일부
+        음수) — 75가 실제로 꺾이는 지점. (2) 임계값별 누적 비교 — 75로
+        낮추면 EV와 히트 수가 둘 다 오름(돌파 0.212→0.248R + 19.1→25.0건/일,
+        박스돌파 0.161→0.196R + 15.9→21.2건/일), 70 이하는 다시 하락 — 75가
+        자연스러운 하한. (3) extended 가설 확인 — RS 구간별 200일선 이격
+        (ext200_pct) median이 16.6%(60-65)→72.0%(95-99)로 강한 단조 증가,
+        RS 높은 돌파 히트일수록 이미 많이 오른 상태라 EV가 나빠지는
+        것으로 보임(RS 자체보다 확장도가 진짜 원인일 가능성).
+        **반영**: BREAKOUT_CONFIG/BOXBREAK_CONFIG의 rs_min 80→75
+        (IMMINENT_CONFIG는 80 유지 — 이 탭만 75-80이 최저치). 세 탭이
+        공유하던 임계값을 처음으로 분리. ext200을 직접 게이트로 쓰는 안은
+        범위 밖이라 보류(다음 라운드 후보). 근거·전체 표:
+        docs/pullback_stop_width_and_entry_timing.md 6절.
 v5.69 [측정] rs_min 85→80(v5.60, breakout/boxbreak/imminent) 재측정 —
         v5.68에서 매긴 재측정 우선순위 3위. 새 스크립트
         `scripts/measurements/2026-08-14_rs_min_bucket_ev_breakout_boxbreak_imminent.py`
@@ -2521,7 +2540,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.69"
+VERSION = "v5.70"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
