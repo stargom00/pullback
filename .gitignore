@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 kr_universe_v6_*.json
 datacache_*.pkl
+.env
