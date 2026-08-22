@@ -5,6 +5,25 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.71 [CONFIG+게이트] 눌림목 RS 게이트를 E=A(12개월 RS≥80) OR B(3개월
+        RS≥80) OR C(RS≥50 且 20거래일 전 대비 랭크+25 이상)로 확장, 눌림폭
+        게이트를 고정%(1.5~15%)에서 ATR 상대배수 depth_atr∈[0.5,3.0]로
+        교체. 계기: MSTR/BMNR/CRCL/PLTR 같은 주도주가 눌림목 탭에 전혀 안
+        잡히는 문제 진단(scripts/measurements/reject_tracer.py) — 4종목
+        전부 rs_min=80 미달이 사유(RS 계산불가 아니라 실제로 낮음, 3종목은
+        12개월/3개월/모멘텀 세 관점 다 약함 — 구조적으로 이 시스템 대상이
+        아님을 확인). 후속 측정(2026-08-23_reject_tracer_rs_variants.py +
+        _ev_and_gate_e.py, harness 2R 레이스)에서 E\\A 증분 EV 0.235R(n=869)
+        · depth_atr 증분 EV 0.194R(n=480)가 현행 A 단독 EV 0.108R보다
+        우수해 채택. 눌림목 탭에만 적용(다른 탭 미변경). 통과 경로를
+        `rs_path`("12M"|"3M"|"momentum") 필드로 노출, UI에 🔥단기주도/
+        🚀랭크급등 배지 추가(12M은 기존 표시 유지, 별도 필터 없이 목록에
+        섞어 표시). rs_3m/rs_delta는 app.py `_compute_rs_ranks` 헬퍼로
+        전체 유니버스 기준 계산(RS 계산 자체를 재사용해 물리적으로 한 곳,
+        20거래일 전 트렁케이션 벤치마크 상수는 균일 차감이라 순위 불변이라
+        오늘 값 재사용 — harness.py의 US 벤치마크 생략과 같은 근거).
+        `_trace_pullback`도 동기화(CLAUDE.md 리터럴 사본 원칙).
+        근거·수치 전체: docs/rs_gate_e_and_depth_atr_v5.71.md.
 v5.70 [측정+CONFIG] 돌파·박스돌파 RS 역방향 심층 조사 — v5.69에서 나온
         부가 발견("돌파·박스돌파는 75-80이 오히려 최고치, 90+에서 비단조")이
         신호등에서 돌파 RS를 뺀 이유(ok군 0.232R < warn군 0.482R)와 같은
@@ -2540,7 +2559,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.70"
+VERSION = "v5.71"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -2659,6 +2678,30 @@ def _ret_pct(close, days):
         return None
     past = float(c.iloc[-days - 1])
     return float(c.iloc[-1]) / past - 1 if past > 0 else None
+
+
+def _compute_rs_ranks(data: dict, b_kospi: float, b_kosdaq: float, b_us: float):
+    """종목 dict(df)로부터 RS 백분위(12개월, 지수 초과성과) + 3개월 단순수익률
+    백분위를 계산. v5.71: rs_delta(20거래일 전 대비 rs_rank 변화) 산출을 위해
+    이 계산을 그대로 다시 돌릴 수 있게 분리(원래 _fetch_market_data_inner
+    본문에 인라인이었던 걸 승격) — data에 20봉 잘린 df를 넣으면 그 시점
+    기준 RS가 재현된다. 벤치마크 상수(b_kospi/b_kosdaq/b_us)는 같은 시장
+    안에서 전 종목에 동일하게 적용돼 백분위 순위엔 영향이 없으므로(균일한
+    상수 차감은 상대순위 불변) 트렁케이션 시점과 무관하게 오늘 값을 그대로
+    재사용해도 결과가 같다(scripts/measurements/harness.py의 US 벤치마크
+    생략과 같은 근거)."""
+    kr, us = {}, {}
+    kr3, us3 = {}, {}
+    for t, df in data.items():
+        is_kr = t.endswith((".KS", ".KQ"))
+        raw = rs_raw_score(df["Close"])
+        if raw is not None:
+            bench_score = (b_kospi if t.endswith(".KS") else b_kosdaq) if is_kr else b_us
+            (kr if is_kr else us)[t] = raw - bench_score
+        (kr3 if is_kr else us3)[t] = _ret_pct(df["Close"], 63)
+    rs_ranks = {**to_rs_rank(kr), **to_rs_rank(us)}
+    rank3 = {**to_rs_rank(kr3), **to_rs_rank(us3)}
+    return rs_ranks, rank3
 
 
 # ── 장 마감 후 디스크 캐시 ──────────────────────────────────
@@ -3022,25 +3065,24 @@ async def _fetch_market_data_inner(market: str, cache_key: str) -> dict:
     b_kospi = bench.get("kospi", 0.0)
     b_kosdaq = bench.get("kosdaq", 0.0)
 
-    kr, us = {}, {}
-    kr3, us3, kr12, us12 = {}, {}, {}, {}
+    rs_ranks, rank3 = _compute_rs_ranks(data, b_kospi, b_kosdaq, b_us)
+    kr12, us12 = {}, {}
     for t, df in data.items():
         is_kr = t.endswith((".KS", ".KQ"))
-        raw = rs_raw_score(df["Close"])
-        if raw is not None:
-            # 한국은 코스피/코스닥 구분, 미국은 나스닥 기준 초과성과
-            if is_kr:
-                bench_score = b_kospi if t.endswith(".KS") else b_kosdaq
-            else:
-                bench_score = b_us
-            rel = raw - bench_score   # 지수 대비 초과성과
-            (kr if is_kr else us)[t] = rel
-        (kr3 if is_kr else us3)[t] = _ret_pct(df["Close"], 63)
         (kr12 if is_kr else us12)[t] = _ret_pct(df["Close"], 252)
-    rs_ranks = {**to_rs_rank(kr), **to_rs_rank(us)}
-    rank3 = {**to_rs_rank(kr3), **to_rs_rank(us3)}
     rank12 = {**to_rs_rank(kr12), **to_rs_rank(us12)}
     rs_moms = {t: rank3[t] - rank12[t] for t in data if t in rank3 and t in rank12}
+    rs3_ranks = rank3   # v5.71: rs_3m 필드로 그대로 노출 (게이트 변형 E — 3개월 RS)
+
+    # ── rs_delta: 20거래일 전 대비 RS 랭크 변화 (v5.71, 게이트 변형 E) ──
+    # scripts/measurements/2026-08-23_reject_tracer_rs_variants.py에서 검증된
+    # 정의 그대로 이식 — 같은 트렁케이션(끝에서 20봉 제거)으로 RS를 재계산해
+    # 오늘 랭크와 비교. data는 이미 메모리에 있어 네트워크 재호출 없음.
+    RS_DELTA_LOOKBACK = 20
+    data_20ago = {t: df.iloc[:-RS_DELTA_LOOKBACK] for t, df in data.items()
+                  if len(df) > RS_DELTA_LOOKBACK}
+    rs_ranks_20ago, _ = _compute_rs_ranks(data_20ago, b_kospi, b_kosdaq, b_us)
+    rs_deltas = {t: rs_ranks[t] - rs_ranks_20ago[t] for t in rs_ranks if t in rs_ranks_20ago}
     _dur_rs = time.time() - _t_rs
 
     # ── 속도 진단 로그 — 어느 단계가 느린지 Railway 로그로 확인 ──
@@ -3062,6 +3104,8 @@ async def _fetch_market_data_inner(market: str, cache_key: str) -> dict:
         "data_ts": data_ts,
         "rs_ranks": rs_ranks,
         "rs_moms": rs_moms,
+        "rs3_ranks": rs3_ranks,   # v5.71: 3개월 RS 백분위 (게이트 변형 E)
+        "rs_deltas": rs_deltas,   # v5.71: 20거래일 전 대비 RS 랭크 변화
         "ts": time.time(),
         "daykey": daykey,
         "timing": _timing,
@@ -3629,6 +3673,8 @@ async def run_scan(market: str, mode: str) -> dict:
     data = bundle["data"]
     rs_ranks = bundle["rs_ranks"]
     rs_moms = bundle["rs_moms"]
+    rs3_ranks = bundle.get("rs3_ranks", {})   # v5.71 — 구 디스크캐시 호환 위해 .get
+    rs_deltas = bundle.get("rs_deltas", {})
     _scan_timing = bundle.get("timing")
 
     fn = {"turnaround": analyze_turnaround, "leader": analyze_leader, "super": analyze_super, "breakout": analyze_breakout, "surge": analyze_surge, "imminent": analyze_imminent, "boxbreak": analyze_boxbreak, "breakdown": analyze_breakdown, "pattern": analyze_pattern}.get(mode, analyze)
@@ -3649,6 +3695,9 @@ async def run_scan(market: str, mode: str) -> dict:
         kwargs = {"rs_rank": rs_ranks.get(t), "rs_mom": rs_moms.get(t)}
         if supports_intraday:
             kwargs["is_kr"] = is_kr
+        if mode == "pullback":   # v5.71: 게이트 변형 E는 눌림목 탭에만 적용
+            kwargs["rs_3m"] = rs3_ranks.get(t)
+            kwargs["rs_delta"] = rs_deltas.get(t)
         result = fn(df, **kwargs)
         if result is None:
             continue
@@ -4386,10 +4435,15 @@ def _gate_risk_pct(rrb, pivot):
     return rrb.get("risk_pct")
 
 
-def _trace_pullback(df, is_kr, rs_rank):
+def _trace_pullback(df, is_kr, rs_rank, rs_3m=None, rs_delta=None):
+    """v5.71: rs_3m/rs_delta는 옵션 — /api/debug는 단일 종목만 보고 있어
+    유니버스 전체 백분위(rs_3m)나 20거래일 전 랭크(rs_delta)를 낼 수 없다
+    (rs_rank 자체도 이미 근사치인 것과 같은 한계, CLAUDE.md '알려진 설계 갭'
+    참고). None으로 두면 3M/momentum 경로는 자동으로 평가 안 되고 12M 경로만
+    본다 — scanner.analyze()와 동일한 None 처리 규약."""
     from scanner import (CONFIG as cfg, rsi as _rsi, select_pivot, significant_support,
                          apply_atr_buffer, _rr_block, _risk_hard_ok, late_stage_info,
-                         _merger_block, anchored_vwap)
+                         _merger_block, anchored_vwap, atr as _atr)
     steps = []
     n0 = len(df) if df is not None else 0
     if not _gate_step(steps, "min_bars", df is not None and n0 >= cfg["min_bars"], f"{n0}봉 (요구 {cfg['min_bars']})"):
@@ -4397,10 +4451,18 @@ def _trace_pullback(df, is_kr, rs_rank):
     df = df.dropna(subset=["Close", "Volume"]).copy()
     if not _gate_step(steps, "min_bars_dropna", len(df) >= cfg["min_bars"], f"{len(df)}봉"):
         return {"passed": False, "fail_at": "min_bars_dropna", "steps": steps}
-    if not _gate_step(steps, "rs_min", rs_rank is not None and rs_rank >= cfg["rs_min"], f"rs={rs_rank} (요구 {cfg['rs_min']}+)"):
+    # v5.71: RS 게이트 E = A(12개월) OR B(3개월) OR C(RS50+ 且 20일랭크+25)
+    path_12m = rs_rank is not None and rs_rank >= cfg["rs_min"]
+    path_3m = rs_3m is not None and rs_3m >= cfg["rs_min"]
+    path_mom = (rs_rank is not None and rs_rank >= cfg["rs_momentum_floor"]
+                and rs_delta is not None and rs_delta >= cfg["rs_delta_min"])
+    rs_ok = path_12m or path_3m or path_mom
+    if not _gate_step(steps, "rs_min", rs_ok,
+                       f"12M rs={rs_rank}(요구{cfg['rs_min']}+) · 3M rs_3m={rs_3m}(요구{cfg['rs_min']}+) · "
+                       f"모멘텀 rs={rs_rank}&rs_delta={rs_delta}(요구 rs{cfg['rs_momentum_floor']}+ 且 delta{cfg['rs_delta_min']}+)"):
         return {"passed": False, "fail_at": "rs_min", "steps": steps}
+    rs_path = "12M" if path_12m else ("3M" if path_3m else "momentum")
     is_leader = rs_rank is not None and rs_rank >= cfg["leader_rs"]
-    pb_min = cfg["leader_pullback_min"] if is_leader else cfg["pullback_min"]
     c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
     ma10 = c.rolling(cfg["ma_short"]).mean(); ma20 = c.rolling(cfg["ma_mid"]).mean()
     ma60 = c.rolling(cfg["ma_long"]).mean(); ma200 = c.rolling(cfg["ma_trend"]).mean()
@@ -4423,7 +4485,6 @@ def _trace_pullback(df, is_kr, rs_rank):
     prev_close = float(c.iloc[-2])
     change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
     breakout_day = change_pct >= 4.0
-    pb_max = cfg.get("pullback_max_kr" if is_kr else "pullback_max_us", cfg.get("pullback_max", 0.18))
     if breakout_day:
         high60_ref = float(h.iloc[-61:-1].max())
         pullback = (high60_ref - prev_close) / high60_ref
@@ -4433,7 +4494,14 @@ def _trace_pullback(df, is_kr, rs_rank):
     else:
         last60_h = h.iloc[-60:]
         pullback = (float(last60_h.max()) - close) / float(last60_h.max())
-    if not _gate_step(steps, "눌림폭", pb_min <= pullback <= pb_max, f"{pullback*100:.1f}% (허용 {pb_min*100:.1f}~{pb_max*100:.1f}%)"):
+    # v5.71: 눌림폭 게이트를 고정%에서 depth_atr(눌림폭%÷ATR%)로 교체
+    atr_val = _atr(h, lo, c, 14)
+    atr_pct_raw = atr_val / close * 100 if close > 0 else 0.0
+    depth_atr = (pullback * 100 / atr_pct_raw) if atr_pct_raw > 0 else None
+    depth_ok = depth_atr is not None and cfg["depth_atr_min"] <= depth_atr <= cfg["depth_atr_max"]
+    if not _gate_step(steps, "눌림폭", depth_ok,
+                       f"depth_atr={f'{depth_atr:.2f}' if depth_atr is not None else 'None'} "
+                       f"(허용 {cfg['depth_atr_min']}~{cfg['depth_atr_max']}) · 눌림폭 {pullback*100:.1f}% · ATR% {atr_pct_raw:.1f}"):
         return {"passed": False, "fail_at": "눌림폭", "steps": steps}
     dist10, dist20, dist60 = (close - m10) / m10, (close - m20) / m20, (close - m60) / m60
     prox = cfg["ma_proximity"]
@@ -4476,7 +4544,7 @@ def _trace_pullback(df, is_kr, rs_rank):
     if not _gate_step(steps, "MA_특수상황", not mg.get("merger"), mg.get("merger_reasons")):
         return {"passed": False, "fail_at": "merger", "steps": steps, "pivot": round(pivot, 2), "stop": round(stop, 2)}
     return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type,
-            "risk_pct": card_risk, "gate_risk_pct": gate_risk, "stop": round(stop, 2)}
+            "risk_pct": card_risk, "gate_risk_pct": gate_risk, "stop": round(stop, 2), "rs_path": rs_path}
 
 
 def _trace_turnaround(df, is_kr, rs_rank, rs_mom):
@@ -4789,6 +4857,14 @@ async def debug_ticker(ticker: str):
     rs_is_approx = _real_rs is None
     rs_used = _real_rs if _real_rs is not None else 80
     rs_mom_used = _real_rs_mom if _real_rs_mom is not None else 5
+    # v5.71: rs_3m/rs_delta는 위 rs_used와 달리 근사 폴백을 두지 않는다 —
+    # 없으면(캐시 콜드/집계 안 됨) 그냥 None으로 둬서 _trace_pullback이
+    # 3M/momentum 경로를 평가 생략하게 한다(12M 경로 근사는 기존과 동일하게
+    # 유지되므로 판정 자체가 막히진 않음). 가짜 근사값을 만들면 "3M도
+    # 통과"라는 오해를 줄 수 있어(rs_used=80 폴백처럼 rs_min 경계값을 그대로
+    # 쓰면 3M/모멘텀 경로가 항상 참으로 보임) 일부러 비워둠.
+    rs3_used = _bundle.get("rs3_ranks", {}).get(ticker) if _bundle else None
+    rs_delta_used = _bundle.get("rs_deltas", {}).get(ticker) if _bundle else None
 
     h, lo, c = df["High"], df["Low"], df["Close"]
     prev_c = c.shift(1)
@@ -4804,7 +4880,7 @@ async def debug_ticker(ticker: str):
     modes = {}
     traces = {}
     try:
-        traces["pullback"] = _trace_pullback(df, is_kr, rs_used)
+        traces["pullback"] = _trace_pullback(df, is_kr, rs_used, rs3_used, rs_delta_used)
     except Exception as e:
         traces["pullback"] = {"passed": False, "fail_at": "에러", "steps": [{"gate": "에러", "ok": False, "detail": str(e)}]}
     try:
@@ -6111,6 +6187,8 @@ async def watch_leader_check(request: Request):
     data = bundle["data"]
     rs_ranks = bundle["rs_ranks"]
     rs_moms = bundle["rs_moms"]
+    rs3_ranks = bundle.get("rs3_ranks", {})
+    rs_deltas = bundle.get("rs_deltas", {})
     converted = []
     for t in tickers:
         df = data.get(t)
@@ -6118,7 +6196,8 @@ async def watch_leader_check(request: Request):
             continue
         is_kr = t.endswith((".KS", ".KQ"))
         try:
-            result = analyze(df, rs_rank=rs_ranks.get(t), rs_mom=rs_moms.get(t), is_kr=is_kr)
+            result = analyze(df, rs_rank=rs_ranks.get(t), rs_mom=rs_moms.get(t), is_kr=is_kr,
+                             rs_3m=rs3_ranks.get(t), rs_delta=rs_deltas.get(t))
         except Exception:
             continue
         if result is None:

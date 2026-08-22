@@ -111,7 +111,10 @@ print("Case10 RS 곱셈:", "OK ✓" if hi and lo_ and hi["score"] > lo_["score"]
 rng11 = np.random.default_rng(21)
 run = list(100 * np.cumprod(1 + rng11.normal(0.006, 0.012, 185)))      # 강한 랠리
 spike = list(run[-1] * np.cumprod(1 + np.array([0.02, 0.015, 0.01])))            # 고점 형성
-flat = list(spike[-1] * 0.95 * np.cumprod(1 + rng11.normal(0.0, 0.006, 25)))  # 고점 -5%서 횡보
+flat = list(spike[-1] * 0.98 * np.cumprod(1 + rng11.normal(0.0, 0.006, 25)))  # 고점 -6.5%서 횡보
+# v5.71: 눌림폭 게이트가 고정%에서 depth_atr(0.5~3.0)로 바뀌면서 -5%(구값)는
+# 이 종목 ATR 대비 depth_atr=3.84로 상한(3.0) 밖 — -6.5%(depth_atr≈2.7,
+# Case13 돌파일 분기까지 감안한 여유치)로 조정.
 closes11 = run + spike + flat
 vols11 = [2_000_000] * 188 + [int(1_100_000 - 8_000*i) for i in range(25)]
 df11 = pd.DataFrame({"Open": closes11, "High": [c*1.012 for c in closes11],

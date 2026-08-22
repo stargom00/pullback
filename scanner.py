@@ -763,12 +763,16 @@ CONFIG = {
     "ma_mid": 20,
     "ma_long": 60,
     "ma_trend": 200,           # 장기 추세 필터
-    "pullback_min": 0.03,      # 최근 고점 대비 최소 조정폭 3%
-    # 최대 조정폭 (이상이면 눌림이 아니라 새 베이스 구축 → 패턴 탭 영역)
-    # ※ 장중 고가 기준으로 측정 (종가 기준은 실제 조정을 과소평가 — 디앤디 사례:
-    #    장중고점 대비 -24%인데 종가고점 대비 -18%로 계산돼 눌림목에 잘못 표시됨)
-    "pullback_max_kr": 0.15,   # KR: 변동성 커서 15%까지 허용
-    "pullback_max_us": 0.12,   # US: 12% (미너비니 기준 건강한 눌림 상한)
+    # v5.71: 눌림폭 게이트를 고정 %(구 pullback_min/max_kr/us)에서 ATR 상대
+    # 배수(depth_atr = 눌림폭% ÷ ATR%)로 교체. 고정 %는 종목 변동성을 무시해
+    # 저ATR 종목엔 헐겁고 고ATR 종목엔 빡빡했다 — stop_wide 배지(v4.67)가 이미
+    # 손절폭에 적용한 것과 같은 발상을 눌림폭 자체에도 적용. leader/non-leader
+    # 구분 없이 단일 범위(측정에서 그렇게 검증됨). 근거:
+    # scripts/measurements/2026-08-23_reject_tracer_ev_and_gate_e.py —
+    # depth_atr 재정의로 추가된 신호(RS는 현행 유지) n=480, EV 0.194R (현행
+    # 눌림목 신호 전체 EV 0.108R보다 우수). docs/rs_gate_e_and_depth_atr_v5.71.md.
+    "depth_atr_min": 0.5,
+    "depth_atr_max": 3.0,
     # ── 후기 스테이지/확장도 게이트 (v4.48, BHE 사후분석) ──
     # BHE 사례: 6개월 +110%, 200일선 이격 +70%의 4차 베이스 돌파(95)를 통과시켜
     # -9.4% 붕괴를 맞음. 확장도가 주 필터(BHE의 베이스들은 9%대로 얕아 카운트로 안 걸림).
@@ -793,17 +797,24 @@ CONFIG = {
     # 저ATR 종목은 영향 없음(max()라 기존 통과분이 새로 탈락하는 일 없음).
     "risk_hard_atr_mult": 1.5,
     "risk_hard_atr_cap": 15.0,
-    "pullback_max": 0.18,      # (구버전 호환용 폴백 — 시장별 키 없을 때만 사용)
     "ma_proximity": 0.035,     # 이평선과의 거리 허용치 3.5%
     "vol_contraction": 0.85,   # 최근 3일 평균 거래량 < 20일 평균 × 0.85
     "rsi_min": 35,
     "rsi_max": 62,
     "recent_high_window": 40,  # 60일 고점이 최근 N봉 안에 있어야 함
     "rs_min": 80,              # RS 등급 최소치 (눌림목=조정 중이라 80, 약간 여유)
+    # v5.71: RS 게이트 E = A(12개월 RS>=rs_min) OR B(3개월 RS>=rs_min) OR
+    # C(12개월 RS>=rs_momentum_floor 且 20거래일 전 대비 랭크상승>=rs_delta_min).
+    # B는 rs_min을 그대로 재사용(측정에서 동일 80으로 검증) — 별도 키 안 둠.
+    # 근거: scripts/measurements/2026-08-23_reject_tracer_rs_variants.py +
+    # 2026-08-23_reject_tracer_ev_and_gate_e.py — E\A 증분 EV 0.235R(n=869)가
+    # 현행 A 단독 EV 0.108R보다 우수. docs/rs_gate_e_and_depth_atr_v5.71.md.
+    "rs_momentum_floor": 50,
+    "rs_delta_min": 25,
     "pivot_window": 10,        # 피벗(돌파가) = 직전 N봉 고가
-    # 주도주(RS 90+) 완화 기준: 얕고 짧은 눌림도 인정
+    # 주도주(RS 90+) 완화 기준: RSI만 완화(눌림폭 완화는 v5.71에서 depth_atr로
+    # 대체되며 제거 — depth_atr가 이미 변동성 상대값이라 leader 예외 불필요)
     "leader_rs": 90,
-    "leader_pullback_min": 0.015,
     "leader_rsi_max": 72,
     # 손절 ATR 버퍼: 구조 손절(지지선) 아래로 ATR×배수만큼 여유를 둬
     # 노이즈(지지선 살짝 깨고 반등)에 털리는 걸 방지. 종목 변동성 자동 반영.
@@ -1341,11 +1352,13 @@ def to_rs_rank(raw_scores: dict[str, float]) -> dict[str, int]:
     return ranks
 
 
-def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = None, cfg: dict = CONFIG, _setup_eval: bool = False, is_kr: bool = False) -> dict | None:
+def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = None, cfg: dict = CONFIG, _setup_eval: bool = False, is_kr: bool = False, rs_3m: int | None = None, rs_delta: int | None = None) -> dict | None:
     """
     일봉 DataFrame(Open/High/Low/Close/Volume)을 받아
     눌림목 조건 충족 여부와 점수를 반환. 미충족이면 None.
-    rs_rank: 유니버스 내 상대강도 백분위 (1~99). None이면 RS 필터 생략.
+    rs_rank: 유니버스 내 12개월 상대강도 백분위 (1~99). None이면 RS 필터 생략.
+    rs_3m: 3개월 수익률 기준 상대강도 백분위 (v5.71).
+    rs_delta: 20거래일 전 대비 rs_rank 변화(오늘랭크-20일전랭크, v5.71).
     """
     if df is None or len(df) < cfg["min_bars"]:
         return None
@@ -1354,11 +1367,19 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     if len(df) < cfg["min_bars"]:
         return None
 
-    # ── 0) RS 필터 + 주도주 판정 ──
-    if rs_rank is not None and rs_rank < cfg["rs_min"]:
+    # ── 0) RS 필터(3경로 E=A∪B∪C, v5.71) + 주도주 판정 ──
+    # A(12개월 RS) / B(3개월 RS) / C(RS 50+이면서 20거래일 만에 랭크 25+ 상승)
+    # 중 하나만 만족하면 통과. rs_rank가 None이면(유니버스 밖 호출 등) 기존과
+    # 동일하게 필터 자체를 생략 — rs_3m/rs_delta만 있고 rs_rank가 없는 호출은
+    # 실제 파이프라인에 없음(app.py가 셋 다 같은 번들에서 채움).
+    path_12m = rs_rank is not None and rs_rank >= cfg["rs_min"]
+    path_3m = rs_3m is not None and rs_3m >= cfg["rs_min"]
+    path_mom = (rs_rank is not None and rs_rank >= cfg["rs_momentum_floor"]
+                and rs_delta is not None and rs_delta >= cfg["rs_delta_min"])
+    if rs_rank is not None and not (path_12m or path_3m or path_mom):
         return None
+    rs_path = "12M" if path_12m else ("3M" if path_3m else ("momentum" if path_mom else None))
     is_leader = rs_rank is not None and rs_rank >= cfg["leader_rs"]
-    pb_min = cfg["leader_pullback_min"] if is_leader else cfg["pullback_min"]
     rsi_max = cfg["leader_rsi_max"] if is_leader else cfg["rsi_max"]
 
     c = df["Close"]
@@ -1410,11 +1431,9 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     bars_since_high = len(last60_h) - 1 - int(last60_h.idxmax())
     recent_high_ok = bars_since_high <= cfg["recent_high_window"]
 
-    # ── 3) 조정폭 (눌림 깊이) — 장중 고가 기준, 시장별 상한 ──
+    # ── 3) 조정폭 (눌림 깊이) — 장중 고가 기준, ATR 상대 배수로 판정 ──
     #    종가 기준 측정은 실제 조정을 3~6%p 과소평가함 (고점 캔들의 윗꼬리 무시).
     #    돌파일엔 전날 종가/전날까지의 고가 기준으로 평가.
-    pb_max = cfg.get("pullback_max_kr" if is_kr else "pullback_max_us",
-                     cfg.get("pullback_max", 0.18))
     if breakout_day:
         high60_ref = float(h.iloc[-61:-1].max())
         pullback = (high60_ref - prev_close) / high60_ref
@@ -1429,8 +1448,14 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
             return None
     else:
         pullback = (high60 - close) / high60
-    pullback_ok = pb_min <= pullback <= pb_max
-    if not pullback_ok:
+    # v5.71: 눌림폭 게이트를 고정 %에서 ATR 상대 배수(depth_atr)로 교체 —
+    # atr_val을 여기서 먼저 구해 아래 손절 버퍼 계산(구 1494행 근처)에도
+    # 재사용한다(중복 계산 방지). 근거: CONFIG 정의부 주석 참고.
+    atr_val = atr(h, lo, c, 14)
+    atr_pct_raw = atr_val / close * 100 if close > 0 else 0.0
+    depth_atr = (pullback * 100 / atr_pct_raw) if atr_pct_raw > 0 else None
+    depth_ok = depth_atr is not None and cfg["depth_atr_min"] <= depth_atr <= cfg["depth_atr_max"]
+    if not depth_ok:
         return None
 
     # ── 4) 이평선 지지 ──
@@ -1491,7 +1516,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     # ── ATR 버퍼: 구조 손절 아래로 ATR×배수만큼 여유 (노이즈 흡수) ──
     # 손절은 여전히 구조(지지선)에 고정되어 현재가 따라 안 움직이고,
     # 종목 변동성(ATR)만큼만 살짝 아래로 내려 정상 변동에 안 털리게 한다.
-    atr_val = atr(h, lo, c, 14)     # 종목 변동성 (버퍼 + 경고 공용)
+    # atr_val은 v5.71부터 위(눌림폭 depth_atr 게이트)에서 이미 계산됨 — 재사용.
     stop, stop_struct, atr_buf = apply_atr_buffer(
         stop, h, lo, c, cfg.get("atr_stop_buffer", 0.0))
     # 화면 지지선 표시를 실제 손절 기준과 일치시킴 (버퍼 전 구조 손절 기준)
@@ -1539,7 +1564,8 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     # 전날 셋업 점수: 오늘 봉을 빼고 재평가 (🔥 카드 표시용, 재귀 1회 제한)
     setup_score = None
     if triggered and not _setup_eval:
-        prev = analyze(df.iloc[:-1], rs_rank=rs_rank, rs_mom=rs_mom, cfg=cfg, _setup_eval=True, is_kr=is_kr)
+        prev = analyze(df.iloc[:-1], rs_rank=rs_rank, rs_mom=rs_mom, cfg=cfg, _setup_eval=True, is_kr=is_kr,
+                       rs_3m=rs_3m, rs_delta=rs_delta)
         if prev:
             setup_score = prev["score"]
 
@@ -1585,6 +1611,9 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "setup_score": setup_score,
         "rs": rs_rank,
         "rs_mom": rs_mom,
+        "rs_3m": rs_3m,
+        "rs_delta": rs_delta,
+        "rs_path": rs_path,   # v5.71: "12M" | "3M" | "momentum" | None(RS필터 생략시)
         "leader": is_leader,
         "mode": "pullback",
         # v5.68: 돌파임박(v5.44)과 같은 "확인 후 진입" 일지 트리거용 —
@@ -1599,6 +1628,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "qa_reason": _qa["disqualify_reason"],
         **_mg,
         "pullback_pct": round(pullback * 100, 1),
+        "depth_atr": round(depth_atr, 2) if depth_atr is not None else None,  # v5.71: 눌림폭÷ATR% 게이트 실값(표시용)
         "support_ma": disp_support,
         "ma_dist_pct": disp_support_dist,
         "vol_ratio": round(vol_ratio, 2),
