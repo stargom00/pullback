@@ -5,6 +5,22 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.78 [UI] v5.77 접힌 카드가 한 줄에 다 욱여넣어 위계 없이 산만하다는
+        피드백 → 2층 구조로 재설계. 1층(cc-row1)은 종목명(15px bold,
+        눈의 앵커)·☆✕·시장뱃지·🔥🚀👑·▸로 정체성 줄, 2층(cc-row2)은
+        스파크라인(80×24, 기존 2배)·"RS"/"리스크" 라벨(9.5px muted)+값·
+        점수(우측끝)로 수치 줄. 라벨을 붙여 숫자 해석 부담 감소. 숫자
+        컬럼은 여전히 width 고정+tabular-nums로 세로 정렬 유지(v5.77
+        방침 이어감). 카드 최소폭 330→260px 축소(2층이라 가로 공간 덜
+        필요, 열은 여전히 최대 3 — 2열 전환 breakpoint도 1050→900px로
+        같이 낮춤, 폭 남으면 카드가 넓어짐), grid gap 14→19px·mobile
+        gap도 통일해서 12→17px, 카드 패딩 9~12px→12~16px(mobile
+        7~12px→10~14px)로 여유. 펼침/접힘 토글·버튼 전파 가드(bindCard
+        Interactions)는 구조 변경과 무관하게 그대로 동작(closest() 가드가
+        DOM 깊이에 안 걸림). 인버스 카드는 스파크 데이터가 원래 없어
+        2층에서 강도/5일등락/레버리지만. 검증: Node로 card()를 직접
+        실행해 cc-row1/cc-row2/cc-name-lg/cc-field×2/라벨 문구 확인,
+        html.parser 태그 균형(에러 0), pytest 383개 통과.
 v5.77 [UI] v5.76 접힌 카드 뷰 시각 문제 2건 수정.
         (1) 펼침 시 빈 공간: .grid에 align-items:start 추가 — 그리드 행이
         가장 큰 아이템(펼친 카드) 높이로 트랙 사이징되는 건 CSS Grid 특성상
@@ -2647,7 +2663,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.77"
+VERSION = "v5.78"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
