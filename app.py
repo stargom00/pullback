@@ -5,6 +5,36 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.79 [UI+버그수정] 접힌 카드 2층의 🟢🔴가 진입판정(entrySignal)인지
+        리스크%인지 구분 안 되던 문제 수정(사용자 제보 — 한국알콜: 접힌
+        카드 🔴인데 펼치면 🟡, 리스크 4.26%는 ATR 4.2%×1.5=6.3% 이내라
+        초록이어야 함). 원인 ①: entrySigMini(구 entryIconMini)가 3단계
+        신호등(🟢/🟡/🔴)을 2단계(🟢/🔴)로 압축해서 warn(🟡)이 🔴로 잘못
+        보임 — 압축 없이 펼친 카드와 동일한 3단계로 복원. 원인 ②: 이
+        아이콘이 "리스크" 필드 안에 같이 묶여 있어서 리스크 탓처럼 보임 —
+        cc-entry를 리스크 필드 밖으로 완전히 분리(독립 항목). 리스크%
+        색상 로직 자체(ATR×1.5 파스텔 초록/주황)는 검증 결과 버그 없음
+        (Node로 risk_pct=4.26/atr_pct=4.2 직접 계산 — 정상적으로 초록
+        반환, threshold=6.3 정상 적용).
+        ⚠️ 검증 중 이 사고와 무관한 별도 버그 2건 추가 발견 — 사용자 승인
+        받아 같이 수정(내일부터 🟡 판정이 늘어나 보이면 이 커밋이 원인):
+        (a) entrySignal()의 RS 체크에서 danger 분기(RS<70)엔 `if(rsActive)
+        danger++`가 있는데 대응하는 warn 분기(70≤RS<90, "주도주는 아님")엔
+        `warn++`가 아예 빠져 있어서, checks 배열엔 warn으로 찍히면서도
+        최종 판정엔 반영이 안 됐음(RS 70~89 종목이 전부 🟢으로 새어나감)
+        — RS가 활성 항목인 pullback/imminent/turnaround/boxbreak/pattern
+        탭 전체에 영향. warn 분기에 `if (rsActive) warn++` 추가.
+        (b) 같은 함수의 리스크 체크가 `s.market === 'kr'`(소문자)로 비교해
+        실제 값 'KR'(대문자)과 항상 불일치 — 한국 종목이 12% 기준 대신
+        미국 기준(8%)으로 판정되고 있었음. 'KR'(대문자)로 수정 — 리스크
+        8~12% 사이였던 한국 종목들이 앞으로 ok로 바뀔 수 있음.
+        (2) 카드 최소폭 230px로 추가 축소(3열 유지), breakpoint도 800px로
+        재계산.
+        검증: Node로 RS=75 단독 재현(수정 전 checks=warn/level=ok 버그
+        재현 → 수정 후 level=warn/🟡 확인), KR risk_pct=10%가 12% 기준
+        적용돼 ok로 바뀌는 것 확인, US risk_pct=10%는 8% 기준 그대로 warn
+        유지(회귀 없음) 확인. html.parser 태그 균형(에러 0), pytest 383개
+        통과.
 v5.78 [UI] v5.77 접힌 카드가 한 줄에 다 욱여넣어 위계 없이 산만하다는
         피드백 → 2층 구조로 재설계. 1층(cc-row1)은 종목명(15px bold,
         눈의 앵커)·☆✕·시장뱃지·🔥🚀👑·▸로 정체성 줄, 2층(cc-row2)은
@@ -2663,7 +2693,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.78"
+VERSION = "v5.79"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
