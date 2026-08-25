@@ -62,6 +62,19 @@ rs_min 85→80, 슈퍼대장 즉시진입 ATR×2) — 전부 같은 이유로 �
    (`2026-08-25_institutional_flow_pullback_ev.py::ev_gap_zscore`,
    `docs/institutional_flow_pullback_ev.md` "재검토" 절). 표본을
    나눠서 EV를 비교하는 새 측정은 이 함수(또는 동등한 z검정)를 재사용할 것.
+8. **KR+US 혼합 코호트의 EV는 시장별(KR/US) 분해를 반드시 병기한다 —
+   혼합 단일 수치로 결론 내지 않는다.** 2026-08-26 조사에서 눌림목
+   슈퍼대장 소속 EV 0.266(혼합)이 KR 단독 -0.214R vs US 단독 +0.346R
+   (z≈3.36, 매우 유의)로 정반대 부호임을 확인 — 혼합 수치만 보면
+   "확인된 우위"로 보이지만 실제로는 US가 견인하고 KR은 역방향인
+   착시였다. 눌림목 전체 EV도 동일 패턴(KR 0.002R vs US 0.206R,
+   z≈2.95). 두 시장은 유동성·참여자 구성·변동성 체계가 달라 같은
+   필터·설정이라도 성과가 크게 갈릴 수 있다는 뜻 — `harness.is_kr_ticker()`
+   로 최소한 KR/US 분해 수치는 항상 같이 계산해서 보고할 것(전체 코호트가
+   작아 분해가 무의미할 정도로 표본이 작은 경우는 예외, 그 경우도 표본
+   부족을 명시).
+   (`2026-08-26_pullback_ev_cohort_and_pipeline_diff.py`,
+   `docs/pullback_ev_kr_us_regime_investigation.md`).
 
 ## 기존 docs/*.md 측정 스크립트 존재 여부 (2026-08-14 감사)
 

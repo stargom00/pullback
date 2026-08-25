@@ -5,6 +5,23 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.84 [문서] 슈퍼대장 EV — KR/US 혼합 착시 캐비어트 반영(사용자 지시,
+        2026-08-26 KR/US 분해 조사 후속). 눌림목 슈퍼대장 소속 EV
+        0.266은 KR+US 혼합 수치로 추정 — KR 단독 재현은 -0.214R(역방향,
+        n=103), US 단독은 +0.346R로 확인(z≈3.36, 매우 유의). 기간
+        분해(최근/이전 절반)에서 최근 악화 신호 없음 — 표본 전체에
+        걸친 지속 패턴.
+        GUIDE.md "👑 슈퍼대장 활용법"(v5.83) 우선순위1에 "⚠️ KR 종목
+        주의" 문단 추가: KR 종목엔 이 필터를 진입 근거로 쓰지 말 것
+        명시.
+        docs/all_tabs_common_yardstick_investigation.md에 "눌림목/
+        슈퍼대장 EV — KR/US 혼합 착시 재논쟁 방지 노트" 추가(추세전환
+        재논쟁 방지 노트와 같은 형식) — 혼합 단일 수치로 결론 내지
+        말 것을 명시.
+        scripts/measurements/README.md 규칙8 추가: KR+US 혼합 코호트는
+        시장별 분해를 반드시 병기.
+        UI(필터·뱃지)는 아직 미반영 — 표본·견고성(시드/기간)을 더 본
+        후 결정. scanner.py 무수정, static/index.html은 verBadge만 변경.
 v5.83 [문서] 👑 슈퍼대장 활용법 — 실측 기반 3단계 우선순위 문서화(사용자 지시).
         GUIDE.md 3장(대장후보·슈퍼대장)에 "👑 슈퍼대장 활용법" 절 추가:
         ①눌림목 [👑]필터 주력(EV 0.266 vs 무필터 0.172, 손절폭도 자연히
@@ -2780,7 +2797,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.83"
+VERSION = "v5.84"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
