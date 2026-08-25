@@ -241,7 +241,10 @@ tr.editing{background:rgba(242,179,61,.06)}
 .legend .lg-h{color:var(--text);opacity:.7}
 .legend .lg:hover{color:var(--text)}
 @media (max-width:600px){.legend{padding:0 16px 10px;gap:12px}}
-.sectorbar{display:flex;gap:8px;flex-wrap:wrap;padding:0 24px 12px}
+/* v5.75: 세 줄까지 차지하던 걸 한 줄로 압축 — 줄바꿈 대신 가로 스크롤,
+   상위 N개만 기본 표시하고 나머지는 토글로. */
+.sectorbar{display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;padding:0 24px 12px;
+  scrollbar-width:thin}
 .sectorbar:empty{padding:0}
 .alert-tag{font-size:11px;color:#FF6B6B;background:rgba(255,107,107,.12);
   padding:2px 7px;border-radius:6px;font-weight:600;vertical-align:middle}
@@ -265,12 +268,19 @@ tr.editing{background:rgba(242,179,61,.06)}
 .alert-list .chip:hover{text-decoration:line-through}
 @media (max-width:600px){.alert-panel{padding:12px 16px}}
 .schip{font-size:12px;padding:5px 11px;border-radius:99px;background:var(--surface);
-  border:1px solid var(--line);color:var(--muted);cursor:pointer;transition:all .12s}
+  border:1px solid var(--line);color:var(--muted);cursor:pointer;transition:all .12s;
+  flex-shrink:0;white-space:nowrap}
 .schip:hover{border-color:var(--amber);color:var(--text)}
-.schip.on{background:var(--surface2);color:var(--text);border-color:var(--amber)}
+.schip.on{border-color:var(--amber)}
+.schip.on b{color:var(--text)}
 .schip b{color:var(--amber);margin-left:5px}
 .schip .clear{color:var(--muted)}
 .schip.empty{opacity:.45}
+/* v5.75: 종목 수 비례 채움 바 — JS가 인라인 linear-gradient로 pct%만큼 채움.
+   .on 상태는 배경 대신 테두리 색(amber)으로 표시(인라인 배경이 우선순위가
+   높아 배경 스와프는 못 씀 — 위 .schip.on에서 background 규칙 제거함). */
+.schip.more-toggle{background:transparent;border-style:dashed;color:var(--muted);font-weight:600}
+.schip.more-toggle:hover{border-color:var(--amber);color:var(--text)}
 /* v5.45: 손절폭 필터 칩 — 다중선택이라 둥근 pill(섹터=단일선택 브라우징)과
    구분되게 사각 모서리로. on 상태는 각 tier 고유색(JS 인라인)이 이미 입혀짐. */
 .schip.risktier{border-radius:8px;font-weight:500}
@@ -434,7 +444,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.74</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.75</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1987,19 +1997,47 @@ document.getElementById('alertAdd').addEventListener('click', async () => {
   loadAlertList(); load(true);
 });
 
+// v5.75: 세 줄 차지하던 섹터 칩 → 한 줄 압축. 상위 SECTOR_CHIP_TOP개만 기본
+// 표시 + "+N개 ▾" 토글로 전체 펼침(펼침 상태는 저장 안 함 — 새로고침하면
+// sectorExpanded가 다시 false로 초기화됨). summary는 백엔드 Counter.most_
+// common() 결과라 이미 count 내림차순 — 그대로 slice하면 됨.
+const SECTOR_CHIP_TOP = 6;
+let sectorExpanded = false;
+
 function renderSectors(summary) {
   const bar = document.getElementById('sectorbar');
   if (!summary.length) { bar.innerHTML = ''; return; }
-  const chips = summary.map(s =>
-    `<span class="schip" data-sec="${s.sector}">${s.sector}<b>${s.count}</b></span>`
-  ).join('');
-  bar.innerHTML = chips;
-  bar.querySelectorAll('.schip').forEach(ch => ch.addEventListener('click', () => {
+  const maxCount = Math.max(...summary.map(s => s.count));
+  let visible = sectorExpanded ? summary : summary.slice(0, SECTOR_CHIP_TOP);
+  // 접힌 상태에서도 이미 선택된 섹터가 상위 N개 밖에 있으면 필터를 못 끄게
+  // 되는 걸 막기 위해 예외로 끼워 보여줌.
+  if (!sectorExpanded && sectorFilter && !visible.some(s => s.sector === sectorFilter)) {
+    const active = summary.find(s => s.sector === sectorFilter);
+    if (active) visible = visible.concat([active]);
+  }
+  const chipHtml = visible.map(s => {
+    const pct = maxCount > 0 ? Math.round(s.count / maxCount * 100) : 0;
+    const on = sectorFilter === s.sector;
+    return `<span class="schip${on ? ' on' : ''}" data-sec="${s.sector}"
+      style="background:linear-gradient(to right, rgba(245,196,81,.16) ${pct}%, var(--surface) ${pct}%)"
+      >${s.sector}<b>${s.count}</b></span>`;
+  }).join('');
+  const moreCount = summary.length - SECTOR_CHIP_TOP;
+  const toggleHtml = moreCount > 0
+    ? `<span class="schip more-toggle" id="sectorMoreToggle">${sectorExpanded ? '접기 ▴' : `+${moreCount}개 ▾`}</span>`
+    : '';
+  bar.innerHTML = chipHtml + toggleHtml;
+  bar.querySelectorAll('.schip[data-sec]').forEach(ch => ch.addEventListener('click', () => {
     const sec = ch.dataset.sec;
     sectorFilter = (sectorFilter === sec) ? null : sec;
-    bar.querySelectorAll('.schip').forEach(x => x.classList.toggle('on', x.dataset.sec === sectorFilter));
+    renderSectors(summary);
     renderCards();
   }));
+  const moreBtn = document.getElementById('sectorMoreToggle');
+  if (moreBtn) moreBtn.addEventListener('click', () => {
+    sectorExpanded = !sectorExpanded;
+    renderSectors(summary);
+  });
 }
 
 // v5.36: 패턴 탭 서브탭(전체/컵앤핸들/치솟은깃발/더블바닥/급등매집).
