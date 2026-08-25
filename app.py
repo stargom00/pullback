@@ -5,6 +5,16 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.73 [배포] /guide, /guide.md에 no-cache 헤더 추가 — 사용자가 v5.72 배포
+        후 돌파임박 탭에 숨김 X버튼이 안 보인다고 제보. 실제로는 코드
+        문제가 아니었음(프로덕션 raw HTML을 curl로 받아 로컬과 diff =
+        완전 동일, card() 함수를 Node로 직접 실행해 imminent 데이터로도
+        hide-btn이 정상 생성됨을 확인) — 원인은 "/"가 이미 no-cache
+        헤더(v5.13)를 달고 있는데도 브라우저가 강하게 캐싱해 Cmd+Shift+R로도
+        안 풀리고 개발자도구 "캐시 비우기"로만 해결되던 현상. "/"·/sw.js는
+        이미 _NO_CACHE_HEADERS 적용 중이었지만 /guide·/guide.md는 헤더가
+        아예 없어 브라우저 기본 휴리스틱 캐싱에 노출돼 있었음 — 동일
+        헤더로 통일. API 응답(/api/*)은 기존 미들웨어가 이미 전부 커버.
 v5.72 [UI+API] 스캐너 카드에 종목 숨김 기능 추가 — 카드 X 버튼(☆ 옆)으로
         즉시 숨기면 모든 탭에서 표시만 안 됨(스캔/게이트/저널/하네스 로직은
         무영향, 순수 표시 필터). 90일 자동 만료, 필터 칩 줄의 "🙈 숨김 N"
@@ -2566,7 +2576,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.72"
+VERSION = "v5.73"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6092,7 +6102,7 @@ async def guide_md():
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "GUIDE.md")
     if not os.path.exists(path):
         return Response("가이드 파일이 없습니다.", media_type="text/plain")
-    return FileResponse(path, media_type="text/markdown; charset=utf-8")
+    return FileResponse(path, media_type="text/markdown; charset=utf-8", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/guide")
@@ -6127,7 +6137,7 @@ fetch('/guide.md').then(r => r.text()).then(md => {
   document.getElementById('doc').innerHTML = marked.parse(md);
 }).catch(() => { document.getElementById('doc').textContent = '가이드를 불러오지 못했습니다.'; });
 </script></body></html>"""
-    return Response(html, media_type="text/html; charset=utf-8")
+    return Response(html, media_type="text/html; charset=utf-8", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/api/rsettings")
