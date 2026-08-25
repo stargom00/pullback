@@ -299,7 +299,13 @@ tr.editing{background:rgba(242,179,61,.06)}
   color:var(--muted);padding:0;margin-top:1px;transition:color .15s;flex-shrink:0}
 .fav-btn:hover{color:#f5c451}
 .fav-btn.on{color:#f5c451}
+/* v5.72: 숨김 X 버튼 — 즐겨찾기 별 옆, 평소엔 흐리게 있다가 hover 시 진해짐 */
+.hide-btn{background:none;border:none;cursor:pointer;font-size:14px;line-height:1;
+  color:var(--muted);padding:0;margin-top:2px;opacity:.35;transition:opacity .15s,color .15s;flex-shrink:0}
+.hide-btn:hover{opacity:1;color:#ff6b6b}
 .card-top{display:flex;align-items:flex-start;gap:12px}
+.card{transition:opacity .2s ease,transform .2s ease}
+.card.hiding{opacity:0;transform:scale(.96);pointer-events:none}
 .name{font-size:15px;font-weight:700;line-height:1.2}
 .tick{font-size:11px;color:var(--muted);margin-top:2px}
 .tv-link{color:var(--muted);text-decoration:none;cursor:pointer}
@@ -399,7 +405,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.71</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.72</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -434,6 +440,7 @@ tr.editing{background:rgba(242,179,61,.06)}
     <button class="tab" id="bearOkToggle" title="약세장 적격(💎)만 표시 — 탄탄한베이스 + RS90+ + 손절폭적정, 3조건 전부 충족. 게이트 🟡🔴일 때 125개 후보에서 옥석을 가리는 필터. 대부분 걸러져서 몇 개만 남는 게 정상.">💎 적격만</button>
     <button class="tab" id="accumSortToggle" title="🧲 매집흔적 점수(A-B-C 패턴 전용, 보조 지표) 높은 순 정렬 — 판정 불가(데이터 부족) 종목은 맨 뒤로">🧲 매집순</button>
     <button class="tab" id="superOnlyToggle" style="display:none" title="슈퍼대장(RS95+ · 3개월 모멘텀15%+) 소속 종목만 — 신호등 🟢(RS≥90)의 부분집합이라 더 엄격한 별도 필터. 실측: 전체 EV 0.151R → 슈퍼대장 소속만 0.266R (docs/all_tabs_common_yardstick_investigation.md)">👑 슈퍼대장만</button>
+    <button class="tab" id="hiddenToggle" style="display:none" title="숨긴 종목 — 클릭하면 목록에서 바로 복구할 수 있어요 (90일 지나면 자동으로 다시 보임)">🙈 숨김 <span id="hiddenCount">0</span></button>
   </div>
   <button class="refresh" id="refresh">다시 스캔</button>
 </header>
@@ -583,6 +590,17 @@ tr.editing{background:rgba(242,179,61,.06)}
     <div class="actions">
       <button class="cancel" onclick="closeManualAdd()">취소</button>
       <button class="save ma-save-btn" onclick="saveManualAdd()">대기로 추가</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="hiddenModal">
+  <div class="modal">
+    <h3>🙈 숨긴 종목</h3>
+    <div class="sub">90일 지나면 자동으로 다시 보여요. 지금 복구하려면 버튼을 누르세요.</div>
+    <div id="hiddenList" style="display:flex;flex-direction:column;gap:8px;max-height:55vh;overflow-y:auto"></div>
+    <div class="actions">
+      <button class="cancel" onclick="document.getElementById('hiddenModal').classList.remove('open')">닫기</button>
     </div>
   </div>
 </div>
@@ -949,6 +967,7 @@ function breakdownCard(s) {
   return `<div class="card${s.triggered ? ' fired' : ''}${fav ? ' fav' : ''}">
     <div class="card-top">
       <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="즐겨찾기">${fav ? '★' : '☆'}</button>
+      <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
       <div>
         <div class="name">🩸 ${s.name}${s.triggered ? ' <span style="color:#ff6b6b;font-size:11px">이탈+거래량</span>' : ''}<span class="mkt">${s.market}</span></div>
         <div class="tick mono">${s.ticker ? `<a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a>` : ''}${s.sector && s.sector !== '기타' ? ` · ${s.sector}` : ''}</div>
@@ -1004,6 +1023,7 @@ function card(s) {
   return `<div class="card${s.triggered ? ' fired' : ''}${fav ? ' fav' : ''}">
     <div class="card-top">
       <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기 (최상단 고정)'}">${fav ? '★' : '☆'}</button>
+      <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
       <div>
         <div class="name">${s.name}${s.alert ? ` <span class="alert-tag" title="시장경보">⚠️ ${s.alert}</span>` : ''}${s.climax ? ` <span class="climax-tag ${s.climax_level}" title="미너비니 클라이맥스/과열 신호: ${(s.climax_reasons||[]).join(', ')}. 매수보다 매도·경계 구간일 수 있음.">${s.climax_level === 'danger' ? '🛑' : '🔆'} 과열</span>` : ''}${(() => { const lq = liquidityCheck(s); return lq ? ` <span class="pmat ${lq.cls === 'bad' ? 'wait' : 'ok'}" style="${lq.cls === 'bad' ? 'background:#341418;color:#f87171;border:1px solid #6b2028' : 'background:#152535;color:#7fb8e0;border:1px dashed #2d5a8c'}" title="${lq.tip}">${lq.label}</span>` : ''; })()}${s.grade && s.grade !== '?' ? ` <span class="gbadge g${s.grade}" title="트렌드 템플릿 ${s.tt_pass}/8 통과${(s.tt_fails && s.tt_fails.length) ? ` · 미충족: ${s.tt_fails.join(', ')}` : ' · 전 조건 충족'}. 참고용 — 판정 아님: 8조건 중 7개가 이미 각 탭 게이트와 중복(90%+ 통과, 0비트)이고, 등급별 실측 EV가 성과를 못 가름(눌림목은 A등급이 오히려 최저). docs/ud_volume_ratio_investigation.md">${s.grade}급(참고)</span>` : ''}${s.mode === 'pattern' ? (s.pat_ready ? ` <span class="pmat ok" title="패턴 성립 요건 전부 충족 — 기간·거래량 고갈 OK. 피벗 돌파(거래량 150%+)만 남음">✅ 요건충족</span>` : ` <span class="pmat wait" title="패턴 형성 중 — 미충족: ${(s.pat_missing || []).join(' · ')}. 요건 채우기 전 돌파 추격은 실패 확률 높음 (특히 치솟은깃발)">⏳ 미완성</span>`) : ''}${(s.late_flags && s.late_flags.length) ? ` <span class="climax-tag ${s.late_level}" title="후기 스테이지/과확장 (v4.48): ${s.late_flags.join(', ')}${s.ext200_pct ? ` · 200일선 이격 +${s.ext200_pct}%` : ''}. 큰 시세 이후의 베이스일수록 실패 확률이 높음 — 사이즈 축소 또는 관망 권장.">${s.late_level === 'danger' ? '🛑' : '🏔'} 후기</span>` : ''}${s.mode === 'pullback' && s.rs_path === '3M' ? ` <span class="climax-tag" style="background:#1a2a3a;color:#7dd3fc;border:1px solid #2d5a8c" title="RS 게이트를 12개월이 아니라 3개월 상대강도(80퍼센타일+)로 통과 — 12개월 전체로는 아직 상위 20%가 아니지만 최근 3개월 상승세는 강한 종목(v5.71). 근거: docs/rs_gate_e_and_depth_atr_v5.71.md">🔥 단기주도</span>` : ''}${s.mode === 'pullback' && s.rs_path === 'momentum' ? ` <span class="climax-tag" style="background:#1a2a3a;color:#7dd3fc;border:1px solid #2d5a8c" title="RS 게이트를 랭크 급상승으로 통과 — RS 50+ 이면서 20거래일 만에 랭크가 25 이상 뛴 종목(v5.71). 12개월/3개월 기준 자체는 아직 80 미만. 근거: docs/rs_gate_e_and_depth_atr_v5.71.md">🚀 랭크급등</span>` : ''}${s.earnings_badge ? ` <span class="climax-tag" style="background:#0f2a1a;color:#34d399;border:1px solid #1d6b3a" title="미너비니 CAN SLIM 실적 기준(Phase 1, 근사치): 3년 연간 EPS 연속증가 + 최근분기 EPS YoY ${s.eps_yoy_pct != null ? s.eps_yoy_pct + '%' : '?'}(25%↑) + 매출 YoY ${s.revenue_yoy_pct != null ? s.revenue_yoy_pct + '%' : '?'}(증가) 전부 충족.">💰 실적우수</span>` : ''}${s.merger ? ` <span class="merger-tag" title="M&A/특수상황 의심: ${(s.merger_reasons||[]).join(', ')}. 인수가 부근에 가격이 고정돼 상방은 막히고 하방은 딜 무산 시 급락하는 비대칭 리스크. 추세매매 부적합 — 차트의 깔끔한 횡보가 강세 신호가 아님.">🤝 M&A의심</span>` : ''}${s.base_badge ? ` <span class="climax-tag ${s.base_badge_lv === 'good' ? '' : (s.base_badge_lv === 'bad' ? 'danger' : '')}" style="${s.base_badge_lv === 'good' ? 'background:#12351f;color:#4ade80;border:1px solid #1d6b3a' : (s.base_badge_lv === 'bad' ? 'background:#341418;color:#f87171;border:1px solid #6b2028' : (s.base_badge_lv === 'neutral' ? 'background:#26262e;color:#9ca3af;border:1px solid #3f3f4a' : 'background:#33270f;color:#fbbf24;border:1px solid #6b5518'))}" title="${s.base_discontinuity ? '⚠️ 데이터 불연속: 최근 ±25%+ 가격 갭 감지 — 스핀오프/합병/재상장/액면변경 의심. 티커는 같아도 갭 이전은 다른 회사일 수 있어 RS·베이스·이평이 오염됨. 점수·등급 신뢰 불가. 반드시 공시 직접 확인.' : '베이스 품질 (오닐/미너비니): 길이 ' + (s.base_length_wk ?? '?') + '주 · 깊이 ' + (s.base_depth_pct ?? '?') + '%' + (s.base_vcp ? ' · VCP수축✓' : '') + (s.base_vol_dry ? ' · 거래량건조✓' : '') + '. 5주+ 탄탄한 베이스일수록 돌파 성공률 높음. 며칠짜리 얕은 조정은 베이스 아님.'}">${s.base_discontinuity ? '⚠️' : (s.base_badge_lv === 'good' ? '🧱' : (s.base_badge_lv === 'bad' ? '⛔' : (s.base_badge_lv === 'neutral' ? '📊' : '📏')))} ${s.base_badge}</span>` : ''}${(() => {
           // v5.42: ATR상대(stop_wide) 배지를 절대값 4단계 배지로 교체 —
@@ -1323,6 +1343,85 @@ document.getElementById('superOnlyToggle').addEventListener('click', (e) => {
   renderCards();
 });
 let favorites = [];
+
+// ── v5.72: 종목 숨김 (표시 필터, 90일 자동만료) ──
+// hiddenMap은 renderCards()/renderInverseCards()에서만 참조되는 순수 표시
+// 필터 — 스캔/게이트/저널/하네스 로직은 이 객체를 전혀 모른다.
+let hiddenMap = {};  // {TICKER: {ticker, name, hidden_at, days_left}}
+
+async function loadHidden() {
+  try {
+    const res = await fetch('/api/hidden');
+    const items = await res.json();
+    hiddenMap = {};
+    (items || []).forEach(it => { hiddenMap[it.ticker] = it; });
+  } catch (e) { /* 실패해도 숨김 없이 그냥 보여주는 쪽이 안전 */ }
+  updateHiddenChipVisibility();
+}
+
+function updateHiddenChipVisibility() {
+  const n = Object.keys(hiddenMap).length;
+  const btn = document.getElementById('hiddenToggle');
+  if (btn) btn.style.display = n > 0 ? '' : 'none';
+  const cnt = document.getElementById('hiddenCount');
+  if (cnt) cnt.textContent = n;
+}
+
+// 카드 렌더 함수(card/breakdownCard/renderInverseCards) 공통 — .hide-btn
+// 클릭 시 낙관적으로 즉시 숨기고 부드럽게 사라진 뒤, 서버에 저장.
+function bindHideButtons(content) {
+  content.querySelectorAll('.hide-btn').forEach(b => b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const ticker = (b.dataset.ticker || '').toUpperCase();
+    const name = b.dataset.name || ticker;
+    if (!ticker) return;
+    hiddenMap[ticker] = { ticker, name, hidden_at: new Date().toISOString(), days_left: 90 };
+    updateHiddenChipVisibility();
+    const cardEl = b.closest('.card');
+    if (cardEl) {
+      cardEl.classList.add('hiding');
+      setTimeout(() => cardEl.remove(), 200);
+    }
+    try {
+      await fetch(`/api/hidden/${encodeURIComponent(ticker)}`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name}),
+      });
+    } catch (err) { /* 다음 loadHidden()이 서버 상태로 다시 맞춰줌 */ }
+  }));
+}
+
+function renderHiddenModal() {
+  const box = document.getElementById('hiddenList');
+  if (!box) return;
+  const items = Object.values(hiddenMap).sort((a, b) => new Date(b.hidden_at) - new Date(a.hidden_at));
+  box.innerHTML = items.length ? items.map(it => `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px">
+      <div>
+        <div style="font-weight:600;font-size:13px">${it.name} <span style="font-size:11px;color:var(--muted);font-weight:400">${it.ticker}</span></div>
+        <div style="font-size:11px;color:var(--muted)">숨긴 날짜 ${(it.hidden_at || '').slice(0, 10)} · D-${it.days_left}</div>
+      </div>
+      <button class="cancel" style="flex:none;padding:6px 10px;font-size:12px;width:auto" onclick="restoreHidden('${it.ticker}')">복구</button>
+    </div>
+  `).join('') : '<div style="color:var(--muted);font-size:13px;padding:12px 0">숨긴 종목이 없습니다.</div>';
+}
+
+async function restoreHidden(ticker) {
+  delete hiddenMap[ticker];
+  renderHiddenModal();
+  updateHiddenChipVisibility();
+  if (mode === 'inverse') renderInverseCards(lastInverseHits); else renderCards();
+  try {
+    await fetch(`/api/hidden/${encodeURIComponent(ticker)}`, {method: 'DELETE'});
+  } catch (e) { /* 무시 — 로컬은 이미 복구됨 */ }
+}
+
+document.getElementById('hiddenToggle').addEventListener('click', async () => {
+  await loadHidden();
+  renderHiddenModal();
+  document.getElementById('hiddenModal').classList.add('open');
+});
+
 const DESC = {
   pullback: '우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+',
   turnaround: '⭐첫 번째 베이스 집중 · 추세 전환 직후(역배열→정배열) · 바닥 6개월 이내 + 조정 1회↓(1차 베이스) · 200일선 바닥 상향전환 · 돌파일 거래량 1.5배↑ · RS 개선 중',
@@ -1623,14 +1722,18 @@ async function loadInverse(refresh = false) {
       <span>인버스 ${data.hits.length}개</span>
       <span>기준 ${data.generated_at}${data.cached ? ' (캐시)' : ''}</span>`;
     document.getElementById('sectorRow') && (document.getElementById('sectorRow').innerHTML = '');
-    renderInverseCards(data.hits || []);
+    lastInverseHits = data.hits || [];
+    renderInverseCards(lastInverseHits);
   } catch (e) {
     content.innerHTML = '<div class="empty">인버스 스캔 실패. 서버 로그를 확인하세요.</div>';
   }
 }
 
+let lastInverseHits = [];  // v5.72: 숨김 복구 시 재조회 없이 다시 렌더하기 위한 캐시
+
 function renderInverseCards(hits) {
   const content = document.getElementById('content');
+  hits = hits.filter(h => !hiddenMap[(h.ticker || '').toUpperCase()]);  // v5.72: 표시 필터일 뿐
   if (!hits.length) { content.innerHTML = '<div class="empty">인버스 데이터가 없습니다.</div>'; return; }
   const strengthBadge = (s) => s === 'strong'
     ? '<span class="st-badge" style="background:#3a2020;color:#ff6b6b">🔴 본격 하락장</span>'
@@ -1647,6 +1750,7 @@ function renderInverseCards(hits) {
     const idx5Color = idx5 != null ? (idx5 < 0 ? 'var(--px-down)' : 'var(--px-up)') : 'var(--muted)';
     return `<div class="card">
       <div class="card-top">
+        <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
         <div>
           <div class="name">${s.name}<span class="mkt">${s.market}</span></div>
           <div class="tick mono"><a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a> · ${s.underlying} 하락 베팅</div>
@@ -1670,6 +1774,7 @@ function renderInverseCards(hits) {
   content.innerHTML = `
     <div class="surge-warn" style="margin-bottom:12px">🔻 인버스 = 지수 하락 베팅. <b>강도 점수(0~100)</b>가 높을수록 인버스 살 만한 국면이에요. <b>기초지수 5일 등락</b>이 마이너스(지수 빠짐)일수록 인버스 유리. 곱버스(2x/3x)는 변동성 극심 → <b>단기·소액만</b>. 미너비니式 본래 하락장엔 현금 우선.<br><span style="font-size:11px;color:var(--muted)">※ 곱버스/미국 ETF의 실시간 정확한 가격은 증권앱에서 확인하세요. 이 탭은 "지금 하락 국면인가" 판단용이에요.</span></div>
     <div class="grid">${cards}</div>`;
+  bindHideButtons(content);
 }
 
 async function loadAlertList() {
@@ -1809,6 +1914,9 @@ function renderPatternSubTabs(list) {
 function renderCards() {
   const content = document.getElementById('content');
   let list = sectorFilter ? lastHits.filter(h => h.sector === sectorFilter) : lastHits.slice();
+  // v5.72: 숨긴 종목 제외 — 순수 표시 필터, list는 카드 렌더링 전용이라
+  // 스캔/게이트/저널/하네스 어디에도 영향 없음(hiddenMap은 렌더 함수에서만 참조).
+  list = list.filter(h => !hiddenMap[(h.ticker || '').toUpperCase()]);
   // 시장 필터 (클라이언트에서 거름 — 재스캔 없음)
   if (market === 'kr') list = list.filter(h => h.market === 'KR');
   else if (market === 'us') list = list.filter(h => h.market === 'US');
@@ -1946,6 +2054,7 @@ function renderCards() {
     else favorites.push(up);
     renderCards();
   }));
+  bindHideButtons(content);
   // 밸류 보기 버튼 바인딩
   content.querySelectorAll('.fund-btn').forEach(b => b.addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -4203,6 +4312,7 @@ loadJournalFromServer();   // 서버에서 일지 로드 + 구 localStorage 이�
 loadRSettings();           // R 시스템 설정 로드 (v4.47)
 loadGateSuggest();         // 시장 게이트 자동 제안 (v4.50)
 hookCalcInputs();          // 진입 폼 사이즈 자동계산 훅
+loadHidden();              // 숨긴 종목 로드 (v5.72) — load()보다 가벼워 먼저 끝남
 load();
 // v4.98: 진입종목 급락 알림 — 브라우저 알림 권한 요청 + 60초 자동 폴링 시작
 if (typeof Notification !== 'undefined' && Notification.permission === 'default') {

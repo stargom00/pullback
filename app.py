@@ -5,6 +5,13 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.72 [UI+API] 스캐너 카드에 종목 숨김 기능 추가 — 카드 X 버튼(☆ 옆)으로
+        즉시 숨기면 모든 탭에서 표시만 안 됨(스캔/게이트/저널/하네스 로직은
+        무영향, 순수 표시 필터). 90일 자동 만료, 필터 칩 줄의 "🙈 숨김 N"
+        버튼에서 남은 일수 확인 + 즉시 복구 가능. 서버 저장은 favorites와
+        동일 패턴(_resolve_persistent_path, /data 볼륨) — hidden_user.txt에
+        티커/숨긴시각/이름 기록. API: POST/DELETE /api/hidden/{ticker},
+        GET /api/hidden(남은 일수 포함, 조회 시 만료분 자동 정리).
 v5.71 [CONFIG+게이트] 눌림목 RS 게이트를 E=A(12개월 RS≥80) OR B(3개월
         RS≥80) OR C(RS≥50 且 20거래일 전 대비 랭크+25 이상)로 확장, 눌림폭
         게이트를 고정%(1.5~15%)에서 ATR 상대배수 depth_atr∈[0.5,3.0]로
@@ -2559,7 +2566,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.71"
+VERSION = "v5.72"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -4161,6 +4168,102 @@ async def toggle_favorite(request: Request):
         for tk in favs:
             f.write(f"{tk}\n")
     return JSONResponse({"ok": True, "favorites": favs})
+
+
+# ── 종목 숨김 (스캐너 카드 표시 필터, alerts/favorites와 동일 패턴) ──
+# v5.72: 순수 표시 필터 — 스캔/게이트/저널/하네스 로직은 이 스토어를 전혀
+# 참조하지 않는다(프론트엔드가 /api/hidden 목록으로 카드를 걸러낼 뿐).
+HIDDEN_PATH = _resolve_persistent_path("hidden_user.txt")
+HIDDEN_EXPIRE_DAYS = 90
+
+
+def load_hidden() -> dict:
+    """숨긴 종목 {TICKER: {"hidden_at": iso, "name": str}}. 90일 지난 항목은
+    여기서 걸러내고(만료된 레코드는 조회 시 정리) 남은 게 있으면 파일도
+    다시 씀."""
+    entries = {}
+    if os.path.exists(HIDDEN_PATH):
+        with open(HIDDEN_PATH, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split(maxsplit=2)
+                if len(parts) < 2:
+                    continue
+                ticker = parts[0].upper()
+                entries[ticker] = {
+                    "hidden_at": parts[1],
+                    "name": parts[2] if len(parts) > 2 else ticker,
+                }
+    now = datetime.now(timezone.utc)
+    alive = {}
+    expired = False
+    for ticker, info in entries.items():
+        try:
+            hidden_dt = datetime.fromisoformat(info["hidden_at"])
+        except ValueError:
+            expired = True  # 손상된 레코드도 정리 대상
+            continue
+        if (now - hidden_dt).days >= HIDDEN_EXPIRE_DAYS:
+            expired = True
+            continue
+        alive[ticker] = info
+    if expired:
+        _save_hidden(alive)
+    return alive
+
+
+def _save_hidden(entries: dict):
+    with open(HIDDEN_PATH, "w", encoding="utf-8") as f:
+        f.write("# 숨긴 종목 (대시보드에서 자동 생성) — 90일 지나면 자동 만료\n")
+        for ticker, info in sorted(entries.items()):
+            f.write(f"{ticker} {info['hidden_at']} {info.get('name', ticker)}\n")
+
+
+@app.get("/api/hidden")
+async def get_hidden():
+    """숨긴 종목 목록. 만료(90일 경과) 항목은 load_hidden()이 조회 시점에
+    걸러내고 파일에서도 지운다."""
+    entries = load_hidden()
+    now = datetime.now(timezone.utc)
+    items = []
+    for ticker, info in entries.items():
+        hidden_dt = datetime.fromisoformat(info["hidden_at"])
+        days_left = max(0, HIDDEN_EXPIRE_DAYS - (now - hidden_dt).days)
+        items.append({
+            "ticker": ticker,
+            "name": info.get("name", ticker),
+            "hidden_at": info["hidden_at"],
+            "days_left": days_left,
+        })
+    items.sort(key=lambda x: x["hidden_at"], reverse=True)
+    return JSONResponse(items)
+
+
+@app.post("/api/hidden/{ticker}")
+async def hide_ticker(ticker: str, request: Request):
+    ticker = ticker.upper().strip()
+    if not ticker:
+        return JSONResponse({"ok": False, "error": "ticker 필요"}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    name = (body or {}).get("name") or ticker
+    entries = load_hidden()
+    entries[ticker] = {"hidden_at": datetime.now(timezone.utc).isoformat(), "name": name}
+    _save_hidden(entries)
+    return JSONResponse({"ok": True})
+
+
+@app.delete("/api/hidden/{ticker}")
+async def unhide_ticker(ticker: str):
+    ticker = ticker.upper().strip()
+    entries = load_hidden()
+    entries.pop(ticker, None)
+    _save_hidden(entries)
+    return JSONResponse({"ok": True})
 
 
 @app.get("/api/debugraw/{ticker}")
