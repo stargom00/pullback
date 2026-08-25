@@ -505,7 +505,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.80</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.81</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -526,7 +526,13 @@ tr.editing{background:rgba(242,179,61,.06)}
          선별력 없음/역선택 확인 → 맨 뒤로 이동 + "검증실패" 라벨.
          docs/all_tabs_common_yardstick_investigation.md 참고. -->
     <button class="tab tab-exp" data-mode="pattern">🧩 패턴<span class="exp-tag danger">검증실패</span></button>
-    <button class="tab tab-exp" data-mode="stage2">📐Stage2<span class="exp-tag danger">검증실패</span></button>
+    <!-- v5.81(2026-08-25): "검증실패"→"참고"로 정정 — 유동성매칭 대조군 재측정
+         결과 상승우위가 5개 시드 전부 양수(+9.02pp 평균, docs/pullback_stop_width_
+         and_entry_timing.md "8/17 캠페인 마무리" 참고)로 견고하게 확인돼 완전한
+         "실패"는 아니라고 판단. 다만 하락위험 차이는 시드마다 부호가 흔들려
+         (-3.92~+3.59pp) 진입 신호로 확정하긴 이르므로 danger(빨강)는 빼되
+         "실험" 탭들과 같은 참고용 취급 유지. -->
+    <button class="tab tab-exp" data-mode="stage2">📐Stage2<span class="exp-tag">참고</span></button>
     <button class="tab" data-mode="sectors">📊 섹터</button>
     <button class="tab" data-mode="eod">📋 마감정리</button>
     <button class="tab" data-mode="journal">📒 내 일지</button>
@@ -1480,7 +1486,8 @@ function card(s) {
       <span class="badge on">Stage2 정배열</span>
       <span class="badge on">거래량 수축</span>
       <span class="badge on">MA 수렴</span>
-    </div>` : s.mode === 'ibd9' ? `
+    </div>
+    <div class="surge-warn" style="background:rgba(255,107,107,.06);border-color:rgba(255,107,107,.25);margin-top:8px">⚠️ 대조군 대비 약한 우위(+9pp), 진입 신호로는 미검증 — 유동성 매칭 대조군 재측정에서 상승 우위는 확인됐지만(5개 시드 평균 +9.02pp, 전부 양수) 하락위험 차이는 시드마다 부호가 흔들려(-3.92~+3.59pp) 안정적이지 않습니다. 후보 발굴 참고용으로만 쓰세요.</div>` : s.mode === 'ibd9' ? `
     <div class="badges">
       <span class="badge on" style="${s.ad_grade === 'A' ? 'background:#12351f;color:#4ade80;border:1px solid #1d6b3a' : 'background:#152535;color:#7fb8e0;border:1px solid #2d5a8c'}" title="U/D Volume Ratio ${s.ud_ratio} 기반 근사 등급 — IBD 원본 A/D Rating 알고리즘과 다름">A/D ${s.ad_grade}</span>
       <span class="badge on">9조건 통과</span>
