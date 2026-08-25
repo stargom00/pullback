@@ -63,11 +63,26 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
   font:inherit;font-size:13px;padding:8px 16px;border-radius:8px;cursor:pointer}
 .refresh:hover{border-color:var(--amber)}
 
-.statusbar{padding:12px 24px;font-size:12px;color:var(--muted);
-  display:flex;gap:16px;flex-wrap:wrap}
+/* v5.76: 상단 게이트/지수 영역 압축 목표의 연장 — 검색창 아래로 옮기면서
+   보조 텍스트 한 줄로 축소(패딩/폰트 축소, 줄바꿈 대신 가로 스크롤). */
+.statusbar{padding:2px 24px 10px;font-size:11px;color:var(--muted);
+  display:flex;gap:12px;flex-wrap:nowrap;overflow-x:auto;align-items:center}
+.statusbar span{flex-shrink:0;white-space:nowrap}
 .statusbar b{color:var(--text)}
-.idxbar{display:flex;gap:10px;flex-wrap:wrap;padding:10px 24px;
-  border-bottom:1px solid var(--line);background:var(--surface);align-items:center}
+/* v5.76: 게이트 배너 3개+지수 카드 6개가 세 줄을 차지하던 걸 요약 한 줄로
+   압축 — 기본은 idx-summary(이름+신호등)만, 탭하면 idx-detail(기존 배너+
+   카드 전부)이 펼쳐짐. 판정 로직(loadIndices의 gateOf)은 그대로, 표시만 재배치. */
+.idxbar{display:block;padding:6px 24px;
+  border-bottom:1px solid var(--line);background:var(--surface)}
+.idx-summary{display:flex;align-items:center;gap:12px;cursor:pointer;
+  padding:4px 0;flex-wrap:nowrap;overflow-x:auto;font-size:13px;font-weight:600}
+.gate-sum-item{white-space:nowrap;flex-shrink:0}
+.idx-chevron{margin-left:auto;color:var(--muted);font-size:10px;flex-shrink:0;
+  transition:transform .15s}
+.idxbar.expanded .idx-chevron{transform:rotate(180deg)}
+.idx-detail{display:none;padding:6px 0 8px}
+.idxbar.expanded .idx-detail{display:block}
+.idx-cards{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .mkt-banner{padding:6px 14px;border-radius:10px;font-size:11px;font-weight:400;border:1px solid var(--line)}
 .gate-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
 .gate-row .mkt-banner{flex:1;min-width:200px}
@@ -284,6 +299,14 @@ tr.editing{background:rgba(242,179,61,.06)}
 /* v5.45: 손절폭 필터 칩 — 다중선택이라 둥근 pill(섹터=단일선택 브라우징)과
    구분되게 사각 모서리로. on 상태는 각 tier 고유색(JS 인라인)이 이미 입혀짐. */
 .schip.risktier{border-radius:8px;font-weight:500}
+/* v5.76: 손절폭 칩 4개를 "손절폭 ▾" 드롭다운 하나로 흡수 — 필터 로직
+   (riskTierFilter Set, RISK_TIERS)은 그대로, 컨테이너만 상시노출 줄에서
+   클릭 시 뜨는 플로팅 패널로 바꿈. */
+.dropdown-wrap{position:relative;display:inline-flex}
+.risktier-dropdown{position:absolute;top:calc(100% + 6px);left:0;z-index:50;
+  background:var(--surface);border:1px solid var(--line);border-radius:10px;
+  padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.4);
+  display:flex;flex-wrap:wrap;gap:6px;min-width:230px}
 /* v5.46: 패턴 서브탭 — 섹터 칩(.schip, 둥근 pill·amber)과 완전히 다른
    외형(사각 모서리·보라 액센트)으로 "이 탭 안의 하위분류 선택"임을 시각적으로
    분리. 섹터 칩은 브라우징(여러 개 중 아무거나), 서브탭은 상호배타적 선택. */
@@ -400,9 +423,11 @@ tr.editing{background:rgba(242,179,61,.06)}
   .tab{padding:9px 13px;font-size:13.5px;flex-shrink:0;white-space:nowrap}
   .refresh{padding:10px 16px;font-size:13.5px}
 
-  .idxbar{padding:10px 16px;gap:8px}
+  .idxbar{padding:6px 16px}
+  .idx-summary{gap:9px;font-size:12px}
+  .idx-cards{gap:8px}
   .idx{font-size:12.5px;padding:7px 12px}
-  .statusbar{padding:12px 16px;font-size:11.5px}
+  .statusbar{padding:2px 16px 8px;font-size:10.5px;gap:10px}
   .legend{padding:0 16px 10px}
   .sectorbar{padding:0 16px 12px}
   .alert-panel{padding:12px 16px}
@@ -444,7 +469,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.75</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.76</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -476,6 +501,10 @@ tr.editing{background:rgba(242,179,61,.06)}
     <button class="tab" data-market="us">미국</button>
     <button class="tab" id="strictToggle" title="RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓ 만 표시 (주도주 엄선)">🎯 주도주만</button>
     <button class="tab" id="riskSortToggle" title="손절폭(리스크%) 좁은 순으로 정렬 — 타이트한 진입 자리가 위로. 단 ATR(일상 변동)보다 좁은 손절은 노이즈에 털릴 수 있어 ⚠️ 표시">↕ 손절좁은순</button>
+    <div class="dropdown-wrap">
+      <button class="tab" id="riskTierDropdownToggle" style="display:none" title="손절폭 절대값 4단계로 거르기 (다중선택 가능)">손절폭 ▾</button>
+      <div class="risktier-dropdown" id="riskTierBar" style="display:none"></div>
+    </div>
     <button class="tab" id="bearOkToggle" title="약세장 적격(💎)만 표시 — 탄탄한베이스 + RS90+ + 손절폭적정, 3조건 전부 충족. 게이트 🟡🔴일 때 125개 후보에서 옥석을 가리는 필터. 대부분 걸러져서 몇 개만 남는 게 정상.">💎 적격만</button>
     <button class="tab" id="accumSortToggle" title="🧲 매집흔적 점수(A-B-C 패턴 전용, 보조 지표) 높은 순 정렬 — 판정 불가(데이터 부족) 종목은 맨 뒤로">🧲 매집순</button>
     <button class="tab" id="superOnlyToggle" style="display:none" title="슈퍼대장(RS95+ · 3개월 모멘텀15%+) 소속 종목만 — 신호등 🟢(RS≥90)의 부분집합이라 더 엄격한 별도 필터. 실측: 전체 EV 0.151R → 슈퍼대장 소속만 0.266R (docs/all_tabs_common_yardstick_investigation.md)">👑 슈퍼대장만</button>
@@ -484,11 +513,6 @@ tr.editing{background:rgba(242,179,61,.06)}
   <button class="refresh" id="refresh">다시 스캔</button>
 </header>
 
-<!-- v5.45: 손절폭 절대값 4단계 필터(다중선택) — risk_pct 있는 모드에서만
-     노출(renderRiskTierFilter가 매번 mode 확인). 필터 줄(전체/한국/미국/…)
-     바로 아래, 섹터 칩보다 위에 둬서 "필터 그룹"으로 묶임(섹터 칩은 브라우징용
-     이라 아래로 분리). -->
-<div class="sectorbar" id="riskTierBar" style="display:none"></div>
 <div class="stopwidth-warn" id="stopWidthWarnBanner" style="display:none"></div>
 <!-- v5.36: 패턴 탭 전용 서브탭(전체/컵앤핸들/치솟은깃발/더블바닥/급등매집).
      mode==='pattern'일 때만 렌더링·표시 — renderPatternSubTabs()가 매번
@@ -499,7 +523,6 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <div class="idxbar" id="idxbar"></div>
 
-<div class="statusbar" id="status"></div>
 <div class="sectorbar" id="sectorbar"></div>
 <div class="alert-panel" id="alertPanel">
   <input id="alertTicker" placeholder="티커 (예: 347850.KQ)" style="width:180px">
@@ -522,6 +545,11 @@ tr.editing{background:rgba(242,179,61,.06)}
       border:none;font-size:14px;cursor:pointer;white-space:nowrap">🔬 진단</button>
   </div>
 </div>
+<!-- v5.76: 스캔 통계 줄(종목수/기준시각/스캔시간/경보)을 상단에서 검색창
+     아래로 이동 + 작은 보조 텍스트로 압축 — "폰에서 스크롤 없이 첫 카드"
+     목표를 위해 헤더~카드 사이 높이를 최대한 줄임. 내용·경보 클릭 동작은
+     그대로(load()가 채우는 로직 불변). -->
+<div class="statusbar" id="status"></div>
 <div id="content"><div class="loading"><div class="spinner"></div>스캔 중…</div></div>
 
 <!-- v4.62: 왜 안 잡혔나 진단 결과 (검색란은 위 searchBar로 통합, 결과만 여기 표시) -->
@@ -829,17 +857,32 @@ const STRICT_MODE_VALID = new Set(['pullback', 'turnaround', 'breakout', 'immine
 const BEAR_OK_VALID = new Set(['pullback', 'breakout', 'imminent', 'pattern', 'strong_pivot']);
 // 매집순(accumSort): accum_score는 패턴 탭의 급등매집 서브패턴에서만 채워짐.
 const ACCUM_SORT_VALID = new Set(['pattern']);
+// v5.76: 상시노출 4칩 → "손절폭 ▾" 드롭다운. 필터 로직(riskTierFilter Set,
+// RISK_TIERS 판정)은 그대로 — 펼침/접힘 컨테이너만 바뀜. 펼침 상태는 저장
+// 안 함(riskTierDropdownOpen, 새로고침하면 다시 false).
+let riskTierDropdownOpen = false;
+
 function renderRiskTierFilter() {
+  const toggleBtn = document.getElementById('riskTierDropdownToggle');
   const bar = document.getElementById('riskTierBar');
-  if (!bar) return;
-  if (!RISK_TIER_MODES.has(mode)) { bar.style.display = 'none'; return; }
-  bar.style.display = 'flex';
+  if (!toggleBtn || !bar) return;
+  if (!RISK_TIER_MODES.has(mode)) {
+    toggleBtn.style.display = 'none';
+    bar.style.display = 'none';
+    return;
+  }
+  toggleBtn.style.display = '';
+  const n = riskTierFilter.size;
+  toggleBtn.textContent = n > 0 ? `손절폭(${n}) ▾` : '손절폭 ▾';
+  toggleBtn.classList.toggle('active', n > 0);
+  bar.style.display = riskTierDropdownOpen ? 'flex' : 'none';
   bar.innerHTML = RISK_TIERS.map(t =>
     `<span class="schip risktier ${riskTierFilter.has(t.key) ? 'on' : ''}" data-key="${t.key}"
        style="border-color:${t.border};${riskTierFilter.has(t.key) ? `background:${t.bg};color:${t.color}` : ''}"
        title="손절폭 ${t.range} 종목만 보기 (다중선택 가능)">${t.emoji} ${t.label} <span style="opacity:.7">${t.range}</span></span>`
   ).join('');
-  bar.querySelectorAll('.risktier').forEach(ch => ch.addEventListener('click', () => {
+  bar.querySelectorAll('.risktier').forEach(ch => ch.addEventListener('click', (e) => {
+    e.stopPropagation();
     const k = ch.dataset.key;
     if (riskTierFilter.has(k)) riskTierFilter.delete(k); else riskTierFilter.add(k);
     renderCards();
@@ -1452,6 +1495,18 @@ document.getElementById('superOnlyToggle').addEventListener('click', (e) => {
   superOnlyFilter = !superOnlyFilter;
   e.target.classList.toggle('active', superOnlyFilter);
   renderCards();
+});
+document.getElementById('riskTierDropdownToggle').addEventListener('click', (e) => {
+  e.stopPropagation();
+  riskTierDropdownOpen = !riskTierDropdownOpen;
+  renderRiskTierFilter();
+});
+// 드롭다운 바깥 클릭하면 닫힘.
+document.addEventListener('click', (e) => {
+  if (riskTierDropdownOpen && !e.target.closest('.dropdown-wrap')) {
+    riskTierDropdownOpen = false;
+    renderRiskTierFilter();
+  }
 });
 let favorites = [];
 
@@ -4391,6 +4446,11 @@ const TV_INDEX_SYMBOL = {
   '비트코인': 'COINBASE:BTCUSD',
 };
 
+// v5.76: idxbar 펼침 상태 — 저장 안 함(새로고침하면 다시 접힘). loadIndices()는
+// 5분마다 재호출되는데(setInterval), 그때마다 접히면 안 되니 모듈 변수로 들고
+// 있다가 재렌더 시 그대로 반영(사용자가 펼쳐둔 채 새 지수 데이터만 갱신됨).
+let idxExpanded = false;
+
 async function loadIndices() {
   const bar = document.getElementById('idxbar');
   try {
@@ -4398,7 +4458,7 @@ async function loadIndices() {
     const data = await res.json();
     const list = (data.indices || []);
     if (!list.length) { bar.style.display = 'none'; return; }
-    bar.style.display = 'flex';
+    bar.style.display = 'block';
     const regimeDot = (rg) => {
       if (!rg) return '';
       const map = {good:['🟢','#28b478'], neutral:['🟡','#e6aa28'], bad:['🔴','#FF5A6E']};
@@ -4408,6 +4468,8 @@ async function loadIndices() {
     // ── 지수별 게이트 배너 (v4.53.1): 코스피·코스닥·나스닥 각각 판정 ──
     // 각 지수의 분산일·레짐·FTD로 개별 신호. 한국 종목은 코스피/코스닥,
     // 미국 종목은 나스닥 게이트를 보고 판단.
+    // ⚠️ v5.76: 표시만 재배치(요약 한 줄 + 펼침 상세) — 이 판정 로직(gateOf)
+    // 자체는 절대 안 건드림. good/neutral/bad 3단계, 문구·분산일·FTD 표시도 그대로.
     const gateOf = (ix) => {
       if (!ix) return null;
       const dist = ix.dist_days || 0;
@@ -4421,18 +4483,25 @@ async function loadIndices() {
       return { lv, html: `${txt}${distTxt}${ftdTxt}` };
     };
     const gateNames = ['코스피', '코스닥', '나스닥'];
-    let banner = '';
-    const gateBoxes = gateNames.map(nm => {
+    const gateResults = gateNames.map(nm => {
       const ix = list.find(x => x.name === nm);
-      const g = gateOf(ix);
-      if (!g) return '';
-      return `<div class="mkt-banner mkt-${g.lv}" title="${nm} 게이트: 분산일(기관 매도일) + 레짐 판정. 한국 종목은 코스피/코스닥, 미국 종목은 나스닥 기준으로 진입 판단.">
-        ${nm} ${g.html}</div>`;
-    }).filter(Boolean);
-    if (gateBoxes.length) {
-      banner = `<div class="gate-row">${gateBoxes.join('')}</div>`;
-    }
-    bar.innerHTML = banner + list.map(ix => {
+      return { nm, g: gateOf(ix) };
+    }).filter(x => x.g);
+
+    // 요약 한 줄(기본 표시) — 이름+신호등만. 탭하면 상세(배너 문장+지수
+    // 카드 6개, 닛케이·비트코인은 여기 안에만)가 펼쳐짐.
+    const GATE_LV_EMOJI = { good: '🟢', neutral: '🟡', bad: '🔴' };
+    const summaryHtml = gateResults.map(({ nm, g }) =>
+      `<span class="gate-sum-item">${nm}${GATE_LV_EMOJI[g.lv] || ''}</span>`
+    ).join('');
+
+    const gateBoxes = gateResults.map(({ nm, g }) =>
+      `<div class="mkt-banner mkt-${g.lv}" title="${nm} 게이트: 분산일(기관 매도일) + 레짐 판정. 한국 종목은 코스피/코스닥, 미국 종목은 나스닥 기준으로 진입 판단.">
+        ${nm} ${g.html}</div>`
+    );
+    const gateRowHtml = gateBoxes.length ? `<div class="gate-row">${gateBoxes.join('')}</div>` : '';
+
+    const idxCardsHtml = list.map(ix => {
       const pct = ix.change_pct;
       const chg = ix.change;
       // 한국식 색: 상승=빨강(up), 하락=파랑(down)
@@ -4453,6 +4522,16 @@ async function loadIndices() {
         + `<span class="vl">${val}</span>`
         + `<span class="ch ${dir}">${chgStr}</span></div>`;
     }).join('');
+
+    bar.innerHTML = `
+      <div class="idx-summary" id="idxSummaryToggle">${summaryHtml}<span class="idx-chevron">▾</span></div>
+      <div class="idx-detail">${gateRowHtml}<div class="idx-cards">${idxCardsHtml}</div></div>`;
+    bar.classList.toggle('expanded', idxExpanded);
+    const toggle = document.getElementById('idxSummaryToggle');
+    if (toggle) toggle.addEventListener('click', () => {
+      idxExpanded = !idxExpanded;
+      bar.classList.toggle('expanded', idxExpanded);
+    });
   } catch (e) {
     bar.style.display = 'none';
   }
