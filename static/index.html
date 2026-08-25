@@ -304,8 +304,37 @@ tr.editing{background:rgba(242,179,61,.06)}
   color:var(--muted);padding:0;margin-top:2px;opacity:.35;transition:opacity .15s,color .15s;flex-shrink:0}
 .hide-btn:hover{opacity:1;color:#ff6b6b}
 .card-top{display:flex;align-items:flex-start;gap:12px}
-.card{transition:opacity .2s ease,transform .2s ease}
+.card{transition:opacity .2s ease,transform .2s ease;cursor:pointer}
 .card.hiding{opacity:0;transform:scale(.96);pointer-events:none}
+
+/* v5.74: 카드 접기/펼치기 — 기본 접힘(card-collapsed만 보임), 클릭하면
+   card-expanded로 전환. 펼침 상태는 클래스로만 관리, 저장 안 함 — 재렌더마다
+   항상 이 기본값(접힘)부터 시작. */
+.card:not(.expanded){padding:9px 14px}
+.card-expanded{display:none}
+.card.expanded .card-collapsed{display:none}
+.card.expanded .card-expanded{display:flex;flex-direction:column;gap:12px}
+.card-collapsed{display:flex;align-items:center;gap:7px;min-height:20px}
+.card-collapsed .fav-btn{font-size:16px;margin-top:0}
+.card-collapsed .hide-btn{font-size:12px;margin-top:0}
+.cc-name{font-size:12.5px;font-weight:700;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;max-width:96px;flex-shrink:1}
+.cc-mkt{font-size:9px;font-weight:600;padding:1px 5px;border-radius:4px;
+  background:var(--surface2);color:var(--muted);flex-shrink:0}
+.cc-spark{flex-shrink:0;width:40px;height:16px;display:block}
+.cc-spark svg{width:40px;height:16px;display:block}
+.cc-rs,.cc-risk,.cc-score{font-size:11px;flex-shrink:0;min-width:26px;text-align:right}
+.cc-entry{font-size:11px;flex-shrink:0;line-height:1}
+.cc-badges{font-size:10px;flex-shrink:0;letter-spacing:-1px}
+.cc-chevron{margin-left:auto;color:var(--muted);font-size:10px;flex-shrink:0;
+  transition:transform .15s}
+.card.expanded .cc-chevron{transform:rotate(90deg)}
+@media (max-width:700px){
+  .grid{gap:6px}
+  .card:not(.expanded){padding:7px 12px}
+  .card-collapsed{gap:6px}
+  .cc-name{max-width:34vw;font-size:12px}
+}
 .name{font-size:15px;font-weight:700;line-height:1.2}
 .tick{font-size:11px;color:var(--muted);margin-top:2px}
 .tv-link{color:var(--muted);text-decoration:none;cursor:pointer}
@@ -405,7 +434,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.73</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.74</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -959,12 +988,80 @@ function entrySignalNoteHtml(s, sig) {
   return `<div class="sig-note" title="탭마다 실측 결과가 달라 판정에 쓰는 항목 수가 다릅니다 (docs/all_tabs_common_yardstick_investigation.md)">이 탭에서 검증된 ${sig.activeCount}개 항목만 판정에 반영 중 · 참고 항목은 값만 표시</div>`;
 }
 
+// v5.74: 카드 접기/펼치기 공통 요약행 — 기본 접힘, 카드 클릭으로 펼침/접힘
+// 토글(펼침 상태는 저장 안 함, 재렌더마다 항상 접힘부터 시작). card()/
+// breakdownCard()가 공용으로 쓰고, 인버스는 필드가 아예 달라 별도
+// collapsedRowHtmlInverse()를 씀.
+function miniSparkHtml(s) {
+  if (!s.spark || !s.spark.length) return '<span class="cc-spark"></span>';
+  return `<span class="cc-spark">${sparkSVG(s.spark, s.spark_ma20 || [])}</span>`;
+}
+function entryIconMini(s) {
+  if (typeof entrySignal !== 'function') return '';
+  const sig = entrySignal(s);
+  if (!sig || !sig.activeCount) return '';  // 이 탭엔 판정 항목 자체가 없음
+  return sig.level === 'ok' ? '🟢' : '🔴';  // warn/danger 둘 다 🔴로 압축(요청: 2단계만)
+}
+function riskPctMiniHtml(s) {
+  if (s.risk_pct == null) return '<span class="cc-risk mono">-</span>';
+  // ATR×1.5 상대기준(요청 그대로) — ATR 무효(<1%)일 때만 고정 US8%/KR12%로 폴백
+  // (CLAUDE.md의 stop_wide/게이트 폴백 규칙과 동일한 근거).
+  const ok = (s.atr_pct != null && s.atr_pct >= 1)
+    ? s.risk_pct <= s.atr_pct * 1.5
+    : s.risk_pct <= (s.market === 'KR' ? 12 : 8);
+  return `<span class="cc-risk mono" style="color:${ok ? 'var(--green)' : '#fbbf24'}">${s.risk_pct}%</span>`;
+}
+function collapsedBadgeIconsHtml(s) {
+  let out = '';
+  if (s.rs_path === '3M') out += '🔥';
+  if (s.rs_path === 'momentum') out += '🚀';
+  if (s.is_super) out += '👑';
+  return `<span class="cc-badges">${out}</span>`;
+}
+function collapsedRowHtml(s) {
+  const fav = favorites.includes((s.ticker || '').toUpperCase());
+  return `<div class="card-collapsed">
+    <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기'}">${fav ? '★' : '☆'}</button>
+    <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
+    <span class="cc-name">${s.name}</span>
+    <span class="cc-mkt">${s.market}</span>
+    ${miniSparkHtml(s)}
+    <span class="cc-rs mono" title="RS">${s.rs != null ? s.rs : '-'}</span>
+    <span class="cc-entry" title="진입 신호등">${entryIconMini(s)}</span>
+    ${riskPctMiniHtml(s)}
+    <span class="cc-score mono" title="점수">${s.score != null ? Math.round(s.score) : '-'}</span>
+    ${collapsedBadgeIconsHtml(s)}
+    <span class="cc-chevron">▸</span>
+  </div>`;
+}
+// 인버스는 RS/risk_pct/score/entrySignal 개념이 아예 없는 별도 데이터 형태라
+// 가장 가까운 값으로 대응: RS 자리→강도(inv_score), 진입아이콘→과열여부,
+// 리스크%자리→인버스 5일 등락, 점수자리→레버리지, 배지자리→강도 신호등.
+function collapsedRowHtmlInverse(s) {
+  const scoreColor = s.inv_score >= 70 ? '#ff6b6b' : (s.inv_score >= 40 ? '#f2b33d' : '#7a8a7a');
+  const ret5 = s.ret5_pct;
+  const strengthDot = s.strength === 'strong' ? '🔴' : s.strength === 'building' ? '🟡' : '🟢';
+  return `<div class="card-collapsed">
+    <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
+    <span class="cc-name">${s.name}</span>
+    <span class="cc-mkt">${s.market}</span>
+    <span class="cc-rs mono" style="color:${scoreColor}" title="강도 점수">${s.inv_score != null ? s.inv_score : '-'}</span>
+    <span class="cc-entry" title="과열 여부">${s.overheated ? '🔴' : '🟢'}</span>
+    <span class="cc-risk mono" style="color:${ret5 >= 0 ? 'var(--px-up)' : 'var(--px-down)'}" title="인버스 5일 등락">${ret5 != null ? (ret5 >= 0 ? '+' : '') + ret5 + '%' : '-'}</span>
+    <span class="cc-score mono" title="레버리지">${s.leverage >= 2 ? s.leverage + 'x' : '-'}</span>
+    <span class="cc-badges" title="하락장 강도">${strengthDot}</span>
+    <span class="cc-chevron">▸</span>
+  </div>`;
+}
+
 function breakdownCard(s) {
   const chgCls = s.change_pct >= 0 ? 'up' : 'down';
   const chgSign = s.change_pct >= 0 ? '+' : '';
   const fav = favorites.includes((s.ticker || '').toUpperCase());
   const krWarn = s.market === 'KR';
   return `<div class="card${s.triggered ? ' fired' : ''}${fav ? ' fav' : ''}">
+    ${collapsedRowHtml(s)}
+    <div class="card-expanded">
     <div class="card-top">
       <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="즐겨찾기">${fav ? '★' : '☆'}</button>
       <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
@@ -1001,6 +1098,7 @@ function breakdownCard(s) {
     ${krWarn ? '<div class="surge-warn" style="margin-top:8px">⚠️ 한국 종목 — 개인 공매도 제약. 인버스 ETF나 관찰용으로 활용.</div>' : ''}
     <div class="surge-warn" style="background:rgba(255,107,107,.06);border-color:rgba(255,107,107,.25);margin-top:8px">🩸 숏은 손실 무한·숏스퀴즈 위험. 손절(위쪽 저항) 칼같이, 소액만. 미너비니式 본래 현금 우선.</div>
     ${s.ticker ? `<button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button><button class="journal-btn" style="margin-left:6px;background:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'};border-color:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'}" onclick="quickWatch(this,'${s.ticker}')" ${isPendingWatch(s.ticker) ? 'disabled' : ''} title="원클릭 봇 감시(대기) 등록 — 피벗·손절 자동 입력. 돌파·리테스트 시 텔레그램 알림. (일지의 '관찰' 카테고리와 다름: 관찰=이평 접근 알림용)">${isPendingWatch(s.ticker) ? '✓ 감시중' : '⚡ 감시'}</button>` : ''}
+    </div>
   </div>`;
 }
 
@@ -1021,6 +1119,8 @@ function card(s) {
   const chgSign = s.change_pct >= 0 ? '+' : '';
   const fav = favorites.includes((s.ticker || '').toUpperCase());
   return `<div class="card${s.triggered ? ' fired' : ''}${fav ? ' fav' : ''}">
+    ${collapsedRowHtml(s)}
+    <div class="card-expanded">
     <div class="card-top">
       <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기 (최상단 고정)'}">${fav ? '★' : '☆'}</button>
       <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
@@ -1295,6 +1395,7 @@ function card(s) {
     })() : ''}
     ${s.ticker ? `
     <button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button>${s.mode === 'leader' ? `<button class="journal-btn" style="margin-left:6px;background:${isLeaderConversionWatch(s.ticker) ? '#12351f' : '#1a2a3f'};border-color:${isLeaderConversionWatch(s.ticker) ? '#12351f' : '#1a2a3f'};color:${isLeaderConversionWatch(s.ticker) ? 'inherit' : '#7fb8ff'}" onclick="watchLeaderConversion(this,'${s.ticker}')" ${isLeaderConversionWatch(s.ticker) ? 'disabled' : ''} title="눌림목 전환 관찰 등록 — 손절 없음, 봇 알림 없음. 대장후보 히트의 74%가 60봉 내 눌림목 탭에 전환(중앙값 6봉). 눌림목 탭을 열 때마다 자동으로 전환 여부를 확인해요.">${isLeaderConversionWatch(s.ticker) ? '✓ 관찰중' : '👁 눌림목 전환 관찰'}</button>` : `<button class="journal-btn" style="margin-left:6px;background:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'};border-color:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'}" onclick="quickWatch(this,'${s.ticker}')" ${isPendingWatch(s.ticker) ? 'disabled' : ''} title="원클릭 봇 감시 등록">${isPendingWatch(s.ticker) ? '✓ 감시중' : '⚡ 감시'}</button>`}` : ''}
+    </div>
   </div>`;
 }
 
@@ -1368,8 +1469,9 @@ function updateHiddenChipVisibility() {
 }
 
 // 카드 렌더 함수(card/breakdownCard/renderInverseCards) 공통 — .hide-btn
-// 클릭 시 낙관적으로 즉시 숨기고 부드럽게 사라진 뒤, 서버에 저장.
-function bindHideButtons(content) {
+// 클릭 시 낙관적으로 즉시 숨기고 부드럽게 사라진 뒤, 서버에 저장. + v5.74:
+// 카드 접기/펼치기 토글(버튼/링크 클릭은 전파 안 되게 가드).
+function bindCardInteractions(content) {
   content.querySelectorAll('.hide-btn').forEach(b => b.addEventListener('click', async (e) => {
     e.stopPropagation();
     const ticker = (b.dataset.ticker || '').toUpperCase();
@@ -1389,6 +1491,15 @@ function bindHideButtons(content) {
       });
     } catch (err) { /* 다음 loadHidden()이 서버 상태로 다시 맞춰줌 */ }
   }));
+  // v5.74: 카드 접기/펼치기. 버튼/링크(☆·✕·차트열기·일지추가·감시 등) 클릭은
+  // closest()로 걸러내 토글이 안 먹게 — 그 요소들은 각자 자기 동작만 한다.
+  content.querySelectorAll('.card').forEach(cardEl => {
+    if (!cardEl.querySelector('.card-collapsed')) return;  // 아직 미적용 카드 방어
+    cardEl.addEventListener('click', (e) => {
+      if (e.target.closest('button, a, input, select, textarea')) return;
+      cardEl.classList.toggle('expanded');
+    });
+  });
 }
 
 function renderHiddenModal() {
@@ -1749,6 +1860,8 @@ function renderInverseCards(hits) {
     const idx5Str = idx5 != null ? `${idx5>=0?'+':''}${idx5}%` : '–';
     const idx5Color = idx5 != null ? (idx5 < 0 ? 'var(--px-down)' : 'var(--px-up)') : 'var(--muted)';
     return `<div class="card">
+      ${collapsedRowHtmlInverse(s)}
+      <div class="card-expanded">
       <div class="card-top">
         <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
         <div>
@@ -1769,12 +1882,13 @@ function renderInverseCards(hits) {
       </div>
       ${s.overheated ? '<div class="surge-warn" style="background:rgba(255,107,107,.08);border-color:rgba(255,107,107,.3)">⚠️ 인버스 과열(RSI '+s.rsi+') — 지수 과대낙폭 = 반등 시 인버스 급락 위험. 추격 금지.</div>' : ''}
       <div style="font-size:11px;color:var(--muted);margin-top:8px">${s.strength_txt}${s.derived ? ' · 📐 1x 역산' : ''}</div>
+      </div>
     </div>`;
   }).join('');
   content.innerHTML = `
     <div class="surge-warn" style="margin-bottom:12px">🔻 인버스 = 지수 하락 베팅. <b>강도 점수(0~100)</b>가 높을수록 인버스 살 만한 국면이에요. <b>기초지수 5일 등락</b>이 마이너스(지수 빠짐)일수록 인버스 유리. 곱버스(2x/3x)는 변동성 극심 → <b>단기·소액만</b>. 미너비니式 본래 하락장엔 현금 우선.<br><span style="font-size:11px;color:var(--muted)">※ 곱버스/미국 ETF의 실시간 정확한 가격은 증권앱에서 확인하세요. 이 탭은 "지금 하락 국면인가" 판단용이에요.</span></div>
     <div class="grid">${cards}</div>`;
-  bindHideButtons(content);
+  bindCardInteractions(content);
 }
 
 async function loadAlertList() {
@@ -2054,7 +2168,7 @@ function renderCards() {
     else favorites.push(up);
     renderCards();
   }));
-  bindHideButtons(content);
+  bindCardInteractions(content);
   // 밸류 보기 버튼 바인딩
   content.querySelectorAll('.fund-btn').forEach(b => b.addEventListener('click', async (e) => {
     e.stopPropagation();

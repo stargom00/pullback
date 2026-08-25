@@ -5,6 +5,21 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.74 [UI] 스캐너 카드 접기/펼치기 — 기본 접힘, 클릭하면 펼침(다시 클릭하면
+        접힘). 목적: 한 화면에서 많은 종목을 빠르게 훑고 관심 가는 것만
+        펼쳐보기. 접힌 카드는 한 줄 요약(☆·✕·종목명·시장·미니스파크·RS·
+        진입신호등(🟢/🔴, warn/danger는 🔴로 압축)·리스크%(ATR×1.5 기준
+        초록/주황, ATR 무효 시 고정 US8%/KR12% 폴백)·점수·🔥/🚀/👑 아이콘)만
+        표시. ☆/✕/차트링크/일지버튼 등 클릭은 closest() 가드로 펼침 토글에
+        안 걸리게 분리. 펼침 상태는 클래스로만 관리하고 어디에도 저장 안
+        해서 재스캔·새로고침마다 항상 접힘부터 시작. card()/breakdownCard()/
+        인버스 인라인 카드 3곳 전부 적용 — 인버스는 RS/risk_pct/score/
+        entrySignal 개념 자체가 없어 강도(inv_score)·과열여부·5일 등락·
+        레버리지로 대응 매핑. 기존 card-top 이하 전체 마크업은 그대로 두고
+        `<div class="card-expanded">`로만 감싸는 방식으로 구현해 회귀
+        위험 최소화 — Python html.parser로 전체 파일 태그 균형 확인(에러 0),
+        Node에 카드 렌더 함수를 직접 실행해 imminent/breakdown 샘플 데이터로
+        collapsed+expanded 마크업 정상 생성 확인.
 v5.73 [배포] /guide, /guide.md에 no-cache 헤더 추가 — 사용자가 v5.72 배포
         후 돌파임박 탭에 숨김 X버튼이 안 보인다고 제보. 실제로는 코드
         문제가 아니었음(프로덕션 raw HTML을 curl로 받아 로컬과 diff =
@@ -2576,7 +2591,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.73"
+VERSION = "v5.74"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
