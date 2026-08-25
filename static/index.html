@@ -320,14 +320,23 @@ tr.editing{background:rgba(242,179,61,.06)}
 .psub.empty{opacity:.45}
 @media (max-width:600px){.sectorbar{padding:0 16px 12px}.psubbar{padding:0 16px 12px}}
 
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));
-  gap:14px;padding:0 24px 40px}
+/* v5.77: 최대 3열 고정(화면 넓어지면 열이 느는 대신 카드가 넓어짐) +
+   align-items:start — 한 줄에서 카드 하나가 펼쳐져도 옆의 접힌 카드들은
+   grid row 높이에 맞춰 늘어나지 않고 자기 콘텐츠 높이만 유지(빈 공간 방지). */
+.grid{display:grid;grid-template-columns:repeat(3, minmax(330px,1fr));
+  gap:14px;padding:0 24px 40px;align-items:start}
+@media (max-width:1050px){.grid{grid-template-columns:repeat(2, minmax(280px,1fr))}}
 
-.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;
+/* v5.77: 기본 테두리를 무채색 진회색으로(배경보다 살짝 밝은 정도) — 강조색은
+   진짜 특별한 카드(fired·fav·super-hl)에만 남겨서 의미가 흐려지지 않게. */
+.card{background:var(--surface);border:1px solid #33363d;border-radius:12px;
   padding:16px;display:flex;flex-direction:column;gap:12px}
-.card:hover{border-color:#33455F}
+.card:hover{border-color:#454852}
 .card.fired{border-color:rgba(242,179,61,.55)}
 .card.fav{border-color:rgba(245,196,81,.5);box-shadow:0 0 0 1px rgba(245,196,81,.25)}
+/* v5.77: 👑 슈퍼대장 전용 강조 — fav(즐겨찾기, 사용자가 직접 표시)와 구분되게
+   글로우 없이 테두리만. */
+.card.super-hl{border-color:rgba(250,204,21,.55)}
 .fav-btn{background:none;border:none;cursor:pointer;font-size:20px;line-height:1;
   color:var(--muted);padding:0;margin-top:1px;transition:color .15s;flex-shrink:0}
 .fav-btn:hover{color:#f5c451}
@@ -350,15 +359,22 @@ tr.editing{background:rgba(242,179,61,.06)}
 .card-collapsed{display:flex;align-items:center;gap:7px;min-height:20px}
 .card-collapsed .fav-btn{font-size:16px;margin-top:0}
 .card-collapsed .hide-btn{font-size:12px;margin-top:0}
+/* v5.77: 표처럼 훑을 수 있게 고정 컬럼 정렬 — 폭을 max-width가 아니라
+   width로 고정해서 카드마다 값 길이가 달라도 같은 x좌표에 오게 함.
+   순서: [☆✕] [종목명+국가] [스파크라인] [RS] [🟢/🔴] [리스크%] [점수] [배지] [▸] */
+.cc-namewrap{display:flex;align-items:center;gap:5px;width:112px;flex-shrink:0;overflow:hidden}
 .cc-name{font-size:12.5px;font-weight:700;white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis;max-width:96px;flex-shrink:1}
+  text-overflow:ellipsis;flex-shrink:1;min-width:0}
 .cc-mkt{font-size:9px;font-weight:600;padding:1px 5px;border-radius:4px;
   background:var(--surface2);color:var(--muted);flex-shrink:0}
 .cc-spark{flex-shrink:0;width:40px;height:16px;display:block}
 .cc-spark svg{width:40px;height:16px;display:block}
-.cc-rs,.cc-risk,.cc-score{font-size:11px;flex-shrink:0;min-width:26px;text-align:right}
-.cc-entry{font-size:11px;flex-shrink:0;line-height:1}
-.cc-badges{font-size:10px;flex-shrink:0;letter-spacing:-1px}
+.cc-rs,.cc-risk,.cc-score{font-variant-numeric:tabular-nums;flex-shrink:0;text-align:right}
+.cc-rs{font-size:11px;width:26px}
+.cc-entry{font-size:11px;flex-shrink:0;width:16px;text-align:center;line-height:1}
+.cc-risk{font-size:11px;width:38px}
+.cc-score{font-size:11px;width:22px}
+.cc-badges{font-size:10px;flex-shrink:0;width:26px;letter-spacing:-1px}
 .cc-chevron{margin-left:auto;color:var(--muted);font-size:10px;flex-shrink:0;
   transition:transform .15s}
 .card.expanded .cc-chevron{transform:rotate(90deg)}
@@ -366,7 +382,8 @@ tr.editing{background:rgba(242,179,61,.06)}
   .grid{gap:6px}
   .card:not(.expanded){padding:7px 12px}
   .card-collapsed{gap:6px}
-  .cc-name{max-width:34vw;font-size:12px}
+  .cc-namewrap{width:32vw}
+  .cc-name{font-size:12px}
 }
 .name{font-size:15px;font-weight:700;line-height:1.2}
 .tick{font-size:11px;color:var(--muted);margin-top:2px}
@@ -469,7 +486,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.76</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.77</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1062,7 +1079,8 @@ function riskPctMiniHtml(s) {
   const ok = (s.atr_pct != null && s.atr_pct >= 1)
     ? s.risk_pct <= s.atr_pct * 1.5
     : s.risk_pct <= (s.market === 'KR' ? 12 : 8);
-  return `<span class="cc-risk mono" style="color:${ok ? 'var(--green)' : '#fbbf24'}">${s.risk_pct}%</span>`;
+  // v5.77: 채도 낮춘 파스텔톤(눈 피로 감소) — 기존 vivid var(--green)/#fbbf24 대체.
+  return `<span class="cc-risk mono" style="color:${ok ? '#8fd6ac' : '#f0c479'}">${s.risk_pct}%</span>`;
 }
 function collapsedBadgeIconsHtml(s) {
   let out = '';
@@ -1076,8 +1094,7 @@ function collapsedRowHtml(s) {
   return `<div class="card-collapsed">
     <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기'}">${fav ? '★' : '☆'}</button>
     <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
-    <span class="cc-name">${s.name}</span>
-    <span class="cc-mkt">${s.market}</span>
+    <span class="cc-namewrap"><span class="cc-name">${s.name}</span><span class="cc-mkt">${s.market}</span></span>
     ${miniSparkHtml(s)}
     <span class="cc-rs mono" title="RS">${s.rs != null ? s.rs : '-'}</span>
     <span class="cc-entry" title="진입 신호등">${entryIconMini(s)}</span>
@@ -1096,8 +1113,7 @@ function collapsedRowHtmlInverse(s) {
   const strengthDot = s.strength === 'strong' ? '🔴' : s.strength === 'building' ? '🟡' : '🟢';
   return `<div class="card-collapsed">
     <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
-    <span class="cc-name">${s.name}</span>
-    <span class="cc-mkt">${s.market}</span>
+    <span class="cc-namewrap"><span class="cc-name">${s.name}</span><span class="cc-mkt">${s.market}</span></span>
     <span class="cc-rs mono" style="color:${scoreColor}" title="강도 점수">${s.inv_score != null ? s.inv_score : '-'}</span>
     <span class="cc-entry" title="과열 여부">${s.overheated ? '🔴' : '🟢'}</span>
     <span class="cc-risk mono" style="color:${ret5 >= 0 ? 'var(--px-up)' : 'var(--px-down)'}" title="인버스 5일 등락">${ret5 != null ? (ret5 >= 0 ? '+' : '') + ret5 + '%' : '-'}</span>
@@ -1112,7 +1128,7 @@ function breakdownCard(s) {
   const chgSign = s.change_pct >= 0 ? '+' : '';
   const fav = favorites.includes((s.ticker || '').toUpperCase());
   const krWarn = s.market === 'KR';
-  return `<div class="card${s.triggered ? ' fired' : ''}${fav ? ' fav' : ''}">
+  return `<div class="card${s.triggered ? ' fired' : ''}${fav ? ' fav' : ''}${s.is_super ? ' super-hl' : ''}">
     ${collapsedRowHtml(s)}
     <div class="card-expanded">
     <div class="card-top">
@@ -1171,7 +1187,7 @@ function card(s) {
   const chgCls = s.change_pct >= 0 ? 'up' : 'down';
   const chgSign = s.change_pct >= 0 ? '+' : '';
   const fav = favorites.includes((s.ticker || '').toUpperCase());
-  return `<div class="card${s.triggered ? ' fired' : ''}${fav ? ' fav' : ''}">
+  return `<div class="card${s.triggered ? ' fired' : ''}${fav ? ' fav' : ''}${s.is_super ? ' super-hl' : ''}">
     ${collapsedRowHtml(s)}
     <div class="card-expanded">
     <div class="card-top">

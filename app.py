@@ -5,6 +5,24 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.77 [UI] v5.76 접힌 카드 뷰 시각 문제 2건 수정.
+        (1) 펼침 시 빈 공간: .grid에 align-items:start 추가 — 그리드 행이
+        가장 큰 아이템(펼친 카드) 높이로 트랙 사이징되는 건 CSS Grid 특성상
+        불가피하지만, align-items:start로 짧은 형제 카드가 그 트랙 높이까지
+        늘어나 빈 테두리 박스를 그리는 것만 막음(카드 자체 높이는 그대로,
+        옆에 여백만 생김 — 요청한 "빈 공간만 없으면 됨" 기준 충족).
+        (2) 가독성 3건: (a) 데스크톱 그리드 auto-fill(무제한 열) →
+        repeat(3, minmax(330px,1fr)) 고정 3열, 1050px 이하는 2열(화면
+        넓으면 카드가 넓어짐, 열이 늘지 않음) (b) 카드 기본 테두리를
+        var(--line)(남색 톤) 대신 무채색 진회색(#33363d, 배경보다 살짝
+        밝음)으로, 강조 테두리는 fired·fav·👑슈퍼대장(신규 .super-hl)에만
+        (c) 접힌 카드 컬럼을 max-width→width 고정으로 바꿔 표처럼 정렬
+        (종목명+국가는 .cc-namewrap로 묶어 폭 고정, RS·리스크%·점수는
+        tabular-nums+고정폭 우측정렬) (d) 리스크% 초록/주황을 파스텔톤
+        (#8fd6ac/#f0c479)으로 채도 낮춤 — "색상은 유지"라 톤만 조정, 로직
+        불변. 검증: Node로 super_hl 샘플 데이터를 card()에 직접 실행해
+        super-hl 클래스·cc-namewrap 구조·파스텔 그린 색상 확인, Python
+        html.parser 태그 균형(에러 0)+중복 id(0건), pytest 383개 통과.
 v5.76 [UI] 상단 영역(카드 시작 전까지) 전면 압축 — "폰에서 스크롤 없이 첫
         카드" 목표. ⚠️ 게이트 신호등 판정 로직(loadIndices의 gateOf: 분산일·
         레짐→lv/문구)은 한 글자도 안 건드림, 표시 위치만 재배치.
@@ -2629,7 +2647,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.76"
+VERSION = "v5.77"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
