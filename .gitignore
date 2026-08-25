@@ -4,3 +4,4 @@ kr_universe_v6_*.json
 datacache_*.pkl
 .env
 scripts/measurements/*.results.json
+money_flow_data/

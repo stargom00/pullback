@@ -5,6 +5,44 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.85 [신규] 💰 돈의 흐름 데일리 리포트 (사용자 지시) — "투자하는범" 3단계
+        방법론(거래대금→가격→테마)의 자동화. **진입 신호가 아니라 정보
+        레이어** — scanner.py 매매 신호와 완전히 분리(scanner.py 무수정).
+        [1단계: money_flow.py 신규 모듈] KR/US 각각 거래대금 상위 100
+        추출(기존 `_fetch_market_data` 데이터 재사용, 새 스크래핑 없음),
+        등락률·전일대비 순위변화, 섹터/테마 분류(미분류 처리), 테마별
+        집계(종목수/breadth/평균등락률/거래대금점유율+전일대비변화),
+        ±10% 급등락 표시, KR 초소형주 플래그(시총 1000억 기준,
+        investor_flow.py 재사용 — US는 시총 소스 없어 None+한계 명시).
+        [테마 지속성(streak)] 거래대금 점유율 상위 10위 이내 연속 등장
+        일수 — 아무 테마나 매일 top100에 최소 1종목은 있어 무조건
+        "등장"으로 치면 무의미해지므로 순위 컷으로 "눈에 띄게 강한
+        테마"만 추적, 컷 밖으로 밀리면 리셋.
+        [테마 내부 서열판+확산 단계] 테마 내 top100 편입 종목을 거래대금
+        순 대장주/2등주/3등주로 서열화 + 4단계 규칙 판정: 초기(대장주만)
+        /확산(본격, 대장주+후발주 동반상승)/말기 경계(후발주만)/비확산.
+        일자별 JSON 저장(영구볼륨 우선).
+        [2단계: money_flow_report.py 신규 모듈] docs/money_flow_prompt.md
+        (사용자 제공 원문 그대로 저장 + streak·확산단계를 자금이동 판단
+        핵심 근거로 쓰라는 지시 추가) 프롬프트로 Claude API(claude-sonnet-
+        4-6, web_search 툴 활성화) 호출해 마크다운 리포트 생성. 키
+        없음/패키지 미설치/API 실패는 예외 없이 (None, 에러메시지) 반환
+        — 호출부가 1단계 결과만으로 항상 응답 가능(사용자 지시).
+        [3단계: /moneyflow 페이지] KR/US 탭 + 날짜 선택 + 수동 재실행
+        버튼, 상단 "관찰용 정보 — 진입 신호 아님" 배너. AI 해석 있으면
+        marked.js 렌더, 없으면(생성 실패) 1단계 JSON을 표로 폴백 렌더.
+        헤더에 💰 링크 추가(📖 가이드 링크 옆).
+        [스케줄러 연동] 기존 `_warm_market`(장마감 후 1회 워밍)에 독립
+        추적(`_moneyflow_warmed`)으로 연결 — 스캔 워밍과 서로 실패 전파
+        안 됨. Claude 호출이 오래 걸릴 수 있어 `create_task`로 던져
+        4분 주기 스케줄러 루프를 안 막음. API: GET/POST /api/moneyflow/
+        {market}(/run).
+        requirements.txt: beautifulsoup4(전전 버전 누락 보완), anthropic
+        추가. ANTHROPIC_API_KEY는 .env/Railway 환경변수로 사용자가 직접
+        설정 필요(본 배포에 값 없음 — 2단계는 설정 전까지 항상 폴백).
+        검증: TestClient로 3개 엔드포인트 실제 호출(POST run/GET
+        with·without date/invalid market 400) + money_flow.py 합성
+        데이터로 streak 연속성·확산단계 4가지 케이스 단위 검증.
 v5.84 [문서] 슈퍼대장 EV — KR/US 혼합 착시 캐비어트 반영(사용자 지시,
         2026-08-26 KR/US 분해 조사 후속). 눌림목 슈퍼대장 소속 EV
         0.266은 KR+US 혼합 수치로 추정 — KR 단독 재현은 -0.214R(역방향,
@@ -2777,6 +2815,8 @@ import scanner as scanner_mod
 import naver_kr
 import fundamentals as fundamentals_mod
 import earnings as earnings_mod
+import money_flow
+import money_flow_report
 
 app = FastAPI(title="눌림목 스캐너")
 
@@ -2797,7 +2837,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.84"
+VERSION = "v5.85"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -4176,6 +4216,50 @@ _warmed: dict = {}  # {"kr:daykey": True} 중복 워밍 방지
 _warm_intraday_ts: dict = {}   # {market: 마지막 장중 워밍 시각}
 
 
+# ── 돈의 흐름 데일리 리포트 (v5.85, 사용자 지시) ──
+# scanner.py의 매매 신호와 완전히 분리된 정보 레이어 — 진입 신호 아님.
+# 1단계(money_flow.py, 거래대금 상위 100+테마 집계)와 2단계(money_flow_
+# report.py, Claude API 해석)를 순차 실행. 스케줄러(장마감 후 1회)와
+# 수동 재실행(POST /api/moneyflow/{market}/run) 공통 진입점.
+_moneyflow_warmed: dict = {}  # {"kr:daykey": True} — 스캔 워밍과 별도 추적
+
+
+async def _run_money_flow(market: str, daykey: str) -> dict:
+    """1단계+2단계 실행 + 저장. 2단계(Claude) 실패는 예외를 안 던지고
+    error 필드로만 남겨 호출부가 1단계 결과만으로도 항상 응답 가능하게
+    한다(사용자 지시: "API 호출 실패 시 1단계 계산 결과만이라도 표시")."""
+    bundle = await _fetch_market_data(market, wait_for_fresh=True)
+    if not bundle:
+        return {"error": f"{market} 시장 데이터 로드 실패", "snapshot": None, "markdown": None}
+    methodology_note = (
+        f"US 거래대금 상위 100은 미국 전체 시장이 아니라 이 앱의 US 유니버스"
+        f"({len(bundle['universe'])}종목, 전 섹터 동적구성) 안에서의 순위입니다"
+        " — 실제 미국 전체 시장 상위 100과 다를 수 있습니다(전체 시장 API 없음)."
+    ) if market == "us" else ""
+    loop = asyncio.get_event_loop()
+    snapshot = await loop.run_in_executor(
+        _executor, money_flow.run_daily, market, daykey,
+        bundle["data"], bundle["universe"], _sector_of, methodology_note,
+    )
+    markdown, error = await loop.run_in_executor(_executor, money_flow_report.generate_report, snapshot)
+    if markdown:
+        money_flow.save_report_markdown(market, daykey, markdown)
+        print(f"[moneyflow] {market} {daykey} 리포트 생성 완료")
+    else:
+        print(f"[moneyflow] {market} {daykey} 2단계 실패(1단계만 저장됨): {error}")
+    return {"snapshot": snapshot, "markdown": markdown, "error": error}
+
+
+async def _run_money_flow_bg(market: str, daykey: str):
+    """스케줄러 전용 fire-and-forget 래퍼 — create_task로 던지므로 예외를
+    여기서 잡아 로그만 남긴다(안 잡으면 조용히 삼켜지는 asyncio 기본 동작
+    대신 원인 파악 가능하게)."""
+    try:
+        await _run_money_flow(market, daykey)
+    except Exception as e:
+        print(f"[moneyflow] scheduler run failed {market} {daykey}: {e}")
+
+
 async def _warm_market(market: str):
     """해당 시장 데이터+주요 모드 결과를 미리 빌드(캐시 저장).
     v4.52.5: 장 마감 후뿐 아니라 '장중에도' 프리로드.
@@ -4197,6 +4281,13 @@ async def _warm_market(market: str):
             print(f"[scheduler] warmed {market} for {daykey}")
         except Exception as e:
             print(f"[scheduler] warm {market} failed: {e}")
+        # 돈의 흐름은 스캔 워밍과 독립 추적 — 스캔 워밍 실패와 무관하게 시도,
+        # 서로의 실패가 전파되지 않음. Claude API 호출이 오래(10~30초+) 걸릴
+        # 수 있어 create_task로 던져 4분 주기 스케줄러 루프를 막지 않는다.
+        mfkey = f"{market}:{daykey}"
+        if not _moneyflow_warmed.get(mfkey):
+            _moneyflow_warmed[mfkey] = True
+            asyncio.create_task(_run_money_flow_bg(market, daykey))
         return
     # ── 장중: 캐시가 8분 이상 묵었으면 미리 갱신 (사용자 요청 전에) ──
     # DATA_TTL(10분)보다 짧은 주기로 데워, 사용자가 열 때 항상 신선한 캐시 확보.
@@ -6357,6 +6448,170 @@ a.back{position:fixed;top:14px;right:14px;background:var(--surface);border:1px s
 fetch('/guide.md').then(r => r.text()).then(md => {
   document.getElementById('doc').innerHTML = marked.parse(md);
 }).catch(() => { document.getElementById('doc').textContent = '가이드를 불러오지 못했습니다.'; });
+</script></body></html>"""
+    return Response(html, media_type="text/html; charset=utf-8", headers=_NO_CACHE_HEADERS)
+
+
+# ── 돈의 흐름 데일리 리포트 API (v5.85) ──
+def _moneyflow_market_or_400(market: str) -> JSONResponse | None:
+    if market not in ("kr", "us"):
+        return JSONResponse({"error": "market은 kr 또는 us"}, status_code=400)
+    return None
+
+
+@app.get("/api/moneyflow/{market}")
+async def get_money_flow(market: str, date: str | None = None):
+    bad = _moneyflow_market_or_400(market)
+    if bad:
+        return bad
+    available = money_flow.list_available_dates(market)
+    daykey = date or (available[0] if available else None)
+    if daykey is None:
+        return JSONResponse({"market": market, "date": None, "available_dates": [],
+                              "snapshot": None, "markdown": None,
+                              "error": "아직 생성된 리포트가 없습니다. 재실행을 눌러보세요."})
+    snapshot = money_flow.load_snapshot(market, daykey)
+    markdown = money_flow.load_report_markdown(market, daykey)
+    error = None if (snapshot is not None) else "해당 날짜의 데이터가 없습니다"
+    if snapshot is not None and markdown is None:
+        error = "AI 해석 리포트가 없습니다(생성 실패 또는 미실행) — 1단계 계산 결과만 표시합니다"
+    return JSONResponse(_clean_nan({"market": market, "date": daykey, "available_dates": available,
+                                     "snapshot": snapshot, "markdown": markdown, "error": error}))
+
+
+@app.post("/api/moneyflow/{market}/run")
+async def run_money_flow_now(market: str):
+    bad = _moneyflow_market_or_400(market)
+    if bad:
+        return bad
+    daykey = datetime.now(KST).strftime("%Y-%m-%d")
+    try:
+        result = await _run_money_flow(market, daykey)
+    except Exception as e:
+        return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=500)
+    available = money_flow.list_available_dates(market)
+    return JSONResponse(_clean_nan({"market": market, "date": daykey, "available_dates": available, **result}))
+
+
+@app.get("/moneyflow")
+async def money_flow_page():
+    """돈의 흐름 데일리 리포트 뷰어 — KR/US 탭, 날짜 선택, 수동 재실행.
+    AI 해석(markdown) 있으면 marked.js로 렌더, 없으면(API 실패 등)
+    1단계 JSON을 표로 폴백 렌더(사용자 지시: 실패해도 계산 결과는 표시)."""
+    html = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>💰 돈의 흐름 데일리 리포트</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--line:#30363d;--fg:#e6edf3;--muted:#8b949e;--green:#3fb950;--amber:#f2b33d}
+body{background:var(--bg);color:var(--fg);font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;
+  margin:0;padding:24px 16px 60px;line-height:1.75}
+#wrap{max-width:860px;margin:0 auto}
+h1{font-size:22px;margin-bottom:4px}
+h2{font-size:19px;margin-top:36px;border-bottom:1px solid var(--line);padding-bottom:6px;color:var(--green)}
+h3{font-size:15.5px;margin-top:24px}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left}
+th{background:var(--surface)}
+code{background:var(--surface);padding:1px 5px;border-radius:4px;font-size:13px}
+blockquote{border-left:3px solid var(--green);margin:0;padding:2px 14px;color:var(--muted)}
+hr{border:none;border-top:1px solid var(--line);margin:28px 0}
+strong{color:#ffd98a}
+a.back{position:fixed;top:14px;right:14px;background:var(--surface);border:1px solid var(--line);
+  color:var(--fg);text-decoration:none;padding:6px 12px;border-radius:8px;font-size:13px}
+.warn-banner{background:rgba(242,179,61,.1);border:1px solid rgba(242,179,61,.35);color:var(--amber);
+  padding:10px 14px;border-radius:8px;font-size:13.5px;margin:14px 0}
+.mf-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px 0}
+.mf-tab{background:var(--surface);border:1px solid var(--line);color:var(--fg);padding:6px 14px;
+  border-radius:8px;font-size:13.5px;cursor:pointer}
+.mf-tab.active{border-color:var(--green);color:var(--green)}
+select,button{background:var(--surface);border:1px solid var(--line);color:var(--fg);padding:6px 10px;
+  border-radius:8px;font-size:13px;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}
+.mf-note{color:var(--muted);font-size:12.5px;margin:6px 0}
+.mf-err{color:#ff9b9b;font-size:13px;margin:10px 0}
+</style></head><body>
+<a class="back" href="/">← 스캐너</a>
+<div id="wrap">
+<h1>💰 돈의 흐름 데일리 리포트</h1>
+<div class="warn-banner">⚠️ 관찰용 정보입니다 — 진입 신호가 아닙니다. 자금 흐름 파악용 참고 자료로만 활용하세요.</div>
+<div class="mf-toolbar">
+  <button class="mf-tab active" id="tabKr" onclick="setMarket('kr')">🇰🇷 한국</button>
+  <button class="mf-tab" id="tabUs" onclick="setMarket('us')">🇺🇸 미국</button>
+  <select id="dateSel" onchange="loadDate(this.value)"></select>
+  <button id="runBtn" onclick="runNow()">🔄 재실행</button>
+</div>
+<div id="doc">불러오는 중…</div>
+</div>
+<script>
+let market = 'kr';
+function fmtTop(snapshot) {
+  if (!snapshot || !snapshot.top) return '';
+  const rows = snapshot.top.slice(0, 30).map(r =>
+    `<tr><td>${r.rank}</td><td>${r.name || r.ticker}</td><td>${r.change_pct}%</td><td>${r.theme}</td>` +
+    `<td>${(r.turnover/1e8).toFixed(1)}억</td><td>${r.rank_change != null ? (r.rank_change>0?'+':'')+r.rank_change : (r.is_new_entrant?'신규':'-')}</td></tr>`
+  ).join('');
+  const themeRows = Object.entries(snapshot.themes || {}).sort((a,b) => b[1].turnover_share_pct - a[1].turnover_share_pct).map(([name, t]) =>
+    `<tr><td>${name}</td><td>${t.n}</td><td>${t.breadth_pct}%</td><td>${t.avg_change_pct}%</td>` +
+    `<td>${t.turnover_share_pct}%${t.turnover_share_change_pct != null ? ` (${t.turnover_share_change_pct>0?'+':''}${t.turnover_share_change_pct}%p)` : ''}</td>` +
+    `<td>${t.streak_days}일</td><td>${t.stage}</td></tr>`
+  ).join('');
+  return `<p class="mf-note">AI 해석 리포트가 없어 1단계 계산 결과(테마 집계 + 거래대금 상위 30)만 표로 표시합니다.</p>
+  <h3>테마 집계</h3>
+  <table><tr><th>테마</th><th>종목수</th><th>상승비율</th><th>평균등락</th><th>거래대금 점유율</th><th>연속등장</th><th>확산단계</th></tr>${themeRows}</table>
+  <h3>거래대금 상위 30</h3>
+  <table><tr><th>순위</th><th>종목</th><th>등락률</th><th>테마</th><th>거래대금</th><th>순위변화</th></tr>${rows}</table>`;
+}
+async function loadDate(date) {
+  const doc = document.getElementById('doc');
+  doc.innerHTML = '불러오는 중…';
+  try {
+    const url = date ? `/api/moneyflow/${market}?date=${encodeURIComponent(date)}` : `/api/moneyflow/${market}`;
+    const res = await fetch(url);
+    const d = await res.json();
+    const sel = document.getElementById('dateSel');
+    sel.innerHTML = (d.available_dates || []).map(dt => `<option value="${dt}" ${dt===d.date?'selected':''}>${dt}</option>`).join('');
+    let html = '';
+    if (d.markdown) {
+      html = marked.parse(d.markdown);
+    } else if (d.snapshot) {
+      html = fmtTop(d.snapshot);
+    } else {
+      html = '<p class="mf-err">아직 리포트가 없습니다. 재실행 버튼을 눌러보세요.</p>';
+    }
+    if (d.error && d.snapshot) html += `<p class="mf-err">⚠️ ${d.error}</p>`;
+    if (d.snapshot && d.snapshot.methodology_note) html += `<p class="mf-note">${d.snapshot.methodology_note}</p>`;
+    doc.innerHTML = html;
+  } catch (e) {
+    doc.innerHTML = '<p class="mf-err">불러오기 실패</p>';
+  }
+}
+function setMarket(m) {
+  market = m;
+  document.getElementById('tabKr').classList.toggle('active', m === 'kr');
+  document.getElementById('tabUs').classList.toggle('active', m === 'us');
+  loadDate(null);
+}
+async function runNow() {
+  const btn = document.getElementById('runBtn');
+  btn.disabled = true;
+  btn.textContent = '실행 중… (최대 1분)';
+  try {
+    const res = await fetch(`/api/moneyflow/${market}/run`, {method: 'POST'});
+    const d = await res.json();
+    let html = d.markdown ? marked.parse(d.markdown) : (d.snapshot ? fmtTop(d.snapshot) : '<p class="mf-err">실행 실패</p>');
+    if (d.error && d.snapshot) html += `<p class="mf-err">⚠️ ${d.error}</p>`;
+    document.getElementById('doc').innerHTML = html;
+    const sel = document.getElementById('dateSel');
+    sel.innerHTML = (d.available_dates || []).map(dt => `<option value="${dt}" ${dt===d.date?'selected':''}>${dt}</option>`).join('');
+  } catch (e) {
+    document.getElementById('doc').innerHTML = '<p class="mf-err">실행 실패</p>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔄 재실행';
+  }
+}
+loadDate(null);
 </script></body></html>"""
     return Response(html, media_type="text/html; charset=utf-8", headers=_NO_CACHE_HEADERS)
 
