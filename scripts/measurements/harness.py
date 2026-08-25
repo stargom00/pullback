@@ -259,3 +259,35 @@ def ev_summary(outcomes: list) -> dict:
         "target_rate": target_n / nv if nv else None,
         "n_insufficient": n_insuff,
     }
+
+
+# ── 6) 두 그룹 EV 격차 유의성 (규칙 7, v5.68 README 참고) ──────────────
+# 결과가 -1R/0R/+2R 세 값뿐인 이산분포라 분산이 커서, 반분·사분위 비교의
+# 겉보기 격차만으론 "우연"을 못 거를 수 있다 — 2026-08-25 기관/외국인
+# 수급 캠페인에서 inst_20d가 격차+단조성 기준을 통과하고도 z≈0.98로
+# 유의하지 않았던 사례로 확인(scripts/measurements/README.md 규칙7).
+# 원래 그 캠페인 스크립트에 로컬로 있던 함수를 이후 재사용을 위해 여기로
+# 승격 — 표본을 나눠 EV를 비교하는 측정은 이 함수를 쓴다.
+def ev_gap_zscore(ev_lower: dict, ev_upper: dict):
+    """ev_summary() 결과 두 개(하위/상위 그룹)의 EV 격차 z통계량.
+    반환: (z, significant:bool) — 계산 불가시 (None, False). 양측 95%
+    기준(|z|>=1.96)으로 유의성 판정."""
+    def _stats(ev):
+        n = ev.get("nv") or 0
+        stop_r, target_r = ev.get("stop_rate"), ev.get("target_rate")
+        e = ev.get("ev_R")
+        if not n or stop_r is None or target_r is None or e is None:
+            return None
+        e2 = 1 * stop_r + 4 * target_r  # E[R^2]: (-1)^2*stop + 2^2*target
+        var = max(e2 - e ** 2, 0)
+        return var, n
+    a, b = _stats(ev_lower), _stats(ev_upper)
+    if a is None or b is None:
+        return None, False
+    (var_a, n_a), (var_b, n_b) = a, b
+    se = ((var_a / n_a) + (var_b / n_b)) ** 0.5
+    if se == 0:
+        return None, False
+    gap = ev_upper["ev_R"] - ev_lower["ev_R"]
+    z = gap / se
+    return z, abs(z) >= 1.96
