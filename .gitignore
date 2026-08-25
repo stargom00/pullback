@@ -3,3 +3,4 @@ __pycache__/
 kr_universe_v6_*.json
 datacache_*.pkl
 .env
+scripts/measurements/*.results.json

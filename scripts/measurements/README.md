@@ -40,7 +40,7 @@ rs_min 85→80, 슈퍼대장 즉시진입 ATR×2) — 전부 같은 이유로 �
 | 문서 | 인용된 스크립트 | 존재 여부 |
 |---|---|---|
 | `pullback_stop_width_and_entry_timing.md` | `2026-08-14_pullback_stop_width_and_entry_timing.py` | ✅ 여기 있음(v5.68부터) |
-| `all_tabs_common_yardstick_investigation.md` | Script A~F, `entrysignal_before_after.py`, `item_pass_rates_all5.py`, `super_immediate_entry.py`, `super_pullback_prefilter_check.py`, `super_status_atr2.py`, `surge_accum_followup.py` | ❌ 전부 재현 불가 |
+| `all_tabs_common_yardstick_investigation.md` | Script A~F, `entrysignal_before_after.py`, `item_pass_rates_all5.py`, `super_immediate_entry.py`, `super_pullback_prefilter_check.py`, `super_status_atr2.py`, `surge_accum_followup.py` | ❌ 전부 재현 불가 (Script A의 추세전환 부분·Script B/E의 Stage2 부분은 2026-08-25 재현 가능한 후속 스크립트로 대체 측정됨 — 아래 참고, 원본 자체는 여전히 없음) |
 | `imminent_stop_entry_investigation.md` | (파일명 없이 인라인 서술) | ❌ 재현 불가 |
 | `leader_to_pullback_watch.md` | `leader_check_cost.py`, `leader_to_pullback_dist.py` | ❌ 재현 불가 |
 | `rs_definition_and_slope_investigation.md` | (파일명 없이 인라인 서술, `test_trace_parity.py` 등은 별개로 실존) | ❌ 재현 불가 |
