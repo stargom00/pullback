@@ -6,3 +6,4 @@ requests
 numpy
 pykrx
 python-dotenv
+beautifulsoup4
