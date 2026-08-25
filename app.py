@@ -5,6 +5,26 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.82 [버그수정] 카드 접기/펼치기 도입(v5.80) 후 끊어졌던 트레이딩뷰 차트
+        연결 복구 — 종목명 클릭으로 열도록 재설계.
+        [원인] v5.80에서 접힌 카드(card-collapsed)가 기본 노출 상태가
+        됐는데, 트레이딩뷰 링크(tv-link)는 펼쳤을 때만 보이는
+        card-expanded 안 티커(.tick) 줄에만 있었음 — 접힌 상태에서는
+        차트로 갈 방법이 아예 없었음(종목명은 평범한 span).
+        [수정] collapsedRowHtml()/collapsedRowHtmlInverse()의 종목명
+        span과 card()/breakdownCard()/인버스 카드 expanded의 .name
+        안 종목명을 전부 <a href="tvUrl(s)">로 교체 — 접힌 카드·펼친
+        카드 양쪽 다 종목명 클릭 시 새 탭으로 트레이딩뷰 차트 열림.
+        새 .name-link 클래스(color:inherit·밑줄 없음 기본, hover 시만
+        #7fb8e0 색+밑줄)로 평소엔 기존 텍스트와 시각적으로 동일하게
+        유지. 행 펼침/접힘 클릭 가드(bindCardInteractions)에 .name-link
+        를 명시 추가(a 태그라 이미 걸러지지만 의도를 코드에 남김) —
+        종목명 클릭이 행 토글로 전파 안 됨. 기존 티커 줄의 📈 차트
+        링크(.tv-link)는 손대지 않아 그대로 작동.
+        검증: Node로 card()/breakdownCard() KR·US 출력에서 종목명
+        링크 href가 tvUrl()과 일치, name-link 2회(접힘+펼침) 존재,
+        기존 tv-link 여전히 존재 확인. html.parser 태그 균형(에러 0),
+        중복 id 없음, pytest 383개 통과. scanner.py 무수정.
 v5.81 [측정+UI] Stage2 "검증실패" 뱃지 정정 — 8/17 캠페인 마무리.
         [배경] 2026-08-25_stage2_liquidity_matched_control.py(seed=42
         단발)가 완전무작위 대조군 대비 하락위험 열위(+4.9pp)를
@@ -2745,7 +2765,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.81"
+VERSION = "v5.82"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
