@@ -5,6 +5,21 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.88 [문서] US 눌림목(무필터 기본 탭) EV 시간분할 재현 확인(사용자
+        지시) — GUIDE.md "US 종목 위주로 신뢰" 권고에 캐비어트 반영
+        (UI 미반영, v5.84와 같은 패턴). US 단독 눌림목 EV +0.206R
+        (n=1,333, 오늘 재현)을 측정기간 절반으로 나누면 이전 절반
+        (off160~250) +0.334R vs 최근 절반(off60~150) +0.029R로 사실상
+        무신호 — 3절 슈퍼대장 KR 사례와 반대로 "최근에 약해진 패턴".
+        사전 판정 기준(둘 다 +0.1R 이상 → 신뢰 근거 vs 한쪽이라도 미달
+        → 캐비어트)에서 후반부 미달로 캐비어트 확정.
+        매집봉 필터 재현 확인 2건 완료: ① offset 20/40/60 개별 재측정
+        (n_without=1로 검정력 없어 절차적 기각) ② 원측정 코호트(20
+        체크포인트 풀링) 재수집 후 시간순 전반부/후반부 반분 재측정
+        (전반부 gap=-0.034R 역방향, 후반부 gap=+0.055R로 0.1R 미달) —
+        ②가 검정력 있는 최종 판정: 기각 확정, 🕯️ 뱃지 도입 안 함.
+        docs/maejip_candle_filter_kr.md·docs/pullback_ev_kr_us_regime_investigation.md
+        갱신. scanner.py/app.py 로직·static 무수정.
 v5.87 [신규] 얼마냐봇 연동용 GET /api/moneyflow/{market}/summary 엔드포인트
         (사용자 지시). 최신 리포트의 날짜/강한 테마 3개/약한 테마 3개/최종
         한 문장을 JSON으로 반환 — 봇이 마크다운 본문을 정규식으로 긁지
@@ -2857,7 +2872,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.87"
+VERSION = "v5.88"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
