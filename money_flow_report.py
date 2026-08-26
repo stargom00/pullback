@@ -14,10 +14,16 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 MODEL = "claude-sonnet-4-6"
 PROMPT_PATH = os.path.join(os.path.dirname(__file__), "docs", "money_flow_prompt.md")
-MAX_TOKENS = 8000
+# v5.87: 8000 → 16000. 11개 섹션(뉴스 검증·데이터 검증 포함) + 웹서치 결과
+# 블록까지 합치면 8000으로는 항상 9번 섹션 부근에서 잘려 10번(최종 한 문장)
+# ·11번(데이터 검증)·12번(기계판독 JSON)이 한 번도 생성된 적이 없었음
+# (실측: KR/US 리포트 둘 다 8000에서 중간에 끊김). 텔레그램 봇이 최종 한
+# 문장을 읽어야 해서(사용자 지시) 완주가 필수.
+MAX_TOKENS = 16000
 # 서버사이드 웹서치 툴 — Claude가 필요하다고 판단할 때만 자동 호출(8. 뉴스
 # 검증 섹션용). 호출 횟수 상한으로 비용 통제.
 WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_uses": 5}
@@ -70,3 +76,21 @@ def generate_report(snapshot: dict) -> tuple[str | None, str | None]:
     if not markdown:
         return None, "API 응답에 텍스트 블록이 없음(웹서치만 반환됐거나 빈 응답)"
     return markdown, None
+
+
+def extract_summary(markdown: str) -> dict | None:
+    """리포트 맨 끝(섹션 12, docs/money_flow_prompt.md)의 기계판독용 JSON
+    블록을 파싱. 블록이 없거나(구형 리포트·생성 중 잘림) 필수 키가 없으면
+    None — 호출부(app.py)가 폴백 처리할 수 있게 예외를 던지지 않는다."""
+    blocks = re.findall(r"```json\s*(\{.*?\})\s*```", markdown, re.DOTALL)
+    if not blocks:
+        return None
+    try:
+        data = json.loads(blocks[-1])
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    if not {"strong_themes", "weak_themes", "final_sentence"} <= data.keys():
+        return None
+    return data

@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.87 [신규] 얼마냐봇 연동용 GET /api/moneyflow/{market}/summary 엔드포인트
+        (사용자 지시). 최신 리포트의 날짜/강한 테마 3개/약한 테마 3개/최종
+        한 문장을 JSON으로 반환 — 봇이 마크다운 본문을 정규식으로 긁지
+        않고 모델이 직접 낸 구조화 데이터를 그대로 쓰게 함.
+        [발견] MAX_TOKENS=8000이던 2단계(Claude) 응답이 KR/US 리포트 둘
+        다 9번 섹션("핵심 뉴스") 근처에서 항상 잘려 10번(최종 한 문장)·
+        11번(데이터 검증)이 한 번도 생성된 적이 없었음(실측 확인) — 봇이
+        의존할 "최종 한 문장"이 애초에 안 나오는 구조였음. 16000으로 상향.
+        docs/money_flow_prompt.md에 "12. 기계 판독용 요약" 섹션 추가 —
+        리포트 맨 끝에 strong_themes/weak_themes/final_sentence를 담은
+        JSON 코드블록을 모델이 직접 내도록 지시. money_flow_report.py에
+        extract_summary() 추가(정규식으로 마지막 ```json 블록 파싱).
 v5.86 [수정] money_flow.py 1단계 저장 크래시 버그 수정. `_attach_kr_mcap`의
         `micro_cap` 판정(`mcap < MICRO_CAP_EOK * 1e8`)이 investor_flow.py
         pandas 연산 결과인 `numpy.float64`끼리 비교돼 `numpy.bool_`을
@@ -2845,7 +2857,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.86"
+VERSION = "v5.87"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6485,6 +6497,37 @@ async def get_money_flow(market: str, date: str | None = None):
         error = "AI 해석 리포트가 없습니다(생성 실패 또는 미실행) — 1단계 계산 결과만 표시합니다"
     return JSONResponse(_clean_nan({"market": market, "date": daykey, "available_dates": available,
                                      "snapshot": snapshot, "markdown": markdown, "error": error}))
+
+
+@app.get("/api/moneyflow/{market}/summary")
+async def get_money_flow_summary(market: str):
+    """얼마냐봇 폴링 전용 요약 엔드포인트 (v5.87) — 최신 리포트의 날짜·
+    강한/약한 테마 3개·최종 한 문장만 JSON으로 반환. money_flow_report의
+    섹션 12 JSON 블록(docs/money_flow_prompt.md)을 파싱 — 마크다운 본문을
+    정규식으로 긁지 않고 모델이 직접 낸 구조화 데이터를 그대로 씀."""
+    bad = _moneyflow_market_or_400(market)
+    if bad:
+        return bad
+    available = money_flow.list_available_dates(market)
+    if not available:
+        return JSONResponse({"market": market, "date": None, "error": "아직 생성된 리포트가 없습니다"})
+    daykey = available[0]
+    markdown = money_flow.load_report_markdown(market, daykey)
+    if not markdown:
+        return JSONResponse({"market": market, "date": daykey,
+                              "error": "AI 해석 리포트가 없습니다(1단계 계산만 존재)"})
+    summary = money_flow_report.extract_summary(markdown)
+    if summary is None:
+        return JSONResponse({"market": market, "date": daykey,
+                              "error": "요약 JSON 파싱 실패(리포트가 중간에 잘렸거나 형식이 다름)"})
+    return JSONResponse({
+        "market": market, "date": daykey,
+        "strong_themes": summary.get("strong_themes"),
+        "weak_themes": summary.get("weak_themes"),
+        "final_sentence": summary.get("final_sentence"),
+        "url": "https://pullback-production.up.railway.app/moneyflow",
+        "error": None,
+    })
 
 
 @app.post("/api/moneyflow/{market}/run")
