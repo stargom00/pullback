@@ -171,7 +171,7 @@ def _attach_kr_mcap(top_rows: list[dict]):
     for r in top_rows:
         mcap = results.get(r["ticker"])
         r["mcap_approx"] = mcap
-        r["micro_cap"] = (mcap < MICRO_CAP_EOK * 1e8) if mcap is not None else None
+        r["micro_cap"] = bool(mcap < MICRO_CAP_EOK * 1e8) if mcap is not None else None
 
 
 def _mark_us_mcap_unavailable(top_rows: list[dict]):

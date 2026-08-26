@@ -5,6 +5,14 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.86 [수정] money_flow.py 1단계 저장 크래시 버그 수정. `_attach_kr_mcap`의
+        `micro_cap` 판정(`mcap < MICRO_CAP_EOK * 1e8`)이 investor_flow.py
+        pandas 연산 결과인 `numpy.float64`끼리 비교돼 `numpy.bool_`을
+        반환 — 파이썬 `bool`의 서브클래스가 아니라 `json.dump`가
+        "Object of type bool is not JSON serializable"로 매 실행 크래시
+        (v5.85 배포 이후 KR 리포트가 한 번도 저장된 적 없었음). `bool(...)`
+        로 감싸 수정. 수동 실행(KR)으로 스냅샷 저장·2단계 markdown 생성
+        확인.
 v5.85 [신규] 💰 돈의 흐름 데일리 리포트 (사용자 지시) — "투자하는범" 3단계
         방법론(거래대금→가격→테마)의 자동화. **진입 신호가 아니라 정보
         레이어** — scanner.py 매매 신호와 완전히 분리(scanner.py 무수정).
@@ -2837,7 +2845,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.85"
+VERSION = "v5.86"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
