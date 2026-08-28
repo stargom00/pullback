@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.89 [UI개선] 💰 돈의 흐름을 헤더의 작은 링크 아이콘에서 정식 탭으로 승격
+        (사용자 지시 — 아이콘이 너무 작아 존재감 없었음). static/index.html
+        #modeTabs에 "💰 돈의흐름" 탭 추가(마감정리 옆) — 클릭하면 페이지
+        이동 없이 기존 /moneyflow 페이지의 fmtTop/loadDate/runNow 뷰
+        로직을 그대로 이식해 탭 컨텐츠 영역에 렌더링. KR/US는 별도
+        버튼 없이 기존 시장 필터(전체/한국/미국)와 연동(전체 선택 시
+        자동으로 한국 취급). 날짜 선택·수동 재실행 버튼, "관찰용
+        정보 — 진입 신호 아님" 배너 전부 탭 안에 유지. 오늘 자 새
+        리포트가 있는데 아직 안 연 상태면 탭 옆에 작은 점 표시
+        (localStorage 기준, 열면 사라짐). 헤더의 💰 아이콘은 제거 —
+        /moneyflow 직접 URL(GET /moneyflow)은 얼마냐봇 텔레그램 링크가
+        그리로 가고 있어 그대로 유지, API(/api/moneyflow/*)도 무수정.
 v5.88 [문서] US 눌림목(무필터 기본 탭) EV 시간분할 재현 확인(사용자
         지시) — GUIDE.md "US 종목 위주로 신뢰" 권고에 캐비어트 반영
         (UI 미반영, v5.84와 같은 패턴). US 단독 눌림목 EV +0.206R
@@ -2872,7 +2884,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.88"
+VERSION = "v5.89"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

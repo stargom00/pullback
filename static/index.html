@@ -26,6 +26,8 @@ if ('serviceWorker' in navigator) {
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- v5.89: 💰 돈의 흐름 탭 — AI 해석 리포트(markdown) 렌더용. /moneyflow 페이지와 동일 버전. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
 <style>
 :root{
   --bg:#0C111B; --surface:#141C2B; --surface2:#1A2436; --line:#233047;
@@ -156,6 +158,27 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .modal .save{background:var(--amber);color:#000}
 .modal .cancel{background:var(--surface2);color:var(--text)}
 .jrnl-wrap{padding:0 24px 40px}
+/* v5.89: 💰 돈의 흐름 탭 — /moneyflow 페이지의 마크다운 렌더 스타일을 이 사이트
+   색상 변수(--surface/--line/--text/--muted/--green/--amber)로 옮겨옴. */
+.mf-warn-banner{background:rgba(242,179,61,.1);border:1px solid rgba(242,179,61,.35);color:var(--amber);
+  padding:10px 14px;border-radius:8px;font-size:13.5px;margin:14px 0}
+.mf-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
+.mf-toolbar select,.mf-toolbar button{background:var(--surface);border:1px solid var(--line);color:var(--text);
+  padding:6px 10px;border-radius:8px;font-size:13px;cursor:pointer;font-family:inherit}
+.mf-toolbar button:disabled{opacity:.5;cursor:default}
+.mf-unread-dot{color:var(--amber)}
+#moneyflowDoc{line-height:1.75;font-size:14px}
+#moneyflowDoc h2{font-size:18px;margin-top:32px;border-bottom:1px solid var(--line);padding-bottom:6px;color:var(--green)}
+#moneyflowDoc h3{font-size:15px;margin-top:22px}
+#moneyflowDoc table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+#moneyflowDoc th,#moneyflowDoc td{border:1px solid var(--line);padding:7px 10px;text-align:left}
+#moneyflowDoc th{background:var(--surface)}
+#moneyflowDoc code{background:var(--surface);padding:1px 5px;border-radius:4px;font-size:12.5px}
+#moneyflowDoc blockquote{border-left:3px solid var(--green);margin:0;padding:2px 14px;color:var(--muted)}
+#moneyflowDoc hr{border:none;border-top:1px solid var(--line);margin:24px 0}
+#moneyflowDoc strong{color:#ffd98a}
+#moneyflowDoc .mf-note{color:var(--muted);font-size:12px;margin:6px 0}
+#moneyflowDoc .mf-err{color:var(--up);font-size:13px;margin:10px 0}
 .jrnl-tools{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
 .jrnl-tools button{padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer;
   border:1px solid var(--line);background:var(--surface);color:var(--text);font-family:inherit}
@@ -509,7 +532,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.88</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <a href="/moneyflow" target="_blank" title="돈의 흐름 데일리 리포트 — 관찰용 정보(진입 신호 아님)" style="text-decoration:none;font-size:15px;vertical-align:2px">💰</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.89</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -539,6 +562,7 @@ tr.editing{background:rgba(242,179,61,.06)}
     <button class="tab tab-exp" data-mode="stage2">📐Stage2<span class="exp-tag">참고</span></button>
     <button class="tab" data-mode="sectors">📊 섹터</button>
     <button class="tab" data-mode="eod">📋 마감정리</button>
+    <button class="tab" data-mode="moneyflow">💰 돈의흐름<span class="mf-unread-dot" id="moneyflowUnreadDot" style="display:none"> ●</span></button>
     <button class="tab" data-mode="journal">📒 내 일지</button>
   </div>
   <div class="tabs" role="tablist">
@@ -603,6 +627,18 @@ tr.editing{background:rgba(242,179,61,.06)}
   <div id="diagResult" style="margin-top:12px"></div>
 </div>
 <div class="jrnl-wrap" id="journalView" style="display:none"></div>
+
+<!-- v5.89: 💰 돈의 흐름 탭 — 기존 /moneyflow 페이지 뷰를 탭 컨텐츠로 재사용.
+     KR/US 전환은 헤더의 기존 시장 필터(전체/한국/미국)와 연동, 별도 KR/US
+     버튼은 안 둠. /moneyflow 직접 URL은 텔레그램 링크가 걸려 있어 그대로 유지. -->
+<div class="jrnl-wrap" id="moneyflowView" style="display:none">
+  <div class="mf-warn-banner">⚠️ 관찰용 정보입니다 — 진입 신호가 아닙니다. 자금 흐름 파악용 참고 자료로만 활용하세요.</div>
+  <div class="mf-toolbar">
+    <select id="moneyflowDateSel" onchange="loadMoneyflowDate(this.value)"></select>
+    <button id="moneyflowRunBtn" onclick="runMoneyflowNow()">🔄 재실행</button>
+  </div>
+  <div id="moneyflowDoc">불러오는 중…</div>
+</div>
 
 <div class="modal-bg" id="journalModal">
   <div class="modal">
@@ -2467,11 +2503,111 @@ function renderFund(d) {
   return `<div class="row">${chips.join('')}${vd}</div>${smRow}${bandNote}${krNote}${disclaim}`;
 }
 
+// ════════════════ 💰 돈의 흐름 탭 (v5.89) ════════════════
+// 기존 /moneyflow 독립 페이지의 fmtTop/loadDate/runNow 로직을 탭 컨텐츠로 이식.
+// KR/US는 헤더의 기존 시장 필터(전체/한국/미국)와 연동 — 별도 KR/US 버튼 없음,
+// '전체'는 이 탭에 의미가 없어 kr로 취급(진입 시 자동으로 한국 버튼 활성화).
+function moneyflowMarket() { return market === 'us' ? 'us' : 'kr'; }
+function mfUnreadKey(mkt, date) { return `mf_seen_${mkt}_${date}`; }
+function mfFmtTop(snapshot) {
+  if (!snapshot || !snapshot.top) return '';
+  const rows = snapshot.top.slice(0, 30).map(r =>
+    `<tr><td>${r.rank}</td><td>${r.name || r.ticker}</td><td>${r.change_pct}%</td><td>${r.theme}</td>` +
+    `<td>${(r.turnover/1e8).toFixed(1)}억</td><td>${r.rank_change != null ? (r.rank_change>0?'+':'')+r.rank_change : (r.is_new_entrant?'신규':'-')}</td></tr>`
+  ).join('');
+  const themeRows = Object.entries(snapshot.themes || {}).sort((a,b) => b[1].turnover_share_pct - a[1].turnover_share_pct).map(([name, t]) =>
+    `<tr><td>${name}</td><td>${t.n}</td><td>${t.breadth_pct}%</td><td>${t.avg_change_pct}%</td>` +
+    `<td>${t.turnover_share_pct}%${t.turnover_share_change_pct != null ? ` (${t.turnover_share_change_pct>0?'+':''}${t.turnover_share_change_pct}%p)` : ''}</td>` +
+    `<td>${t.streak_days}일</td><td>${t.stage}</td></tr>`
+  ).join('');
+  return `<p class="mf-note">AI 해석 리포트가 없어 1단계 계산 결과(테마 집계 + 거래대금 상위 30)만 표로 표시합니다.</p>
+  <h3>테마 집계</h3>
+  <table><tr><th>테마</th><th>종목수</th><th>상승비율</th><th>평균등락</th><th>거래대금 점유율</th><th>연속등장</th><th>확산단계</th></tr>${themeRows}</table>
+  <h3>거래대금 상위 30</h3>
+  <table><tr><th>순위</th><th>종목</th><th>등락률</th><th>테마</th><th>거래대금</th><th>순위변화</th></tr>${rows}</table>`;
+}
+async function loadMoneyflowDate(date) {
+  const doc = document.getElementById('moneyflowDoc');
+  doc.innerHTML = '불러오는 중…';
+  const mkt = moneyflowMarket();
+  try {
+    const url = date ? `/api/moneyflow/${mkt}?date=${encodeURIComponent(date)}` : `/api/moneyflow/${mkt}`;
+    const res = await fetch(url);
+    const d = await res.json();
+    const sel = document.getElementById('moneyflowDateSel');
+    sel.innerHTML = (d.available_dates || []).map(dt => `<option value="${dt}" ${dt===d.date?'selected':''}>${dt}</option>`).join('');
+    let html = '';
+    if (d.markdown) html = marked.parse(d.markdown);
+    else if (d.snapshot) html = mfFmtTop(d.snapshot);
+    else html = '<p class="mf-err">아직 리포트가 없습니다. 재실행 버튼을 눌러보세요.</p>';
+    if (d.error && d.snapshot) html += `<p class="mf-err">⚠️ ${d.error}</p>`;
+    if (d.snapshot && d.snapshot.methodology_note) html += `<p class="mf-note">${d.snapshot.methodology_note}</p>`;
+    doc.innerHTML = html;
+    // v5.89: 이 날짜를 열었으니 '읽음' 처리 — 오늘자면 탭 점 표시도 바로 숨김
+    if (d.date) {
+      localStorage.setItem(mfUnreadKey(mkt, d.date), '1');
+      const dot = document.getElementById('moneyflowUnreadDot');
+      if (dot) dot.style.display = 'none';
+    }
+  } catch (e) {
+    doc.innerHTML = '<p class="mf-err">불러오기 실패</p>';
+  }
+}
+async function runMoneyflowNow() {
+  const btn = document.getElementById('moneyflowRunBtn');
+  btn.disabled = true;
+  btn.textContent = '실행 중… (최대 1분)';
+  const mkt = moneyflowMarket();
+  try {
+    const res = await fetch(`/api/moneyflow/${mkt}/run`, { method: 'POST' });
+    const d = await res.json();
+    let html = d.markdown ? marked.parse(d.markdown) : (d.snapshot ? mfFmtTop(d.snapshot) : '<p class="mf-err">실행 실패</p>');
+    if (d.error && d.snapshot) html += `<p class="mf-err">⚠️ ${d.error}</p>`;
+    document.getElementById('moneyflowDoc').innerHTML = html;
+    const sel = document.getElementById('moneyflowDateSel');
+    sel.innerHTML = (d.available_dates || []).map(dt => `<option value="${dt}" ${dt===d.date?'selected':''}>${dt}</option>`).join('');
+    if (d.date) {
+      localStorage.setItem(mfUnreadKey(mkt, d.date), '1');
+      const dot = document.getElementById('moneyflowUnreadDot');
+      if (dot) dot.style.display = 'none';
+    }
+  } catch (e) {
+    document.getElementById('moneyflowDoc').innerHTML = '<p class="mf-err">실행 실패</p>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔄 재실행';
+  }
+}
+function onEnterMoneyflowTab() {
+  if (market === 'all') {
+    market = 'kr';
+    document.querySelectorAll('[data-market]').forEach(x => x.classList.toggle('active', x.dataset.market === 'kr'));
+  }
+  loadMoneyflowDate(null);
+}
+// 오늘 자 새 리포트가 있는데 아직 안 열었으면 탭에 점 표시(KR/US 둘 중 하나라도) —
+// localStorage 기준으로만 가볍게 판단, 별도 폴링 없음(페이지 로드 시 1회).
+async function checkMoneyflowUnread() {
+  const dot = document.getElementById('moneyflowUnreadDot');
+  if (!dot) return;
+  const today = new Date().toISOString().slice(0, 10);
+  let anyUnread = false;
+  for (const mkt of ['kr', 'us']) {
+    try {
+      const res = await fetch(`/api/moneyflow/${mkt}`);
+      const d = await res.json();
+      if (d.date === today && !localStorage.getItem(mfUnreadKey(mkt, d.date))) anyUnread = true;
+    } catch (e) { /* 무시 */ }
+  }
+  dot.style.display = anyUnread ? 'inline' : 'none';
+}
+checkMoneyflowUnread();
+
 document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('click', () => {
   document.querySelectorAll('[data-market]').forEach(x => x.classList.remove('active'));
   t.classList.add('active');
   market = t.dataset.market;
-  renderCards();  // 재스캔 없이 화면만 다시 그림 (lastHits는 전체 보유)
+  if (mode === 'moneyflow') { loadMoneyflowDate(null); } else { renderCards(); }  // 재스캔 없이 화면만 다시 그림 (lastHits는 전체 보유)
 }));
 document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click', () => {
   document.querySelectorAll('[data-mode]').forEach(x => x.classList.remove('active'));
@@ -2479,15 +2615,20 @@ document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click'
   mode = t.dataset.mode;
   hideFilterButtonsIfNotApplicable();   // v5.56: journal은 load() 자체를 안 타서 여기서도 호출
   const isJournal = mode === 'journal';
-  document.getElementById('content').style.display = isJournal ? 'none' : '';
+  const isMoneyflow = mode === 'moneyflow';
+  document.getElementById('content').style.display = (isJournal || isMoneyflow) ? 'none' : '';
   document.getElementById('journalView').style.display = isJournal ? 'block' : 'none';
-  document.getElementById('searchBar').style.display = isJournal ? 'none' : '';
-  document.getElementById('diagBar').style.display = isJournal ? 'none' : '';
+  document.getElementById('moneyflowView').style.display = isMoneyflow ? 'block' : 'none';
+  document.getElementById('searchBar').style.display = (isJournal || isMoneyflow) ? 'none' : '';
+  document.getElementById('diagBar').style.display = (isJournal || isMoneyflow) ? 'none' : '';
   document.getElementById('patternSubTabs').style.display = (mode === 'pattern') ? 'flex' : 'none';
   document.getElementById('subDesc').textContent = isJournal
     ? '🔥/추세전환 신호를 기록하고 결과(R)를 추적 — 주말에 CSV로 내보내 구글시트에 백업'
+    : isMoneyflow ? '💰 돈의 흐름 — 관찰용 정보(진입 신호 아님), KR/US는 위 시장 필터로 전환'
     : DESC[mode];
-  if (isJournal) { renderJournal(); } else { load(); }
+  if (isJournal) { renderJournal(); }
+  else if (isMoneyflow) { onEnterMoneyflowTab(); }
+  else { load(); }
 }));
 
 // ════════════════ R 기반 리스크 시스템 (v4.47) ════════════════
