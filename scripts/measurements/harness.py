@@ -195,9 +195,17 @@ US_LIQUIDITY_FLOOR = 2e6
 
 
 def passes_liquidity_filter(hit: dict, is_kr: bool) -> bool:
+    """저유동성 컷 + 가격고정(M&A 의심) 제외 — analyze_*()가 hit 딕셔너리에
+    price_frozen을 정보용으로 항상 붙여주므로(v5.90, scanner.price_frozen_check)
+    여기서 체크만 하면 기존(v4.80~) 측정 파이프라인의 배제 동작이 그대로
+    유지된다 — 실제 게이트는 scanner.py에서 완전제외로 하드코딩돼 있지 않고
+    app.py 표시 레이어가 처리하지만(전 탭 공통, 숨김+펼치기), 측정 스크립트는
+    이 한 곳만 거치면 예전과 동일하게 제외돼 EV 수치에 영향이 없다."""
     avg_turn = hit.get("avg_turnover") or 0
     floor_ = KR_LIQUIDITY_FLOOR if is_kr else US_LIQUIDITY_FLOOR
     if avg_turn > 0 and avg_turn < floor_:
+        return False
+    if hit.get("price_frozen"):
         return False
     return True
 

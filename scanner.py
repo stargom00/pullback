@@ -560,53 +560,39 @@ def _risk_hard_ok(rrb: dict, is_kr: bool, pivot: float | None = None) -> bool:
         return True
 
 
-def merger_warning(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series) -> dict:
-    """M&A(인수합병)/특수상황 의심 감지.
-    GSAT(아마존 인수) 같은 종목은 인수가 부근에 가격이 '고정'돼
-    변동성이 비정상적으로 죽고 좁은 밴드에 갇힌다. 차트상으론 깔끔한
-    횡보(=눌림목/베이스)로 보이지만 실제론 상방이 인수가에 막히고
-    하방은 딜 무산 시 급락하는 비대칭 리스크 → 추세매매 부적합.
+def price_frozen_check(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series) -> dict:
+    """가격고정(M&A/특수상황 의심) 감지 — v5.90 재설계(사용자 지시), 전 탭 공통.
+
+    GSAT(아마존 인수)/CRNX(Vertex 인수, $85/주)/APGE(AbbVie 인수, $135.11/주)
+    같은 종목은 인수가 부근에 가격이 '고정'돼 변동성이 비정상적으로 죽는다.
+    차트상으론 깔끔한 횡보(=눌림목/베이스)로 보이지만 실제론 상방이 인수가에
+    막히고 하방은 딜 무산 시 급락하는 비대칭 리스크 → 추세매매 부적합.
 
     조건(동시 충족):
-      1) 변동성 붕괴: 최근 20봉 ATR%가 그 이전 60봉 ATR%의 40% 이하
-      2) 좁은 밴드: 최근 20봉이 ±5% 안에 갇힘 (고가/저가 폭)
-      3) 점프 흔적: 횡보 진입 전(과거 60~120봉 구간)에 거래량 폭발(평균 5배+)
-                    동반 큰 갭/급등(+15% 이상)이 있었음 = 발표 충격
-    반환: {merger: bool, reasons: [..]}
+      1) 발표충격갭: 과거 5~120봉 구간에 거래량 폭발(평균 5배+) 동반 큰 갭/
+         급등(+15% 이상) — M&A 발표의 결정적 증거.
+      2) 변동성 극소: 최근 20봉 ATR%(ATR/종가)가 0.5% 미만으로 붕괴.
+
+    캘리브레이션(2026-08-29, 실데이터): CRNX/APGE 실제 M&A 사례 ATR%
+    0.089~0.124%, 정상 신고가 주도주(NVDA/PLTR/AVGO/TSLA/MSTR/SMCI/CRWD/
+    ANET/VRT/MU) ATR% 2.78~5.74% — 최소 22배 마진으로 완전 분리 확인.
+    일부 정상 주도주도 조건1(발표충격갭)만은 단독 충족하지만(PLTR/SMCI/MU가
+    실제로 +15%+ 갭 이력 있음), 조건2(변동성 극소)를 동시 충족하는 경우는
+    없어 AND 결합으로 안전하게 분리됨. 근거: docs/price_frozen_calibration.md.
+
+    반환: {price_frozen: bool, price_frozen_reasons: [..]}
     """
-    reasons = []
     if len(c) < 130:
-        return {"merger": False, "reasons": []}
+        return {"price_frozen": False, "price_frozen_reasons": []}
     close = float(c.iloc[-1])
     if close <= 0:
-        return {"merger": False, "reasons": []}
+        return {"price_frozen": False, "price_frozen_reasons": []}
 
-    # ── 1) 변동성 붕괴 (ATR%로 정규화 — 가격대 무관 비교) ──
-    # 최근 20봉 ATR%(=ATR/가격)가 발표 갭 이전의 정상 변동성 대비 급감했는가.
-    # 절대 ATR은 가격대(60달러 vs 80달러)에 따라 왜곡되므로 반드시 % 비교.
-    def atr_pct(hh, ll, cc):
-        a = atr(hh, ll, cc, 14)
-        px = float(cc.iloc[-1])
-        return a / px if px > 0 else 9.9
-    atr_recent = atr_pct(h.iloc[-20:], lo.iloc[-20:], c.iloc[-20:])
-    # 비교 기준: 발표 갭이 섞이지 않은 '먼 과거'(−120~−60봉)의 정상 변동성
-    atr_base = atr_pct(h.iloc[-120:-60], lo.iloc[-120:-60], c.iloc[-120:-60])
-    if atr_base <= 0:
-        return {"merger": False, "reasons": []}
-    vol_collapse = (atr_recent / atr_base) <= 0.60
-    if vol_collapse:
-        reasons.append("변동성붕괴")
+    reasons = []
 
-    # ── 2) 좁은 밴드 고정 ──
-    hi20 = float(h.iloc[-20:].max())
-    lo20 = float(lo.iloc[-20:].min())
-    band = (hi20 - lo20) / close if close > 0 else 9.9
-    tight = band <= 0.05
-    if tight:
-        reasons.append("좁은밴드고정")
-
-    # ── 3) 횡보 직전 점프 흔적 (발표 충격) ──
-    # 횡보 구간(최근 20봉) 직전, 과거 60~120봉 사이에서 거래량 폭발+급등 탐색
+    # ── 1) 발표 직전 점프 흔적 ──
+    # 과거 60~120봉 사이(최근 5봉은 제외해 진행 중인 돌파와 혼동 방지)에서
+    # 거래량 폭발+급등 탐색.
     seg_v = v.iloc[-120:-5]
     seg_c = c.iloc[-120:-5]
     jumped = False
@@ -615,28 +601,33 @@ def merger_warning(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series) -> d
         if vmean > 0:
             daily = seg_c.pct_change()
             for i in range(len(seg_v)):
+                d = daily.iloc[i]
                 vol_spike = float(seg_v.iloc[i]) >= vmean * 5
-                gap_up = float(daily.iloc[i]) >= 0.15 if not math.isnan(float(daily.iloc[i])) else False
+                gap_up = (not math.isnan(d)) and d >= 0.15
                 if vol_spike and gap_up:
                     jumped = True
                     break
     if jumped:
         reasons.append("발표충격갭")
 
-    # 판정: 발표충격갭은 필수(M&A의 결정적 증거) + 좁은밴드 필수.
-    # 변동성붕괴는 보조(가점) — 둘만 맞아도 강한 의심으로 본다.
-    # (발표갭+좁은밴드 = 발표 후 인수가에 가격이 고정된 전형적 패턴)
-    merger = jumped and tight
-    return {"merger": merger, "reasons": reasons if merger else []}
+    # ── 2) 최근 변동성 극소 (ATR%로 정규화 — 가격대 무관 절대 기준) ──
+    atr_val = atr(h.iloc[-20:], lo.iloc[-20:], c.iloc[-20:], 14)
+    atr_pct_recent = atr_val / close * 100 if close > 0 else 9.9
+    frozen = atr_pct_recent < 0.5
+    if frozen:
+        reasons.append(f"변동성극소(ATR {atr_pct_recent:.2f}%)")
+
+    price_frozen = jumped and frozen
+    return {"price_frozen": price_frozen, "price_frozen_reasons": reasons if price_frozen else []}
 
 
-def _merger_block(c, h, lo, v) -> dict:
-    """analyze 결과에 붙일 M&A 의심 플래그 블록."""
+def _price_frozen_block(c, h, lo, v) -> dict:
+    """analyze 결과에 붙일 가격고정 의심 플래그 블록(정보용 — 게이트 아님,
+    v5.90부터 exclude는 app.py run_scan()이 표시 레이어에서 처리)."""
     try:
-        mw = merger_warning(c, h, lo, v)
+        return price_frozen_check(c, h, lo, v)
     except Exception:
-        return {"merger": False, "merger_reasons": []}
-    return {"merger": mw["merger"], "merger_reasons": mw["reasons"]}
+        return {"price_frozen": False, "price_frozen_reasons": []}
 
 
 def off_high_pct(c, lookback: int = 252) -> float:
@@ -1589,11 +1580,11 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     _tt = trend_grade(c, lo, h, rs_rank, ud=_ud50)
     if _ls["late_level"] == "danger" and cfg.get("late_stage_exclude", True):
         return None
-    # v4.80: M&A/특수상황 의심 종목은 배지로 표시만 하던 걸 아예 스캔 결과에서 제외.
-    # 추세매매 부적합(상방 막힘+하방 비대칭 리스크)이라 안 보이는 게 낫다는 요청.
-    _mg = _merger_block(c, h, lo, v)
-    if _mg["merger"]:
-        return None
+    # v5.90: 가격고정(M&A 의심)은 더 이상 하드 게이트가 아니라 정보용 필드 —
+    # 완전제외 대신 결과에 포함시켜서 app.py/harness 양쪽이 표시 레이어에서
+    # (숨김+펼치기) 또는 측정 레이어에서(harness.passes_liquidity_filter)
+    # 각자 필요한 대로 쓰게 한다(전 탭 공통 유틸, scanner.price_frozen_check).
+    _mg = _price_frozen_block(c, h, lo, v)
 
     # v5.24: 조용한 매집 스코어(Task 2) — 눌림목 탭 카드에도 노출. 여기서
     # 실패해도 눌림목 탭 전체를 죽이면 안 되므로 별도 try/except로 격리.
@@ -2195,6 +2186,8 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
         prev = analyze_turnaround(df.iloc[:-1], rs_rank=rs_rank, rs_mom=rs_mom, cfg=cfg, _setup_eval=True, is_kr=is_kr)
         if prev:
             setup_score = prev["score"]
+    # v5.90(사용자 지시) — 가격고정(M&A 의심) 정보용 필드, 전 탭 공통 유틸.
+    _mg = _price_frozen_block(c, h, lo, v)
 
     return {
         "mode": "turnaround",
@@ -2224,6 +2217,7 @@ def analyze_turnaround(df: pd.DataFrame, rs_rank: int | None = None,
         "tl_break_intraday": tl_break_intraday,
         "ud": ud,
         "pivot_dist_pct": round(pivot_dist_pct, 2),
+        **_mg,
         **_rr_block(pivot, stop, h, lo, c,
                     base_low=float(lo.iloc[-30:].min()),
                     entry=close, warn_pct=15.0, is_kr=is_kr, stop_struct=stop_struct, atr_buf=atr_buf),
@@ -2306,6 +2300,11 @@ def analyze_leader(df: pd.DataFrame, rs_rank: int | None = None,
     if rs_mom is not None:
         score += 10 * max(0.0, min(rs_mom, 30)) / 30
 
+    # v5.90(사용자 지시) — 가격고정(M&A 의심) 정보용 필드. 이 탭이 원인 확인
+    # 과정에서 CRNX/APGE(둘 다 실제 M&A 발표, price_frozen_check로 정확히
+    # 감지됨)를 실제로 잡고 있었던 것으로 확인된 탭 중 하나 — 커버리지 공백.
+    _mg = _price_frozen_block(c, h, lo, v)
+
     return {
         "mode": "leader",
         "mom_3m_pct": round(_mom * 100, 1),
@@ -2322,6 +2321,7 @@ def analyze_leader(df: pd.DataFrame, rs_rank: int | None = None,
         "ma20_dist_pct": round(ma20_dist_pct, 1),
         "vol_ratio": round(vol_ratio, 2),
         "vol_dry": False,
+        **_mg,
         "rsi": round(cur_rsi, 1),
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
@@ -2429,6 +2429,8 @@ def analyze_super(df: pd.DataFrame, rs_rank: int | None = None,
     # 가장 실전적이라 채택. `_rr_block`으로 카드용 stop/risk_pct/rr 통일.
     rr = _rr_block(close, close - atr(h, lo, c, 14) * 2, h, lo, c,
                    entry=close, is_kr=is_kr)
+    # v5.90(사용자 지시) — 가격고정(M&A 의심) 정보용 필드, 전 탭 공통 유틸.
+    _mg = _price_frozen_block(c, h, lo, v)
 
     return {
         "mode": "super",
@@ -2449,6 +2451,7 @@ def analyze_super(df: pd.DataFrame, rs_rank: int | None = None,
         "buy_zone": round(buy_zone, 2),
         "rsi": round(cur_rsi, 1),
         "vol_dry": False,
+        **_mg,
         **rr,
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
@@ -2586,10 +2589,8 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
     _tt = trend_grade(c, lo, h, rs_rank, ud=up_down_volume(c, v, 50))
     if _ls["late_level"] == "danger" and CONFIG.get("late_stage_exclude", True):
         return None
-    # v4.80: M&A/특수상황 의심 종목은 스캔 결과에서 제외 (배지 표시만 하지 않음).
-    _mg = _merger_block(c, h, lo, v)
-    if _mg["merger"]:
-        return None
+    # v5.90: 가격고정(M&A 의심) — 정보용 필드로 결과에 포함(하드 게이트 아님).
+    _mg = _price_frozen_block(c, h, lo, v)
 
     return {
         "mode": "breakout",
@@ -2770,10 +2771,8 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
     _tt = trend_grade(c, lo, h, rs_rank, ud=up_down_volume(c, v, 50))
     if _ls["late_level"] == "danger" and CONFIG.get("late_stage_exclude", True):
         return None
-    # v4.80: M&A/특수상황 의심 종목은 스캔 결과에서 제외.
-    _mg = _merger_block(c, h, lo, v)
-    if _mg["merger"]:
-        return None
+    # v5.90: 가격고정(M&A 의심) — 정보용 필드로 결과에 포함(하드 게이트 아님).
+    _mg = _price_frozen_block(c, h, lo, v)
 
     return {
         "mode": "boxbreak",
@@ -2965,10 +2964,8 @@ def analyze_imminent(df: pd.DataFrame, rs_rank: int | None = None,
     _tt = trend_grade(c, lo, h, rs_rank, ud=up_down_volume(c, v, 50))
     if _ls["late_level"] == "danger" and CONFIG.get("late_stage_exclude", True):
         return None
-    # v4.80: M&A/특수상황 의심 종목은 스캔 결과에서 제외.
-    _mg = _merger_block(c, h, lo, v)
-    if _mg["merger"]:
-        return None
+    # v5.90: 가격고정(M&A 의심) — 정보용 필드로 결과에 포함(하드 게이트 아님).
+    _mg = _price_frozen_block(c, h, lo, v)
 
     return {
         "mode": "imminent",
@@ -3085,6 +3082,11 @@ def analyze_surge(df: pd.DataFrame, rs_rank: int | None = None,
 
     # 점수 = 거래량 강도 + 양봉 강도 (RS 무관)
     score = round(min(vol_mult / 6.0, 1.0) * 50 + min(change_pct / 15.0, 1.0) * 50, 1)
+    # v5.90(사용자 지시) — 가격고정(M&A 의심) 정보용 필드. 원인 확인 과정에서
+    # 이 탭이 CRNX/APGE(둘 다 실제 M&A 발표)를 실제로 잡고 있었던 것으로
+    # 확인됨(발표 직후 갭+거래량 폭발이 이 탭 조건과 구조적으로 겹침) —
+    # 커버리지 공백.
+    _mg = _price_frozen_block(c, h, lo, v)
 
     return {
         "mode": "surge",
@@ -3103,6 +3105,7 @@ def analyze_surge(df: pd.DataFrame, rs_rank: int | None = None,
         "dist_from_high_pct": round((high60 - close) / high60 * 100, 1) if high60 > 0 else 0.0,
         "rsi": round(cur_rsi, 1),
         "vol_dry": False,
+        **_mg,
         "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
         "spark_ma20": [
             None if math.isnan(x) else round(float(x), 4)
@@ -3314,11 +3317,9 @@ def analyze_breakdown(df: pd.DataFrame, rs_rank: int | None = None,
     prev_close = float(c.iloc[-2])
     change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
 
-    # v4.80: M&A/특수상황 의심 종목은 스캔 결과에서 제외. 숏(붕괴) 탭도 마찬가지 —
-    # 딜 완주 시 갭업으로 숏도 위험한 비대칭 리스크라 여기도 배제 대상.
-    _mg = _merger_block(c, h, lo, v)
-    if _mg["merger"]:
-        return None
+    # v5.90: 가격고정(M&A 의심) — 정보용 필드로 결과에 포함(하드 게이트 아님,
+    # 숏(붕괴) 탭도 딜 완주 시 갭업 리스크가 있어 대상에 포함).
+    _mg = _price_frozen_block(c, h, lo, v)
 
     return {
         "mode": "breakdown",
@@ -4198,10 +4199,8 @@ def analyze_pattern(df: pd.DataFrame, rs_rank: int | None = None,
     score = min(score, 100.0)
 
     _tt = trend_grade(c, lo, h, rs_rank, ud=up_down_volume(c, v, 50))
-    # v4.80: M&A/특수상황 의심 종목은 스캔 결과에서 제외.
-    _mg = _merger_block(c, h, lo, v)
-    if _mg["merger"]:
-        return None
+    # v5.90: 가격고정(M&A 의심) — 정보용 필드로 결과에 포함(하드 게이트 아님).
+    _mg = _price_frozen_block(c, h, lo, v)
     # v5.19: 매집 스코어는 _pat_surge_accum()가 계산해 best dict에 넣어두지만, 이
     # 함수는 best를 통째로 스프레드하지 않고 필드를 골라서 새 dict를 만들기
     # 때문에 따로 안 퍼올리면 계산만 되고 API까지 안 감. 급등매집이 최종

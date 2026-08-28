@@ -195,6 +195,11 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .jtable td:nth-child(3) a{font-size:13.5px;font-weight:600}
 .note-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .merger-tag{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;background:rgba(147,112,219,.14);color:#b794f6;border:1px solid rgba(147,112,219,.4);white-space:nowrap;cursor:help}
+/* v5.90: 가격고정(M&A 의심) 숨김 요약 줄 + 펼침 그리드 */
+.pf-frozen-bar{padding:14px 24px 4px;text-align:center}
+.pf-frozen-toggle{background:var(--surface);border:1px solid rgba(147,112,219,.4);color:#b794f6;font:inherit;font-size:12.5px;font-weight:600;padding:8px 16px;border-radius:8px;cursor:pointer}
+.pf-frozen-toggle:hover{background:rgba(147,112,219,.1)}
+.pf-frozen-grid{margin-top:10px;opacity:.85}
 .st-badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px;white-space:nowrap}
 /* v4.85: 상태배지(꽉 찬 배경)와 확실히 구분되는 '버튼' 느낌 — 점선 테두리 + 투명배경.
    이전엔 둘 다 진한 배경이라 '지금 상태'와 '누르는 버튼'이 한눈에 안 구분됐음. */
@@ -532,7 +537,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.89</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.90</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1310,7 +1315,7 @@ function card(s) {
       <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기 (최상단 고정)'}">${fav ? '★' : '☆'}</button>
       <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
       <div>
-        <div class="name"><a class="name-link" href="${tvUrl(s)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.name}</a>${s.alert ? ` <span class="alert-tag" title="시장경보">⚠️ ${s.alert}</span>` : ''}${s.climax ? ` <span class="climax-tag ${s.climax_level}" title="미너비니 클라이맥스/과열 신호: ${(s.climax_reasons||[]).join(', ')}. 매수보다 매도·경계 구간일 수 있음.">${s.climax_level === 'danger' ? '🛑' : '🔆'} 과열</span>` : ''}${(() => { const lq = liquidityCheck(s); return lq ? ` <span class="pmat ${lq.cls === 'bad' ? 'wait' : 'ok'}" style="${lq.cls === 'bad' ? 'background:#341418;color:#f87171;border:1px solid #6b2028' : 'background:#152535;color:#7fb8e0;border:1px dashed #2d5a8c'}" title="${lq.tip}">${lq.label}</span>` : ''; })()}${s.grade && s.grade !== '?' ? ` <span class="gbadge g${s.grade}" title="트렌드 템플릿 ${s.tt_pass}/8 통과${(s.tt_fails && s.tt_fails.length) ? ` · 미충족: ${s.tt_fails.join(', ')}` : ' · 전 조건 충족'}. 참고용 — 판정 아님: 8조건 중 7개가 이미 각 탭 게이트와 중복(90%+ 통과, 0비트)이고, 등급별 실측 EV가 성과를 못 가름(눌림목은 A등급이 오히려 최저). docs/ud_volume_ratio_investigation.md">${s.grade}급(참고)</span>` : ''}${s.mode === 'pattern' ? (s.pat_ready ? ` <span class="pmat ok" title="패턴 성립 요건 전부 충족 — 기간·거래량 고갈 OK. 피벗 돌파(거래량 150%+)만 남음">✅ 요건충족</span>` : ` <span class="pmat wait" title="패턴 형성 중 — 미충족: ${(s.pat_missing || []).join(' · ')}. 요건 채우기 전 돌파 추격은 실패 확률 높음 (특히 치솟은깃발)">⏳ 미완성</span>`) : ''}${(s.late_flags && s.late_flags.length) ? ` <span class="climax-tag ${s.late_level}" title="후기 스테이지/과확장 (v4.48): ${s.late_flags.join(', ')}${s.ext200_pct ? ` · 200일선 이격 +${s.ext200_pct}%` : ''}. 큰 시세 이후의 베이스일수록 실패 확률이 높음 — 사이즈 축소 또는 관망 권장.">${s.late_level === 'danger' ? '🛑' : '🏔'} 후기</span>` : ''}${s.mode === 'pullback' && s.rs_path === '3M' ? ` <span class="climax-tag" style="background:#1a2a3a;color:#7dd3fc;border:1px solid #2d5a8c" title="RS 게이트를 12개월이 아니라 3개월 상대강도(80퍼센타일+)로 통과 — 12개월 전체로는 아직 상위 20%가 아니지만 최근 3개월 상승세는 강한 종목(v5.71). 근거: docs/rs_gate_e_and_depth_atr_v5.71.md">🔥 단기주도</span>` : ''}${s.mode === 'pullback' && s.rs_path === 'momentum' ? ` <span class="climax-tag" style="background:#1a2a3a;color:#7dd3fc;border:1px solid #2d5a8c" title="RS 게이트를 랭크 급상승으로 통과 — RS 50+ 이면서 20거래일 만에 랭크가 25 이상 뛴 종목(v5.71). 12개월/3개월 기준 자체는 아직 80 미만. 근거: docs/rs_gate_e_and_depth_atr_v5.71.md">🚀 랭크급등</span>` : ''}${s.earnings_badge ? ` <span class="climax-tag" style="background:#0f2a1a;color:#34d399;border:1px solid #1d6b3a" title="미너비니 CAN SLIM 실적 기준(Phase 1, 근사치): 3년 연간 EPS 연속증가 + 최근분기 EPS YoY ${s.eps_yoy_pct != null ? s.eps_yoy_pct + '%' : '?'}(25%↑) + 매출 YoY ${s.revenue_yoy_pct != null ? s.revenue_yoy_pct + '%' : '?'}(증가) 전부 충족.">💰 실적우수</span>` : ''}${s.merger ? ` <span class="merger-tag" title="M&A/특수상황 의심: ${(s.merger_reasons||[]).join(', ')}. 인수가 부근에 가격이 고정돼 상방은 막히고 하방은 딜 무산 시 급락하는 비대칭 리스크. 추세매매 부적합 — 차트의 깔끔한 횡보가 강세 신호가 아님.">🤝 M&A의심</span>` : ''}${s.base_badge ? ` <span class="climax-tag ${s.base_badge_lv === 'good' ? '' : (s.base_badge_lv === 'bad' ? 'danger' : '')}" style="${s.base_badge_lv === 'good' ? 'background:#12351f;color:#4ade80;border:1px solid #1d6b3a' : (s.base_badge_lv === 'bad' ? 'background:#341418;color:#f87171;border:1px solid #6b2028' : (s.base_badge_lv === 'neutral' ? 'background:#26262e;color:#9ca3af;border:1px solid #3f3f4a' : 'background:#33270f;color:#fbbf24;border:1px solid #6b5518'))}" title="${s.base_discontinuity ? '⚠️ 데이터 불연속: 최근 ±25%+ 가격 갭 감지 — 스핀오프/합병/재상장/액면변경 의심. 티커는 같아도 갭 이전은 다른 회사일 수 있어 RS·베이스·이평이 오염됨. 점수·등급 신뢰 불가. 반드시 공시 직접 확인.' : '베이스 품질 (오닐/미너비니): 길이 ' + (s.base_length_wk ?? '?') + '주 · 깊이 ' + (s.base_depth_pct ?? '?') + '%' + (s.base_vcp ? ' · VCP수축✓' : '') + (s.base_vol_dry ? ' · 거래량건조✓' : '') + '. 5주+ 탄탄한 베이스일수록 돌파 성공률 높음. 며칠짜리 얕은 조정은 베이스 아님.'}">${s.base_discontinuity ? '⚠️' : (s.base_badge_lv === 'good' ? '🧱' : (s.base_badge_lv === 'bad' ? '⛔' : (s.base_badge_lv === 'neutral' ? '📊' : '📏')))} ${s.base_badge}</span>` : ''}${(() => {
+        <div class="name"><a class="name-link" href="${tvUrl(s)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.name}</a>${s.alert ? ` <span class="alert-tag" title="시장경보">⚠️ ${s.alert}</span>` : ''}${s.climax ? ` <span class="climax-tag ${s.climax_level}" title="미너비니 클라이맥스/과열 신호: ${(s.climax_reasons||[]).join(', ')}. 매수보다 매도·경계 구간일 수 있음.">${s.climax_level === 'danger' ? '🛑' : '🔆'} 과열</span>` : ''}${(() => { const lq = liquidityCheck(s); return lq ? ` <span class="pmat ${lq.cls === 'bad' ? 'wait' : 'ok'}" style="${lq.cls === 'bad' ? 'background:#341418;color:#f87171;border:1px solid #6b2028' : 'background:#152535;color:#7fb8e0;border:1px dashed #2d5a8c'}" title="${lq.tip}">${lq.label}</span>` : ''; })()}${s.grade && s.grade !== '?' ? ` <span class="gbadge g${s.grade}" title="트렌드 템플릿 ${s.tt_pass}/8 통과${(s.tt_fails && s.tt_fails.length) ? ` · 미충족: ${s.tt_fails.join(', ')}` : ' · 전 조건 충족'}. 참고용 — 판정 아님: 8조건 중 7개가 이미 각 탭 게이트와 중복(90%+ 통과, 0비트)이고, 등급별 실측 EV가 성과를 못 가름(눌림목은 A등급이 오히려 최저). docs/ud_volume_ratio_investigation.md">${s.grade}급(참고)</span>` : ''}${s.mode === 'pattern' ? (s.pat_ready ? ` <span class="pmat ok" title="패턴 성립 요건 전부 충족 — 기간·거래량 고갈 OK. 피벗 돌파(거래량 150%+)만 남음">✅ 요건충족</span>` : ` <span class="pmat wait" title="패턴 형성 중 — 미충족: ${(s.pat_missing || []).join(' · ')}. 요건 채우기 전 돌파 추격은 실패 확률 높음 (특히 치솟은깃발)">⏳ 미완성</span>`) : ''}${(s.late_flags && s.late_flags.length) ? ` <span class="climax-tag ${s.late_level}" title="후기 스테이지/과확장 (v4.48): ${s.late_flags.join(', ')}${s.ext200_pct ? ` · 200일선 이격 +${s.ext200_pct}%` : ''}. 큰 시세 이후의 베이스일수록 실패 확률이 높음 — 사이즈 축소 또는 관망 권장.">${s.late_level === 'danger' ? '🛑' : '🏔'} 후기</span>` : ''}${s.mode === 'pullback' && s.rs_path === '3M' ? ` <span class="climax-tag" style="background:#1a2a3a;color:#7dd3fc;border:1px solid #2d5a8c" title="RS 게이트를 12개월이 아니라 3개월 상대강도(80퍼센타일+)로 통과 — 12개월 전체로는 아직 상위 20%가 아니지만 최근 3개월 상승세는 강한 종목(v5.71). 근거: docs/rs_gate_e_and_depth_atr_v5.71.md">🔥 단기주도</span>` : ''}${s.mode === 'pullback' && s.rs_path === 'momentum' ? ` <span class="climax-tag" style="background:#1a2a3a;color:#7dd3fc;border:1px solid #2d5a8c" title="RS 게이트를 랭크 급상승으로 통과 — RS 50+ 이면서 20거래일 만에 랭크가 25 이상 뛴 종목(v5.71). 12개월/3개월 기준 자체는 아직 80 미만. 근거: docs/rs_gate_e_and_depth_atr_v5.71.md">🚀 랭크급등</span>` : ''}${s.earnings_badge ? ` <span class="climax-tag" style="background:#0f2a1a;color:#34d399;border:1px solid #1d6b3a" title="미너비니 CAN SLIM 실적 기준(Phase 1, 근사치): 3년 연간 EPS 연속증가 + 최근분기 EPS YoY ${s.eps_yoy_pct != null ? s.eps_yoy_pct + '%' : '?'}(25%↑) + 매출 YoY ${s.revenue_yoy_pct != null ? s.revenue_yoy_pct + '%' : '?'}(증가) 전부 충족.">💰 실적우수</span>` : ''}${s.price_frozen ? ` <span class="merger-tag" title="가격고정(M&A/특수상황) 의심: ${(s.price_frozen_reasons||[]).join(', ')}. 인수가 부근에 가격이 고정돼 상방은 막히고 하방은 딜 무산 시 급락하는 비대칭 리스크. 추세매매 부적합 — 차트의 깔끔한 횡보가 강세 신호가 아님. 기본적으로 목록에서 숨겨지고 탭 하단 '펼치기'로만 보여요(v5.90).">⚠️ 가격고정</span>` : ''}${s.base_badge ? ` <span class="climax-tag ${s.base_badge_lv === 'good' ? '' : (s.base_badge_lv === 'bad' ? 'danger' : '')}" style="${s.base_badge_lv === 'good' ? 'background:#12351f;color:#4ade80;border:1px solid #1d6b3a' : (s.base_badge_lv === 'bad' ? 'background:#341418;color:#f87171;border:1px solid #6b2028' : (s.base_badge_lv === 'neutral' ? 'background:#26262e;color:#9ca3af;border:1px solid #3f3f4a' : 'background:#33270f;color:#fbbf24;border:1px solid #6b5518'))}" title="${s.base_discontinuity ? '⚠️ 데이터 불연속: 최근 ±25%+ 가격 갭 감지 — 스핀오프/합병/재상장/액면변경 의심. 티커는 같아도 갭 이전은 다른 회사일 수 있어 RS·베이스·이평이 오염됨. 점수·등급 신뢰 불가. 반드시 공시 직접 확인.' : '베이스 품질 (오닐/미너비니): 길이 ' + (s.base_length_wk ?? '?') + '주 · 깊이 ' + (s.base_depth_pct ?? '?') + '%' + (s.base_vcp ? ' · VCP수축✓' : '') + (s.base_vol_dry ? ' · 거래량건조✓' : '') + '. 5주+ 탄탄한 베이스일수록 돌파 성공률 높음. 며칠짜리 얕은 조정은 베이스 아님.'}">${s.base_discontinuity ? '⚠️' : (s.base_badge_lv === 'good' ? '🧱' : (s.base_badge_lv === 'bad' ? '⛔' : (s.base_badge_lv === 'neutral' ? '📊' : '📏')))} ${s.base_badge}</span>` : ''}${(() => {
           // v5.42: ATR상대(stop_wide) 배지를 절대값 4단계 배지로 교체 —
           // 4개 게이트 탭에서 stop_wide가 구조적 사백지(dead)가 된 문제 대응.
           return riskTierBadge(s.risk_pct);
@@ -1647,6 +1652,13 @@ let favorites = [];
 // hiddenMap은 renderCards()/renderInverseCards()에서만 참조되는 순수 표시
 // 필터 — 스캔/게이트/저널/하네스 로직은 이 객체를 전혀 모른다.
 let hiddenMap = {};  // {TICKER: {ticker, name, hidden_at, days_left}}
+
+// ── v5.90: 가격고정(M&A 의심) 표시 필터 — hiddenMap(사용자가 직접 ✕한 종목,
+// 90일 만료)과는 완전히 독립적인 별도 기능. 서버가 price_frozen 플래그를
+// 붙여서 다 보내주면(전 탭 공통), 프론트가 기본적으로 목록에서 빼고 탭
+// 하단에 "N개 숨김" 한 줄만 보여준다 — 탭(mode)별로 펼침 상태를 따로
+// 기억(다른 탭 전환해도 유지, 새로고침하면 초기화).
+let priceFrozenExpandedModes = new Set();
 
 async function loadHidden() {
   try {
@@ -2301,6 +2313,14 @@ function renderCards() {
   // v5.72: 숨긴 종목 제외 — 순수 표시 필터, list는 카드 렌더링 전용이라
   // 스캔/게이트/저널/하네스 어디에도 영향 없음(hiddenMap은 렌더 함수에서만 참조).
   list = list.filter(h => !hiddenMap[(h.ticker || '').toUpperCase()]);
+  // v5.90: 가격고정(M&A 의심) — hiddenMap(사용자가 직접 숨김)과는 완전히
+  // 독립적인 별도 필터. 기본적으로 목록에서 빼되(list에서 제거), 탭 하단에
+  // "N개 숨김 + 펼치기" 한 줄로 항상 존재를 알려주고 펼치면 볼 수 있게
+  // frozenList로 따로 챙겨둔다 — 완전 은폐가 아니라 "기본 숨김"이라는 취지.
+  let frozenList = list.filter(h => h.price_frozen);
+  if (!priceFrozenExpandedModes.has(mode)) {
+    list = list.filter(h => !h.price_frozen);
+  }
   // 시장 필터 (클라이언트에서 거름 — 재스캔 없음)
   if (market === 'kr') list = list.filter(h => h.market === 'KR');
   else if (market === 'us') list = list.filter(h => h.market === 'US');
@@ -2413,9 +2433,30 @@ function renderCards() {
   // 즐겨찾기를 최상단으로 (시장 정렬 위에 얹음)
   const isFav = h => favorites.includes((h.ticker || '').toUpperCase());
   list.sort((a, b) => (isFav(b) ? 1 : 0) - (isFav(a) ? 1 : 0));
-  content.innerHTML = list.length
+  const mainHtml = list.length
     ? `<div class="grid">${list.map(card).join('')}</div>`
     : `<div class="empty">${(strictMode && mode !== 'breakdown') ? `🎯 주도주 조건(RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓)을 모두 충족하는 종목이 없습니다.<br>엄선 필터라 비어있는 게 정상이에요. 해제하려면 '🎯 주도주만'을 다시 누르세요.` : searchQuery ? `'${searchQuery}'은(는) 이 탭의 시그널엔 없어요.<br><span id="lookupHint" style="color:var(--muted);font-size:12px">유니버스 전체에서 찾는 중…</span>` : sectorFilter ? `'${sectorFilter}' 섹터에 해당 종목이 없습니다.` : (mode === 'pattern' && patternSubFilter !== 'all') ? `${PATTERN_SUBTABS.find(p => p.key === patternSubFilter)?.label ?? patternSubFilter} 조건 통과 종목이 없습니다.<br>다른 서브탭을 선택하거나 '전체'로 돌아가세요.` : `현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : mode === 'breakdown' ? 'Stage 4 숏(붕괴)' : mode === 'stage2' ? 'Stage2' : mode === 'ibd9' ? 'IBD 9조건' : mode === 'earnings' ? '실적우수' : mode === 'strong_pivot' ? '강한피벗' : '눌림목'} 종목이 없습니다.${mode === 'stage2' ? '<br>유동성·RS70+·Stage2템플릿·거래량수축·MA수렴을 전부 통과해야 해서 0개인 날이 있는 게 정상이에요 — 필터 문제가 아니라 시장이 약하다는 신호.' : mode === 'ibd9' ? '<br>9가지 조건(3개월 수익률 30%+ 포함)을 전부 통과해야 해서 0개인 날이 있는 게 정상이에요.' : mode === 'earnings' ? '<br>RS70+ 상위 종목 중 3년 EPS 연속증가+분기 YoY25%+매출증가를 전부 통과해야 해서 0개인 날이 있는 게 정상이에요.' : mode === 'strong_pivot' ? '<br>돌파임박 + (Stage2 또는 IBD9) 이중 게이트라 0개인 날이 있는 게 정상이에요 — 실험 탭입니다.' : '<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.'}`}</div>`;
+  // v5.90: 가격고정(M&A 의심) 숨김 요약 줄 — 탭 맨 아래, 펼치면 카드까지.
+  // hiddenMap(사용자가 직접 숨김)의 "🙈 숨김 N" 칩과는 별개 UI — 완전
+  // 은폐가 아니라 "존재는 알려주되 기본은 숨김"이 취지라 항상 한 줄은 보임.
+  const pfExpanded = priceFrozenExpandedModes.has(mode);
+  const frozenHtml = frozenList.length ? `
+    <div class="pf-frozen-bar">
+      <button class="pf-frozen-toggle" id="pfFrozenToggle" type="button">
+        ⚠️ 가격고정(M&A 의심) ${frozenList.length}개 숨김 ${pfExpanded ? '— 접기 ▲' : '— 펼치기 ▼'}
+      </button>
+    </div>
+    ${pfExpanded ? `<div class="grid pf-frozen-grid">${frozenList.map(card).join('')}</div>` : ''}
+  ` : '';
+  content.innerHTML = mainHtml + frozenHtml;
+  const pfToggle = document.getElementById('pfFrozenToggle');
+  if (pfToggle) {
+    pfToggle.addEventListener('click', () => {
+      if (priceFrozenExpandedModes.has(mode)) priceFrozenExpandedModes.delete(mode);
+      else priceFrozenExpandedModes.add(mode);
+      renderCards();
+    });
+  }
   // 탭 결과에 없으면 유니버스 전체 조회 (검색어 있을 때만)
   if (!list.length && searchQuery && !strictMode) {
     triggerLookup(searchQuery);

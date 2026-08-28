@@ -5,6 +5,26 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.90 [기능개선] 가격고정(M&A 의심) 필터 전 탭 공통화(사용자 지시) — CRNX/
+        APGE(둘 다 실제 M&A 발표, 웹 검증 완료) 두 종목이 대장후보·급등
+        탭에 잡히던 문제. 원인은 탐지 로직 결함이 아니라 커버리지 공백
+        — 기존 merger_warning()(v4.80)이 6개 analyze_*()에만 있었고
+        대장후보/급등/추세전환/돌파 4개엔 아예 없었음(직접 호출로 확인:
+        CRNX/APGE가 leader/surge에서 실제 HIT). scanner.py에
+        price_frozen_check() 단일 공통 유틸 신설(발표충격갭 +15%+ 동시
+        ATR% 20봉 기준 0.5% 미만 — 실데이터 캘리브레이션: CRNX/APGE
+        ATR% 0.09~0.12% vs 정상 주도주 10종목 ATR% 2.78~5.74%, 22배+
+        마진 확인, docs/price_frozen_calibration.md) — 10개
+        analyze_*() 전부가 내부에서 호출해 결과에 price_frozen 필드로
+        항상 부착. v4.80처럼 완전 제외(하드 게이트)하지 않고 정보용으로만
+        남김 — 표시 여부는 static/index.html이 판단해 카드가 뜨는 전
+        탭에서 기본 숨김 + 탭 하단 "N개 숨김 — 펼치기" 한 줄로 전환(⚠️
+        가격고정 배지 부착해서 표시, 완전 은폐 아님). RS 랭킹 계산
+        유니버스는 그대로 유지(영향 없음). harness.py
+        passes_liquidity_filter()가 hit.price_frozen을 같이 체크하도록
+        확장해 15개+ 측정 스크립트를 하나도 안 고쳐도 v4.80과 동일하게
+        EV 측정에서 계속 제외됨. 검증: test_scanner.py 0 FAIL,
+        test_trace_parity.py 381 passed(_trace_*↔analyze_* 완전 일치).
 v5.89 [UI개선] 💰 돈의 흐름을 헤더의 작은 링크 아이콘에서 정식 탭으로 승격
         (사용자 지시 — 아이콘이 너무 작아 존재감 없었음). static/index.html
         #modeTabs에 "💰 돈의흐름" 탭 추가(마감정리 옆) — 클릭하면 페이지
@@ -2828,7 +2848,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, analyze_inverse, analyze_breakdown, analyze_pattern, analyze_stage2, rs_score_stage2, analyze_ibd9_cheap, analyze_ibd9_full, rs_raw_score, to_rs_rank, climax_warning, inverse_score
+from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, analyze_inverse, analyze_breakdown, analyze_pattern, analyze_stage2, rs_score_stage2, analyze_ibd9_cheap, analyze_ibd9_full, rs_raw_score, to_rs_rank, climax_warning, inverse_score, price_frozen_check
 from inverse_universe import inverse_universe
 from sectors import get_sector
 try:
@@ -2884,7 +2904,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.89"
+VERSION = "v5.90"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -3498,11 +3518,13 @@ async def _run_scan_stage2(bundle: dict) -> dict:
         r = analyze_stage2(df, rs_pctile=pctiles.get(t))
         if r is None:
             continue
+        pf = price_frozen_check(df["Close"], df["High"], df["Low"], df["Volume"])  # v5.90
         hits.append({
             "ticker": t, "name": universe.get(t, t), "market": "KR",
             "sector": _sector_of(t), "alert": None,
             "climax": False, "climax_reasons": [], "climax_level": None,
             "avg_value_20_eok": round(liq_value[t] / 1e8, 1),
+            "price_frozen": pf["price_frozen"], "price_frozen_reasons": pf["price_frozen_reasons"],
             **r,
         })
         diag["kr_hits"] += 1
@@ -3637,6 +3659,7 @@ async def _run_scan_strong_pivot(bundle: dict) -> dict:
         mkt = "KR" if is_kr else "US"
         alert_kind = alerts.get(t.upper())
         cw = climax_warning(df["Close"], df["High"], df["Low"], df["Volume"])
+        # v5.90: price_frozen은 analyze_imminent()가 이미 result에 붙여줌 — 중복 계산 안 함.
         hits.append({
             "ticker": t, "name": universe.get(t, t), "market": mkt,
             "sector": _sector_of(t), "alert": alert_kind,
@@ -3740,10 +3763,12 @@ async def _run_scan_ibd9(bundle: dict) -> dict:
                               extra.get("market_cap"), extra.get("held_pct_inst"))
         if r is None:
             continue
+        pf = price_frozen_check(data[t]["Close"], data[t]["High"], data[t]["Low"], data[t]["Volume"])  # v5.90
         hits.append({
             "ticker": t, "name": universe.get(t, t), "market": "US",
             "sector": _sector_of(t), "alert": None,
             "climax": False, "climax_reasons": [], "climax_level": None,
+            "price_frozen": pf["price_frozen"], "price_frozen_reasons": pf["price_frozen_reasons"],
             **r,
         })
         diag["us_hits"] += 1
@@ -3888,10 +3913,12 @@ async def _run_scan_earnings_inner(bundle: dict) -> dict:
         is_kr = naver_kr.is_kr(t)
         eps_yoy = eg.get("quarterly_eps_yoy_pct") or 0
         score = round(60 * (rs or 0) / 99 + 40 * min(eps_yoy, 200) / 200, 1)
+        pf = price_frozen_check(df["Close"], df["High"], df["Low"], df["Volume"])  # v5.90
         hits.append({
             "ticker": t, "name": universe.get(t, t), "market": "KR" if is_kr else "US",
             "sector": _sector_of(t), "alert": None,
             "climax": False, "climax_reasons": [], "climax_level": None,
+            "price_frozen": pf["price_frozen"], "price_frozen_reasons": pf["price_frozen_reasons"],
             "mode": "earnings",
             "close": round(close, 2), "change_pct": round(chg, 2),
             "score": score, "rs": rs,
@@ -4041,6 +4068,15 @@ async def run_scan(market: str, mode: str) -> dict:
         alert_kind = alerts.get(t.upper())
         # 미너비니식 클라이맥스(과열/매도) 경고 — 모든 모드에 부착
         cw = climax_warning(df["Close"], df["High"], df["Low"], df["Volume"])
+        # v5.90(사용자 지시) — 가격고정(M&A 의심)은 scanner.py의 10개 analyze_*()가
+        # 전부 내부에서 이미 계산해 result에 price_frozen/price_frozen_reasons로
+        # 붙여준다(정보용, 하드 게이트 아님) — 여기서 다시 계산 안 함(중복
+        # 방지). 예전엔 analyze_*() 내부에서 완전 제외했지만(v4.80), 이제는
+        # 표시 여부를 프론트(static/index.html)가 판단 — "기본 숨김 + N개
+        # 펼치기" 방식으로 바꾸기 위해 하드 제외를 뺐다. RS 랭킹 계산
+        # (rs_ranks/rs_moms)은 이 지점보다 앞서 별도로 끝나 있어 영향 없고,
+        # harness 측정 파이프라인은 passes_liquidity_filter가 hit.price_frozen을
+        # 그대로 읽어 예전과 동일하게 제외한다(harness.py 참고).
         # v5.55: 눌림목 전용 — 슈퍼대장(RS95+ + 모멘텀) 소속 여부. 측정 결과
         # (docs/all_tabs_common_yardstick_investigation.md 후속) 눌림목
         # 히트를 슈퍼대장 소속으로만 좁히면 EV 0.151→0.266로 개선, RS≥90
@@ -4915,7 +4951,7 @@ def _trace_pullback(df, is_kr, rs_rank, rs_3m=None, rs_delta=None):
     본다 — scanner.analyze()와 동일한 None 처리 규약."""
     from scanner import (CONFIG as cfg, rsi as _rsi, select_pivot, significant_support,
                          apply_atr_buffer, _rr_block, _risk_hard_ok, late_stage_info,
-                         _merger_block, anchored_vwap, atr as _atr)
+                         _price_frozen_block, anchored_vwap, atr as _atr)
     steps = []
     n0 = len(df) if df is not None else 0
     if not _gate_step(steps, "min_bars", df is not None and n0 >= cfg["min_bars"], f"{n0}봉 (요구 {cfg['min_bars']})"):
@@ -5012,9 +5048,11 @@ def _trace_pullback(df, is_kr, rs_rank, rs_3m=None, rs_delta=None):
     ls = late_stage_info(c, lo, h, v, is_kr)
     if not _gate_step(steps, "후기스테이지", ls.get("late_level") != "danger", f"level={ls.get('late_level')} flags={ls.get('late_flags')}"):
         return {"passed": False, "fail_at": "late_stage_danger", "steps": steps, "pivot": round(pivot, 2), "stop": round(stop, 2)}
-    mg = _merger_block(c, h, lo, v)
-    if not _gate_step(steps, "MA_특수상황", not mg.get("merger"), mg.get("merger_reasons")):
-        return {"passed": False, "fail_at": "merger", "steps": steps, "pivot": round(pivot, 2), "stop": round(stop, 2)}
+    # v5.90: 가격고정(M&A 의심)은 더 이상 게이트가 아니라 표시 레이어 정보 —
+    # 항상 통과 처리하되 디버그 패널에는 판정값을 그대로 보여준다.
+    pf = _price_frozen_block(c, h, lo, v)
+    _gate_step(steps, "가격고정(정보용, 비차단)", True,
+               f"price_frozen={pf.get('price_frozen')} {pf.get('price_frozen_reasons')}")
     return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type,
             "risk_pct": card_risk, "gate_risk_pct": gate_risk, "stop": round(stop, 2), "rs_path": rs_path}
 
@@ -5086,7 +5124,7 @@ def _trace_turnaround(df, is_kr, rs_rank, rs_mom):
 
 def _trace_breakout(df, is_kr, rs_rank):
     from scanner import (BREAKOUT_CONFIG as cfg, rsi as _rsi, off_high_pct, apply_atr_buffer,
-                         _rr_block, _risk_hard_ok, late_stage_info, _merger_block)
+                         _rr_block, _risk_hard_ok, late_stage_info, _price_frozen_block)
     steps = []
     n0 = len(df) if df is not None else 0
     if not _gate_step(steps, "min_bars", df is not None and n0 >= cfg["min_bars"], f"{n0}봉"):
@@ -5144,16 +5182,16 @@ def _trace_breakout(df, is_kr, rs_rank):
     ls = late_stage_info(c, lo, h, v, is_kr)
     if not _gate_step(steps, "후기스테이지", ls.get("late_level") != "danger", f"level={ls.get('late_level')}"):
         return {"passed": False, "fail_at": "late_stage_danger", "steps": steps, "pivot": round(pivot, 2), "stop": rrb.get("stop")}
-    mg = _merger_block(c, h, lo, v)
-    if not _gate_step(steps, "MA_특수상황", not mg.get("merger"), mg.get("merger_reasons")):
-        return {"passed": False, "fail_at": "merger", "steps": steps, "pivot": round(pivot, 2), "stop": rrb.get("stop")}
+    pf = _price_frozen_block(c, h, lo, v)
+    _gate_step(steps, "가격고정(정보용, 비차단)", True,
+               f"price_frozen={pf.get('price_frozen')} {pf.get('price_frozen_reasons')}")
     return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2),
             "risk_pct": rrb.get("risk_pct"), "stop": rrb.get("stop")}
 
 
 def _trace_boxbreak(df, is_kr, rs_rank):
     from scanner import (BOXBREAK_CONFIG as cfg, off_high_pct, significant_resistance,
-                         apply_atr_buffer, _rr_block, _risk_hard_ok, late_stage_info, _merger_block)
+                         apply_atr_buffer, _rr_block, _risk_hard_ok, late_stage_info, _price_frozen_block)
     steps = []
     n0 = len(df) if df is not None else 0
     if not _gate_step(steps, "min_bars", df is not None and n0 >= cfg["min_bars"], f"{n0}봉"):
@@ -5223,10 +5261,9 @@ def _trace_boxbreak(df, is_kr, rs_rank):
     if not _gate_step(steps, "후기스테이지", ls.get("late_level") != "danger", f"level={ls.get('late_level')}"):
         return {"passed": False, "fail_at": "late_stage_danger", "steps": steps, "pivot": round(pivot, 2),
                 "stop": rrb.get("stop"), "박스상세": box_detail}
-    mg = _merger_block(c, h, lo, v)
-    if not _gate_step(steps, "MA_특수상황", not mg.get("merger"), mg.get("merger_reasons")):
-        return {"passed": False, "fail_at": "merger", "steps": steps, "pivot": round(pivot, 2),
-                "stop": rrb.get("stop"), "박스상세": box_detail}
+    pf = _price_frozen_block(c, h, lo, v)
+    _gate_step(steps, "가격고정(정보용, 비차단)", True,
+               f"price_frozen={pf.get('price_frozen')} {pf.get('price_frozen_reasons')}")
     return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2),
             "risk_pct": rrb.get("risk_pct"), "stop": rrb.get("stop"), "박스상세": box_detail}
 
@@ -5234,7 +5271,7 @@ def _trace_boxbreak(df, is_kr, rs_rank):
 def _trace_imminent(df, is_kr, rs_rank):
     from scanner import (IMMINENT_CONFIG as cfg, rsi as _rsi, off_high_pct, select_pivot,
                          significant_support, apply_atr_buffer, _rr_block, _risk_hard_ok,
-                         late_stage_info, _merger_block)
+                         late_stage_info, _price_frozen_block)
     steps = []
     n0 = len(df) if df is not None else 0
     if not _gate_step(steps, "min_bars", df is not None and n0 >= cfg["min_bars"], f"{n0}봉 (요구 {cfg['min_bars']})"):
@@ -5285,10 +5322,9 @@ def _trace_imminent(df, is_kr, rs_rank):
     if not _gate_step(steps, "후기스테이지", ls.get("late_level") != "danger", f"level={ls.get('late_level')}"):
         return {"passed": False, "fail_at": "late_stage_danger", "steps": steps, "pivot": round(pivot, 2),
                 "near_pct": round(near * 100, 2), "stop": rrb.get("stop")}
-    mg = _merger_block(c, h, lo, v)
-    if not _gate_step(steps, "MA_특수상황", not mg.get("merger"), mg.get("merger_reasons")):
-        return {"passed": False, "fail_at": "merger", "steps": steps, "pivot": round(pivot, 2),
-                "near_pct": round(near * 100, 2), "stop": rrb.get("stop")}
+    pf = _price_frozen_block(c, h, lo, v)
+    _gate_step(steps, "가격고정(정보용, 비차단)", True,
+               f"price_frozen={pf.get('price_frozen')} {pf.get('price_frozen_reasons')}")
     return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type,
             "near_pct": round(near * 100, 2), "risk_pct": rrb.get("risk_pct"), "stop": rrb.get("stop")}
 
