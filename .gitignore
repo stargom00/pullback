@@ -6,3 +6,4 @@ datacache_*.pkl
 scripts/measurements/*.results.json
 money_flow_data/
 jongga_forward.json
+theme_map.json

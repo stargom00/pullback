@@ -5,6 +5,35 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.100 [기능추가] 테마-관련주 매핑 인프라(사용자 지시) — 테마로테이션
+        탭의 전제, 측정 3번(대조군용 재료). UI는 아직 없음(측정 통과 후
+        별도 지시로 탭 설계 때 함께).
+        신규 `theme_map.py`(app.py 미의존 — money_flow.py/money_flow_
+        report.py와 같은 원칙): `generate_theme_map(theme, kr_universe)`
+        가 Claude(`claude-sonnet-4-6`, money_flow_report.py와 동일 모델
+        — 이미 이 앱에서 검증된 조합)에 web_search 툴을 켜서 테마 관련
+        KR 상장사 명단을 JSON으로 받는다(프롬프트: 실재 상장사만·사업
+        직결도 순 rank·대장주=재료와 가장 직접 연결된 종목·각 종목
+        구체적 한 줄 근거). 환각 방지: 응답 티커를 `universe.get_universe
+        ("kr")`과 6자리 코드 기준으로 대조 — 불일치 종목은 결과에서
+        빼고 `removed` 필드+로그로 남김(테스트: 가짜 anthropic 모듈
+        주입해 실제 티커 1개+존재하지 않는 티커 1개 섞은 응답으로 직접
+        검증, 환각만 정확히 걸러짐 확인). 저장:
+        `_resolve_theme_map_dir()`(JOURNAL_DIR→/data→앱폴더, money_flow.py
+        의 `_resolve_money_flow_dir`와 동일 우선순위를 독립 재현)의
+        theme_map.json — `{테마명: {generated_at, stocks, source,
+        removed}}`. 30일 경과 시 `is_stale()`이 재생성 대상으로 판정.
+        트리거: `_run_money_flow(market="kr", ...)`가 스냅샷 계산 후
+        `themes` 중 `stage=="확산(본격)"` 또는 `streak_days>=2`인 테마를
+        추려 `theme_map.maybe_auto_generate()` 호출 — 매핑 없거나(or
+        30일 경과) 테마만, 하루 신규 생성 최대 3건(비용 가드, 테스트로
+        한도 초과 시 API 미호출까지 직접 검증) 넘으면 스킵. US 돈의흐름
+        잡은 대상 아님(테마 매핑은 KR 전용).
+        API: `GET /api/theme_map`(목록, 경량 뷰) · `GET /api/theme_map/
+        {테마명}`(매핑 조회 — 저장된 정적 rank와 별도로 각 종목의 당일
+        거래대금 순위 `turnover_rank_today`를 동적으로 계산해 병기) ·
+        `POST /api/theme_map/{테마명}`(수동 생성 — 자동 생성과 같은
+        일일 한도 공유, 한도 초과 시 429).
 v5.99 [기능추가] 개장일(거래일) 판정 가드(사용자 지시) — 스케줄러가
         주말/공휴일 구분 없이 매일 돌아서, `_market_session_key()`가
         KST 요일/시각만으로 "장마감" 판정을 내리면 실제 휴장일에도
@@ -3062,6 +3091,7 @@ import fundamentals as fundamentals_mod
 import earnings as earnings_mod
 import money_flow
 import money_flow_report
+import theme_map
 
 app = FastAPI(title="눌림목 스캐너")
 
@@ -3082,7 +3112,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.99"
+VERSION = "v5.100"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -4866,6 +4896,23 @@ async def _run_money_flow(market: str, daykey: str) -> dict:
         print(f"[moneyflow] {market} {daykey} 리포트 생성 완료")
     else:
         print(f"[moneyflow] {market} {daykey} 2단계 실패(1단계만 저장됨): {error}")
+    # v5.100(사용자 지시 4번): KR 강세 테마(확산 단계 진입 또는 streak
+    # 2일+) 감지 시, 매핑 없는(또는 30일 경과) 테마만 자동 생성. US는
+    # theme_map이 "KR 관련주" 전용(사용자 지시 1번)이라 대상 아님.
+    if market == "kr":
+        try:
+            candidate_themes = [
+                name for name, info in (snapshot.get("themes") or {}).items()
+                if info.get("stage") == "확산(본격)" or (info.get("streak_days") or 0) >= 2
+            ]
+            if candidate_themes:
+                generated = await loop.run_in_executor(
+                    _executor, theme_map.maybe_auto_generate, candidate_themes, bundle["universe"],
+                )
+                if generated:
+                    print(f"[theme_map] {daykey} 자동 생성: {generated}")
+        except Exception as e:
+            print(f"[theme_map] 자동 생성 트리거 실패: {e}")
     return {"snapshot": snapshot, "markdown": markdown, "error": error}
 
 
@@ -6889,6 +6936,65 @@ async def jongga_forward():
     docstring 참고 — 실전 진입가는 그 사이 어딘가라 어느 한쪽만 쓰면 왜곡)."""
     today = datetime.now(KST).strftime("%Y-%m-%d")
     return JSONResponse(_clean_nan({**_jongga_forward_stats(), "trading_day": is_trading_day("kr", today)}))
+
+
+def _kr_turnover_rank_map(kr_data: dict) -> dict:
+    """전체 KR 티커의 당일 거래대금(종가×거래량) 순위 — _run_scan_jongga
+    의 turnover_rank_at()과 같은 정의(신규 지표라 재구현 금지 원칙 대상
+    아님 — 프로덕션에 이미 있는 함수를 다시 만드는 게 아니라, 애초에
+    별도 함수 스코프라 공용화하지 않은 계산식을 여기서도 한 번 더 씀)."""
+    turnovers = {}
+    for t, df in kr_data.items():
+        c, v = df.get("Close"), df.get("Volume")
+        if c is None or v is None or len(c) < 1 or len(v) < 1:
+            continue
+        try:
+            turnovers[t] = float(c.iloc[-1]) * float(v.iloc[-1])
+        except Exception:
+            continue
+    ranked = sorted(turnovers.items(), key=lambda kv: kv[1], reverse=True)
+    return {t: i + 1 for i, (t, _) in enumerate(ranked)}
+
+
+@app.get("/api/theme_map")
+async def theme_map_list():
+    """저장된 테마 매핑 목록(경량 뷰, UI 아직 없음 — 사용자 지시 6번)."""
+    return JSONResponse(theme_map.list_all())
+
+
+@app.get("/api/theme_map/{theme_name}")
+async def theme_map_get(theme_name: str):
+    """테마 매핑 조회 + 각 종목 당일 거래대금 순위 병기(동적, 사용자
+    지시 5번) — 생성 시점의 정적 rank(대장주 서열)와 별도 필드로 공존."""
+    entry = theme_map.get(theme_name)
+    if entry is None:
+        return JSONResponse(
+            {"error": f"'{theme_name}' 매핑 없음 — POST /api/theme_map/{theme_name}으로 생성"},
+            status_code=404)
+    bundle = await _fetch_market_data("kr")
+    rank_map = _kr_turnover_rank_map(bundle["data"]) if bundle else {}
+    stocks = [{**s, "turnover_rank_today": rank_map.get(s["ticker"])} for s in entry.get("stocks", [])]
+    return JSONResponse(_clean_nan({**entry, "stocks": stocks, "theme": theme_name,
+                                     "stale": theme_map.is_stale(entry)}))
+
+
+@app.post("/api/theme_map/{theme_name}")
+async def theme_map_generate(theme_name: str):
+    """수동 생성(사용자 지시 4번) — 자동 생성과 같은 일일 한도를 공유한다
+    (비용 가드, 사용자 지시 7번 — 수동이라고 무제한 허용 안 함)."""
+    if theme_map.today_generation_count() >= theme_map.DAILY_GENERATION_LIMIT:
+        return JSONResponse(
+            {"error": f"오늘 신규 매핑 생성 한도({theme_map.DAILY_GENERATION_LIMIT}건) 도달 — 내일 다시 시도"},
+            status_code=429)
+    bundle = await _fetch_market_data("kr", wait_for_fresh=True)
+    if not bundle:
+        return JSONResponse({"error": "KR 시장 데이터 로드 실패"}, status_code=503)
+    loop = asyncio.get_event_loop()
+    entry = await loop.run_in_executor(_executor, theme_map.generate_theme_map, theme_name, bundle["universe"])
+    if entry.get("error"):
+        return JSONResponse({"error": entry["error"]}, status_code=502)
+    theme_map.save_theme_map(theme_name, entry)
+    return JSONResponse(_clean_nan({"theme": theme_name, **entry}))
 
 
 @app.get("/api/vol/{ticker}")
