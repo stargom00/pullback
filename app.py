@@ -5,6 +5,21 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.94 [기능추가] KR 돌파 계열 저모멘텀(RSI<50) 경고 배지 구현(사용자
+        지시) — 사전 등록 시간분할 독립 재현 완료 근거
+        (docs/kr_breakout_rsi_investigation.md, 이전 절반 z=-3.15/최근
+        절반 z=-2.97, 둘 다 -0.15R 기준 초과). static/index.html만
+        수정(scanner.py/app.py 무변경 — hit["rsi"]는 analyze_breakout/
+        analyze_boxbreak/analyze_turnaround이 이미 내부에서 계산해
+        내려주는 기존 필드를 그대로 씀). isLowMomentumBreakout(s) 헬퍼
+        신설(mode가 breakout/boxbreak/turnaround AND market==='KR'
+        AND rsi<50 — US는 미검증이라 market 조건으로 배제). (1) 펼친
+        카드에 "⚠️ 저모멘텀 돌파 — 손절률 66~78% (검증됨)" 배지
+        (climax-tag caution 재사용). (2) 접힌 카드엔 collapsedBadgeIconsHtml
+        에 ⚠️ 아이콘만 추가. (3) entrySignal() 진입 판정 신호등에 warn
+        1건 반영 — RS 70~89 warn 분기와 동일 패턴(checks.push + warn++),
+        게이트 아님 — 카드 제외 없음, list 필터링 미적용. (4) GUIDE.md
+        6장(돌파·박스돌파)에 한 줄 추가.
 v5.93 [문구수정] 게이트 조건부 EV 실측(2026-08-29, docs/pullback_ev_kr_us_
         regime_investigation.md 7절 — US z=-3.15 역방향, 게이트가 개별
         신호 EV를 예측 못 함 확인) 반영, 처방형 문구 제거(사용자 지시).
@@ -2957,7 +2972,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.93"
+VERSION = "v5.94"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
