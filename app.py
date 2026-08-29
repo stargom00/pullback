@@ -5,6 +5,28 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.92 [UI개편] 탭 메뉴 전면 개편 + 앱 리네이밍(사용자 지시). "눌림목
+        스캐너"→"돌파·눌림 스캐너"(부제 "국장은 돌파 · 미장은 눌림 —
+        시장별 검증 전략") — index.html title/h1, GUIDE.md, README.md,
+        /guide 페이지 title만 변경, 레포명/URL/API 경로는 그대로.
+        탭에 시장 라벨 부착(내부 mode 키 불변, 표시명만): 🇺🇸눌림목/
+        🇺🇸슈퍼대장/🇺🇸돌파임박, 🇰🇷돌파/🇰🇷박스돌파/🇰🇷추세전환.
+        🇰🇷/🇺🇸 탭 클릭 시 시장 필터 자동 연동(setMarket) — 수동으로
+        반대 시장 선택은 허용하되 그러면 카드 목록 상단에 얇은 안내
+        ("이 계열은 {시장}에서 검증되지 않음 — 전략 지도 참고",
+        marketMismatchBanner, market==='all'일 땐 표시 안 함). 탭 순서
+        재편: [🇺🇸 3개]→[🇰🇷 3개]→[대장관찰·섹터·💰돈의흐름]→
+        [인버스·붕괴]→[마감정리·내일지]→[⋯ 실험] 접기 버튼(패턴/
+        Stage2/IBD9/강한피벗/실적우수/급등 6개, expTabsGroup을
+        display:contents로 토글해 부모 .tabs의 flex 레이아웃 유지 —
+        상태 저장 안 함, 새로고침마다 항상 접힘). 대장후보→대장관찰
+        표시명 변경(MODE_TAB_LABEL·진단패널 modeNames·전환관찰 버튼
+        툴팁 3곳) — 추세전환은 이름 유지(사용자 결정). 하위호환 확인:
+        즐겨찾기(ticker 기준, mode 무관)·저널(저장된 mode 키 불변,
+        라벨만 렌더 시점에 바뀜)·URL 파라미터(이 앱은 mode/market을
+        URL에 안 실음, 확인 완료)·얼마냐봇(/api/ma/{ticker} 미변경)
+        전부 영향 없음. scanner.py 게이트/EV 로직 미변경(순수 표시
+        레이어), test_scanner.py/test_trace_parity.py 재실행 확인.
 v5.91 [UI개선] 시장별 전략 지도(docs/kr_us_strategy_map.md, 사전 등록 합산
         검정 z=4.88) UI 반영(사용자 지시). KR에서는 돌파 계열(돌파·박스
         돌파·추세전환)이 되돌림 계열(눌림목·돌파임박)보다 EV가 유의하게
@@ -2917,7 +2939,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.91"
+VERSION = "v5.92"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6518,7 +6540,7 @@ async def guide_page():
     """활용 가이드 뷰어 — 스캐너 다크 테마, 클라이언트 렌더(marked.js)."""
     html = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>📖 눌림목 스캐너 활용 가이드</title>
+<title>📖 돌파·눌림 스캐너 활용 가이드</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
 <style>
 :root{--bg:#0d1117;--surface:#161b22;--line:#30363d;--fg:#e6edf3;--muted:#8b949e;--green:#3fb950}

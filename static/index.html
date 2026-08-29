@@ -4,7 +4,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>눌림목 스캐너</title>
+<title>돌파·눌림 스캐너</title>
 <!-- v4.79: PWA — 앱스토어 없이 홈 화면에 설치해서 앱처럼 쓰기 -->
 <link rel="manifest" href="/static/manifest.json">
 <link rel="apple-touch-icon" href="/static/icons/icon-180.png">
@@ -60,6 +60,9 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 #superOnlyToggle:hover{background:rgba(250,204,21,.1)}
 #superOnlyToggle.active{background:rgba(250,204,21,.2);color:#fde68a;border-color:#facc15}
 .tab:focus-visible,button:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+/* v5.92: 탭 메뉴 전면 개편 — 계열 구분 얇은 세로선 + "⋯ 실험" 접기 그룹. */
+.tab-group-sep{width:1px;align-self:stretch;background:var(--line);margin:2px 3px;flex-shrink:0}
+.app-tagline{font-size:11.5px;color:#7aa3c9;margin-top:1px}
 
 .refresh{border:1px solid var(--line);background:var(--surface);color:var(--text);
   font:inherit;font-size:13px;padding:8px 16px;border-radius:8px;cursor:pointer}
@@ -541,38 +544,50 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.91</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.92</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
-    <button class="tab active" data-mode="imminent">🎯 돌파임박</button>
-    <button class="tab" data-mode="pullback">눌림목</button>
-    <button class="tab" data-mode="breakout">🚀 돌파</button>
-    <button class="tab" data-mode="boxbreak">📦 박스돌파</button>
-    <button class="tab" data-mode="turnaround">추세전환</button>
-    <button class="tab" data-mode="leader">대장후보</button>
-    <button class="tab" data-mode="super">⭐슈퍼대장</button>
-    <button class="tab" data-mode="ibd9">🇺🇸IBD9</button>
-    <button class="tab tab-exp" data-mode="strong_pivot">강한피벗<span class="exp-tag">실험</span></button>
-    <button class="tab" data-mode="earnings">💰실적우수</button>
-    <button class="tab tab-exp" data-mode="surge">⚡급등<span class="exp-tag">실험</span></button>
+    <!-- v5.92: 시장별 전략 지도(docs/kr_us_strategy_map.md, 사전 등록 검정
+         z=4.88) 반영 — 🇺🇸/🇰🇷 라벨 탭 클릭 시 시장 필터 자동 연동
+         (updateModeRecommendations 아래쪽 mode 클릭 핸들러 참고). -->
+    <button class="tab" data-mode="pullback">🇺🇸눌림목</button>
+    <button class="tab" data-mode="super">🇺🇸슈퍼대장</button>
+    <button class="tab active" data-mode="imminent">🇺🇸돌파임박</button>
+    <span class="tab-group-sep"></span>
+    <button class="tab" data-mode="breakout">🇰🇷돌파</button>
+    <button class="tab" data-mode="boxbreak">🇰🇷박스돌파</button>
+    <button class="tab" data-mode="turnaround">🇰🇷추세전환</button>
+    <span class="tab-group-sep"></span>
+    <button class="tab" data-mode="leader">대장관찰</button>
+    <button class="tab" data-mode="sectors">📊 섹터</button>
+    <button class="tab" data-mode="moneyflow">💰 돈의흐름<span class="mf-unread-dot" id="moneyflowUnreadDot" style="display:none"> ●</span></button>
+    <span class="tab-group-sep"></span>
     <button class="tab tab-exp" data-mode="inverse">🔻인버스<span class="exp-tag">하락</span></button>
     <button class="tab tab-exp" data-mode="breakdown">🩸붕괴<span class="exp-tag">숏</span></button>
-    <!-- v5.50: 패턴/Stage2 — 전체 유니버스 실측(시점매칭 대조군 대비)에서
-         선별력 없음/역선택 확인 → 맨 뒤로 이동 + "검증실패" 라벨.
-         docs/all_tabs_common_yardstick_investigation.md 참고. -->
-    <button class="tab tab-exp" data-mode="pattern">🧩 패턴<span class="exp-tag danger">검증실패</span></button>
-    <!-- v5.81(2026-08-25): "검증실패"→"참고"로 정정 — 유동성매칭 대조군 재측정
-         결과 상승우위가 5개 시드 전부 양수(+9.02pp 평균, docs/pullback_stop_width_
-         and_entry_timing.md "8/17 캠페인 마무리" 참고)로 견고하게 확인돼 완전한
-         "실패"는 아니라고 판단. 다만 하락위험 차이는 시드마다 부호가 흔들려
-         (-3.92~+3.59pp) 진입 신호로 확정하긴 이르므로 danger(빨강)는 빼되
-         "실험" 탭들과 같은 참고용 취급 유지. -->
-    <button class="tab tab-exp" data-mode="stage2">📐Stage2<span class="exp-tag">참고</span></button>
-    <button class="tab" data-mode="sectors">📊 섹터</button>
+    <span class="tab-group-sep"></span>
     <button class="tab" data-mode="eod">📋 마감정리</button>
-    <button class="tab" data-mode="moneyflow">💰 돈의흐름<span class="mf-unread-dot" id="moneyflowUnreadDot" style="display:none"> ●</span></button>
     <button class="tab" data-mode="journal">📒 내 일지</button>
+    <span class="tab-group-sep"></span>
+    <button class="tab" id="expTabsToggle" type="button">⋯ 실험</button>
+    <span id="expTabsGroup" style="display:none">
+      <!-- v5.50: 패턴/Stage2 — 전체 유니버스 실측(시점매칭 대조군 대비)에서
+           선별력 없음/역선택 확인 → "검증실패" 라벨.
+           docs/all_tabs_common_yardstick_investigation.md 참고. -->
+      <button class="tab tab-exp" data-mode="pattern">🧩 패턴<span class="exp-tag danger">검증실패</span></button>
+      <!-- v5.81(2026-08-25): "검증실패"→"참고"로 정정 — 유동성매칭 대조군 재측정
+           결과 상승우위가 5개 시드 전부 양수(+9.02pp 평균, docs/pullback_stop_width_
+           and_entry_timing.md "8/17 캠페인 마무리" 참고)로 견고하게 확인돼 완전한
+           "실패"는 아니라고 판단. 다만 하락위험 차이는 시드마다 부호가 흔들려
+           (-3.92~+3.59pp) 진입 신호로 확정하긴 이르므로 danger(빨강)는 빼되
+           "실험" 탭들과 같은 참고용 취급 유지. -->
+      <button class="tab tab-exp" data-mode="stage2">📐Stage2<span class="exp-tag">참고</span></button>
+      <button class="tab" data-mode="ibd9">🇺🇸IBD9</button>
+      <button class="tab tab-exp" data-mode="strong_pivot">강한피벗<span class="exp-tag">실험</span></button>
+      <button class="tab" data-mode="earnings">💰실적우수</button>
+      <button class="tab tab-exp" data-mode="surge">⚡급등<span class="exp-tag">실험</span></button>
+    </span>
   </div>
   <div class="tabs" role="tablist">
     <button class="tab active" data-market="all">전체</button>
@@ -592,6 +607,7 @@ tr.editing{background:rgba(242,179,61,.06)}
   <button class="refresh" id="refresh">다시 스캔</button>
 </header>
 
+<div class="stopwidth-warn" id="marketMismatchBanner" style="display:none"></div>
 <div class="stopwidth-warn" id="stopWidthWarnBanner" style="display:none"></div>
 <!-- v5.36: 패턴 탭 전용 서브탭(전체/컵앤핸들/치솟은깃발/더블바닥/급등매집).
      mode==='pattern'일 때만 렌더링·표시 — renderPatternSubTabs()가 매번
@@ -1599,7 +1615,7 @@ function card(s) {
       </div>`;
     })() : ''}
     ${s.ticker ? `
-    <button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button>${s.mode === 'leader' ? `<button class="journal-btn" style="margin-left:6px;background:${isLeaderConversionWatch(s.ticker) ? '#12351f' : '#1a2a3f'};border-color:${isLeaderConversionWatch(s.ticker) ? '#12351f' : '#1a2a3f'};color:${isLeaderConversionWatch(s.ticker) ? 'inherit' : '#7fb8ff'}" onclick="watchLeaderConversion(this,'${s.ticker}')" ${isLeaderConversionWatch(s.ticker) ? 'disabled' : ''} title="눌림목 전환 관찰 등록 — 손절 없음, 봇 알림 없음. 대장후보 히트의 74%가 60봉 내 눌림목 탭에 전환(중앙값 6봉). 눌림목 탭을 열 때마다 자동으로 전환 여부를 확인해요.">${isLeaderConversionWatch(s.ticker) ? '✓ 관찰중' : '👁 눌림목 전환 관찰'}</button>` : `<button class="journal-btn" style="margin-left:6px;background:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'};border-color:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'}" onclick="quickWatch(this,'${s.ticker}')" ${isPendingWatch(s.ticker) ? 'disabled' : ''} title="원클릭 봇 감시 등록">${isPendingWatch(s.ticker) ? '✓ 감시중' : '⚡ 감시'}</button>`}` : ''}
+    <button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button>${s.mode === 'leader' ? `<button class="journal-btn" style="margin-left:6px;background:${isLeaderConversionWatch(s.ticker) ? '#12351f' : '#1a2a3f'};border-color:${isLeaderConversionWatch(s.ticker) ? '#12351f' : '#1a2a3f'};color:${isLeaderConversionWatch(s.ticker) ? 'inherit' : '#7fb8ff'}" onclick="watchLeaderConversion(this,'${s.ticker}')" ${isLeaderConversionWatch(s.ticker) ? 'disabled' : ''} title="눌림목 전환 관찰 등록 — 손절 없음, 봇 알림 없음. 대장관찰 히트의 74%가 60봉 내 눌림목 탭에 전환(중앙값 6봉). 눌림목 탭을 열 때마다 자동으로 전환 여부를 확인해요.">${isLeaderConversionWatch(s.ticker) ? '✓ 관찰중' : '👁 눌림목 전환 관찰'}</button>` : `<button class="journal-btn" style="margin-left:6px;background:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'};border-color:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'}" onclick="quickWatch(this,'${s.ticker}')" ${isPendingWatch(s.ticker) ? 'disabled' : ''} title="원클릭 봇 감시 등록">${isPendingWatch(s.ticker) ? '✓ 감시중' : '⚡ 감시'}</button>`}` : ''}
     </div>
   </div>`;
 }
@@ -2338,6 +2354,18 @@ function renderCards() {
   // 시장 필터 (클라이언트에서 거름 — 재스캔 없음)
   if (market === 'kr') list = list.filter(h => h.market === 'KR');
   else if (market === 'us') list = list.filter(h => h.market === 'US');
+  // v5.92: 시장별 전략 지도 불일치 안내 — 🇰🇷/🇺🇸 라벨 탭인데(TAB_MARKET_LABEL)
+  // 사용자가 수동으로 반대 시장으로 바꾼 경우에만 표시(진입 차단 아님, 참고용).
+  // market==='all'은 불일치로 안 침 — 두 시장 다 보는 중립 상태라 경고할 근거가 없음.
+  const mismatchBar = document.getElementById('marketMismatchBanner');
+  if (mismatchBar) {
+    const tabMkt = TAB_MARKET_LABEL[mode];
+    const mismatch = tabMkt && market !== 'all' && market !== tabMkt;
+    mismatchBar.style.display = mismatch ? '' : 'none';
+    if (mismatch) {
+      mismatchBar.innerHTML = `⚠️ 이 계열은 ${market === 'kr' ? '한국' : '미국'}에서 검증되지 않음 — 전략 지도 참고 (docs/kr_us_strategy_map.md, z=4.88)`;
+    }
+  }
   // 종목명/코드 검색 필터
   if (searchQuery) {
     const q = searchQuery.toLowerCase().replace(/\s/g, '');
@@ -2663,6 +2691,15 @@ checkMoneyflowUnread();
 // 등록 검정(z=4.88) 채택 결과. 탭 접근은 안 막고 ★ 표시만 붙인다.
 const KR_RECOMMENDED_MODES = ['breakout', 'boxbreak', 'turnaround'];
 const US_RECOMMENDED_MODES = ['pullback', 'super', 'imminent'];
+// v5.92: 🇰🇷/🇺🇸 라벨 탭 → 시장 필터 자동 연동에 재사용(같은 근거 매핑).
+const TAB_MARKET_LABEL = {};
+KR_RECOMMENDED_MODES.forEach(m => { TAB_MARKET_LABEL[m] = 'kr'; });
+US_RECOMMENDED_MODES.forEach(m => { TAB_MARKET_LABEL[m] = 'us'; });
+function setMarket(newMarket) {
+  market = newMarket;
+  document.querySelectorAll('[data-market]').forEach(x => x.classList.toggle('active', x.dataset.market === newMarket));
+  updateModeRecommendations();
+}
 function updateModeRecommendations() {
   document.querySelectorAll('[data-mode]').forEach(t => {
     const existing = t.querySelector('.tab-rec');
@@ -2683,16 +2720,32 @@ function updateModeRecommendations() {
   });
 }
 document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('click', () => {
-  document.querySelectorAll('[data-market]').forEach(x => x.classList.remove('active'));
-  t.classList.add('active');
-  market = t.dataset.market;
-  updateModeRecommendations();
+  setMarket(t.dataset.market);
   if (mode === 'moneyflow') { loadMoneyflowDate(null); } else { renderCards(); }  // 재스캔 없이 화면만 다시 그림 (lastHits는 전체 보유)
 }));
+// v5.92: "⋯ 실험" 접기 그룹 — 패턴/Stage2/IBD9/강한피벗/실적우수/급등 6개.
+// 상태 저장 안 함(새로고침마다 항상 접힘부터 시작, 사용자 지시).
+let expTabsExpanded = false;
+document.getElementById('expTabsToggle').addEventListener('click', (e) => {
+  expTabsExpanded = !expTabsExpanded;
+  document.getElementById('expTabsGroup').style.display = expTabsExpanded ? 'contents' : 'none';
+  e.target.textContent = expTabsExpanded ? '⋯ 접기' : '⋯ 실험';
+});
 document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click', () => {
   document.querySelectorAll('[data-mode]').forEach(x => x.classList.remove('active'));
   t.classList.add('active');
   mode = t.dataset.mode;
+  // v5.92: 🇰🇷/🇺🇸 라벨 탭 클릭 시 시장 필터 자동 연동(사용자 지시) — 수동으로
+  // 다시 다른 시장을 고를 수는 있고, 그러면 renderCards()의 marketMismatchBanner가
+  // 안내한다(강제 아님, 표시만).
+  if (TAB_MARKET_LABEL[mode]) {
+    setMarket(TAB_MARKET_LABEL[mode]);
+  } else {
+    // v5.92: 섹터/마감정리/인버스 등은 renderCards()를 안 거쳐서 배너가
+    // 안 지워질 수 있음 — 탭 전환 시점에 바로 정리.
+    const mb = document.getElementById('marketMismatchBanner');
+    if (mb) mb.style.display = 'none';
+  }
   hideFilterButtonsIfNotApplicable();   // v5.56: journal은 load() 자체를 안 타서 여기서도 호출
   const isJournal = mode === 'journal';
   const isMoneyflow = mode === 'moneyflow';
@@ -3424,7 +3477,7 @@ const MODE_TAB_LABEL = {
   breakout: '돌파',
   boxbreak: '박스돌파',
   turnaround: '추세전환',
-  leader: '대장후보',
+  leader: '대장관찰',
   super: '슈퍼대장',
   surge: '급등',
   stage2: 'Stage2',
@@ -4716,7 +4769,7 @@ async function runDiag() {
       return;
     }
     const modeNames = { pullback:'눌림목', turnaround:'추세전환', imminent:'돌파임박',
-      breakout:'돌파', boxbreak:'박스돌파', leader:'대장후보', super:'슈퍼대장', surge:'급등' };
+      breakout:'돌파', boxbreak:'박스돌파', leader:'대장관찰', super:'슈퍼대장', surge:'급등' };
     const modeChips = Object.entries(d.modes || {}).map(([k, v]) => {
       const pass = v === '통과';
       const bg = pass ? '#12351f' : '#26262e';
