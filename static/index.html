@@ -561,20 +561,24 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.100</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.101</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
     <!-- v5.92: 시장별 전략 지도(docs/kr_us_strategy_map.md, 사전 등록 검정
          z=4.88) 반영 — 🇺🇸/🇰🇷 라벨 탭 클릭 시 시장 필터 자동 연동
-         (updateModeRecommendations 아래쪽 mode 클릭 핸들러 참고). -->
-    <button class="tab" data-mode="pullback">🇺🇸눌림목</button>
+         (updateModeRecommendations 아래쪽 mode 클릭 핸들러 참고).
+         v5.101: 그룹 내 탭 순서 = 측정 EV 순(사용자 지시) — 🇺🇸 슈퍼대장
+         (0.346R) → 돌파임박(0.232R) → 눌림목(0.206R), 🇰🇷 박스돌파
+         (0.431R) → 돌파(0.368R) → 추세전환(0.326R) → 종가베팅(오버나이트
+         갭 전략이라 R계열과 비교 불가 — 계열 맨 뒤 고정). -->
     <button class="tab" data-mode="super">🇺🇸슈퍼대장</button>
     <button class="tab active" data-mode="imminent">🇺🇸돌파임박</button>
+    <button class="tab" data-mode="pullback">🇺🇸눌림목</button>
     <span class="tab-group-sep"></span>
-    <button class="tab" data-mode="breakout">🇰🇷돌파</button>
     <button class="tab" data-mode="boxbreak">🇰🇷박스돌파</button>
+    <button class="tab" data-mode="breakout">🇰🇷돌파</button>
     <button class="tab" data-mode="turnaround">🇰🇷추세전환</button>
     <button class="tab" data-mode="jongga" title="T일 종가매수→T+1일 시가매도, 단기 오버나이트 전략(v5.97)">🇰🇷종가베팅</button>
     <span class="tab-group-sep"></span>
