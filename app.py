@@ -5,6 +5,25 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.102 [버그수정] 감시/관찰/일지 버튼 계열 전면 감사(사용자 지시). 근본
+        원인: 저널 저장이 /api/journal 전체배열 덮어쓰기인데, 프론트가
+        setJournal()과 _saveJournalToServer()를 따로 호출하는 곳이 9곳
+        있었고, quickWatch/watchLeaderConversion의 loadJournalFromServer()가
+        내부에서 updateTracking()을 미대기(fire-and-forget)로 돌려 동시에
+        여러 저장 요청이 경쟁 — 늦게 도착한 쪽이 먼저 도착한 걸 그대로
+        덮어써(lost-update) 방금 등록한 레코드가 저장 파일에서 통째로
+        사라지는 사고 재현 확인(👁 관찰 등록 직후 자동 추적 사이클과
+        경쟁시켜 재현 → 관찰 레코드 소실, 수정 후 재현 안 됨 확인).
+        _saveJournalToServer 직접 호출 9곳을 모두 setJournal()로 통일하고,
+        setJournal()을 프라미스 체인으로 직렬화 + 실제 전송 시점에
+        journalCache를 다시 읽도록 변경 — 유실이 구조적으로 불가능해짐.
+        사용자가 의심한 "analyze_boxbreak() pivot 필드 부재"(대장후보 죽은
+        버튼과 같은 이유) 가설은 실측 스캔 5건 전수 확인으로 기각 — pivot/
+        stop 모두 정상 존재, card() 렌더링도 정상. ⚡감시 버튼의 "무반응"
+        체감은 이 저장 경쟁 사고의 다른 얼굴로 판단(등록 직후 자동추적이
+        경쟁해 조용히 유실). 👁 관찰이 "대기 아닌 진입"으로 보인 것도
+        같은 경쟁 사고 — 생성 시점 코드(app.py /api/watch/quick, status
+        'watch' 정상 부여) 자체는 문제 없었음.
 v5.101 [UI개선] 탭 순서를 시장별 측정 EV 순으로 재배열(사용자 지시,
         순수 표시 레이어 — scanner.py 게이트/EV 로직 미변경).
         🇺🇸: 슈퍼대장(0.346R)→돌파임박(0.232R)→눌림목(0.206R).
@@ -3122,7 +3141,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.101"
+VERSION = "v5.102"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

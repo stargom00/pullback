@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.101</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.102</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3193,12 +3193,24 @@ function isLeaderConversionWatch(ticker) {
   return (journalCache || []).some(r => r.ticker === ticker && r.status === 'watch' && r.watch_kind === 'leader_conversion');
 }
 
+// v5.102 [버그수정]: 저장을 체인으로 직렬화 — quickWatch/watchLeaderConversion의
+// loadJournalFromServer()가 내부에서 updateTracking()을 미대기(fire-and-forget)로
+// 돌리는 동안, 다른 곳(markEntered/reopenWatch/saveJournal 등)이 각자 다른
+// 시점의 journalCache 스냅샷을 들고 /api/journal(전체 덮어쓰기)로 동시에
+// 저장하면 늦게 도착한 요청이 먼저 도착한 걸 덮어써 방금 등록한 레코드가
+// 통째로 사라지는 사고가 남(재현: 👁 관찰 등록 직후 자동 추적 사이클과
+// 경쟁해 관찰 레코드가 저장 파일에서 소실). 큐에 넣고 "실제 전송 시점"에
+// journalCache를 다시 읽으면, 그 사이 다른 변경이 있어도 항상 최신 상태가
+// 나가 유실이 구조적으로 불가능해진다. setJournal()이 유일한 저장 진입점 —
+// _saveJournalToServer를 직접 호출하지 말 것(큐를 건너뛰어 경쟁이 재발함).
+let _journalSaveChain = Promise.resolve();
 function setJournal(arr) {
   journalCache = arr;
-  return _saveJournalToServer(arr);
+  _journalSaveChain = _journalSaveChain.catch(() => {}).then(() => _saveJournalToServer(journalCache));
+  return _journalSaveChain;
 }
 
-// 서버 저장 (성공 확인 + 1회 재시도 + 실패 시 알림)
+// 서버 저장 (성공 확인 + 1회 재시도 + 실패 시 알림). setJournal()을 통해서만 호출됨.
 async function _saveJournalToServer(arr, _retry = true) {
   try {
     const res = await fetch('/api/journal', {
@@ -3616,7 +3628,7 @@ async function checkLeaderConversions(active) {
       }
     }
     if (changed) {
-      setJournal(j); await _saveJournalToServer(j);
+      await setJournal(j);
       if (document.getElementById('journalView').style.display !== 'none') renderJournal();
     }
   } catch (e) { /* 다음 주기에 재시도 */ }
@@ -3928,9 +3940,8 @@ async function saveManualAdd() {
     exit: '', result_r: '', held_days: '', review: ''
   };
   const j = getJournal(); j.unshift(rec);
-  journalCache = j;
   closeManualAdd();
-  const ok = await _saveJournalToServer(j);
+  const ok = await setJournal(j);
   if (ok !== false) renderJournal();
 }
 
@@ -4077,10 +4088,9 @@ async function saveJournal() {
     trigger_pivot_dist_pct: (_cat === '관찰' && TRIGGER_WATCH_MODES.has(s.mode) && s.pivot_dist_pct != null) ? s.pivot_dist_pct : null,
   };
   const j = getJournal(); j.unshift(rec);
-  journalCache = j;
   closeJournal();
   // 저장 완료를 기다려 누락 방지 (실패 시 알림은 _saveJournalToServer가 처리)
-  const ok = await _saveJournalToServer(j);
+  const ok = await setJournal(j);
   if (ok && typeof renderJournal === 'function' &&
       document.getElementById('journalView').style.display !== 'none') {
     renderJournal();
@@ -4571,7 +4581,7 @@ async function markEntered(id) {
   r.tracking = true;
   r.date = kstStr();
   r.closed_reason = '';
-  setJournal(j); await _saveJournalToServer(j); renderJournal();
+  await setJournal(j); renderJournal();
 }
 
 // 대기 → 무산: 돌파 안 오고 셋업 깨짐. 손익 0, 통계 제외.
@@ -4580,7 +4590,7 @@ async function markMissed(id) {
   const r = j.find(x => x.id === id); if (!r) return;
   r.status = 'missed';
   r.tracking = false;
-  setJournal(j); await _saveJournalToServer(j); renderJournal();
+  await setJournal(j); renderJournal();
 }
 
 // v4.95: 종료(closed) → 진입중(entered)으로 되돌리기. 목표도달 자동종료가
@@ -4598,7 +4608,7 @@ async function reopenRow(id) {
   r.exit_reason = '';
   r.closed_date = '';
   r.target_reached = false;
-  setJournal(j); await _saveJournalToServer(j); renderJournal();
+  await setJournal(j); renderJournal();
 }
 
 // ── v5.47: 관찰(watch) 종료 처리 — 무산 / 진입함 / 그냥종료 세 갈래 ──
@@ -4619,7 +4629,7 @@ async function markWatchEntered(id) {
   r.tracking = !!(r.entry && r.stop);
   r.date = kstStr();
   r.closed_reason = '';
-  setJournal(j); await _saveJournalToServer(j);
+  await setJournal(j);
   editingId = id;
   renderJournal();
 }
@@ -4631,7 +4641,7 @@ async function markWatchMissed(id) {
   r.tracking = false;
   r.closed_reason = '관찰종료(무산)';
   r.closed_date = kstStr();
-  setJournal(j); await _saveJournalToServer(j); renderJournal();
+  await setJournal(j); renderJournal();
 }
 // 관찰 → 그냥 종료: 셋업 붕괴는 아니지만 더 안 지켜봄(승패 판단 없음).
 // missed와 같은 종결 상태를 재사용(통계 제외 로직 그대로 활용)하되 사유만 구분.
@@ -4642,7 +4652,7 @@ async function markWatchClosed(id) {
   r.tracking = false;
   r.closed_reason = '관찰종료(수동)';
   r.closed_date = kstStr();
-  setJournal(j); await _saveJournalToServer(j); renderJournal();
+  await setJournal(j); renderJournal();
 }
 // 종료된 관찰 → 다시 관찰중으로 (실수로 종료했을 때).
 async function reopenWatch(id) {
@@ -4651,7 +4661,7 @@ async function reopenWatch(id) {
   r.status = 'watch';
   r.closed_reason = '';
   r.closed_date = '';
-  setJournal(j); await _saveJournalToServer(j); renderJournal();
+  await setJournal(j); renderJournal();
 }
 // v5.54: 관찰 종류별 만료 기간·해소(더 이상 정리 대상 아님) 판정 — 관찰
 // 종류가 늘어도 cleanupExpiredWatches/renderWatchCleanupBar를 안 건드리게
@@ -4680,7 +4690,7 @@ async function cleanupExpiredWatches() {
     r.closed_reason = '확인기간종료(자동정리)';
     r.closed_date = today;
   }
-  setJournal(j); await _saveJournalToServer(j); renderJournal();
+  await setJournal(j); renderJournal();
 }
 // 관찰 뷰 전용 행 렌더 — 진행중은 그대로, 종료된 건 접어서 하단에(기본 접힘).
 function renderWatchRows(rows) {
