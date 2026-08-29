@@ -5,6 +5,24 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.105 [기능추가] 앱 비공개 전환 — 로그인 게이트(사용자 지시). 포지션
+        탭(계좌 수량·평단·손익)이 그대로 공개 노출되던 상태를 막음.
+        APP_PASSWORD 환경변수 설정 시에만 켜짐(미설정이면 기존처럼 전체
+        공개, 온오프는 이 변수 하나). 90일 HMAC 서명 쿠키(pb_session,
+        httponly+secure+samesite=lax) — 서명 키가 비번에서 파생돼 비번을
+        바꾸면 이전 쿠키가 전부 자동 무효화됨. /login(GET·POST, 비밀번호
+        입력 하나짜리 미니멀 폼) 신설, python-multipart 의존성 추가 없이
+        urllib.parse.parse_qs로 form body 직접 파싱. 예외: ①
+        /api/positions/sync·sync_error는 기존 SYNC_TOKEN 자체 보호 그대로
+        유지(세션 게이트 안 거침, sync_toss.py는 쿠키를 못 들고 있음) ②
+        얼마냐봇이 폴링하는 GET 경로(watch/positions·watch/pending·
+        opening-surge·jongga/candidates·positions·market/gate·journal·
+        dist/{t}·ma/{t}·pullback-signal/{t}·vol/{t}·moneyflow/{m}/summary,
+        stock-alert/main.py SCANNER_URL 호출부 전수 확인 기준)는 새
+        API_READ_TOKEN 헤더(X-Api-Read-Token)로도 통과 — stock-alert
+        레포도 이 헤더를 보내도록 같이 수정(v2.21). 나머지 전부(스캔·
+        저널·디버그 등)는 세션 쿠키 필수, API는 401 JSON·페이지는 /login
+        리다이렉트.
 v5.104 [기능추가] sync_toss.py IP 미허용 실패 상태 노출(사용자 지시).
         토스 API가 403(IP 미허용)으로 실패하면 sync_toss.py가 현재 공인
         IP를 포함해 POST /api/positions/sync_error(SYNC_TOKEN 인증)로
@@ -3097,16 +3115,19 @@ v4.5.0  한국 종목(.KS/.KQ) 데이터 소스를 yfinance → 네이버(naver_
 v4.4.2  (이전 버전)
 """
 import asyncio
+import hashlib
+import hmac
 import math
 import os
 import time
 import json as _json
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import parse_qs
 
 import yfinance as yf
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, analyze_inverse, analyze_breakdown, analyze_pattern, analyze_stage2, rs_score_stage2, analyze_ibd9_cheap, analyze_ibd9_full, analyze_jongga, rs_raw_score, to_rs_rank, climax_warning, inverse_score, price_frozen_check
@@ -3166,7 +3187,141 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.104"
+# v5.105: 비공개 전환 — 계좌 정보(포지션 탭)가 그대로 노출되던 상태를 막는다
+# (사용자 지시). APP_PASSWORD 미설정이면 이 게이트 자체가 꺼져 기존처럼
+# 전체 공개 — 온오프는 이 환경변수 하나로 결정(로컬 개발 시 방해 안 됨).
+APP_PASSWORD = os.environ.get("APP_PASSWORD")
+API_READ_TOKEN = os.environ.get("API_READ_TOKEN")
+_SESSION_COOKIE = "pb_session"
+_SESSION_MAX_AGE = 90 * 24 * 3600   # 90일
+
+# sync_toss.py 전용 — 자체 SYNC_TOKEN으로 이미 보호되고(_verify_sync_token),
+# 브라우저 쿠키를 못 들고 있는 로컬 스크립트라 세션/API_READ_TOKEN 게이트를
+# 아예 안 거친다.
+_SYNC_TOKEN_GATED_PATHS = {"/api/positions/sync", "/api/positions/sync_error"}
+
+# 얼마냐봇(stock-alert 레포)이 폴링하는 읽기 전용 API — API_READ_TOKEN
+# 헤더(X-Api-Read-Token)로 세션 쿠키 없이 통과. stock-alert/main.py의
+# SCANNER_URL 호출부 전수 확인(2026-08-30 기준) 결과와 정확히 일치시킴 —
+# 여기 없는 경로(예: POST /api/moneyflow/{market}/run)는 봇이 안 쓰므로
+# 의도적으로 제외, 세션 쿠키 없이는 여전히 막힘.
+_BOT_READ_EXACT_PATHS = {
+    "/api/watch/positions", "/api/watch/pending", "/api/opening-surge",
+    "/api/jongga/candidates", "/api/positions", "/api/market/gate", "/api/journal",
+}
+_BOT_READ_PATH_PREFIXES = ("/api/dist/", "/api/ma/", "/api/pullback-signal/", "/api/vol/")
+
+
+def _is_bot_read_path(method: str, path: str) -> bool:
+    if method != "GET":
+        return False
+    if path in _BOT_READ_EXACT_PATHS:
+        return True
+    if path.startswith(_BOT_READ_PATH_PREFIXES):
+        return True
+    if path.startswith("/api/moneyflow/") and path.endswith("/summary"):
+        return True
+    return False
+
+
+def _session_secret() -> bytes:
+    # 서명 키를 비밀번호에서 파생 — 비번을 바꾸면(Railway 재배포) 이전에
+    # 발급된 쿠키가 자동으로 전부 무효화되는 부수 효과(의도적, 별도 무효화
+    # 로직 불필요).
+    return hashlib.sha256((APP_PASSWORD or "").encode()).digest()
+
+
+def _make_session_cookie() -> str:
+    expiry = int(time.time()) + _SESSION_MAX_AGE
+    payload = str(expiry)
+    sig = hmac.new(_session_secret(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{sig}"
+
+
+def _verify_session_cookie(value) -> bool:
+    if not value or "." not in value:
+        return False
+    payload, _, sig = value.partition(".")
+    expected = hmac.new(_session_secret(), payload.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        return False
+    try:
+        return int(payload) > time.time()
+    except ValueError:
+        return False
+
+
+_LOGIN_PAGE_HTML = """<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>눌림목 스캐너</title>
+<style>
+body{background:#0f1115;color:#e5e7eb;font-family:-apple-system,BlinkMacSystemFont,sans-serif;
+display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+form{background:#1a1d24;padding:32px;border-radius:12px;width:260px;box-shadow:0 4px 20px rgba(0,0,0,.3)}
+h1{font-size:16px;margin:0 0 20px;text-align:center;color:#9ca3af;font-weight:500}
+input{width:100%;box-sizing:border-box;padding:12px;border-radius:8px;border:1px solid #333;
+background:#0f1115;color:#e5e7eb;font-size:15px}
+button{width:100%;margin-top:12px;padding:12px;border:0;border-radius:8px;background:#3b82f6;
+color:#fff;font-size:15px;cursor:pointer}
+.err{color:#f87171;font-size:13px;text-align:center;margin:0 0 12px}
+</style></head><body>
+<form method="post" action="/login">
+<h1>🔒 눌림목 스캐너</h1>
+__ERROR__
+<input type="password" name="password" placeholder="비밀번호" autofocus required>
+<button type="submit">입장</button>
+</form>
+</body></html>"""
+
+
+@app.get("/login")
+async def login_page():
+    if not APP_PASSWORD:
+        return RedirectResponse("/", status_code=302)
+    return Response(_LOGIN_PAGE_HTML.replace("__ERROR__", ""), media_type="text/html")
+
+
+@app.post("/login")
+async def login_submit(request: Request):
+    if not APP_PASSWORD:
+        return RedirectResponse("/", status_code=302)
+    body = (await request.body()).decode("utf-8", errors="replace")
+    pw = (parse_qs(body).get("password") or [""])[0]
+    if not hmac.compare_digest(pw, APP_PASSWORD):
+        html = _LOGIN_PAGE_HTML.replace("__ERROR__", '<p class="err">비밀번호가 틀렸습니다</p>')
+        return Response(html, media_type="text/html", status_code=401)
+    resp = RedirectResponse("/", status_code=303)
+    resp.set_cookie(_SESSION_COOKIE, _make_session_cookie(), max_age=_SESSION_MAX_AGE,
+                     httponly=True, secure=True, samesite="lax")
+    return resp
+
+
+@app.middleware("http")
+async def _auth_gate(request: Request, call_next):
+    """APP_PASSWORD 미설정이면 통과(게이트 꺼짐). 설정되면: /login과
+    SYNC_TOKEN 자체보호 경로는 항상 통과, 유효한 세션 쿠키가 있으면 통과,
+    얼마냐봇 폴링 경로는 API_READ_TOKEN 헤더로도 통과. 나머지는 API면
+    401 JSON, 페이지면 /login으로 리다이렉트."""
+    if not APP_PASSWORD:
+        return await call_next(request)
+
+    path = request.url.path
+    if path == "/login" or path in _SYNC_TOKEN_GATED_PATHS:
+        return await call_next(request)
+
+    if _verify_session_cookie(request.cookies.get(_SESSION_COOKIE)):
+        return await call_next(request)
+
+    if _is_bot_read_path(request.method, path) and API_READ_TOKEN and \
+            hmac.compare_digest(request.headers.get("X-Api-Read-Token", ""), API_READ_TOKEN):
+        return await call_next(request)
+
+    if path.startswith("/api/"):
+        return JSONResponse({"ok": False, "error": "로그인 필요"}, status_code=401)
+    return RedirectResponse("/login", status_code=302)
+
+
+VERSION = "v5.105"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
