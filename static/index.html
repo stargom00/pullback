@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.105</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.106</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -796,6 +796,21 @@ tr.editing{background:rgba(242,179,61,.06)}
     <div class="actions">
       <button class="cancel" onclick="closeManualAdd()">취소</button>
       <button class="save ma-save-btn" onclick="saveManualAdd()">대기로 추가</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="pivotChoiceModal">
+  <div class="modal">
+    <h3>⚡ 이미 피벗 위예요</h3>
+    <div class="sub" id="pcInfo"></div>
+    <div class="actions" style="flex-direction:column;align-items:stretch;gap:8px">
+      <button class="save" onclick="pivotChoiceEnterNow()">① 현재가 기준 진입으로 기록</button>
+      <div style="display:flex;gap:8px">
+        <input id="pcCustomPrice" type="text" inputmode="decimal" placeholder="② 지정가 입력" style="flex:1;width:auto">
+        <button class="save" style="flex:0 0 100px" onclick="pivotChoiceCustomWait()">이 가격 대기</button>
+      </div>
+      <button class="cancel" onclick="pivotChoiceCancel()">③ 취소</button>
     </div>
   </div>
 </div>
@@ -3690,8 +3705,18 @@ async function updateTracking(prefetched, prefetchedClosed) {
     // 진입가(피벗) 도달 → 자동 '진입'으로 전환, 진입일 갱신.
     // 자동 무산 2조건: (1) 대기 WATCH_DAYS일 경과(셋업 식음)
     //                  (2) 종가가 손절가 아래로 빠짐(베이스/셋업 붕괴)
+    // v5.106 [버그수정]: "현재가 ≥ 진입가"라는 상태(레벨) 체크만 하고 있어서,
+    // 등록 시점에 이미 현재가가 피벗 위였던 기록(8/30 컴투스 등)이 등록
+    // 직후 첫 체크에서 곧바로 진입 전환됨 — "등록 이후 실제로 아래→위로
+    // 교차했는지"를 안 봤던 게 원인. reg_price(등록 시점 가격, 서버가
+    // /api/watch/quick에서 저장)가 이미 entry 이상이면 애초에 교차가
+    // 불가능한 상태이므로 자동 전환하지 않는다(등록 화면에서 3지선다로
+    // 걸러졌어야 할 레코드가 구버전 캐시 등으로 남아있어도 안전).
+    // reg_price가 없는 구버전 레코드는 기존 방식(레벨 체크)으로 폴백.
     if ((r.status || 'entered') === 'pending') {
-      if (px >= entry) {
+      const regPrice = r.reg_price != null ? parseFloat(r.reg_price) : null;
+      const crossable = !(regPrice != null && regPrice >= entry);
+      if (crossable && px >= entry) {
         r.status = 'entered';
         r.tracking = true;
         r.date = kstStr(today);  // 실제 진입일로 갱신
@@ -3907,18 +3932,33 @@ function modeTab(mode) { return MODE_TAB_LABEL[mode] || mode || '-'; }
 // 트레이딩뷰 차트 URL (v4.52.2): 한국은 KRX:6자리코드, 미국은 티커
 function modeCategory(mode) { return mode === 'surge' ? '단타' : '추세추종'; }
 // v4.64: 원클릭 관찰 등록 — 모달 없이 카드 피벗·손절 그대로 봇 감시 시작
+// v5.106 [버그수정]: 등록 순간 이미 현재가가 피벗 위면 그대로 등록해도
+// updateTracking() 첫 체크에서 곧바로 '진입'으로 전환돼버림(8/30 컴투스 등
+// 5건 — 등록가=피벗인데 현재가가 이미 그 위라 등록 직후 +R로 표시).
+// 등록 전에 먼저 걸러서 3지선다(①현재가 기준 진입 ②지정가 대기 ③취소)를
+// 보여준다 — 서버(/api/watch/quick)도 같은 조건을 409로 한 번 더 강제하므로
+// (방어 이중화) 여기서 놓쳐도 최종적으로는 안전.
 async function quickWatch(btn, ticker) {
   const s = lastHits.find(h => h.ticker === ticker);
   if (!s) return;
   if (!s.pivot) { btn.textContent = '피벗없음'; return; }
+  if (s.close != null && s.close >= s.pivot) {
+    openPivotChoiceModal(s, btn);
+    return;
+  }
+  await _quickWatchRequest(s, btn, {
+    ticker: s.ticker, name: s.name, market: s.market,
+    pivot: s.pivot, stop: s.stop, tab: modeTab(s.mode), score: s.score,
+    reg_price: s.close,
+  });
+}
+
+async function _quickWatchRequest(s, btn, payload) {
   btn.disabled = true; btn.textContent = '등록중…';
   try {
     const res = await fetch('/api/watch/quick', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ticker: s.ticker, name: s.name, market: s.market,
-        pivot: s.pivot, stop: s.stop, tab: modeTab(s.mode), score: s.score,
-      })
+      body: JSON.stringify(payload)
     });
     const j = await res.json();
     if (j.ok) {
@@ -3928,10 +3968,62 @@ async function quickWatch(btn, ticker) {
       // 안 건드려서, 등록 직후 '내 일지' 탭으로 가면 옛 캐시가 그대로 보여
       // 방금 감시 등록한 종목이 안 보이던 문제. 서버에서 다시 읽어와 캐시 동기화.
       await loadJournalFromServer();
+    } else if (j.code === 'already_above_pivot') {
+      // 등록 사이 가격이 더 올라 서버가 뒤늦게 걸러낸 경우 — 다시 선택지 제시.
+      btn.disabled = false; btn.textContent = '⚡ 감시';
+      openPivotChoiceModal(s, btn);
     } else {
       btn.textContent = '실패'; btn.disabled = false;
     }
   } catch (e) { btn.textContent = '실패'; btn.disabled = false; }
+}
+
+let _pivotChoiceCtx = null;
+function openPivotChoiceModal(s, btn) {
+  _pivotChoiceCtx = { s, btn };
+  document.getElementById('pcInfo').innerHTML =
+    `<b>${s.name}</b> (${s.ticker})<br>현재가 ${fmtPrice(s.close, s.market)}가 이미 피벗 ${fmtPrice(s.pivot, s.market)} 위예요.<br>` +
+    `그냥 등록하면 대기가 아니라 바로 '진입'으로 기록됩니다 — 어떻게 할까요?`;
+  document.getElementById('pcCustomPrice').value = '';
+  document.getElementById('pivotChoiceModal').classList.add('open');
+}
+function closePivotChoiceModal(resetBtn) {
+  document.getElementById('pivotChoiceModal').classList.remove('open');
+  if (resetBtn && _pivotChoiceCtx && _pivotChoiceCtx.btn) {
+    _pivotChoiceCtx.btn.disabled = false;
+    _pivotChoiceCtx.btn.textContent = '⚡ 감시';
+  }
+}
+function pivotChoiceCancel() {
+  closePivotChoiceModal(true);
+  _pivotChoiceCtx = null;
+}
+async function pivotChoiceEnterNow() {
+  const ctx = _pivotChoiceCtx; if (!ctx) return;
+  const { s, btn } = ctx;
+  closePivotChoiceModal(false);
+  _pivotChoiceCtx = null;
+  await _quickWatchRequest(s, btn, {
+    ticker: s.ticker, name: s.name, market: s.market,
+    pivot: s.pivot, stop: s.stop, tab: modeTab(s.mode), score: s.score,
+    reg_price: s.close, force_status: 'entered', entry_override: s.close,
+  });
+}
+async function pivotChoiceCustomWait() {
+  const ctx = _pivotChoiceCtx; if (!ctx) return;
+  const { s, btn } = ctx;
+  const custom = parseFloat(document.getElementById('pcCustomPrice').value);
+  if (!custom || custom <= s.close) {
+    alert('현재가보다 높은 가격을 입력하세요 — 대기는 그 위쪽 돌파를 기다리는 조건이에요.');
+    return;
+  }
+  closePivotChoiceModal(false);
+  _pivotChoiceCtx = null;
+  await _quickWatchRequest(s, btn, {
+    ticker: s.ticker, name: s.name, market: s.market,
+    pivot: custom, stop: s.stop, tab: modeTab(s.mode), score: s.score,
+    reg_price: s.close,
+  });
 }
 
 // v5.54: 대장후보→눌림목 전환 관찰 원클릭 등록. quickWatch와 같은 엔드포인트
@@ -4196,6 +4288,7 @@ async function saveJournal() {
     pivot_type: s.pivot_type || '', setup_score: s.setup_score != null ? Math.round(s.setup_score) : '',
     rs: s.rs, entry, stop,
     pivot: s.pivot ?? null,                    // 피벗가 (대기 종목 돌파 알림용)
+    reg_price: s.close ?? null,                // v5.106: 등록 시점 가격 — pending 교차판정 기준(updateTracking 참고)
     risk_pct: riskAmt != null ? Math.round(riskAmt * 10) / 10 : '',
     // ── 진입 시점 신호 스냅샷 (검증용) ──
     sig_level: sig ? sig.level : '',          // ok | warn | danger
@@ -4619,6 +4712,7 @@ function viewRow(r) {
       ? `<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">
            <span class="st-act" onclick="partialEditingId=${r.id};editingId=null;renderJournal()" title="부분 익절 기록 (예: 2R에서 절반)" style="border-color:#8c6d2d;color:#f2b33d">🔪부분</span>
            <span class="st-act" onclick="markClosed(${r.id})" title="매매 종료 · 청산가 입력" style="border-color:#2d5a8c;color:#9fb4ff">⏹종료</span>
+           ${(!r.partials || !r.partials.length) ? `<span class="st-act" onclick="revertToPending(${r.id})" title="등록 직후 즉시 진입으로 잘못 전환된 기록을 대기 상태로 되돌리기" style="border-color:#666;color:#aaa">↩대기로</span>` : ''}
          </div>`
     // v4.95: 목표도달 자동종료가 남긴 실수(부분익절 하려던 종목이 먼저 전량
     // 종료돼버린 경우 등)를 되돌릴 수 있게. 종료 기록만 초기화하고 진입중으로 복귀.
@@ -4745,6 +4839,25 @@ async function markMissed(id) {
   const r = j.find(x => x.id === id); if (!r) return;
   r.status = 'missed';
   r.tracking = false;
+  await setJournal(j); renderJournal();
+}
+
+// v5.106: 즉시-진입 오염 기록(등록 시점에 이미 피벗 위였던 게 자동으로
+// '진입'으로 전환된 8/30 컴투스 등)을 수동으로 '대기'로 되돌리는 정정 기능.
+// reg_price를 현재가로 다시 세팅해서(대개 여전히 피벗 위) 되돌린 직후
+// updateTracking()이 또 즉시 재전환하지 않게 막는다 — crossable 조건이
+// reg_price>=entry일 때 거짓이 되므로, 사용자가 markEntered로 직접
+// 확정하거나 진입가를 수정하기 전까진 안전하게 대기 상태로 머문다.
+async function revertToPending(id) {
+  const j = getJournal();
+  const r = j.find(x => x.id === id); if (!r) return;
+  if (r.partials && r.partials.length) { alert('부분익절 기록이 있는 종목은 대기로 되돌릴 수 없어요.'); return; }
+  if (!confirm(`${r.name}을(를) 다시 '대기' 상태로 되돌릴까요?\n등록 직후 즉시 진입 처리된 오염 기록을 바로잡을 때 씁니다.\n진입일 등 기록이 초기화됩니다.`)) return;
+  r.status = 'pending';
+  r.tracking = false;
+  r.entry = r.pivot ?? r.entry;
+  r.reg_price = r.last_price != null ? r.last_price : (r.reg_price ?? null);
+  r.closed_reason = '';
   await setJournal(j); renderJournal();
 }
 

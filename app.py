@@ -5,6 +5,25 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.106 [버그수정] 감시 등록 즉시 '진입'으로 오전환되는 버그(사용자 지시,
+        재현: 8/30 컴투스 등 5건 — 등록가=피벗 34,000, 현재가 36,000, 등록
+        직후 +1.6R 표시). 원인: 서버(/api/watch/quick)와 얼마냐봇은 이
+        전환에 관여 안 함 — 전환은 static/index.html의 updateTracking()이
+        "현재가 ≥ 진입가" 상태(레벨)만 보고 매 체크마다 판정하는 구조였고,
+        등록 시점 가격을 저장/비교하지 않아 등록 직후 첫 체크에서 바로
+        걸림(교차 감지가 아니라 레벨 체크였던 게 근본원인). 수정 3단계:
+        ① reg_price(등록 시점 가격) 필드 신설 — /api/watch/quick이 받아서
+        저장, updateTracking() pending 분기가 "reg_price가 이미 entry
+        이상이면 자동전환 안 함"으로 교차 판정하도록 변경(reg_price 없는
+        구버전 레코드는 기존 레벨체크로 폴백, 하위호환). ② 등록 시점 가드:
+        quickWatch()가 등록 전에 현재가≥피벗이면 3지선다 모달(①현재가
+        기준 진입 기록 ②지정가 입력해 대기 ③취소) 표시, 서버도 같은 조건을
+        force_status 없이는 409로 거부(이중 방어 — 프론트 우회/레이스에도
+        안전). ③ 오염 기록 정정: viewRow에 ↩대기로(revertToPending) 버튼
+        신설 — entered→pending 수동 되돌리기(부분익절 있으면 차단), 기존
+        delJournal(삭제)과 함께 8/30 5건 수동 정리 가능. 수동 '+ 일지에
+        추가' 모달(saveJournal)도 reg_price를 같이 저장해 같은 안전장치
+        적용(대기 카테고리로 저장 시).
 v5.105 [기능추가] 앱 비공개 전환 — 로그인 게이트(사용자 지시). 포지션
         탭(계좌 수량·평단·손익)이 그대로 공개 노출되던 상태를 막음.
         APP_PASSWORD 환경변수 설정 시에만 켜짐(미설정이면 기존처럼 전체
@@ -3321,7 +3340,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.105"
+VERSION = "v5.106"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7754,7 +7773,7 @@ async def watch_quick(request: Request):
     이 API는 카드의 피벗·손절을 그대로 받아 서버에서 일지에 1건 append한다.
     (기존 POST /api/journal은 전체 덮어쓰기라 동시성 위험 → append 전용 신설)
 
-    body: {ticker, name, market, pivot, stop}
+    body: {ticker, name, market, pivot, stop, reg_price, force_status?, entry_override?}
     중복: 같은 ticker의 pending 항목이 이미 있으면 새로 안 만들고 exists 반환.
 
     v5.54: category='관찰' 분기 추가 — 대장후보→눌림목 전환 관찰(👁 버튼)이
@@ -7762,7 +7781,17 @@ async def watch_quick(request: Request):
     피벗 개념 자체가 없음), status='watch'(봇 알림 대상 아님, 손절 없음),
     watch_kind로 관찰 종류 구분(cleanupExpiredWatches 등에서 트리거 관찰과
     다른 만료 기간 적용). 기존 category='추세추종'(기본값) 경로는 무변경.
-    """
+
+    v5.106 [버그수정] 등록 순간 이미 현재가가 피벗 위면 대기(pending)로
+    만들어도 다음 updateTracking() 첫 체크에서 곧바로 '진입'으로 전환돼
+    버리던 사고(8/30 컴투스 등 5건 — 등록가=피벗 34,000, 현재가 36,000,
+    등록 직후 +1.6R로 표시). reg_price(등록 시점 가격)를 받아 저장해서
+    프론트가 "상태(위/아래)"가 아니라 "등록 이후 실제 교차"로 판정할 수 있게
+    한다(static/index.html updateTracking 참고). 여기서는 그 안전장치의
+    서버측 강제: is_observe가 아니고 pivot이 있는데 reg_price가 이미 pivot
+    이상이면 force_status 없이는 거부(409) — 프론트가 이 상태를 감지해
+    등록 전에 3지선다(①현재가 기준 진입 ②지정가 대기 ③취소) 모달을 띄우고,
+    ①을 고르면 force_status='entered'+entry_override로 재호출한다."""
     body = await request.json()
     ticker = (body.get("ticker") or "").strip()
     if not ticker:
@@ -7777,6 +7806,22 @@ async def watch_quick(request: Request):
     if not pivot and not is_observe:
         return JSONResponse({"ok": False, "error": "pivot 필요"}, status_code=400)
 
+    try:
+        reg_price = float(body.get("reg_price")) if body.get("reg_price") not in (None, "") else None
+    except (TypeError, ValueError):
+        reg_price = None
+    force_status = body.get("force_status") or None   # None | "entered"
+    try:
+        entry_override = float(body.get("entry_override")) if body.get("entry_override") not in (None, "") else None
+    except (TypeError, ValueError):
+        entry_override = None
+
+    if not is_observe and pivot and reg_price is not None and reg_price >= pivot and force_status != "entered":
+        return JSONResponse({
+            "ok": False, "error": "이미 피벗 위 — 대기로 등록하면 즉시 진입 처리됩니다",
+            "code": "already_above_pivot", "reg_price": reg_price, "pivot": pivot,
+        }, status_code=409)
+
     watch_kind = body.get("watch_kind") or None
     j = load_journal()
     if is_observe:
@@ -7790,6 +7835,14 @@ async def watch_quick(request: Request):
             if r.get("ticker") == ticker and r.get("status") == "pending":
                 return JSONResponse({"ok": True, "exists": True, "id": r.get("id"),
                                      "msg": "이미 대기 감시 중"})
+    entered_now = (not is_observe) and force_status == "entered"
+    if entered_now:
+        entry_val = entry_override if entry_override is not None else (reg_price if reg_price is not None else pivot)
+    elif is_observe:
+        entry_val = None
+    else:
+        entry_val = pivot   # 대기 항목만 entry=피벗 관례, 관찰은 없음
+
     import time as _t
     rec = {
         "id": int(_t.time() * 1000),
@@ -7797,17 +7850,20 @@ async def watch_quick(request: Request):
         "ticker": ticker,
         "name": body.get("name") or ticker,
         "market": body.get("market") or ("KR" if ticker[:1].isdigit() else "US"),
-        "status": "watch" if is_observe else "pending",
+        "status": "watch" if is_observe else ("entered" if entered_now else "pending"),
         "category": category,
         "cat": category,
         "tab": body.get("tab") or "돌파임박",
         "signal": "",
         "pivot": pivot,
-        "entry": pivot if not is_observe else None,   # 대기 항목만 entry=피벗 관례, 관찰은 없음
+        "entry": entry_val,
         "stop": stop,
         "pivot_type": "원클릭",
         "setup_score": body.get("score") or "",
+        "reg_price": reg_price,   # v5.106: 등록 시점 가격 — pending 교차판정 기준
     }
+    if entered_now:
+        rec["tracking"] = bool(entry_val and stop)
     if is_observe:
         rec["watch_kind"] = watch_kind
         rec["watch_start_date"] = rec["date"]
