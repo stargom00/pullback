@@ -5,3 +5,4 @@ datacache_*.pkl
 .env
 scripts/measurements/*.results.json
 money_flow_data/
+jongga_forward.json

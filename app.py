@@ -5,6 +5,31 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.98 [기능추가] 🇰🇷 종가베팅 포워드 트래킹(사용자 지시) — 후보의 실제
+        성과를 자동 누적해 백테스트(+1.22%, n=276, z=4.28)와 실전 결과를
+        계속 대조. 저장: `_resolve_persistent_path("jongga_forward.json")`
+        (Railway 볼륨, favorites/alerts와 동일 경로 우선순위). 레코드는
+        {날짜:{티커:{...}}} — snapshot_price/close_price/next_open_price
+        3단계로 채워지고, 스냅샷가↔확정종가가 다를 수 있어(14:40~15:30
+        변동) 두 기준(gap_snapshot_pct/gap_close_pct)을 분리 계산.
+        (1) `_record_jongga_snapshot()`: 14:40~15:00 스케줄 스냅샷
+        (`_maybe_run_jongga_snapshot`)에서만 호출 — 라이브 온디맨드 스캔은
+        기록 안 함(중복/조기기록 방지). (2) `_record_jongga_eod()`:
+        `_warm_market()`의 '장마감 후' 분기(daykey 확정 시점)에서 오늘자
+        후보의 확정 종가 채움. (3) `_resolve_jongga_gaps()`: `_warm_market()`
+        장마감후·장중 두 분기 다에서 호출 — 과거(오늘 이전) 미확정
+        레코드 중 다음 거래일 데이터(Open)가 이미 들어온 것을 찾아 갭
+        확정(date_str < today 가드로 당일 자기 자신 오확정 방지, 왕복
+        비용 0.3% 차감은 백테스트와 동일 가정). (4) `/api/jongga/forward`
+        신설 — 스냅샷기준/종가기준 각각 n·평균갭·갭업률 + 백테스트
+        참조값 + 최근 30건. (5) static/index.html: 종가베팅 탭 하단에
+        `jonggaForwardFooterHtml()` — 누적 30건 미만이면 "표본 축적 중"
+        표시, 이상이면 두 기준 나란히 표시. `/api/scan`과 별도 엔드포인트라
+        탭 진입 시 `loadJonggaForwardStats()`로 독립 fetch.
+        검증: _record_jongga_snapshot→_record_jongga_eod→_resolve_jongga_gaps
+        →_jongga_forward_stats() 전체 라이프사이클을 합성 pandas 데이터로
+        직접 실행해 종가/갭 계산값 정확성 확인(예: (72500/71000-1-0.003)
+        *100=1.81% 등 수동 검산 일치).
 v5.97 [기능추가] 🇰🇷 종가베팅 탭 신설(사용자 지시) — 사전 등록 백테스트
         채택 조건 그대로 구현(docs/kr_jongga_betting_backtest.md, 조합A:
         n=276, 비용차감후 평균 +1.22%, base 대비 z=4.28). T일 종가매수
@@ -3031,7 +3056,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.97"
+VERSION = "v5.98"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -3673,6 +3698,168 @@ async def _run_scan_jongga(bundle: dict) -> dict:
         "session_state": session["state"], "session_label": session["label"],
         "timing": bundle.get("timing"),
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "ts": time.time(),
+    }
+
+
+# ── 🇰🇷 종가베팅 포워드 트래킹 (v5.98) ──────────────────────────────
+# 후보의 실제 성과를 자동 누적 — 백테스트(+1.22%)와 실전 결과를 계속
+# 대조하기 위함(사용자 지시). 저장 파일 경로(JONGGA_FORWARD_PATH)는
+# 아래쪽 _resolve_persistent_path() 정의 직후에 잡는다(모듈 하단 참고,
+# ALERTS_USER_PATH 등과 같은 위치) — 이 함수들은 호출 시점에만
+# JONGGA_FORWARD_PATH를 참조하므로 정의 순서는 무관.
+#
+# 데이터 구조: {"YYYY-MM-DD": {티커: {레코드}}}. 레코드 필드:
+#   snapshot_price/snapshot_ts — 14:40~15:00 스냅샷 시점 가격
+#   close_price/eod_recorded  — 당일 장마감 확정 종가(15:40+ 채움)
+#   next_open_price/next_open_date/resolved — 익일 시가 확정(장 열리면 채움)
+#   gap_snapshot_pct — (익일시가/스냅샷가 - 1 - 비용0.3%)*100  ("스냅샷 기준" 성과)
+#   gap_close_pct    — (익일시가/확정종가 - 1 - 비용0.3%)*100  ("종가 기준" 성과)
+# 스냅샷가↔확정종가가 다를 수 있어(14:40~15:30 변동) 둘 다 남기고 분리
+# 계산한다 — 실전 진입가는 그 사이 어딘가라 어느 한쪽만 쓰면 왜곡된다.
+JONGGA_FORWARD_COST = 0.003  # 왕복 수수료+슬리피지 0.3% — 백테스트와 동일 가정
+
+
+def _load_jongga_forward() -> dict:
+    if os.path.exists(JONGGA_FORWARD_PATH):
+        try:
+            with open(JONGGA_FORWARD_PATH, encoding="utf-8") as f:
+                data = _json.load(f)
+                return data if isinstance(data, dict) else {}
+        except (ValueError, OSError):
+            return {}
+    return {}
+
+
+def _save_jongga_forward(data: dict):
+    try:
+        tmp = JONGGA_FORWARD_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(data, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, JONGGA_FORWARD_PATH)
+    except OSError as e:
+        print(f"[jongga-forward] 저장 실패: {e}")
+
+
+def _record_jongga_snapshot(date_str: str, hits: list):
+    """14:40~15:00 스냅샷 확정 시(스케줄러 1회 실행분에서만 호출 —
+    사용자가 탭을 열 때마다 도는 라이브 스캔에서는 호출 안 함, 중복/
+    조기기록 방지) 오늘자 후보를 전부 기록."""
+    fwd = _load_jongga_forward()
+    day_rec = fwd.setdefault(date_str, {})
+    now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+    changed = False
+    for h in hits:
+        t = h.get("ticker")
+        if not t or t in day_rec:
+            continue
+        day_rec[t] = {
+            "ticker": t, "name": h.get("name", t),
+            "snapshot_price": h.get("close"), "snapshot_ts": now_str,
+            "turnover_rank": h.get("turnover_rank"), "change_pct_snapshot": h.get("change_pct"),
+            "vol_mult": h.get("vol_mult"), "off_high_pct": h.get("off_high_pct"), "wick_pct": h.get("wick_pct"),
+            "close_price": None, "eod_recorded": False,
+            "next_open_price": None, "next_open_date": None, "resolved": False,
+            "gap_snapshot_pct": None, "gap_close_pct": None,
+        }
+        changed = True
+    if changed:
+        _save_jongga_forward(fwd)
+
+
+def _record_jongga_eod(date_str: str, kr_data: dict):
+    """장 마감 후(daykey 확정 시점, _warm_market의 '장마감 후' 분기)
+    오늘자 후보들의 확정 종가를 채운다."""
+    fwd = _load_jongga_forward()
+    day_rec = fwd.get(date_str)
+    if not day_rec:
+        return
+    changed = False
+    for t, rec in day_rec.items():
+        if rec.get("eod_recorded"):
+            continue
+        df = kr_data.get(t)
+        if df is None or df.empty:
+            continue
+        try:
+            rec["close_price"] = round(float(df["Close"].iloc[-1]), 2)
+            rec["eod_recorded"] = True
+            changed = True
+        except Exception:
+            continue
+    if changed:
+        _save_jongga_forward(fwd)
+
+
+def _resolve_jongga_gaps(kr_data: dict):
+    """장중 워밍(_warm_market 장중 분기, 8분 주기) 때마다 호출 — 아직
+    안 풀린 과거 날짜 레코드 중 '다음 거래일' 데이터가 이미 들어온
+    것이 있으면 시가를 확정하고 갭을 계산한다. 오늘 자기 자신의 스냅샷
+    레코드는 date_str < today 조건으로 원천 배제(당일 데이터로 당일
+    후보를 잘못 확정하는 것 방지)."""
+    fwd = _load_jongga_forward()
+    today_str = datetime.now(KST).strftime("%Y-%m-%d")
+    changed = False
+    for date_str, day_rec in fwd.items():
+        if date_str >= today_str:
+            continue
+        for t, rec in day_rec.items():
+            if rec.get("resolved"):
+                continue
+            df = kr_data.get(t)
+            if df is None or df.empty:
+                continue
+            try:
+                last_date = str(df.index[-1].date())
+            except Exception:
+                continue
+            if last_date <= date_str:
+                continue   # 아직 다음 거래일 데이터가 안 들어옴
+            try:
+                open_t1 = float(df["Open"].iloc[-1])
+            except Exception:
+                continue
+            rec["next_open_price"] = round(open_t1, 2)
+            rec["next_open_date"] = last_date
+            snap = rec.get("snapshot_price")
+            close_ = rec.get("close_price")
+            if snap:
+                rec["gap_snapshot_pct"] = round((open_t1 / snap - 1 - JONGGA_FORWARD_COST) * 100, 2)
+            if close_:
+                rec["gap_close_pct"] = round((open_t1 / close_ - 1 - JONGGA_FORWARD_COST) * 100, 2)
+            rec["resolved"] = True
+            changed = True
+    if changed:
+        _save_jongga_forward(fwd)
+
+
+def _jongga_forward_stats() -> dict:
+    """/api/jongga/forward용 누적 통계. 스냅샷기준/종가기준 각각 계산."""
+    fwd = _load_jongga_forward()
+    resolved = []
+    for date_str, day_rec in fwd.items():
+        for t, rec in day_rec.items():
+            if rec.get("resolved"):
+                resolved.append({**rec, "date": date_str})
+    resolved.sort(key=lambda r: (r["date"], r.get("ticker", "")), reverse=True)
+
+    def _agg(field):
+        vals = [r[field] for r in resolved if r.get(field) is not None]
+        n = len(vals)
+        if n == 0:
+            return {"n": 0, "mean_gap_pct": None, "up_rate": None}
+        return {
+            "n": n,
+            "mean_gap_pct": round(sum(vals) / n, 3),
+            "up_rate": round(sum(1 for v in vals if v > 0) / n * 100, 1),
+        }
+
+    return {
+        "total_resolved": len(resolved),
+        "snapshot_basis": _agg("gap_snapshot_pct"),
+        "close_basis": _agg("gap_close_pct"),
+        "backtest_reference": {"mean_gap_pct": 1.22, "n": 276, "z": 4.28,
+                                "source": "docs/kr_jongga_betting_backtest.md"},
+        "recent": resolved[:30],
     }
 
 
@@ -4561,13 +4748,21 @@ async def _warm_market(market: str):
         if _warmed.get(wkey):
             return
         try:
-            await _fetch_market_data(market, wait_for_fresh=True)
+            bundle = await _fetch_market_data(market, wait_for_fresh=True)
             for mode in ("imminent", "pullback", "turnaround", "breakout"):
                 res = await run_scan(market, mode)
                 res["daykey"] = daykey
                 _cache[f"{market}:{mode}"] = res
             _warmed[wkey] = True
             print(f"[scheduler] warmed {market} for {daykey}")
+            # v5.98: 종가베팅 포워드 트래킹 — 장마감 확정 시점에 오늘자
+            # 후보들의 확정 종가 기록 + 어제 이전 미확정 레코드 갱신 시도.
+            if market == "kr" and bundle:
+                try:
+                    _record_jongga_eod(daykey, bundle["data"])
+                    _resolve_jongga_gaps(bundle["data"])
+                except Exception as e2:
+                    print(f"[jongga-forward] EOD 처리 실패: {e2}")
         except Exception as e:
             print(f"[scheduler] warm {market} failed: {e}")
         # 돈의 흐름은 스캔 워밍과 독립 추적 — 스캔 워밍 실패와 무관하게 시도,
@@ -4585,7 +4780,7 @@ async def _warm_market(market: str):
     if now - last < 480:      # 8분
         return
     try:
-        await _fetch_market_data(market, wait_for_fresh=True)
+        bundle = await _fetch_market_data(market, wait_for_fresh=True)
         for mode in ("imminent", "pullback", "turnaround", "breakout"):
             res = await run_scan(market, mode)
             res["daykey"] = None
@@ -4593,6 +4788,13 @@ async def _warm_market(market: str):
             _cache[f"{market}:{mode}"] = res
         _warm_intraday_ts[market] = now
         print(f"[scheduler] intraday-warmed {market}")
+        # v5.98: 익일 장 시작 후 첫(이후 매) 장중 워밍마다 — 과거 미확정
+        # 종가베팅 레코드에 오늘 시가가 들어왔는지 확인해 갭 확정.
+        if market == "kr" and bundle:
+            try:
+                _resolve_jongga_gaps(bundle["data"])
+            except Exception as e2:
+                print(f"[jongga-forward] 장중 갭 확정 실패: {e2}")
     except Exception as e:
         print(f"[scheduler] intraday warm {market} failed: {e}")
 
@@ -4663,6 +4865,10 @@ async def _maybe_run_jongga_snapshot():
         _cache["kr:jongga"] = result
         _jongga_snapshot_date = today
         print(f"[jongga] {today} 장중 스냅샷 완료 — 후보 {len(result['hits'])}개")
+        try:
+            _record_jongga_snapshot(today, result["hits"])  # v5.98 포워드 트래킹 기록
+        except Exception as e2:
+            print(f"[jongga-forward] 스냅샷 기록 실패: {e2}")
     except Exception as e:
         print(f"[jongga] 장중 스냅샷 실패: {e}")
 
@@ -4734,6 +4940,7 @@ def _resolve_persistent_path(filename: str) -> str:
 
 
 ALERTS_USER_PATH = _resolve_persistent_path("alerts_user.txt")
+JONGGA_FORWARD_PATH = _resolve_persistent_path("jongga_forward.json")  # v5.98 포워드 트래킹
 
 
 @app.get("/api/alerts")
@@ -6518,6 +6725,15 @@ async def jongga_candidates():
         "candidates": candidates, "count": len(candidates),
         "message_format_hint": "🌆 오늘의 종가베팅 후보 {count}개: {name}(+{change_pct}%, 거래대금 {turnover_rank}위), ...",
     })
+
+
+@app.get("/api/jongga/forward")
+async def jongga_forward():
+    """🇰🇷 종가베팅 포워드 트래킹 누적 통계(v5.98, 사용자 지시) — 백테스트
+    (+1.22%, n=276, z=4.28)와 실전 결과를 계속 대조하기 위한 엔드포인트.
+    스냅샷가 기준/확정종가 기준을 분리 계산(모듈 상단 _resolve_jongga_gaps
+    docstring 참고 — 실전 진입가는 그 사이 어딘가라 어느 한쪽만 쓰면 왜곡)."""
+    return JSONResponse(_clean_nan(_jongga_forward_stats()))
 
 
 @app.get("/api/vol/{ticker}")

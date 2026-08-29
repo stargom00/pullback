@@ -296,6 +296,13 @@ tr.editing{background:rgba(242,179,61,.06)}
   border-radius:8px;padding:9px 12px;font-size:12.5px;font-weight:600;color:#ff9b9b;
   margin:0 24px 8px;line-height:1.5}
 @media (max-width:600px){.jongga-safety-banner{margin:0 16px 8px}}
+/* v5.98: 종가베팅 탭 하단 포워드 트래킹 성적 — 목록 다음, 카드 그리드 밖.
+   백테스트 수치와 계속 대조하는 섹션이라 중립 톤(파랑 계열)으로 구분. */
+.jongga-forward-box{background:rgba(96,165,250,.06);border:1px solid rgba(96,165,250,.25);
+  border-radius:10px;padding:12px 16px;margin:16px 24px 24px;font-size:12.5px;line-height:1.7}
+.jongga-forward-title{font-weight:700;color:#93c5fd;margin-bottom:4px}
+.jongga-forward-sub{color:var(--muted)}
+@media (max-width:600px){.jongga-forward-box{margin:16px 16px 24px}}
 .legend{display:flex;gap:18px;flex-wrap:wrap;padding:0 24px 10px;font-size:12px}
 .legend .lg{color:var(--muted);cursor:help;display:inline-flex;align-items:center;gap:5px}
 .legend .lg-h{color:var(--text);opacity:.7}
@@ -554,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.97</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.98</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -1360,6 +1367,38 @@ function jonggaCard(s) {
     </div>
   </div>`;
 }
+// v5.98: 종가베팅 포워드 트래킹 — 백테스트(+1.22%, n=276, z=4.28)와 실전
+// 결과를 계속 대조(사용자 지시). /api/jongga/forward를 탭 진입 시 별도로
+// 불러온다(카드 스캔과 다른 엔드포인트라 load()의 일반 흐름 밖에서 처리).
+async function loadJonggaForwardStats() {
+  try {
+    const res = await fetch('/api/jongga/forward');
+    jonggaForwardStats = await res.json();
+  } catch (e) {
+    jonggaForwardStats = null;
+  }
+  if (mode === 'jongga') renderCards();
+}
+function jonggaForwardFooterHtml() {
+  if (mode !== 'jongga') return '';
+  const s = jonggaForwardStats;
+  if (!s) return `<div class="jongga-forward-box">📈 포워드 성적 불러오는 중…</div>`;
+  const snap = s.snapshot_basis || {}, close_ = s.close_basis || {};
+  const total = s.total_resolved || 0;
+  const fmtGap = v => v == null ? '-' : `${v >= 0 ? '+' : ''}${v}%`;
+  if (total < 30) {
+    return `<div class="jongga-forward-box">
+      <div class="jongga-forward-title">📈 포워드 성적 — 표본 축적 중 (누적 ${total}건 · 평균갭 ${fmtGap(snap.mean_gap_pct)} · 백테스트 +1.22%)</div>
+      <div class="jongga-forward-sub">30건이 모이면 신뢰도 있는 비교가 가능해요 — 스냅샷기준 ${fmtGap(snap.mean_gap_pct)}(n=${snap.n||0}) · 종가기준 ${fmtGap(close_.mean_gap_pct)}(n=${close_.n||0})</div>
+    </div>`;
+  }
+  return `<div class="jongga-forward-box">
+    <div class="jongga-forward-title">📈 포워드 성적 — 누적 ${total}건 · 평균갭 ${fmtGap(snap.mean_gap_pct)} (백테스트 +1.22%)</div>
+    <div class="jongga-forward-sub">스냅샷 기준(14:40 가격 매수 가정): 평균갭 ${fmtGap(snap.mean_gap_pct)} · 갭업률 ${snap.up_rate ?? '-'}% (n=${snap.n||0})</div>
+    <div class="jongga-forward-sub">종가 기준(확정 종가 매수 가정): 평균갭 ${fmtGap(close_.mean_gap_pct)} · 갭업률 ${close_.up_rate ?? '-'}% (n=${close_.n||0})</div>
+    <div class="jongga-forward-sub" style="opacity:.65">실전 진입가는 이 둘 사이 어딘가 — 두 기준 다 참고할 것. 근거: docs/kr_jongga_betting_backtest.md</div>
+  </div>`;
+}
 
 function breakdownCard(s) {
   const chgCls = s.change_pct >= 0 ? 'up' : 'down';
@@ -1716,6 +1755,7 @@ let sectorFilter = null;
 let searchQuery = '';
 let lastHits = [];
 let lastScanMeta = {};   // v5.97: 종가베팅 탭 배너용 — session_state/label/backtest_note 등 hits 밖의 필드
+let jonggaForwardStats = null;   // v5.98: /api/jongga/forward 누적 포워드 트래킹 통계 캐시
 let strictMode = false;
 let riskSort = false;
 let bearOkOnly = false;   // v4.65: 💎 약세장적격만
@@ -2596,7 +2636,7 @@ function renderCards() {
     </div>
     ${pfExpanded ? `<div class="grid pf-frozen-grid">${frozenList.map(card).join('')}</div>` : ''}
   ` : '';
-  content.innerHTML = mainHtml + frozenHtml;
+  content.innerHTML = mainHtml + frozenHtml + jonggaForwardFooterHtml();
   const pfToggle = document.getElementById('pfFrozenToggle');
   if (pfToggle) {
     pfToggle.addEventListener('click', () => {
@@ -2854,7 +2894,7 @@ document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click'
     // v5.97: 종가베팅은 KR 전용이지만 z=4.88 전략지도(TAB_MARKET_LABEL)와는
     // 별개 측정이라 그 맵엔 안 넣음(마켓 불일치 배너 문구가 안 맞을 것) —
     // 시장 동기화만 별도로.
-    if (mode === 'jongga') setMarket('kr');
+    if (mode === 'jongga') { setMarket('kr'); loadJonggaForwardStats(); }
   }
   hideFilterButtonsIfNotApplicable();   // v5.56: journal은 load() 자체를 안 타서 여기서도 호출
   const isJournal = mode === 'journal';
