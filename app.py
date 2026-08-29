@@ -5,6 +5,24 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.93 [문구수정] 게이트 조건부 EV 실측(2026-08-29, docs/pullback_ev_kr_us_
+        regime_investigation.md 7절 — US z=-3.15 역방향, 게이트가 개별
+        신호 EV를 예측 못 함 확인) 반영, 처방형 문구 제거(사용자 지시).
+        (1) static/index.html gateOf(): "🔴 신규 진입 자제"/"🟢 진입
+        환경 양호"/"🟡 선별 진입" → "🔴 지수 약세"/"🟢 지수 안정"/
+        "🟡 지수 혼조"(시장 상태 서술로만, 3단계 판정 로직·분산일·FTD
+        표시는 불변). (2) 게이트 펼침 상세(idx-detail)에 안내 한 줄
+        추가: "ℹ️ 게이트 상태는 개별 신호의 EV를 예측하지 못함(2026-
+        08-29 측정) — 진입 판단은 카드의 신호 품질(손절폭·구조)로."
+        (3) app.py `_index_regime()`의 individual 지수 카드 툴팁
+        regime_txt도 동일 취지로 "비우호(신규진입 자제)"→"비우호" 등
+        괄호 처방구 제거(gate_suggest()의 gate_why 접미사는 R노출
+        자동제안 기능이 별도로 쓰는 값이라 미변경). (4) GUIDE.md 1장
+        "시장 게이트" 절에 동일 실측 캐비어트 추가 — R노출 한도 표
+        (오픈리스크 3R/1.5R/0)는 포트폴리오 노출관리 규칙으로 그대로
+        유효함을 명시하되 "🔴=이 카드는 나쁘다"로 해석하지 않도록.
+        scanner.py의 ftd_state/dist_count/gate_suggest 판정 로직 자체는
+        미변경 — 순수 표시 문구 교체.
 v5.92 [UI개편] 탭 메뉴 전면 개편 + 앱 리네이밍(사용자 지시). "눌림목
         스캐너"→"돌파·눌림 스캐너"(부제 "국장은 돌파 · 미장은 눌림 —
         시장별 검증 전략") — index.html title/h1, GUIDE.md, README.md,
@@ -2939,7 +2957,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.92"
+VERSION = "v5.93"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -5798,13 +5816,19 @@ def _index_regime(code: str) -> dict | None:
         gate_sug, gate_why = scanner_mod.gate_suggest(dc, fs, above60)
 
         # ── 배너 표시용 레짐 (게이트 3색과 정합) ──
+        # v5.93(사용자 지시): 게이트 조건부 EV 실측(2026-08-29,
+        # docs/pullback_ev_kr_us_regime_investigation.md 7절 — US z=-3.15
+        # 역방향)에서 게이트가 개별 신호 EV를 예측 못 함을 확인 — "신규진입
+        # 자제"/"선별 진입"/"진입 환경 양호" 같은 처방형 문구 제거, 시장
+        # 상태 서술로만 남김. gate_sug/gate_suggest() 판정 로직 자체는 불변
+        # (R 노출 설정 자동 제안 등 다른 기능이 여전히 이 값을 씀).
         d = dc.get("days")
         if gate_sug == "correction":
-            regime, txt = "bad", "비우호 (신규진입 자제)"
+            regime, txt = "bad", "비우호"
         elif gate_sug == "pressure":
-            regime, txt = "neutral", "주의 (선별 진입)"
+            regime, txt = "neutral", "주의"
         else:
-            regime, txt = "good", "우호 (진입 환경 양호)"
+            regime, txt = "good", "우호"
         txt += f" · {gate_why}"
 
         return {"regime": regime, "regime_txt": txt,
