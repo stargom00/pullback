@@ -7,3 +7,6 @@ scripts/measurements/*.results.json
 money_flow_data/
 jongga_forward.json
 theme_map.json
+positions.json
+positions_meta.json
+sync_toss.log

@@ -5,6 +5,21 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.103 [기능추가] 포지션 보드 1단계 — 토스 잔고 × 스캐너 결합(사용자 지시).
+        아키텍처: Railway가 토스 Open API를 직접 못 부름(허용 IP 방식,
+        Railway 아웃바운드 IP 비고정) → 맥 로컬 sync_toss.py(launchd,
+        30분 간격, toss_client.py 조회전용 재사용)가 수량·평단만 추려
+        POST /api/positions/sync(X-Sync-Token 헤더, SYNC_TOKEN 불일치 시
+        401)로 전송, positions.json에 스냅샷 저장. GET /api/positions는
+        저장된 수량·평단에 서버가 그 순간 새로 조회한 가격을 결합해
+        평가액·손익·R진행률·ATR×1.5 손절제안·RS·현재 히트중인 탭·가격고정
+        의심을 계산 — 가격은 항상 실시간, 수량·평단만 동기화 지연 허용.
+        24시간 이상 스냅샷 오래되면 stale 플래그. 손절가 입력은
+        positions_meta.json(수량·평단 동기화가 절대 못 건드리는 별도
+        파일)에 저장 + 같은 티커의 열린 저널 기록 stop도 같이 갱신.
+        💼 포지션 탭(마감정리 옆) 신설. 계좌번호 등 식별정보는 sync_toss.py가
+        애초에 추출하지 않음. Railway SYNC_TOKEN 환경변수·launchd 등록은
+        사용자 확인 후 별도 진행(docs/toss_position_sync_setup.md).
 v5.102 [버그수정] 감시/관찰/일지 버튼 계열 전면 감사(사용자 지시). 근본
         원인: 저널 저장이 /api/journal 전체배열 덮어쓰기인데, 프론트가
         setJournal()과 _saveJournalToServer()를 따로 호출하는 곳이 9곳
@@ -3141,7 +3156,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.102"
+VERSION = "v5.103"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -5167,6 +5182,13 @@ def _resolve_persistent_path(filename: str) -> str:
 
 ALERTS_USER_PATH = _resolve_persistent_path("alerts_user.txt")
 JONGGA_FORWARD_PATH = _resolve_persistent_path("jongga_forward.json")  # v5.98 포워드 트래킹
+# v5.103: 포지션 보드 — 토스 잔고 동기화(수량·평단, sync_toss.py가 30분마다
+# 덮어씀)와 사용자가 UI에서 입력하는 손절가(positions_meta.json, sync가
+# 절대 안 건드림)를 별도 파일로 분리. 같은 파일에 같이 두면 다음 동기화가
+# 손절가까지 통째로 지워버림 — journal의 전체배열 덮어쓰기 저장과 같은
+# 함정([버그수정] v5.102 저널 저장 경쟁 사고)이라 애초에 파일을 나눠 피한다.
+POSITIONS_PATH = _resolve_persistent_path("positions.json")
+POSITIONS_META_PATH = _resolve_persistent_path("positions_meta.json")
 
 
 @app.get("/api/alerts")
@@ -7776,6 +7798,276 @@ async def batch_prices(request: Request):
     volumes = {tk: vol for tk, _, _, vol in results if vol is not None}
     closed = {tk: (not _is_market_open_now(naver_kr.is_kr(tk))) for tk in prices}
     return JSONResponse({"prices": prices, "closed": closed, "highs": highs, "volumes": volumes})
+
+
+# ══════════════════ v5.103: 포지션 보드 (토스 잔고 × 스캐너 결합) ══════════
+# 아키텍처: Railway는 토스 Open API를 직접 못 부른다(허용 IP 방식이라 서버 IP를
+# 등록해야 하는데 Railway는 배포마다 아웃바운드 IP가 안 고정됨) — 그래서 맥
+# 로컬에서 sync_toss.py(launchd, 30분 간격)가 TossClient(조회전용)로 잔고를
+# 읽어 최소 정보(수량/평단/티커)만 이 서버로 POST한다. 서버는 그 스냅샷을
+# 저장해두고, GET 요청마다 "가격만" 새로 조회해 결합한다 — 수량·평단은
+# 동기화 지연을 허용하지만 가격은 항상 최신이어야 손익이 의미있기 때문.
+POSITIONS_STALE_HOURS = 24
+
+
+def _verify_sync_token(request: Request):
+    """sync_toss.py만 쓰는 공유 시크릿 검증. 없거나 틀리면 401.
+    SYNC_TOKEN 자체가 미설정이면(로컬 개발 등) 기능을 아예 막는다 —
+    빈 문자열끼리 매치되는 사고 방지."""
+    expected = os.environ.get("SYNC_TOKEN")
+    got = request.headers.get("X-Sync-Token")
+    if not expected or not got or got != expected:
+        return False
+    return True
+
+
+def _load_positions_raw() -> dict:
+    if not os.path.exists(POSITIONS_PATH):
+        return {"positions": [], "synced_at": None}
+    try:
+        with open(POSITIONS_PATH, "r", encoding="utf-8") as f:
+            return _json.load(f)
+    except (OSError, ValueError):
+        return {"positions": [], "synced_at": None}
+
+
+def _load_positions_meta() -> dict:
+    """{ticker: {"stop": float, "updated_at": iso}} — sync가 절대 안 건드리는 파일."""
+    if not os.path.exists(POSITIONS_META_PATH):
+        return {}
+    try:
+        with open(POSITIONS_META_PATH, "r", encoding="utf-8") as f:
+            return _json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_json_atomic(path: str, data):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        _json.dump(data, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+
+
+@app.post("/api/positions/sync")
+async def positions_sync(request: Request):
+    """sync_toss.py 전용 수신 엔드포인트. body: {"positions": [{"ticker",
+    "name", "market"("KR"/"US"), "quantity", "avg_price", "currency"}, ...]}.
+    계좌번호 등 식별정보는 절대 받지 않는다(sync_toss.py가 애초에 안 보냄).
+    수량·평단만 통째로 덮어쓴다 — 손절가는 별도 파일(positions_meta.json)이라
+    영향 없음."""
+    if not _verify_sync_token(request):
+        return JSONResponse({"ok": False, "error": "인증 실패 (SYNC_TOKEN)"}, status_code=401)
+    body = await request.json()
+    items = body.get("positions", []) if isinstance(body, dict) else []
+    if not isinstance(items, list):
+        return JSONResponse({"ok": False, "error": "positions 배열 필요"}, status_code=400)
+
+    uni = get_universe(None)
+    out = []
+    for it in items:
+        ticker = str(it.get("ticker") or "").strip()
+        market = (it.get("market") or "").upper()
+        if not ticker:
+            continue
+        resolved, unresolved = ticker, False
+        if market == "KR" and not ticker.endswith((".KS", ".KQ")):
+            match = next((ticker + suf for suf in (".KS", ".KQ") if (ticker + suf) in uni), None)
+            if match:
+                resolved = match
+            else:
+                unresolved = True   # 유니버스 밖(소형주/ETF 등) — 그래도 저장은 함, 가격조회만 실패할 수 있음
+        try:
+            qty = float(it.get("quantity") or 0)
+            avg_price = float(it.get("avg_price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if qty <= 0:
+            continue
+        out.append({
+            "ticker": resolved, "name": it.get("name") or resolved, "market": market,
+            "quantity": qty, "avg_price": avg_price,
+            "currency": it.get("currency") or ("KRW" if market == "KR" else "USD"),
+            "unresolved": unresolved,
+        })
+
+    data = {"positions": out, "synced_at": datetime.now(KST).isoformat()}
+    try:
+        _save_json_atomic(POSITIONS_PATH, data)
+    except OSError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "count": len(out)})
+
+
+@app.post("/api/positions/stop")
+async def positions_set_stop(request: Request):
+    """포지션 보드에서 손절가 입력 → positions_meta.json에 저장.
+    같은 티커의 열린(status=entered, 미종료) 저널 기록이 있으면 그 stop도
+    같이 갱신 — 사용자 지시("저널과 연동 저장")에 따라 R시스템 손절 알림이
+    포지션 보드에서 고친 손절가를 그대로 따라가게 한다."""
+    body = await request.json()
+    ticker = str(body.get("ticker") or "").strip()
+    if not ticker:
+        return JSONResponse({"ok": False, "error": "ticker 필요"}, status_code=400)
+    stop = body.get("stop")
+    try:
+        stop_val = float(stop) if stop not in (None, "") else None
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "error": "stop 형식 오류"}, status_code=400)
+
+    meta = _load_positions_meta()
+    if stop_val is None:
+        meta.pop(ticker, None)
+    else:
+        meta[ticker] = {"stop": stop_val, "updated_at": datetime.now(KST).isoformat()}
+    _save_json_atomic(POSITIONS_META_PATH, meta)
+
+    journal_synced = 0
+    if stop_val is not None:
+        j = load_journal()
+        changed = False
+        for r in j:
+            if r.get("ticker") == ticker and (r.get("status") or "entered") == "entered" and r.get("result_r", "") == "":
+                r["stop"] = stop_val
+                changed = True
+                journal_synced += 1
+        if changed:
+            _save_json_atomic(JOURNAL_PATH, j)
+    return JSONResponse({"ok": True, "journal_synced": journal_synced})
+
+
+_POSITION_MODE_CHECKS = [
+    ("pullback", analyze), ("turnaround", analyze_turnaround),
+    ("breakout", analyze_breakout), ("boxbreak", analyze_boxbreak),
+    ("imminent", analyze_imminent), ("leader", analyze_leader), ("super", analyze_super),
+]
+
+
+@app.get("/api/positions")
+async def get_positions():
+    """저장된 수량·평단(동기화 지연 허용) + 서버가 지금 가진 최신가(항상 실시간)를
+    결합해 평가액·손익·R진행률·손절거리를 계산. 스캐너 컨텍스트(RS·현재
+    히트중인 탭·가격고정 의심)도 같이 붙인다."""
+    raw = _load_positions_raw()
+    positions, synced_at = raw.get("positions", []), raw.get("synced_at")
+    meta = _load_positions_meta()
+
+    stale = False
+    if synced_at:
+        try:
+            age_hours = (datetime.now(KST) - datetime.fromisoformat(synced_at)).total_seconds() / 3600
+            stale = age_hours >= POSITIONS_STALE_HOURS
+        except ValueError:
+            pass
+
+    if not positions:
+        return JSONResponse({"synced_at": synced_at, "stale": stale, "positions": [], "summary": None})
+
+    bundle = await _fetch_market_data("all")
+    rs_ranks = bundle["rs_ranks"] if bundle else {}
+    rs_moms = bundle["rs_moms"] if bundle else {}
+
+    def _one(p):
+        ticker = p["ticker"]
+        df = _fetch(ticker)
+        if df is None or df.empty:
+            return {**p, "price": None, "unresolved": True}
+        is_kr = ticker.endswith((".KS", ".KQ"))
+        h, lo, c, v = df["High"], df["Low"], df["Close"], df["Volume"]
+        close = float(c.iloc[-1])
+        atr_val = scanner_mod.atr(h, lo, c)
+        atr_pct = (atr_val / close * 100) if close > 0 else None
+        rs_used = rs_ranks.get(ticker)
+        rs_mom_used = rs_moms.get(ticker)
+        rs_approx = rs_used is None
+        if rs_approx:
+            rs_used, rs_mom_used = 80, 5
+
+        hit_tabs = []
+        for name, fn in _POSITION_MODE_CHECKS:
+            try:
+                if fn(df, rs_rank=rs_used, rs_mom=rs_mom_used, is_kr=is_kr) is not None:
+                    hit_tabs.append(name)
+            except TypeError:
+                # analyze_leader/analyze_super 시그니처가 is_kr을 안 받을 수 있음
+                try:
+                    if fn(df, rs_rank=rs_used, rs_mom=rs_mom_used) is not None:
+                        hit_tabs.append(name)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        try:
+            pf = price_frozen_check(c, h, lo, v)
+        except Exception:
+            pf = {"price_frozen": False, "price_frozen_reasons": []}
+        try:
+            rsi_val = round(float(scanner_mod.rsi(c).iloc[-1]), 1)
+        except Exception:
+            rsi_val = None
+
+        qty, avg_price = p["quantity"], p["avg_price"]
+        market_value = qty * close
+        cost_basis = qty * avg_price
+        pnl = market_value - cost_basis
+        pnl_pct = (pnl / cost_basis * 100) if cost_basis > 0 else None
+
+        m = meta.get(ticker)
+        stop = m["stop"] if m else None
+        stop_suggested = False
+        if stop is None and atr_val:
+            stop = round(close - atr_val * 1.5, 2)
+            stop_suggested = True
+
+        r_progress = None
+        dist_to_stop_pct = None
+        open_risk = None
+        if stop is not None and stop > 0:
+            dist_to_stop_pct = round((close - stop) / close * 100, 2)
+            if avg_price > stop:
+                r_progress = round((close - avg_price) / (avg_price - stop), 2)
+                if not stop_suggested:   # 제안값(미확정)은 "설정된 리스크"로 합산하지 않음
+                    open_risk = round(qty * (avg_price - stop), 2)
+
+        return {
+            **p, "price": round(close, 2), "market_value": round(market_value, 2),
+            "cost_basis": round(cost_basis, 2), "pnl": round(pnl, 2),
+            "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
+            "stop": stop, "stop_suggested": stop_suggested,
+            "atr_pct": round(atr_pct, 1) if atr_pct is not None else None,
+            "r_progress": r_progress, "dist_to_stop_pct": dist_to_stop_pct,
+            "open_risk": open_risk,
+            "rs": rs_used, "rs_approx": rs_approx, "rsi": rsi_val,
+            "hit_tabs": hit_tabs,
+            "price_frozen": pf.get("price_frozen", False),
+            "price_frozen_reasons": pf.get("price_frozen_reasons", []),
+        }
+
+    loop = asyncio.get_event_loop()
+    results = await asyncio.gather(*[
+        loop.run_in_executor(_executor, _one, p) for p in positions
+    ])
+
+    summary = {"market_value": {"KRW": 0.0, "USD": 0.0}, "cost_basis": {"KRW": 0.0, "USD": 0.0},
+               "pnl": {"KRW": 0.0, "USD": 0.0}, "open_risk": {"KRW": 0.0, "USD": 0.0},
+               "positions_missing_stop": 0}
+    for r in results:
+        cur = r.get("currency") or ("KRW" if r.get("market") == "KR" else "USD")
+        if r.get("market_value") is not None:
+            summary["market_value"][cur] = summary["market_value"].get(cur, 0.0) + r["market_value"]
+            summary["cost_basis"][cur] = summary["cost_basis"].get(cur, 0.0) + r["cost_basis"]
+            summary["pnl"][cur] = summary["pnl"].get(cur, 0.0) + r["pnl"]
+        if r.get("open_risk") is not None:
+            summary["open_risk"][cur] = summary["open_risk"].get(cur, 0.0) + r["open_risk"]
+        # "미설정"은 손절을 아예 안 입력한 경우만 센다(stop_suggested=True).
+        # 손절을 평단보다 위로 올려놔서(트레일링, 이익 확정) open_risk가
+        # 정의상 없는 경우까지 "미설정"으로 잘못 세면 안 됨 — 사용자는 분명히
+        # 입력했으므로.
+        if r.get("stop_suggested"):
+            summary["positions_missing_stop"] += 1
+
+    return JSONResponse({"synced_at": synced_at, "stale": stale, "positions": results, "summary": summary})
 
 
 _NO_CACHE_HEADERS = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"}
