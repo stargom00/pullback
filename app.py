@@ -5,6 +5,32 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.99 [기능추가] 개장일(거래일) 판정 가드(사용자 지시) — 스케줄러가
+        주말/공휴일 구분 없이 매일 돌아서, `_market_session_key()`가
+        KST 요일/시각만으로 "장마감" 판정을 내리면 실제 휴장일에도
+        daykey가 생성돼 금요일 데이터가 그날(토요일/평일공휴일) 날짜로
+        리포트·스캔캐시에 저장되는 문제가 있었음. `is_trading_day(market,
+        date)` 신설 — 주말+정적 공휴일 목록(2026-08-29 WebSearch/WebFetch
+        로 KRX 3개 소스 교차확인(+BigGo뉴스로 6/3 지방선거·7/17 제헌절
+        특별휴장 재확인), NYSE는 nyse.com 공식+stockmarkethours.org 교차
+        확인, 전부 datetime.weekday()로 대체공휴일 논리 재검증)로 판정.
+        의존성 검토: `holidays`/`exchange_calendars` 미설치 상태에서 신규
+        추가는 requirements.txt 버전 미고정(v5.93 Railway 장애 조사에서
+        이미 확인된 리스크) 문제와 겹쳐 위험 대비 이득이 낮다고 판단해
+        보류, pykrx는 KRX_ID/KRX_PW 로그인 필요(v4.38.9에서 이미 포기)라
+        미채택 — 정적 리스트로 결정(docs/trading_calendar.md에 갱신
+        절차·출처·2027 KRX 미확정 상태 명시, KRX는 2026만/NYSE는
+        2026~2027 확인됨을 KRX_CONFIRMED_YEARS/NYSE_CONFIRMED_YEARS로
+        구분해 범위 밖 연도는 로그로 알림). 적용: (1) `_warm_market()`의
+        "장마감 후" 분기 전체(스캔캐시 워밍+돈의흐름 생성+종가베팅
+        EOD/갭확정)를 is_trading_day() 가드로 감싸 비개장일엔 통째로
+        스킵(기존 캐시 유지, 재웜 안 함). (2) `_maybe_run_jongga_snapshot()`
+        의 기존 주말 전용 체크를 is_trading_day()로 교체(공휴일도 커버).
+        (3) `/api/moneyflow/{market}`·`/api/moneyflow/{market}/summary`·
+        `/api/jongga/candidates`·`/api/jongga/forward` 응답에 trading_day
+        필드 추가 — 봇이 이중 확인할 수 있게. 검증: is_trading_day() 13개
+        케이스(주말/공휴일/평일/확인범위밖연도) 직접 실행 확인(2026-08-29
+        실제로 토요일임을 datetime으로 재확인해 판정 정확성 교차검증).
 v5.98 [기능추가] 🇰🇷 종가베팅 포워드 트래킹(사용자 지시) — 후보의 실제
         성과를 자동 누적해 백테스트(+1.22%, n=276, z=4.28)와 실전 결과를
         계속 대조. 저장: `_resolve_persistent_path("jongga_forward.json")`
@@ -3056,7 +3082,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.98"
+VERSION = "v5.99"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -3251,6 +3277,123 @@ def _is_market_open_now(is_kr: bool) -> bool:
     if is_kr:
         return 9 * 60 <= hm < 15 * 60 + 30
     return hm >= 22 * 60 or hm < 6 * 60 + 30
+
+
+# ── 개장일 판정 (v5.99, 사용자 지시) ──────────────────────────────────
+# 배경: 스케줄러가 주말/공휴일 구분 없이 매일 4분마다 돌아서, `_market_
+# session_key()`가 "장 마감 후" 판정을 KST 요일/시각만으로 내리면(공휴일
+# 무시) 실제로 장이 안 열린 날에도 "오늘자 daykey"가 생성돼 그 날짜로
+# 리포트/스캔캐시가 저장되는 문제가 있었다(예: 금요일 데이터 그대로인데
+# 토요일/평일공휴일 날짜로 라벨링). is_trading_day()는 주말+공휴일을
+# 둘 다 걸러 이 문제를 막는다.
+#
+# 라이브러리 검토 결과 — 정적 리스트로 결정한 이유:
+#   - `holidays`/`exchange_calendars` 둘 다 미설치. requirements.txt가
+#     버전 고정이 전혀 없어(CLAUDE.md, v5.93 Railway 장애 조사에서 이미
+#     확인된 리스크) 신규 의존성 추가 자체가 예측 못한 배포 실패 위험을
+#     늘린다 — 이번 기능은 "날짜 가드"라 실패해도 치명적이지 않은데
+#     반해, 의존성 설치 실패는 앱 전체 기동을 막을 수 있어 득실이 안 맞음.
+#   - `pykrx`는 이미 의존성이지만 KRX 실시간 조회는 KRX_ID/KRX_PW 로그인이
+#     필요해 이 프로젝트가 이미 v4.38.9에서 포기한 경로(universe.py 주석
+#     참고) — 개장일 조회도 마찬가지로 막힐 게 뻔해 시도하지 않음.
+#   - 결론: 2026~2027 정적 리스트로 시작. **매년 갱신 필요** —
+#     `docs/trading_calendar.md`에 갱신 절차·출처 명시.
+# 2026-08-29 WebSearch/WebFetch로 직접 조사(KRX: kstockguide.com·
+# calendarlabs.com·market-holiday.com 교차 확인 + biggo.com/finance 뉴스로
+# 6/3·7/17 특별휴장 재확인. NYSE: nyse.com 공식 페이지 + stockmarkethours.org
+# 교차 확인, ICE 보도자료는 추출이 불완전해 참고만 함). 전부 datetime.weekday()
+# 로 요일 재계산해 논리 일관성 검증 완료(대체공휴일 규칙과 정합).
+# 상세 출처·갱신 절차는 docs/trading_calendar.md.
+KRX_HOLIDAYS_2026 = {
+    "2026-01-01",  # 신정
+    "2026-02-16",  # 설날 연휴(전날)
+    "2026-02-17",  # 설날
+    "2026-02-18",  # 설날 연휴(다음날)
+    "2026-03-02",  # 삼일절 대체공휴일(3/1 일요일)
+    "2026-05-01",  # 근로자의 날
+    "2026-05-05",  # 어린이날
+    "2026-05-25",  # 부처님오신날 대체공휴일(5/24 일요일)
+    "2026-06-03",  # 전국동시지방선거(임시공휴일)
+    "2026-07-17",  # 제헌절(2026년 한시적 공휴일 복원 — 상시 휴장일 아님, 매년 재확인 필요)
+    "2026-08-17",  # 광복절 대체공휴일(8/15 토요일)
+    "2026-09-24",  # 추석 연휴(전날)
+    "2026-09-25",  # 추석
+    "2026-10-05",  # 개천절 대체공휴일(10/3 토요일)
+    "2026-10-09",  # 한글날
+    "2026-12-25",  # 크리스마스
+    "2026-12-31",  # 연말 휴장일(매년 정확한 날짜 KRX 공지로 재확인 권장)
+}
+# 2027 KRX: 조사 시점(2026-08-29) 기준 KRX 공식 캘린더 미발표(공휴일 사이트도
+# "2027년 상세 휴장일 안내는 아직 검색 결과에서 찾을 수 없음" — docs/trading_
+# calendar.md 참고). 부정확한 추정치를 넣는 대신 비워두고 연도 자체를 "확인된
+# 연도" 밖으로 둬서(KRX_CONFIRMED_YEARS) is_trading_day가 로그로 알려주게 함 —
+# 2026년 12월경 KRX가 2027년 캘린더를 공표하면 그때 채운다.
+KRX_HOLIDAYS_2027: set[str] = set()
+KRX_CONFIRMED_YEARS = (2026,)
+
+NYSE_HOLIDAYS_2026 = {
+    "2026-01-01",  # New Year's Day
+    "2026-01-19",  # Martin Luther King, Jr. Day
+    "2026-02-16",  # Washington's Birthday
+    "2026-04-03",  # Good Friday
+    "2026-05-25",  # Memorial Day
+    "2026-06-19",  # Juneteenth
+    "2026-07-03",  # Independence Day(observed, 7/4가 토요일)
+    "2026-09-07",  # Labor Day
+    "2026-11-26",  # Thanksgiving Day
+    "2026-12-25",  # Christmas Day
+}
+NYSE_HOLIDAYS_2027 = {
+    "2027-01-01",  # New Year's Day
+    "2027-01-18",  # Martin Luther King, Jr. Day
+    "2027-02-15",  # Washington's Birthday
+    "2027-03-26",  # Good Friday
+    "2027-05-31",  # Memorial Day
+    "2027-06-18",  # Juneteenth(observed)
+    "2027-07-05",  # Independence Day(observed, 7/4가 일요일)
+    "2027-09-06",  # Labor Day
+    "2027-11-25",  # Thanksgiving Day
+    "2027-12-24",  # Christmas Day(observed, 12/25가 토요일)
+}
+NYSE_CONFIRMED_YEARS = (2026, 2027)   # NYSE는 official 발표가 이미 2027까지 나와 있음
+
+
+def is_trading_day(market: str, date: "datetime | str | None" = None) -> bool:
+    """market: 'kr' 또는 'us'. date: KST 달력 날짜(YYYY-MM-DD 문자열 또는
+    datetime, 생략 시 오늘). 주말(토/일) + 정적 공휴일 목록 둘 다 걸러
+    "실제로 그 시장이 열렸을 날짜인가"를 판정 — 리포트/스캔 캐시에 잘못된
+    daykey가 찍히는 걸 막는 게 목적.
+
+    v5.99 단순화: US도 KST 달력일 그대로 쓴다(실제 ET 환산 안 함) —
+    `_market_session_key()` 등 이 앱의 기존 US 날짜 처리와 동일한
+    근사치라 새 불일치를 만들지 않는다(완벽한 타임존 환산은 별도 개선
+    대상, 지금 범위 아님).
+
+    KR은 2026만, US는 2026~2027 확인됨(KRX가 2027 캘린더를 아직 미발표라
+    KR만 범위가 좁음) — 확인 범위 밖 연도는 주말만 걸러지고 공휴일 체크는
+    사실상 무력화된다. 조용히 새는 대신 로그를 남긴다(매년/공표시 갱신 필요,
+    docs/trading_calendar.md)."""
+    if date is None:
+        date = datetime.now(KST)
+    if isinstance(date, str):
+        date_str = date
+        try:
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            return True   # 파싱 실패 — 과도한 차단보다 fail-open
+    else:
+        dt = date
+        date_str = dt.strftime("%Y-%m-%d")
+    if dt.weekday() >= 5:
+        return False
+    if market == "kr":
+        holiday_set, confirmed_years = (KRX_HOLIDAYS_2026 | KRX_HOLIDAYS_2027), KRX_CONFIRMED_YEARS
+    else:
+        holiday_set, confirmed_years = (NYSE_HOLIDAYS_2026 | NYSE_HOLIDAYS_2027), NYSE_CONFIRMED_YEARS
+    if dt.year not in confirmed_years:
+        print(f"[is_trading_day] {market} {date_str} — 정적 휴장일 목록 확인 범위"
+              f"({confirmed_years}) 밖, 주말만 체크됨(목록 갱신 필요, docs/trading_calendar.md)")
+    return date_str not in holiday_set
 
 
 def _disk_cache_dir() -> str:
@@ -4743,6 +4886,13 @@ async def _warm_market(market: str):
     '스캔 실패'가 뜸 → 스케줄러가 미리 데워두면 사용자는 항상 캐시 히트."""
     daykey = _market_session_key(market)
     if daykey:
+        # v5.99: 비개장일(주말/공휴일)이면 여기서 전부 스킵 — daykey는
+        # 이미 확정돼 있지만(_market_session_key가 요일/시각만 봄) 실제로
+        # 그 시장이 안 열렸으면 재웜/리포트생성을 안 한다. 기존 캐시(직전
+        # 진짜 거래일 데이터)는 그대로 남아있어 사용자에게 문제 없음 —
+        # "데이터 안 바뀜"이라는 원래 의도(아래 주석)를 코드로 실제 구현.
+        if not is_trading_day(market, daykey):
+            return
         # ── 장 마감 후: 하루 1회만 데우면 됨 (데이터 고정) ──
         wkey = f"{market}:{daykey}"
         if _warmed.get(wkey):
@@ -4848,7 +4998,7 @@ async def _maybe_run_jongga_snapshot():
     (봇이 폴링해서 자체적으로 보내야 함)로 대체."""
     global _jongga_snapshot_date
     now = datetime.now(KST)
-    if now.weekday() >= 5:
+    if not is_trading_day("kr", now):   # v5.99: 주말+공휴일(기존엔 주말만)
         return
     hm = now.hour * 60 + now.minute
     if not (14 * 60 + 40 <= hm < 15 * 60):
@@ -6711,9 +6861,12 @@ async def jongga_candidates():
     없어(얼마냐봇은 별도 레포) 데이터만 제공 — 문구 형식 제안:
     '🌆 오늘의 종가베팅 후보 N개: 종목명(+등락%, 거래대금 N위)...'
     후보 0개면 봇이 침묵하도록 candidates=[]로 응답(발송 여부는 봇 쪽 로직)."""
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    trading_day = is_trading_day("kr", today)   # v5.99: 봇이 이중 확인할 수 있게 노출
     cached = _cache.get("kr:jongga")
     if not cached:
-        return JSONResponse({"ok": True, "date": None, "candidates": [], "count": 0})
+        return JSONResponse({"ok": True, "date": None, "candidates": [], "count": 0,
+                              "trading_day": trading_day})
     hits = cached.get("hits", [])
     candidates = [
         {"ticker": h["ticker"], "name": h.get("name", h["ticker"]),
@@ -6723,6 +6876,7 @@ async def jongga_candidates():
     return JSONResponse({
         "ok": True, "date": cached.get("daykey") or cached.get("generated_at"),
         "candidates": candidates, "count": len(candidates),
+        "trading_day": trading_day,
         "message_format_hint": "🌆 오늘의 종가베팅 후보 {count}개: {name}(+{change_pct}%, 거래대금 {turnover_rank}위), ...",
     })
 
@@ -6733,7 +6887,8 @@ async def jongga_forward():
     (+1.22%, n=276, z=4.28)와 실전 결과를 계속 대조하기 위한 엔드포인트.
     스냅샷가 기준/확정종가 기준을 분리 계산(모듈 상단 _resolve_jongga_gaps
     docstring 참고 — 실전 진입가는 그 사이 어딘가라 어느 한쪽만 쓰면 왜곡)."""
-    return JSONResponse(_clean_nan(_jongga_forward_stats()))
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    return JSONResponse(_clean_nan({**_jongga_forward_stats(), "trading_day": is_trading_day("kr", today)}))
 
 
 @app.get("/api/vol/{ticker}")
@@ -7048,7 +7203,8 @@ async def get_money_flow(market: str, date: str | None = None):
     if snapshot is not None and markdown is None:
         error = "AI 해석 리포트가 없습니다(생성 실패 또는 미실행) — 1단계 계산 결과만 표시합니다"
     return JSONResponse(_clean_nan({"market": market, "date": daykey, "available_dates": available,
-                                     "snapshot": snapshot, "markdown": markdown, "error": error}))
+                                     "snapshot": snapshot, "markdown": markdown, "error": error,
+                                     "trading_day": is_trading_day(market, daykey)}))   # v5.99
 
 
 @app.get("/api/moneyflow/{market}/summary")
@@ -7079,6 +7235,7 @@ async def get_money_flow_summary(market: str):
         "final_sentence": summary.get("final_sentence"),
         "url": "https://pullback-production.up.railway.app/moneyflow",
         "error": None,
+        "trading_day": is_trading_day(market, daykey),   # v5.99: 봇 이중 확인용
     })
 
 
