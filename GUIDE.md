@@ -24,7 +24,7 @@
 **🇺🇸 미장 = 되돌림 계열**
 - 눌림목·슈퍼대장·돌파임박 위주로 본다 — `docs/kr_us_strategy_map.md`
 - 슈퍼대장 직접 진입 시 포지션 절반 + ATR×2 손절(통상 ATR×1.5 규율과 충돌하는 예외이므로 사이즈로 상쇄) — `docs/all_tabs_common_yardstick_investigation.md`
-- RSI<50 규칙(KR 채택분)은 US에서 검증 중 — 결과 나오면 이 줄 갱신 — `docs/kr_breakout_rsi_investigation.md`
+- RSI<50 규칙은 US엔 적용 안 됨(검증 완료) — US는 오히려 정반대 방향(RSI<50 그룹 EV가 더 높음, z=2.39) — `docs/kr_breakout_rsi_investigation.md`
 
 ---
 

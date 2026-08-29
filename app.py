@@ -5,6 +5,17 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.96 [측정] RSI<50 저모멘텀 필터 US 확장 검증(사전 등록, 사용자 지시) —
+        기각 확정. KR과 동일 설계(이분+시간반분 재현)로 US 돌파+박스
+        돌파+추세전환에 적용한 결과 두 절반 모두 KR과 **정반대 방향**
+        (이전절반 RSI<50 EV 0.729R vs RSI≥50 0.249R z=2.39 유의, 최근
+        절반도 방향 동일·비유의) — 사전 기준(두 절반 모두 -0.15R 이상)
+        미달로 "KR 전용 필터" 확정. 코드 변경 없음(isLowMomentumBreakout
+        의 market==='KR' 조건이 이미 US를 배제하고 있었음 — 이번 측정은
+        그 설계가 사후적으로 옳았음을 확인). GUIDE.md 체크리스트의
+        "US 검증 중" 문구를 결과로 갱신. 근거:
+        docs/kr_breakout_rsi_investigation.md "US 확장 검증" 절,
+        scripts/measurements/2026-08-29_us_breakout_rsi_under50_time_split.py.
 v5.95 [문서] GUIDE.md 맨 앞에 "실전 체크리스트 (1페이지)" 신설(사용자
         지시) — 측정 검증된 규칙만 시장별로 요약, 항목마다 근거 docs
         링크. 공통(ATR×1.5 손절/가격고정 자동제외/게이트색 진입판단
@@ -2978,7 +2989,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.95"
+VERSION = "v5.96"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
