@@ -290,6 +290,12 @@ tr.editing{background:rgba(242,179,61,.06)}
 .stopwidth-warn{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);
   border-radius:8px;padding:8px 11px;font-size:12px;color:#fbbf24;margin:0 24px 12px;line-height:1.5}
 @media (max-width:600px){.stopwidth-warn{margin:0 16px 12px}}
+/* v5.97: 종가베팅 탭 고정 안전 배너 — 손절폭 안내(amber)보다 진하게, 위험
+   경고 톤(red-amber)으로 구분. 탭 상단 항상 표시(사용자 지시 8번). */
+.jongga-safety-banner{background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.35);
+  border-radius:8px;padding:9px 12px;font-size:12.5px;font-weight:600;color:#ff9b9b;
+  margin:0 24px 8px;line-height:1.5}
+@media (max-width:600px){.jongga-safety-banner{margin:0 16px 8px}}
 .legend{display:flex;gap:18px;flex-wrap:wrap;padding:0 24px 10px;font-size:12px}
 .legend .lg{color:var(--muted);cursor:help;display:inline-flex;align-items:center;gap:5px}
 .legend .lg-h{color:var(--text);opacity:.7}
@@ -548,7 +554,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.96</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.97</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -563,6 +569,7 @@ tr.editing{background:rgba(242,179,61,.06)}
     <button class="tab" data-mode="breakout">🇰🇷돌파</button>
     <button class="tab" data-mode="boxbreak">🇰🇷박스돌파</button>
     <button class="tab" data-mode="turnaround">🇰🇷추세전환</button>
+    <button class="tab" data-mode="jongga" title="T일 종가매수→T+1일 시가매도, 단기 오버나이트 전략(v5.97)">🇰🇷종가베팅</button>
     <span class="tab-group-sep"></span>
     <button class="tab" data-mode="leader">대장관찰</button>
     <button class="tab" data-mode="sectors">📊 섹터</button>
@@ -613,6 +620,8 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <div class="stopwidth-warn" id="marketMismatchBanner" style="display:none"></div>
 <div class="stopwidth-warn" id="stopWidthWarnBanner" style="display:none"></div>
+<div class="jongga-safety-banner" id="jonggaSafetyBanner" style="display:none">⚠️ 단기 오버나이트 전략 — 소액 고정 비중, 익일 아침 무조건 정리. 갭하락 리스크 있음(백테스트 평균이며 개별 결과 아님).</div>
+<div class="stopwidth-warn" id="jonggaSessionBanner" style="display:none"></div>
 <!-- v5.36: 패턴 탭 전용 서브탭(전체/컵앤핸들/치솟은깃발/더블바닥/급등매집).
      mode==='pattern'일 때만 렌더링·표시 — renderPatternSubTabs()가 매번
      mode를 확인해서 그 외엔 숨김+필터 미적용. v5.46: 섹터 칩(.schip)과
@@ -1292,6 +1301,66 @@ function collapsedRowHtmlInverse(s) {
   </div>`;
 }
 
+// v5.97: 🇰🇷 종가베팅 전용 카드 — 2R 손익비/신호등 체제와 완전히 다른
+// 게임(T일 종가매수→T+1일 시가매도)이라 별도 렌더러(사용자 지시 6번,
+// breakdownCard와 동일 전례 — entrySignal/riskPctMiniHtml 등 R계열
+// 헬퍼를 아예 안 부른다). 근거: docs/kr_jongga_betting_backtest.md.
+function collapsedRowHtmlJongga(s) {
+  const fav = favorites.includes((s.ticker || '').toUpperCase());
+  const chgCls = s.change_pct >= 0 ? 'up' : 'down';
+  return `<div class="card-collapsed">
+    <div class="cc-row1">
+      <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기'}">${fav ? '★' : '☆'}</button>
+      <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
+      <a class="cc-name-lg name-link" href="${tvUrl(s)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.name}</a>
+      <span class="cc-mkt">KR</span>
+      <span class="cc-chevron">▸</span>
+    </div>
+    <div class="cc-row2">
+      <span class="cc-field"><span class="cc-label">등락</span><span class="cc-rs mono ${chgCls}">${s.change_pct >= 0 ? '+' : ''}${s.change_pct}%</span></span>
+      <span class="cc-field"><span class="cc-label">거래대금</span><span class="cc-rs mono">${s.turnover_rank}위</span></span>
+      <span class="cc-field"><span class="cc-label">거래량</span><span class="cc-rs mono">${s.vol_mult}×</span></span>
+    </div>
+  </div>`;
+}
+function jonggaCard(s) {
+  const chgCls = s.change_pct >= 0 ? 'up' : 'down';
+  const chgSign = s.change_pct >= 0 ? '+' : '';
+  const fav = favorites.includes((s.ticker || '').toUpperCase());
+  return `<div class="card${fav ? ' fav' : ''}">
+    ${collapsedRowHtmlJongga(s)}
+    <div class="card-expanded">
+    <div class="card-top">
+      <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="즐겨찾기">${fav ? '★' : '☆'}</button>
+      <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
+      <div>
+        <div class="name">🌆 <a class="name-link" href="${tvUrl(s)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.name}</a><span class="mkt">${s.market}</span>${s.price_frozen ? ` <span class="merger-tag" title="가격고정(M&A/특수상황) 의심: ${(s.price_frozen_reasons||[]).join(', ')}">⚠️ 가격고정</span>` : ''}</div>
+        <div class="tick mono">${s.ticker ? `<a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a>` : ''}${s.sector && s.sector !== '기타' ? ` · ${s.sector}` : ''}</div>
+      </div>
+      <div style="margin-left:auto;text-align:right">
+        <div class="mono" style="font-size:11px;color:var(--muted)">거래대금</div>
+        <div class="mono" style="font-size:15px;font-weight:700;color:#fbbf24">${s.turnover_rank}위</div>
+      </div>
+    </div>
+    <div class="price-row mono">
+      <span class="price">${fmtPrice(s.close, s.market)}</span>
+      <span class="chg ${chgCls}">${chgSign}${s.change_pct}%</span>
+    </div>
+    ${sparkSVG(s.spark, s.spark_ma20)}
+    <div style="margin-top:10px;padding:10px 12px;background:var(--surface);border-radius:8px;font-size:12.5px;line-height:1.9">
+      <div>✓ 거래대금 상위 100 이내 — <b>${s.turnover_rank}위</b></div>
+      <div>✓ 당일 +3%↑ 양봉 — <b>${chgSign}${s.change_pct}%</b></div>
+      <div>✓ 짧은 윗꼬리(고가 대비 -2%이내) — <b>-${s.wick_pct}%</b></div>
+      <div>✓ 거래량 20일평균 2배+ — <b>${s.vol_mult}×</b></div>
+      <div>✓ 20일선 위 · 52주고점 -15%이내 — <b>20일선 ${fmtPrice(s.ma20, s.market)} · 고점대비 ${s.off_high_pct}%</b></div>
+    </div>
+    <div class="sig-note" style="margin-top:8px;opacity:.85" title="사전 등록 백테스트(2026-08-29) — 조합A 채택, base 대비 z=4.28">📊 ${s.backtest_note || ''}</div>
+    <div class="surge-warn" style="margin-top:8px">🕐 매도 규칙(고정): <b>${s.sell_rule || '익일 시초가~9:05 전량 매도'}</b> — 보유 연장·물타기 없음.</div>
+    ${s.ticker ? `<button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button>` : ''}
+    </div>
+  </div>`;
+}
+
 function breakdownCard(s) {
   const chgCls = s.change_pct >= 0 ? 'up' : 'down';
   const chgSign = s.change_pct >= 0 ? '+' : '';
@@ -1353,6 +1422,7 @@ function patternWarningText(pattern) {
 
 function card(s) {
   if (s.mode === 'breakdown') return breakdownCard(s);
+  if (s.mode === 'jongga') return jonggaCard(s);
   const chgCls = s.change_pct >= 0 ? 'up' : 'down';
   const chgSign = s.change_pct >= 0 ? '+' : '';
   const fav = favorites.includes((s.ticker || '').toUpperCase());
@@ -1645,6 +1715,7 @@ let mode = 'imminent';
 let sectorFilter = null;
 let searchQuery = '';
 let lastHits = [];
+let lastScanMeta = {};   // v5.97: 종가베팅 탭 배너용 — session_state/label/backtest_note 등 hits 밖의 필드
 let strictMode = false;
 let riskSort = false;
 let bearOkOnly = false;   // v4.65: 💎 약세장적격만
@@ -1854,7 +1925,8 @@ const DESC = {
   pattern: '🧩 장기 패턴이 거의 완성된 종목 · 컵앤핸들(12~35% U바닥+얕은 손잡이) / 치솟은깃발(45봉내 +90% 후 얕은 깃발) / 더블바닥(W자) · 피벗 근처만 표시 — 돌파임박과 달리 몇 주~몇 달 형태를 인식',
   sectors: '📊 전일 섹터별 강세 요약 · 코스피/코스닥/미국 각각 섹터 평균 등락·상승비율·상위 종목 · 섹터 매핑된 종목 기준',
   eod: '📋 코스피/코스닥 마감 정리 · 상한가 종목 + 거래대금 상위(네이버 순위 기준) + 섹터 로테이션(상승률/거래대금 상위 섹터)',
-  breakdown: '🩸 Stage 4 숏 셋업 · 역배열(20<60<200)+200일선 하락+지지 이탈+하락 거래량+RS 약세 · ⚠️ 숏은 손실 무한·숏스퀴즈·급반등 위험, 한국은 개인 공매도 제약 · 미국 종목 위주'
+  breakdown: '🩸 Stage 4 숏 셋업 · 역배열(20<60<200)+200일선 하락+지지 이탈+하락 거래량+RS 약세 · ⚠️ 숏은 손실 무한·숏스퀴즈·급반등 위험, 한국은 개인 공매도 제약 · 미국 종목 위주',
+  jongga: '🇰🇷 종가베팅 · T일 종가매수→T+1일 시가매도 단기 오버나이트 · 거래대금 상위100 · +3%↑ 짧은윗꼬리 양봉 · 거래량 20일평균 2배+ · 20일선 위·52주고점-15%이내 · 사전 등록 백테스트 채택(z=4.28, docs/kr_jongga_betting_backtest.md)'
 };
 
 // v5.56: 필터/정렬 버튼 표시 여부 — renderCards()가 안 도는 뷰(인버스/섹터/
@@ -1923,6 +1995,7 @@ async function load(refresh = false) {
       loadAlertList();
     });
     lastHits = data.hits;
+    lastScanMeta = data;
     favorites = data.favorites || [];
     sectorFilter = null;
     searchQuery = '';
@@ -2386,6 +2459,19 @@ function renderCards() {
       mismatchBar.innerHTML = `⚠️ 이 계열은 ${market === 'kr' ? '한국' : '미국'}에서 검증되지 않음 — 전략 지도 참고 (docs/kr_us_strategy_map.md, z=4.88)`;
     }
   }
+  // v5.97: 종가베팅 탭 — 고정 안전 배너 + 시간대별 세션 상태 배너(사용자
+  // 지시 4·8번). lastScanMeta는 load()가 채워줌(hits 밖의 session_state 등).
+  const jSafety = document.getElementById('jonggaSafetyBanner');
+  const jSession = document.getElementById('jonggaSessionBanner');
+  if (jSafety) jSafety.style.display = (mode === 'jongga') ? '' : 'none';
+  if (jSession) {
+    if (mode === 'jongga' && lastScanMeta.session_label) {
+      jSession.style.display = '';
+      jSession.innerHTML = lastScanMeta.session_label;
+    } else {
+      jSession.style.display = 'none';
+    }
+  }
   // 종목명/코드 검색 필터
   if (searchQuery) {
     const q = searchQuery.toLowerCase().replace(/\s/g, '');
@@ -2765,6 +2851,10 @@ document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click'
     // 안 지워질 수 있음 — 탭 전환 시점에 바로 정리.
     const mb = document.getElementById('marketMismatchBanner');
     if (mb) mb.style.display = 'none';
+    // v5.97: 종가베팅은 KR 전용이지만 z=4.88 전략지도(TAB_MARKET_LABEL)와는
+    // 별개 측정이라 그 맵엔 안 넣음(마켓 불일치 배너 문구가 안 맞을 것) —
+    // 시장 동기화만 별도로.
+    if (mode === 'jongga') setMarket('kr');
   }
   hideFilterButtonsIfNotApplicable();   // v5.56: journal은 load() 자체를 안 타서 여기서도 호출
   const isJournal = mode === 'journal';
@@ -3503,6 +3593,7 @@ const MODE_TAB_LABEL = {
   stage2: 'Stage2',
   ibd9: 'IBD9',
   earnings: '실적우수',
+  jongga: '종가베팅',
 };
 // ── 📅 활동 달력 (v4.52): 날짜별 분석/등록 종목 한눈에 ──
 let _jcal = null;   // {y, m} 표시 중인 달

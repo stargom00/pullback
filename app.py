@@ -5,6 +5,48 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.97 [기능추가] 🇰🇷 종가베팅 탭 신설(사용자 지시) — 사전 등록 백테스트
+        채택 조건 그대로 구현(docs/kr_jongga_betting_backtest.md, 조합A:
+        n=276, 비용차감후 평균 +1.22%, base 대비 z=4.28). T일 종가매수
+        →T+1일 시가매도, KR 전용.
+        [스캔] scanner.py: JONGGA_CONFIG + analyze_jongga() 신설 —
+        base(거래대금 상위100)·candle(+3%↑짧은윗꼬리)·volume(20일평균
+        2배+)·position(20일선위·52주고점-15%이내) 임계값 백테스트와
+        완전 동일. 상한가(전일比+30%) 근접 종목은 매수 불가라 제외(백
+        테스트엔 없던 실전 제약, 신규 추가). 가격고정(M&A) 정보용 필드
+        부착은 기존 9개 analyze_*()와 동일(_price_frozen_block).
+        [교차] app.py `_run_scan_jongga()` 신설 — turnover_rank(거래대금
+        순위)는 RS랭크와 같은 이유로 cross-sectional이라 analyze_jongga()
+        밖에서 KR 전종목 대상으로 미리 계산해 넘김. `/api/scan?mode=
+        jongga`로 노출(allowed mode 목록에 추가).
+        [타이밍] naver_kr.fetch_history()가 장중 당일 봉을 실시간에
+        가깝게 이미 포함한다는 게 기존 docstring에 확인돼 있어(별도
+        "전일 확정 폴백" 불필요) `_jongga_session_state()`가 평일
+        14:40 전/14:40~15:30/그 외 3단계로 안내 문구만 결정(스캔 로직
+        자체는 시간 무관, 매 요청 시점 최신 봉 사용). `_scheduler_loop()`
+        (4분 주기)에 `_maybe_run_jongga_snapshot()` 추가 — 평일 14:40
+        ~15:00 사이 1회만 스냅샷을 잡아 `_cache["kr:jongga"]`에 저장.
+        [알림] `/api/jongga/candidates` 신설 — 얼마냐봇(외부 레포,
+        `/api/ma` 폴링 방식과 동일)이 폴링해 자체적으로 텔레그램 메시지를
+        만들어 보내는 용도. **이 레포엔 텔레그램 발송 코드 자체가 없어
+        (얼마냐봇은 별도 레포) "14:50 자동 발송"은 이 커밋만으론 미완성**
+        — 데이터 엔드포인트 + 메시지 포맷 힌트(message_format_hint)까지만
+        준비, 실제 발송은 봇 레포 쪽 작업 필요(사용자에게 별도 보고).
+        [UI] static/index.html: 🇰🇷 3탭 옆에 "🇰🇷종가베팅" 탭 추가.
+        jonggaCard()/collapsedRowHtmlJongga() 완전 별도 렌더러 신설 —
+        entrySignal/riskPctMiniHtml 등 R계열 헬퍼를 아예 호출 안 함(카드에
+        진입판정 신호등·손절폭·2R 손익비 없음, 사용자 지시 6번). 조건 5개
+        체크리스트 + 거래대금순위 + 백테스트 근거수치(backtest_note) +
+        매도규칙(sell_rule) 표시. 탭 상단 고정 안전배너(jonggaSafetyBanner)
+        + 시간대별 세션 안내(jonggaSessionBanner, lastScanMeta로 전달)
+        추가. 클릭 시 시장필터 자동 KR 전환(단 z=4.88 전략지도 TAB_MARKET_
+        LABEL과는 별개 취급 — 마켓불일치 배너 문구가 안 맞을 것이므로).
+        [GUIDE] 6.5장 "종가베팅" 신설 — 조건·타이밍·매도규칙·근거수치·
+        미포함(theme) 사유 기록.
+        검증: card({mode:'jongga',...}) 렌더 결과에 entry-sig 클래스·
+        리스크 필드 없음을 node eval로 직접 확인, analyze_jongga() 상한가
+        제외/전조건통과 케이스 합성 데이터로 검증, test_scanner.py/
+        test_trace_parity.py 재실행.
 v5.96 [측정] RSI<50 저모멘텀 필터 US 확장 검증(사전 등록, 사용자 지시) —
         기각 확정. KR과 동일 설계(이분+시간반분 재현)로 US 돌파+박스
         돌파+추세전환에 적용한 결과 두 절반 모두 KR과 **정반대 방향**
@@ -2933,7 +2975,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, analyze_inverse, analyze_breakdown, analyze_pattern, analyze_stage2, rs_score_stage2, analyze_ibd9_cheap, analyze_ibd9_full, rs_raw_score, to_rs_rank, climax_warning, inverse_score, price_frozen_check
+from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, analyze_inverse, analyze_breakdown, analyze_pattern, analyze_stage2, rs_score_stage2, analyze_ibd9_cheap, analyze_ibd9_full, analyze_jongga, rs_raw_score, to_rs_rank, climax_warning, inverse_score, price_frozen_check
 from inverse_universe import inverse_universe
 from sectors import get_sector
 try:
@@ -2989,7 +3031,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.96"
+VERSION = "v5.97"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -3557,6 +3599,83 @@ STAGE2_LIQUIDITY_MIN_EOK = 20   # 일평균 거래대금(20일) 20억원 이상�
 STAGE2_RS_PCTILE_MIN = 70
 
 
+# ── 🇰🇷 종가베팅 (v5.97) ──────────────────────────────────────────
+# T일 종가매수→T+1일 시가매도. 근거: docs/kr_jongga_betting_backtest.md
+# "후속 — 사전 등록 재설계" 절, 조합 A 채택(n=276, 비용차감후 평균
+# +1.22%, base 대비 z=4.28). 조건 자체는 scanner.analyze_jongga()에
+# 그대로 있음 — 여기(app.py)는 KR 전종목 거래대금 순위(cross-sectional,
+# RS랭크와 같은 이유로 analyze_jongga() 밖에서 계산)만 준비해서 넘긴다.
+JONGGA_BACKTEST_NOTE = ("이 조건 과거 평균 익일갭 +1.22% (n=276, 비용차감후, "
+                          "왕복0.3% 가정) — z=4.28 (docs/kr_jongga_betting_backtest.md)")
+JONGGA_SELL_RULE = "익일 시초가~9:05 전량 매도"
+
+
+def _jongga_session_state(now_kst: datetime) -> dict:
+    """종가베팅 탭 상단 안내용 시간대 상태 — 실제 스캔 로직과 무관, 순수
+    안내 문구용(사용자 지시 4번). 평일 09:00~14:40=대기, 14:40~15:30(동시
+    호가 포함)=활성, 그 외=장종료. 주말은 항상 장종료로 취급."""
+    wd = now_kst.weekday()
+    hm = now_kst.hour * 60 + now_kst.minute
+    if wd >= 5:
+        return {"state": "after", "label": "오늘 장 종료 — 내일 후보는 14:40에"}
+    if hm < 14 * 60 + 40:
+        return {"state": "before", "label": "오늘 후보는 14:40~15:00 사이에 갱신됩니다"}
+    if hm < 15 * 60 + 30:
+        return {"state": "active", "label": "⏰ 오늘 15:20 동시호가 전 진입용"}
+    return {"state": "after", "label": "오늘 장 종료 — 내일 후보는 14:40에"}
+
+
+async def _run_scan_jongga(bundle: dict) -> dict:
+    universe = bundle["universe"]
+    data = bundle["data"]
+    kr_data = {t: df for t, df in data.items() if naver_kr.is_kr(t)}
+
+    diag = {"kr_universe": sum(1 for t in universe if naver_kr.is_kr(t)),
+            "kr_fetched": len(kr_data), "kr_hits": 0}
+
+    # ── 거래대금(종가×거래량) 순위 — RS랭크와 동일하게 cross-sectional이라
+    # analyze_jongga() 밖에서 미리 계산(scripts/measurements/2026-08-29_kr_
+    # jongga_betting_backtest_extended.py의 turnover_rank_at()과 동일 정의) ──
+    turnovers = {}
+    for t, df in kr_data.items():
+        c, v = df.get("Close"), df.get("Volume")
+        if c is None or v is None or len(c) < 1 or len(v) < 1:
+            continue
+        try:
+            turnovers[t] = float(c.iloc[-1]) * float(v.iloc[-1])
+        except Exception:
+            continue
+    ranked = sorted(turnovers.items(), key=lambda kv: kv[1], reverse=True)
+    turnover_rank = {t: i + 1 for i, (t, _) in enumerate(ranked)}
+
+    hits = []
+    for t, df in kr_data.items():
+        r = analyze_jongga(df, turnover_rank=turnover_rank.get(t))
+        if r is None:
+            continue
+        hits.append({
+            "ticker": t, "name": universe.get(t, t), "market": "KR",
+            "sector": _sector_of(t), "backtest_note": JONGGA_BACKTEST_NOTE,
+            "sell_rule": JONGGA_SELL_RULE,
+            **r,
+        })
+        diag["kr_hits"] += 1
+    hits.sort(key=lambda x: x.get("turnover_rank", 9999))
+
+    now_kst = datetime.now(KST)
+    session = _jongga_session_state(now_kst)
+
+    return {
+        "version": VERSION, "market": "kr", "mode": "jongga",
+        "scanned": len(universe), "fetched": len(data), "diag": diag,
+        "hits": hits, "warn_count": 0,
+        "backtest_note": JONGGA_BACKTEST_NOTE, "sell_rule": JONGGA_SELL_RULE,
+        "session_state": session["state"], "session_label": session["label"],
+        "timing": bundle.get("timing"),
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "ts": time.time(),
+    }
+
+
 async def _run_scan_stage2(bundle: dict) -> dict:
     universe = bundle["universe"]
     data = bundle["data"]
@@ -4106,6 +4225,8 @@ async def run_scan(market: str, mode: str) -> dict:
         return await _run_scan_ibd9(bundle)
     if mode == "strong_pivot":
         return await _run_scan_strong_pivot(bundle)
+    if mode == "jongga":
+        return await _run_scan_jongga(bundle)
     universe = bundle["universe"]
     data = bundle["data"]
     rs_ranks = bundle["rs_ranks"]
@@ -4212,7 +4333,7 @@ async def run_scan(market: str, mode: str) -> dict:
 @app.get("/api/scan")
 async def scan(market: str = "all", mode: str = "imminent", refresh: bool = False):
     market = market if market in ("kr", "us", "all") else "all"
-    mode = mode if mode in ("pullback", "turnaround", "leader", "super", "breakout", "surge", "imminent", "boxbreak", "breakdown", "pattern", "stage2", "ibd9", "earnings", "strong_pivot") else "pullback"
+    mode = mode if mode in ("pullback", "turnaround", "leader", "super", "breakout", "surge", "imminent", "boxbreak", "breakdown", "pattern", "stage2", "ibd9", "earnings", "strong_pivot", "jongga") else "pullback"
     key = f"{market}:{mode}"
     favs = load_favorites()
     cached = _cache.get(key)
@@ -4511,17 +4632,54 @@ async def _ensure_mcap_allowed():
         _mcap_fetch_in_progress = False
 
 
+_jongga_snapshot_date: str | None = None   # 오늘 자 종가베팅 스냅샷 실행 여부(날짜 키)
+
+
+async def _maybe_run_jongga_snapshot():
+    """종가베팅 장중 스냅샷 — 평일 KST 14:40~15:00 사이 1회만 실행(사용자
+    지시 3번). 4분 주기 스케줄러 루프에 얹혀서 그 창 안에 최소 4~5회
+    깨어나므로 4분 해상도로도 창을 놓치지 않는다. 결과는 일반 /api/scan
+    캐시(_cache["kr:jongga"])에 그대로 저장 — 프론트가 열든 안 열든 이
+    시각의 스냅샷이 확보된다. 텔레그램 발송(사용자 지시 7번)은 이 레포에
+    봇 코드가 없어(얼마냐봇은 외부 레포, /api/ma/{ticker}만 폴링 —
+    CLAUDE.md) 여기서는 못 하고, 로그 + /api/jongga/candidates 엔드포인트
+    (봇이 폴링해서 자체적으로 보내야 함)로 대체."""
+    global _jongga_snapshot_date
+    now = datetime.now(KST)
+    if now.weekday() >= 5:
+        return
+    hm = now.hour * 60 + now.minute
+    if not (14 * 60 + 40 <= hm < 15 * 60):
+        return
+    today = now.strftime("%Y-%m-%d")
+    if _jongga_snapshot_date == today:
+        return
+    try:
+        bundle = await _fetch_market_data("kr", wait_for_fresh=True)
+        if not bundle:
+            return
+        result = await _run_scan_jongga(bundle)
+        result["daykey"] = _market_session_key("kr")
+        _cache["kr:jongga"] = result
+        _jongga_snapshot_date = today
+        print(f"[jongga] {today} 장중 스냅샷 완료 — 후보 {len(result['hits'])}개")
+    except Exception as e:
+        print(f"[jongga] 장중 스냅샷 실패: {e}")
+
+
 async def _scheduler_loop():
     """4분마다 깨어나 각 시장을 워밍.
     - 장 마감 후: 하루 1회 (데이터 고정)
     - 장중: 8분 이상 묵은 캐시를 미리 갱신 → 사용자는 항상 캐시 히트,
-            콜드 스캔으로 인한 '스캔 실패'가 사라짐."""
+            콜드 스캔으로 인한 '스캔 실패'가 사라짐.
+    - 🇰🇷 종가베팅: 14:40~15:00 사이 1회 스냅샷(v5.97, 아래 참고)."""
     await asyncio.sleep(20)  # 부팅 직후 잠깐 대기
     while True:
         try:
             asyncio.create_task(_ensure_mcap_allowed())  # 하루 1회, 워밍과 별개로 진행
             for market in ("kr", "us"):
                 await _warm_market(market)
+            await _maybe_run_jongga_snapshot()
         except Exception as e:
             print(f"[scheduler] loop error: {e}")
         await asyncio.sleep(240)  # 4분
@@ -6336,6 +6494,30 @@ async def moving_averages(ticker: str):
         return JSONResponse(out)
     except Exception:
         return JSONResponse({"ok": False}, status_code=500)
+
+
+@app.get("/api/jongga/candidates")
+async def jongga_candidates():
+    """🇰🇷 종가베팅 오늘의 후보 — 얼마냐봇(외부 텔레그램 봇, /api/ma
+    폴링 방식과 동일)이 14:50경 폴링해서 자체적으로 메시지를 만들어
+    보내는 용도(v5.97, 사용자 지시 7번). 이 레포엔 텔레그램 발송 코드가
+    없어(얼마냐봇은 별도 레포) 데이터만 제공 — 문구 형식 제안:
+    '🌆 오늘의 종가베팅 후보 N개: 종목명(+등락%, 거래대금 N위)...'
+    후보 0개면 봇이 침묵하도록 candidates=[]로 응답(발송 여부는 봇 쪽 로직)."""
+    cached = _cache.get("kr:jongga")
+    if not cached:
+        return JSONResponse({"ok": True, "date": None, "candidates": [], "count": 0})
+    hits = cached.get("hits", [])
+    candidates = [
+        {"ticker": h["ticker"], "name": h.get("name", h["ticker"]),
+         "change_pct": h.get("change_pct"), "turnover_rank": h.get("turnover_rank")}
+        for h in hits
+    ]
+    return JSONResponse({
+        "ok": True, "date": cached.get("daykey") or cached.get("generated_at"),
+        "candidates": candidates, "count": len(candidates),
+        "message_format_hint": "🌆 오늘의 종가베팅 후보 {count}개: {name}(+{change_pct}%, 거래대금 {turnover_rank}위), ...",
+    })
 
 
 @app.get("/api/vol/{ticker}")

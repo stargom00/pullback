@@ -4518,3 +4518,99 @@ def analyze_ibd9_full(df: pd.DataFrame, cheap: dict, beta: float | None,
             for x in c.rolling(20).mean().iloc[-60:].tolist()
         ],
     }
+
+
+# ── 🇰🇷 종가베팅 (v5.97) ──────────────────────────────────────────
+# T일 종가 매수 → T+1일 시가 매도. 사전 등록 백테스트 채택 조건 그대로
+# 이식(재구현 아님 — 임계값 전부 측정 스크립트와 동일):
+#   docs/kr_jongga_betting_backtest.md "후속 — 사전 등록 재설계" 절,
+#   scripts/measurements/2026-08-29_kr_jongga_betting_backtest_extended.py
+#   조합 A 채택(n=276, 비용차감후 평균 +1.22%, 대조군 대비 z=4.28).
+# turnover_rank(거래대금 순위)는 RS랭크와 동일하게 cross-sectional
+# 정보라 analyze_jongga() 내부에서 계산 불가 — 호출부(app.py)가 KR
+# 전종목 순위를 미리 계산해 넘긴다.
+JONGGA_CONFIG = {
+    "min_bars": 260,             # 52주(252) lookback + 여유 8봉 — 백테스트 MIN_BARS_AFTER_OFFSET과 동일
+    "turnover_rank_max": 100,    # base: 거래대금 상위 100 이내
+    "candle_min_ret": 0.03,      # candle: 당일 +3%↑
+    "candle_max_wick_pct": 0.02, # candle: 종가가 고가 대비 -2% 이내(짧은 윗꼬리)
+    "volume_mult_min": 2.0,      # volume: 직전 20일 평균 대비 배수
+    "volume_lookback": 20,
+    "off_high_min": -15.0,       # position: 52주 고점 대비 낙폭 하한(%)
+    "upper_limit_pct": 0.30,     # KR 상한가(전일比 +30%) — 매수 불가 종목 제외 기준
+    "upper_limit_buffer": 0.995, # 상한가 근접(반올림/틱사이즈 여유) 판정 버퍼
+}
+
+
+def analyze_jongga(df: pd.DataFrame, turnover_rank: int | None = None,
+                    cfg: dict = JONGGA_CONFIG) -> dict | None:
+    """KR 종가베팅 — T일 종가매수→T+1일 시가매도 단기 오버나이트 전략.
+    KR 전용(turnover_rank 자체가 KR 유니버스 기준 랭킹 — US에 적용 금지).
+    조건 5개(base/candle/volume/position/상한가제외) 전부 통과해야 히트.
+    가격고정(M&A) 의심은 다른 9개 analyze_*()와 동일하게 정보용 필드로만
+    부착(하드 게이트 아님, v5.90 패턴)."""
+    if df is None or len(df) < cfg["min_bars"]:
+        return None
+    df = df.dropna(subset=["Close", "Volume"]).copy()
+    if len(df) < cfg["min_bars"]:
+        return None
+    c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+
+    close_t = float(c.iloc[-1])
+    prev_close = float(c.iloc[-2])
+    high_t = float(h.iloc[-1])
+    if close_t <= 0 or prev_close <= 0:
+        return None
+
+    # ── base: 거래대금 상위 100 ──
+    if turnover_rank is None or turnover_rank > cfg["turnover_rank_max"]:
+        return None
+
+    # ── candle: +3%↑ & 짧은 윗꼬리 ──
+    ret_t = close_t / prev_close - 1.0
+    if ret_t < cfg["candle_min_ret"]:
+        return None
+    if high_t <= 0 or close_t < high_t * (1 - cfg["candle_max_wick_pct"]):
+        return None
+
+    # ── 상한가 도달 제외(매수 불가 — 백테스트엔 없던 실전 제약, 사용자 지시) ──
+    limit_price = prev_close * (1 + cfg["upper_limit_pct"])
+    if close_t >= limit_price * cfg["upper_limit_buffer"]:
+        return None
+
+    # ── volume: 직전 20일(T 제외) 평균 대비 2배+ ──
+    vol_t = float(v.iloc[-1])
+    vol_win = v.iloc[-(cfg["volume_lookback"] + 1):-1]
+    if len(vol_win) < cfg["volume_lookback"]:
+        return None
+    vol_avg = float(vol_win.mean())
+    if vol_avg <= 0 or vol_t < vol_avg * cfg["volume_mult_min"]:
+        return None
+
+    # ── position: 20일선 위 & 52주 고점 -15% 이내 ──
+    ma20 = float(c.iloc[-20:].mean())
+    if close_t <= ma20:
+        return None
+    off_high = off_high_pct(c, 252)
+    if off_high < cfg["off_high_min"]:
+        return None
+
+    _mg = _price_frozen_block(c, h, lo, v)
+
+    return {
+        "mode": "jongga",
+        "close": round(close_t, 2),
+        "change_pct": round(ret_t * 100, 2),
+        "turnover_rank": turnover_rank,
+        "turnover": round(close_t * vol_t),
+        "vol_mult": round(vol_t / vol_avg, 2),
+        "ma20": round(ma20, 2),
+        "off_high_pct": round(off_high, 1),
+        "wick_pct": round((high_t - close_t) / high_t * 100, 2) if high_t > 0 else 0.0,
+        **_mg,
+        "spark": [round(float(x), 4) for x in c.iloc[-60:].tolist()],
+        "spark_ma20": [
+            None if math.isnan(x) else round(float(x), 4)
+            for x in c.rolling(20).mean().iloc[-60:].tolist()
+        ],
+    }
