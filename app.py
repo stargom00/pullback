@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.91 [UI개선] 시장별 전략 지도(docs/kr_us_strategy_map.md, 사전 등록 합산
+        검정 z=4.88) UI 반영(사용자 지시). KR에서는 돌파 계열(돌파·박스
+        돌파·추세전환)이 되돌림 계열(눌림목·돌파임박)보다 EV가 유의하게
+        높음(격차 +0.283R, z=4.88) — US는 계열 간 유의차 없음. (1)
+        static/index.html "한국"/"미국" 시장 필터 선택 시 해당 계열
+        탭에 ★ 표시(KR→돌파/박스돌파/추세전환, US→눌림목/슈퍼대장/
+        돌파임박) — 탭 접근은 막지 않음, 표시만(updateModeRecommendations).
+        (2) KR 히트 카드 중 눌림목·돌파임박(되돌림 계열) 진입 판정 박스에
+        "ℹ️ KR 되돌림 계열 EV 0.089R — 돌파 계열(0.372R) 우선 권장 (전략
+        지도)" 한 줄 추가(strategyMapNoteHtml, 진입 차단 아님·정보용) —
+        US 카드는 미변경. (3) GUIDE.md 상단에 "시장별 전략 지도" 요약
+        표 신설(근거 z=4.88, docs 링크). scanner.py/app.py 게이트·EV
+        계산 로직은 미변경(순수 표시 레이어).
 v5.90 [기능개선] 가격고정(M&A 의심) 필터 전 탭 공통화(사용자 지시) — CRNX/
         APGE(둘 다 실제 M&A 발표, 웹 검증 완료) 두 종목이 대장후보·급등
         탭에 잡히던 문제. 원인은 탐지 로직 결함이 아니라 커버리지 공백
@@ -2904,7 +2917,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.90"
+VERSION = "v5.91"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

@@ -272,6 +272,10 @@ tr.editing{background:rgba(242,179,61,.06)}
    신호. 대조군 대비 선별력이 없다고 실측 확인된 탭이라 danger(빨강) 톤으로
    구분 — docs/all_tabs_common_yardstick_investigation.md 근거. */
 .exp-tag.danger{background:rgba(255,107,107,.25);color:#ff9b9b}
+/* v5.91: 시장별 전략 지도(KR/US) 권장 탭 표시 — "한국"/"미국" 시장 필터
+   선택 시에만 해당 계열 탭에 붙는 별. 탭 접근은 절대 막지 않음(표시만),
+   docs/kr_us_strategy_map.md 사전 등록 검정(z=4.88) 근거. */
+.tab-rec{font-size:10px;color:#fbbf24;margin-left:3px;vertical-align:middle}
 .surge-warn{background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.3);
   border-radius:8px;padding:8px 11px;font-size:11px;color:#c084fc;margin-top:8px;line-height:1.5}
 /* v5.66: 손절폭 배지/필터가 "타이트=고품질"로 오독되는 걸 막는 안내줄.
@@ -537,7 +541,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.90</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>눌림목 스캐너 <span class="ver" id="verBadge">v5.91</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -1124,6 +1128,14 @@ function entrySignal(s) {
 // 체크리스트 상단 안내 — 탭마다 판정 항목 수가 달라 "신호등"이라는 이름이
 // 과장될 수 있는 지점(특히 1항목 탭)을 명시. sig.activeItems/activeCount는
 // entrySignal()이 채워줌.
+// v5.91: 시장별 전략 지도(docs/kr_us_strategy_map.md, 사전 등록 검정
+// z=4.88) — KR 되돌림 계열(눌림목·돌파임박) 카드에만 참고 정보로 표시.
+// 진입을 막지 않음, 정보용 한 줄. US 카드는 변경 없음(요청 그대로).
+function strategyMapNoteHtml(s) {
+  if (s.market !== 'KR') return '';
+  if (s.mode !== 'pullback' && s.mode !== 'imminent') return '';
+  return `<div class="sig-note" title="사전 등록 합산 검정(z=4.88) — docs/kr_us_strategy_map.md">ℹ️ KR 되돌림 계열 EV 0.089R — 돌파 계열(0.372R) 우선 권장 (전략 지도)</div>`;
+}
 function entrySignalNoteHtml(s, sig) {
   if (sig.activeCount >= 4) return '';
   const names = sig.activeItems.map(k => ENTRY_SIGNAL_ITEM_LABEL[k]).join('·');
@@ -1578,9 +1590,11 @@ function card(s) {
         return `<span class="chk chk-ref" title="${reasonTitle}">· ${txt}<span class="chk-reftag">${reasonLabel}</span></span>`;
       }).join('');
       const note = entrySignalNoteHtml(s, sig);
+      const stratNote = strategyMapNoteHtml(s);
       return `<div class="entry-sig sig-${sig.level}">
         <div class="sig-head">${sig.label}</div>
         ${note}
+        ${stratNote}
         <div class="sig-list">${items}</div>
       </div>`;
     })() : ''}
@@ -2623,6 +2637,7 @@ function onEnterMoneyflowTab() {
   if (market === 'all') {
     market = 'kr';
     document.querySelectorAll('[data-market]').forEach(x => x.classList.toggle('active', x.dataset.market === 'kr'));
+    updateModeRecommendations();
   }
   loadMoneyflowDate(null);
 }
@@ -2644,10 +2659,34 @@ async function checkMoneyflowUnread() {
 }
 checkMoneyflowUnread();
 
+// v5.91: 시장별 전략 지도(KR/US) 권장 탭 — docs/kr_us_strategy_map.md 사전
+// 등록 검정(z=4.88) 채택 결과. 탭 접근은 안 막고 ★ 표시만 붙인다.
+const KR_RECOMMENDED_MODES = ['breakout', 'boxbreak', 'turnaround'];
+const US_RECOMMENDED_MODES = ['pullback', 'super', 'imminent'];
+function updateModeRecommendations() {
+  document.querySelectorAll('[data-mode]').forEach(t => {
+    const existing = t.querySelector('.tab-rec');
+    if (existing) existing.remove();
+  });
+  const recModes = market === 'kr' ? KR_RECOMMENDED_MODES : market === 'us' ? US_RECOMMENDED_MODES : [];
+  if (!recModes.length) return;
+  recModes.forEach(m => {
+    const btn = document.querySelector(`[data-mode="${m}"]`);
+    if (!btn) return;
+    const star = document.createElement('span');
+    star.className = 'tab-rec';
+    star.title = market === 'kr'
+      ? '시장별 전략 지도 권장 — KR 돌파 계열(돌파/박스돌파/추세전환) EV 0.372R vs 되돌림 계열 0.089R (z=4.88). docs/kr_us_strategy_map.md'
+      : '시장별 전략 지도 참고 — US는 눌림목·돌파임박 개별 탭이 유의하게 좋음(z≥1.96). docs/kr_us_strategy_map.md';
+    star.textContent = '★';
+    btn.appendChild(star);
+  });
+}
 document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('click', () => {
   document.querySelectorAll('[data-market]').forEach(x => x.classList.remove('active'));
   t.classList.add('active');
   market = t.dataset.market;
+  updateModeRecommendations();
   if (mode === 'moneyflow') { loadMoneyflowDate(null); } else { renderCards(); }  // 재스캔 없이 화면만 다시 그림 (lastHits는 전체 보유)
 }));
 document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click', () => {
