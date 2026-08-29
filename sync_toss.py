@@ -20,6 +20,12 @@ sync_toss.py — 토스증권 잔고를 스캐너 서버(포지션 보드)로 �
 수동 실행:
   python3 sync_toss.py
 자동 실행(launchd) 설정은 docs/toss_position_sync_setup.md 참고.
+
+토스 API가 403(IP 미허용)으로 실패하면 현재 공인 IP를 포함해
+POST /api/positions/sync_error로 상태만 서버에 남긴다. 알림 발송(텔레그램
+등)은 이 스크립트/이 레포의 책임이 아니다 — 얼마냐봇이 GET /api/positions의
+sync_error 필드를 폴링해서 자체적으로 처리한다. 성공적으로 동기화되면
+서버가 sync_error를 자동으로 지운다(app.py의 POST /api/positions/sync 참고).
 """
 
 import logging
@@ -41,7 +47,39 @@ DEFAULT_SERVER_URL = "https://pullback-production.up.railway.app"
 SERVER_URL = os.environ.get("PULLBACK_SERVER_URL", DEFAULT_SERVER_URL).rstrip("/")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN")
 REQUEST_TIMEOUT = 15.0
+IP_LOOKUP_TIMEOUT = 5.0
 KST = timezone(timedelta(hours=9))
+
+
+def _get_public_ip():
+    """실패 알림에 넣을 현재 공인 IP. 조회 자체가 실패해도(네트워크 문제 등)
+    동기화 흐름을 막으면 안 되므로 예외를 삼키고 None을 반환한다."""
+    for url in ("https://api.ipify.org", "https://ifconfig.me/ip"):
+        try:
+            r = requests.get(url, timeout=IP_LOOKUP_TIMEOUT)
+            ip = r.text.strip()
+            if ip:
+                return ip
+        except requests.RequestException:
+            continue
+    return None
+
+
+def _report_sync_error(err_type: str, ip, code, message):
+    """서버에 실패 상태만 남긴다. 알림 발송은 이 스크립트/이 레포의 책임이
+    아니다 — 얼마냐봇이 GET /api/positions의 sync_error 필드를 폴링해서
+    자체적으로(dedup 포함) 처리한다."""
+    if not SYNC_TOKEN:
+        return
+    try:
+        requests.post(
+            f"{SERVER_URL}/api/positions/sync_error",
+            headers={"X-Sync-Token": SYNC_TOKEN, "Content-Type": "application/json"},
+            json={"type": err_type, "ip": ip, "code": code, "message": message},
+            timeout=REQUEST_TIMEOUT,
+        )
+    except requests.RequestException as e:
+        logger.error("sync_error 상태 보고 실패: %s", e)
 
 # launchd는 StartInterval=1800(30분마다, 하루 종일)으로 단순하게 두고, "장중만
 # 돈다"는 실제 요구사항은 여기서 판정한다 — StartCalendarInterval로 30분 단위
@@ -109,6 +147,10 @@ def main() -> int:
         holdings = client.get_holdings()
     except TossApiError as e:
         logger.error("보유종목 조회 실패: [%s] %s", e.code, e.message)
+        if e.status_code == 403:   # 토스 쪽 403은 항상 IP 미허용(toss_client.py 참고)
+            ip = _get_public_ip()
+            logger.warning("IP 미허용으로 판단 — 현재 공인 IP: %s", ip or "조회 실패")
+            _report_sync_error("ip_denied", ip, e.code, e.message)
         return 1
 
     positions = _extract_positions(holdings)

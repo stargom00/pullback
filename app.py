@@ -5,6 +5,16 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.104 [기능추가] sync_toss.py IP 미허용 실패 상태 노출(사용자 지시).
+        토스 API가 403(IP 미허용)으로 실패하면 sync_toss.py가 현재 공인
+        IP를 포함해 POST /api/positions/sync_error(SYNC_TOKEN 인증)로
+        상태만 서버에 남김 — sync_error.json에 저장, since/last_seen 구분
+        (같은 ip+type이면 since 유지, last_seen만 갱신). GET /api/positions
+        응답에 sync_error 필드로 노출. 성공적으로 동기화되면(POST
+        /api/positions/sync) sync_error.json을 자동 삭제 — 문제 해소 시
+        조용해짐. 알림 발송(텔레그램)은 이 레포 책임이 아니고 얼마냐봇이
+        sync_error 필드를 폴링해서 자체 dedup 후 처리하는 구조로 결정
+        (텔레그램 봇 토큰을 이 레포에 두지 않기 위해 사용자가 방향 전환).
 v5.103 [기능추가] 포지션 보드 1단계 — 토스 잔고 × 스캐너 결합(사용자 지시).
         아키텍처: Railway가 토스 Open API를 직접 못 부름(허용 IP 방식,
         Railway 아웃바운드 IP 비고정) → 맥 로컬 sync_toss.py(launchd,
@@ -3156,7 +3166,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.103"
+VERSION = "v5.104"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -5189,6 +5199,10 @@ JONGGA_FORWARD_PATH = _resolve_persistent_path("jongga_forward.json")  # v5.98 �
 # 함정([버그수정] v5.102 저널 저장 경쟁 사고)이라 애초에 파일을 나눠 피한다.
 POSITIONS_PATH = _resolve_persistent_path("positions.json")
 POSITIONS_META_PATH = _resolve_persistent_path("positions_meta.json")
+# v5.104: sync_toss.py가 토스 API IP 미허용(403)으로 실패하면 여기에 기록.
+# 발송(텔레그램 알림)은 이 레포 책임이 아니다 — 얼마냐봇이 /api/positions의
+# sync_error 필드를 폴링해서 자체적으로 처리한다(dedup 포함).
+SYNC_ERROR_PATH = _resolve_persistent_path("sync_error.json")
 
 
 @app.get("/api/alerts")
@@ -7849,6 +7863,16 @@ def _save_json_atomic(path: str, data):
     os.replace(tmp, path)
 
 
+def _load_sync_error():
+    if not os.path.exists(SYNC_ERROR_PATH):
+        return None
+    try:
+        with open(SYNC_ERROR_PATH, "r", encoding="utf-8") as f:
+            return _json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
 @app.post("/api/positions/sync")
 async def positions_sync(request: Request):
     """sync_toss.py 전용 수신 엔드포인트. body: {"positions": [{"ticker",
@@ -7896,7 +7920,49 @@ async def positions_sync(request: Request):
         _save_json_atomic(POSITIONS_PATH, data)
     except OSError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    # 성공 = IP 문제가 해소됐다는 뜻이므로 이전에 기록된 sync_error를 지운다.
+    if os.path.exists(SYNC_ERROR_PATH):
+        try:
+            os.remove(SYNC_ERROR_PATH)
+        except OSError:
+            pass
     return JSONResponse({"ok": True, "count": len(out)})
+
+
+@app.post("/api/positions/sync_error")
+async def positions_sync_error(request: Request):
+    """sync_toss.py 전용. 토스 API가 IP 미허용(403)으로 실패했을 때 상태를
+    남긴다. body: {"type", "ip", "code", "message"}. 발송(텔레그램 알림)은
+    여기서 하지 않는다 — 얼마냐봇이 GET /api/positions의 sync_error 필드를
+    폴링해서 자체적으로 처리(dedup 포함)한다. since는 같은 ip+type이 이미
+    기록돼 있으면 유지하고, 아니면 지금 시각으로 새로 시작한다."""
+    if not _verify_sync_token(request):
+        return JSONResponse({"ok": False, "error": "인증 실패 (SYNC_TOKEN)"}, status_code=401)
+    body = await request.json()
+    err_type = str(body.get("type") or "").strip()
+    ip = str(body.get("ip") or "").strip()
+    if not err_type:
+        return JSONResponse({"ok": False, "error": "type 필요"}, status_code=400)
+
+    now = datetime.now(KST).isoformat()
+    prev = _load_sync_error()
+    since = now
+    if prev and prev.get("type") == err_type and prev.get("ip") == ip:
+        since = prev.get("since") or now
+
+    data = {
+        "type": err_type,
+        "ip": ip or None,
+        "code": str(body.get("code") or "") or None,
+        "message": str(body.get("message") or "") or None,
+        "since": since,
+        "last_seen": now,
+    }
+    try:
+        _save_json_atomic(SYNC_ERROR_PATH, data)
+    except OSError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True})
 
 
 @app.post("/api/positions/stop")
@@ -7951,6 +8017,7 @@ async def get_positions():
     raw = _load_positions_raw()
     positions, synced_at = raw.get("positions", []), raw.get("synced_at")
     meta = _load_positions_meta()
+    sync_error = _load_sync_error()
 
     stale = False
     if synced_at:
@@ -7961,7 +8028,7 @@ async def get_positions():
             pass
 
     if not positions:
-        return JSONResponse({"synced_at": synced_at, "stale": stale, "positions": [], "summary": None})
+        return JSONResponse({"synced_at": synced_at, "stale": stale, "positions": [], "summary": None, "sync_error": sync_error})
 
     bundle = await _fetch_market_data("all")
     rs_ranks = bundle["rs_ranks"] if bundle else {}
@@ -8067,7 +8134,7 @@ async def get_positions():
         if r.get("stop_suggested"):
             summary["positions_missing_stop"] += 1
 
-    return JSONResponse({"synced_at": synced_at, "stale": stale, "positions": results, "summary": summary})
+    return JSONResponse({"synced_at": synced_at, "stale": stale, "positions": results, "summary": summary, "sync_error": sync_error})
 
 
 _NO_CACHE_HEADERS = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"}
