@@ -7,6 +7,27 @@
 
 ---
 
+## 실전 체크리스트 (1페이지, v5.95)
+
+측정으로 검증된 규칙만 — 추측·직관은 없다. 각 항목 근거는 괄호 안 docs 참고.
+
+**공통**
+- 손절폭 ≤ ATR×1.5만 진입(넓으면 스킵) — 고ATR 종목만 최대 15%까지 완화(`CLAUDE.md` "ATR 상대 손절폭 v4.67")
+- 가격고정(M&A 의심) 종목은 자동 제외됨(신경 안 써도 됨) — `docs/price_frozen_calibration.md`
+- 게이트 색(🟢🟡🔴)은 진입 판단에서 제외 — 개별 신호 EV를 예측 못 함(US는 오히려 역방향 z=-3.15), 시장 컨텍스트 정보로만 참고 — `docs/pullback_ev_kr_us_regime_investigation.md` 7절
+
+**🇰🇷 국장 = 돌파 계열**
+- 돌파·박스돌파·추세전환만 본다 — 되돌림 계열(눌림목·돌파임박) EV 0.089R vs 돌파 계열 0.372R, 격차 +0.283R z=4.88(사전 등록 채택) — `docs/kr_us_strategy_map.md`
+- 신호일 RSI<50인 돌파는 회피 — 손절률 66~78%(정상은 47~56%), 두 시간대 독립 재현 — `docs/kr_breakout_rsi_investigation.md`
+- RSI 70+는 무죄 — "과열이라 위험"이라는 직관은 틀렸다(z=3.37로 오히려 <50이 위험), 우열 가리지 말 것 — `docs/kr_breakout_rsi_investigation.md`
+
+**🇺🇸 미장 = 되돌림 계열**
+- 눌림목·슈퍼대장·돌파임박 위주로 본다 — `docs/kr_us_strategy_map.md`
+- 슈퍼대장 직접 진입 시 포지션 절반 + ATR×2 손절(통상 ATR×1.5 규율과 충돌하는 예외이므로 사이즈로 상쇄) — `docs/all_tabs_common_yardstick_investigation.md`
+- RSI<50 규칙(KR 채택분)은 US에서 검증 중 — 결과 나오면 이 줄 갱신 — `docs/kr_breakout_rsi_investigation.md`
+
+---
+
 ## 시장별 전략 지도 (KR/US, v5.91)
 
 같은 탭이라도 KR/US 실측 EV가 갈린다. **KR은 돌파 계열(돌파·박스돌파·추세전환)이 되돌림 계열(눌림목·돌파임박)보다 뚜렷하게 우세**(격차 +0.283R, z=4.88, 사전 등록 검정 채택 — 통계적으로 우연이 아님). US는 두 계열 간 유의한 차이가 없어 특정 계열을 배제할 근거가 없다.

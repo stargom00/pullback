@@ -5,6 +5,12 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.95 [문서] GUIDE.md 맨 앞에 "실전 체크리스트 (1페이지)" 신설(사용자
+        지시) — 측정 검증된 규칙만 시장별로 요약, 항목마다 근거 docs
+        링크. 공통(ATR×1.5 손절/가격고정 자동제외/게이트색 진입판단
+        제외) · KR(돌파 계열 채택 z=4.88/RSI<50 회피/RSI70+ 무죄) ·
+        US(되돌림 계열/슈퍼대장 포지션 절반+ATR×2/RSI<50은 검증 중).
+        코드 변경 없음 — GUIDE.md 문서만.
 v5.94 [기능추가] KR 돌파 계열 저모멘텀(RSI<50) 경고 배지 구현(사용자
         지시) — 사전 등록 시간분할 독립 재현 완료 근거
         (docs/kr_breakout_rsi_investigation.md, 이전 절반 z=-3.15/최근
@@ -2972,7 +2978,7 @@ async def _no_cache_api(request, call_next):
     return response
 
 
-VERSION = "v5.94"
+VERSION = "v5.95"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
