@@ -5,6 +5,36 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.108 [버그수정+기능추가] 초기로드 탭↔시장 연동 버그 + 📅캘린더 탭 신설
+        (사용자 지시). ① [버그수정] v5.92의 탭↔시장 자동연동(TAB_MARKET_LABEL)이
+        [data-mode] 클릭 핸들러에만 있고 부트스트랩(첫 로드) 경로엔 없었음
+        — 기본 탭이 🇺🇸/🇰🇷 라벨 탭인데 market 기본값은 'all'이라 첫 로드에
+        다른 시장 종목이 섞여 나오던 버그. 클릭 핸들러의 뷰전환 로직을
+        applyTabViewState() 함수로 빼서 부트스트랩도 같은 경로를 타게 통일.
+        ② [기능추가] 📅캘린더 탭 — 로그인 후 기본 화면(탭 줄 맨 앞, mode
+        기본값도 'calendar'로 변경). GET /api/calendar 한 번으로: 게이트
+        신호등 3개(KR/US/종합, market_gate() 재사용) + 최신 돈의흐름 오늘
+        한 문장(KR/US, money_flow_report.extract_summary 재사용) + D+14
+        매크로 일정 + 휴장일(is_trading_day 재사용, 평일만) + 보유·즐겨찾기
+        종목 다음 실적일(yfinance calendar, KR/US 둘 다 실측 확인 — AAPL/
+        005930.KS로 정상 조회됨, 24시간 캐시). 매크로 일정은 새 모듈
+        macro_calendar.py가 money_flow_report.py와 같은 원칙(Claude API +
+        web_search 툴, 실패해도 예외 없이 (events,error) 반환)으로 생성 —
+        4주 US(FOMC/CPI/PPI/고용보고서/GDP)·KR(금통위 등) 일정을 응답 맨 끝
+        JSON 블록으로 받아 파싱, 형식 안 맞는 항목은 필터링. 캐시
+        (macro_calendar.json, /data 볼륨)는 7일 이상 오래됐을 때만 재생성
+        (스케줄러 4분 루프에 훅, 실패는 24시간 재시도 스로틀), 실패 시 이전
+        events는 그대로 유지 + last_error만 갱신 — "성공한 마지막 결과"와
+        "이번 시도 상태"를 분리해서 장애 중에도 화면이 비지 않게 함. 수동
+        재생성 POST /api/calendar/macro/run(🔄 버튼)도 제공. 화면에 "일정은
+        참고용이며 변경될 수 있어요" 한 줄 고정 노출. 로컬 검증: /api/calendar
+        정상 응답(게이트·돈의흐름·휴장일 실측 확인), D+14 윈도우 필터링(3건
+        중 윈도우 밖 1건 정상 제외), 즐겨찾기 실적일 조회(AAPL D-61 정상),
+        macro_calendar.py JSON 추출/검증 로직 단위 테스트(잘못된 날짜·국가
+        코드 항목 정상 필터링), API 실패 시 폴백 경로(캐시 유지+에러 기록)
+        실측 확인 — 단, 실제 Claude 생성 성공 경로는 로컬 API 키 문제로
+        미검증(프로덕션 배포 후 확인 필요). 브라우저 렌더링은 Chrome 확장
+        미연결로 미검증 — curl 백엔드 검증 + JS 문법 검사만 완료.
 v5.107 [기능개선] Railway 도메인 이전 반영(사용자 지시) —
         pullback-production → pullback2-production.up.railway.app. moneyflow
         리포트 URL(app.py), sync_toss.py의 DEFAULT_SERVER_URL, CLAUDE.md·
@@ -3196,6 +3226,7 @@ import earnings as earnings_mod
 import money_flow
 import money_flow_report
 import theme_map
+import macro_calendar
 
 app = FastAPI(title="눌림목 스캐너")
 
@@ -3350,7 +3381,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.107"
+VERSION = "v5.108"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -5321,6 +5352,7 @@ async def _scheduler_loop():
             for market in ("kr", "us"):
                 await _warm_market(market)
             await _maybe_run_jongga_snapshot()
+            _maybe_refresh_macro_calendar()   # v5.108: 캘린더 탭 매크로 일정, 주 1회
         except Exception as e:
             print(f"[scheduler] loop error: {e}")
         await asyncio.sleep(240)  # 4분
@@ -7606,6 +7638,208 @@ async def run_money_flow_now(market: str):
         return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=500)
     available = money_flow.list_available_dates(market)
     return JSONResponse(_clean_nan({"market": market, "date": daykey, "available_dates": available, **result}))
+
+
+# ══════════════════ v5.108: 캘린더 탭 ══════════════════
+# money_flow와 같은 원칙(생성은 별도 모듈, 캐시/트리거는 app.py)이되, 하루
+# 지난다고 크게 안 바뀌는 데이터라 스케줄러 4분 주기가 아니라 주 1회만
+# 재생성. 실패해도 이전에 성공한 events는 그대로 유지(캐시 파일에 성공한
+# 마지막 events를 남겨두고, 시도 시각/에러만 별도 필드로 갱신).
+MACRO_CALENDAR_PATH = _resolve_persistent_path("macro_calendar.json")
+_MACRO_CALENDAR_STALE_DAYS = 7        # 이보다 오래되면 재생성 시도
+_MACRO_CALENDAR_RETRY_HOURS = 24      # 실패했으면 이 시간 안엔 재시도 안 함(장애 시 폭주 방지)
+
+
+def _load_macro_calendar() -> dict:
+    if not os.path.exists(MACRO_CALENDAR_PATH):
+        return {"events": [], "generated_at": None, "last_attempt_at": None, "last_error": None}
+    try:
+        with open(MACRO_CALENDAR_PATH, "r", encoding="utf-8") as f:
+            data = _json.load(f)
+            return data if isinstance(data, dict) else {"events": [], "generated_at": None,
+                                                          "last_attempt_at": None, "last_error": None}
+    except (OSError, ValueError):
+        return {"events": [], "generated_at": None, "last_attempt_at": None, "last_error": None}
+
+
+def _macro_calendar_stale(cache: dict) -> bool:
+    gen = cache.get("generated_at")
+    if not gen:
+        return True
+    try:
+        age_days = (datetime.now(KST) - datetime.fromisoformat(gen)).total_seconds() / 86400
+    except (ValueError, TypeError):
+        return True
+    return age_days >= _MACRO_CALENDAR_STALE_DAYS
+
+
+def _macro_calendar_attempt_throttled(cache: dict) -> bool:
+    attempt = cache.get("last_attempt_at")
+    if not attempt:
+        return False
+    try:
+        age_hours = (datetime.now(KST) - datetime.fromisoformat(attempt)).total_seconds() / 3600
+    except (ValueError, TypeError):
+        return False
+    return age_hours < _MACRO_CALENDAR_RETRY_HOURS
+
+
+_macro_calendar_task_running = False
+
+
+async def _refresh_macro_calendar_bg():
+    """실패해도 예외를 밖으로 던지지 않음(스케줄러 루프가 통째로 죽으면 안 됨) —
+    money_flow_report 실패 처리와 같은 원칙."""
+    global _macro_calendar_task_running
+    if _macro_calendar_task_running:
+        return
+    _macro_calendar_task_running = True
+    try:
+        cache = _load_macro_calendar()
+        today = datetime.now(KST).strftime("%Y-%m-%d")
+        loop = asyncio.get_event_loop()
+        try:
+            events, error = await loop.run_in_executor(_executor, macro_calendar.generate_calendar, today)
+        except Exception as e:
+            events, error = None, f"{type(e).__name__}: {e}"
+        now_iso = datetime.now(KST).isoformat()
+        cache["last_attempt_at"] = now_iso
+        if events is not None:
+            cache["events"] = events
+            cache["generated_at"] = now_iso
+            cache["last_error"] = None
+        else:
+            cache["last_error"] = error
+            print(f"[calendar] macro 갱신 실패(이전 캐시 유지): {error}")
+        try:
+            _save_json_atomic(MACRO_CALENDAR_PATH, cache)
+        except OSError as e:
+            print(f"[calendar] macro 캐시 저장 실패: {e}")
+    finally:
+        _macro_calendar_task_running = False
+
+
+def _maybe_refresh_macro_calendar():
+    cache = _load_macro_calendar()
+    if _macro_calendar_stale(cache) and not _macro_calendar_attempt_throttled(cache):
+        asyncio.create_task(_refresh_macro_calendar_bg())
+
+
+_next_earnings_cache: dict = {}
+_NEXT_EARNINGS_TTL = 24 * 3600   # 다음 실적일 캐시 24시간 — 날짜 자체는 하루 여러 번 안 바뀜
+
+
+def _next_earnings_date(ticker: str):
+    """블로킹 — executor에서 실행. yfinance calendar의 Earnings Date 중 오늘
+    이후 가장 이른 날짜. KR(005930.KS)·US(AAPL) 둘 다 실측 확인함."""
+    try:
+        cal = yf.Ticker(ticker).calendar
+        dates = cal.get("Earnings Date") if isinstance(cal, dict) else None
+        if not dates:
+            return None
+        today = datetime.now(KST).date()
+        future = sorted(d for d in dates if d and d >= today)
+        return future[0].isoformat() if future else None
+    except Exception:
+        return None
+
+
+def _next_earnings_date_cached(ticker: str):
+    now = time.time()
+    c = _next_earnings_cache.get(ticker)
+    if c and now - c["ts"] < _NEXT_EARNINGS_TTL:
+        return c["data"]
+    data = _next_earnings_date(ticker)
+    _next_earnings_cache[ticker] = {"ts": now, "data": data}
+    return data
+
+
+@app.get("/api/calendar")
+async def get_calendar():
+    """캘린더 탭 — 오늘 요약(게이트 신호등 3개 + 돈의흐름 오늘 한 문장) +
+    D+14 매크로 일정/휴장일 + 보유·즐겨찾기 종목 다음 실적일."""
+    today_dt = datetime.now(KST)
+    today = today_dt.strftime("%Y-%m-%d")
+
+    # 게이트 신호등 3개(KR/US/종합) — 기존 market_gate() 그대로 재사용(로직 중복 없음)
+    gate = None
+    try:
+        gate_resp = await market_gate()
+        gate_body = _json.loads(gate_resp.body)
+        if gate_body.get("ok"):
+            gate = {"gate_kr": gate_body.get("gate_kr"), "gate_us": gate_body.get("gate_us"),
+                    "suggest": gate_body.get("suggest"), "why": gate_body.get("why")}
+    except Exception as e:
+        print(f"[calendar] gate 조회 실패: {e}")
+
+    # 돈의흐름 오늘 한 문장 (KR/US 각각, 있으면)
+    moneyflow = {}
+    for mkt in ("kr", "us"):
+        available = money_flow.list_available_dates(mkt)
+        entry = None
+        if available:
+            daykey = available[0]
+            markdown = money_flow.load_report_markdown(mkt, daykey)
+            summary = money_flow_report.extract_summary(markdown) if markdown else None
+            if summary:
+                entry = {"date": daykey, "final_sentence": summary.get("final_sentence")}
+        moneyflow[mkt] = entry
+
+    # 매크로 일정 — 캐시에서 오늘~D+14 윈도우만
+    macro_cache = _load_macro_calendar()
+    window_end = (today_dt + timedelta(days=14)).strftime("%Y-%m-%d")
+    macro_events = sorted(
+        (e for e in (macro_cache.get("events") or []) if e.get("date") and today <= e["date"] <= window_end),
+        key=lambda e: e.get("date") or "",
+    )
+
+    # 휴장일 — 평일만(주말은 굳이 안 보여줌), 기존 is_trading_day 재사용
+    holidays = []
+    for i in range(15):
+        d = today_dt + timedelta(days=i)
+        if d.weekday() >= 5:
+            continue
+        dkey = d.strftime("%Y-%m-%d")
+        for mkt, label in (("kr", "KR"), ("us", "US")):
+            if not is_trading_day(mkt, dkey):
+                holidays.append({"date": dkey, "market": label, "label": "휴장"})
+
+    # 실적 발표 — 보유종목 + 즐겨찾기 dedup
+    tickers = set()
+    for p in _load_positions_raw().get("positions", []):
+        if p.get("ticker"):
+            tickers.add(p["ticker"])
+    for t in load_favorites():
+        if t:
+            tickers.add(t)
+    loop = asyncio.get_event_loop()
+    earnings = []
+    for tk in sorted(tickers):
+        d = await loop.run_in_executor(_earnings_executor, _next_earnings_date_cached, tk)
+        if d:
+            d_minus = (datetime.strptime(d, "%Y-%m-%d").date() - today_dt.date()).days
+            earnings.append({"ticker": tk, "date": d, "d_minus": d_minus})
+    earnings.sort(key=lambda e: e["date"])
+
+    return JSONResponse(_clean_nan({
+        "today": today,
+        "gate": gate,
+        "moneyflow": moneyflow,
+        "macro_events": macro_events,
+        "macro_note": "일정은 참고용이며 변경될 수 있어요.",
+        "macro_generated_at": macro_cache.get("generated_at"),
+        "macro_error": macro_cache.get("last_error") if not macro_cache.get("events") else None,
+        "holidays": holidays,
+        "earnings": earnings,
+    }))
+
+
+@app.post("/api/calendar/macro/run")
+async def run_macro_calendar_now():
+    """수동 재생성 트리거 — 최초 배포 직후 캐시가 비어있을 때, 또는 오래돼
+    수동으로 새로고침하고 싶을 때. 이미 진행 중이면 조용히 현재 캐시 반환."""
+    await _refresh_macro_calendar_bg()
+    return JSONResponse(_clean_nan(_load_macro_calendar()))
 
 
 @app.get("/moneyflow")

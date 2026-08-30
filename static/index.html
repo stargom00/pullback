@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.107</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.108</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -573,8 +573,12 @@ tr.editing{background:rgba(242,179,61,.06)}
          (0.346R) → 돌파임박(0.232R) → 눌림목(0.206R), 🇰🇷 박스돌파
          (0.431R) → 돌파(0.368R) → 추세전환(0.326R) → 종가베팅(오버나이트
          갭 전략이라 R계열과 비교 불가 — 계열 맨 뒤 고정). -->
+    <!-- v5.108: 캘린더 탭 신설 + 로그인 후 기본 화면으로(사용자 지시) —
+         탭 줄 맨 앞에 위치, active/기본 mode도 이쪽으로 이동. -->
+    <button class="tab active" data-mode="calendar">📅 캘린더</button>
+    <span class="tab-group-sep"></span>
     <button class="tab" data-mode="super">🇺🇸슈퍼대장</button>
-    <button class="tab active" data-mode="imminent">🇺🇸돌파임박</button>
+    <button class="tab" data-mode="imminent">🇺🇸돌파임박</button>
     <button class="tab" data-mode="pullback">🇺🇸눌림목</button>
     <span class="tab-group-sep"></span>
     <button class="tab" data-mode="boxbreak">🇰🇷박스돌파</button>
@@ -695,6 +699,12 @@ tr.editing{background:rgba(242,179,61,.06)}
      입력/R진행률) 전용 뷰로 분리. -->
 <div class="jrnl-wrap" id="positionsView" style="display:none">
   <div id="positionsDoc">불러오는 중…</div>
+</div>
+
+<!-- v5.108: 📅 캘린더 탭 — 로그인 후 기본 화면. 오늘 요약(게이트 신호등+
+     돈의흐름 한 문장) + D+14 매크로 일정/휴장일/보유·즐겨찾기 실적일. -->
+<div class="jrnl-wrap" id="calendarView" style="display:none">
+  <div id="calendarDoc">불러오는 중…</div>
 </div>
 
 <div class="modal-bg" id="journalModal">
@@ -1777,7 +1787,7 @@ function card(s) {
 }
 
 let market = 'all';
-let mode = 'imminent';
+let mode = 'calendar';   // v5.108: 로그인 후 기본 화면 = 캘린더(사용자 지시)
 let sectorFilter = null;
 let searchQuery = '';
 let lastHits = [];
@@ -2881,6 +2891,98 @@ async function onEnterPositionsTab() {
   }
 }
 
+// ════════════════ v5.108: 📅 캘린더 탭 ════════════════
+// 로그인 후 기본 화면. 오늘 요약(게이트 신호등 3개 + 돈의흐름 오늘 한 문장)
+// + D+14 매크로 일정(주 1회 Claude 생성, 서버 캐시)/휴장일/보유·즐겨찾기
+// 실적일을 GET /api/calendar 한 번으로 받아 그린다.
+let _calendarData = null;
+
+async function onEnterCalendarTab() {
+  const doc = document.getElementById('calendarDoc');
+  doc.innerHTML = '<div class="loading"><div class="spinner"></div>불러오는 중…</div>';
+  try {
+    const res = await fetch('/api/calendar');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    _calendarData = await res.json();
+    renderCalendar(_calendarData);
+  } catch (e) {
+    doc.innerHTML = '<p class="mf-err">불러오기 실패 — 새로고침 해보세요.</p>';
+  }
+}
+
+async function runMacroCalendarNow(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '생성 중…'; }
+  try {
+    await fetch('/api/calendar/macro/run', { method: 'POST' });
+  } catch (e) { /* 무시 — 아래서 어차피 다시 불러옴 */ }
+  await onEnterCalendarTab();
+}
+
+const GATE_EMOJI = { confirmed: '🟢', pressure: '🟡', correction: '🔴' };
+const GATE_LABEL = { confirmed: '확인된 상승', pressure: '조정 압박', correction: '조정' };
+
+function renderCalendar(data) {
+  const doc = document.getElementById('calendarDoc');
+  const gate = data.gate;
+  const gateRow = (label, g) => `<div class="rb-item"><span class="rb-t">${label}</span>` +
+    `<span class="rb-v">${GATE_EMOJI[g] || '⚪'} ${GATE_LABEL[g] || '판정불가'}</span></div>`;
+  const gateHtml = gate
+    ? gateRow('🇰🇷 KR', gate.gate_kr) + gateRow('🇺🇸 US', gate.gate_us) + gateRow('종합', gate.suggest)
+    : `<div class="rb-item"><span class="rb-t">시장 게이트</span><span class="rb-v">불러오기 실패</span></div>`;
+
+  const mfLines = ['kr', 'us'].map(mkt => {
+    const m = data.moneyflow && data.moneyflow[mkt];
+    if (!m || !m.final_sentence) return '';
+    return `<div style="margin-top:4px">${mkt === 'kr' ? '🇰🇷' : '🇺🇸'} ${m.final_sentence}</div>`;
+  }).filter(Boolean).join('');
+
+  // 이벤트 통합: 매크로 + 휴장일 + 실적 → 날짜별로 묶어서 하루씩 표시
+  const byDate = {};
+  const addEvent = (date, html) => { (byDate[date] = byDate[date] || []).push(html); };
+  (data.macro_events || []).forEach(e => {
+    const flag = e.country === 'KR' ? '🇰🇷' : '🇺🇸';
+    const impBadge = e.importance === 'high'
+      ? `<span class="badge" style="background:#3a2020;color:#ff9b9b">High</span>`
+      : `<span class="badge">Med</span>`;
+    addEvent(e.date, `<div>${flag} ${e.event} ${impBadge}</div>`);
+  });
+  (data.holidays || []).forEach(h => {
+    addEvent(h.date, `<div style="color:var(--muted)">${h.market === 'KR' ? '🇰🇷' : '🇺🇸'} 휴장</div>`);
+  });
+  (data.earnings || []).forEach(e => {
+    addEvent(e.date, `<div>📊 ${e.ticker} 실적 <b>D-${e.d_minus}</b></div>`);
+  });
+
+  const dowNames = ['일', '월', '화', '수', '목', '금', '토'];
+  const dates = Object.keys(byDate).sort();
+  const eventsHtml = dates.length
+    ? dates.map(d => {
+        const dt = new Date(d + 'T00:00:00+09:00');
+        const isToday = d === data.today;
+        return `<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)${isToday ? ';background:rgba(59,130,246,.08)' : ''}">
+          <div style="flex:0 0 88px;font-size:12px;color:${isToday ? 'var(--text)' : 'var(--muted)'};font-weight:${isToday ? '700' : '400'}">${d.slice(5)} (${dowNames[dt.getDay()]})${isToday ? ' · 오늘' : ''}</div>
+          <div style="flex:1;font-size:13px;display:flex;flex-direction:column;gap:3px">${byDate[d].join('')}</div>
+        </div>`;
+      }).join('')
+    : `<div class="jrnl-empty">2주 안에 예정된 이벤트가 없어요.</div>`;
+
+  const genAt = data.macro_generated_at ? new Date(data.macro_generated_at).toLocaleDateString('ko-KR') : null;
+  const macroNote = `<div style="font-size:11px;color:var(--muted);margin-top:8px">ℹ️ ${data.macro_note || '일정은 참고용이며 변경될 수 있어요.'}${genAt ? ` (매크로 일정 갱신: ${genAt})` : ''}</div>`;
+  const macroErr = (!data.macro_events || !data.macro_events.length) && data.macro_error
+    ? `<div style="font-size:11px;color:#ff9b9b;margin-top:4px">⚠️ 매크로 일정 갱신 실패(이전 캐시 유지 중): ${data.macro_error}</div>` : '';
+
+  doc.innerHTML = `
+    <div class="riskbar">${gateHtml}</div>
+    ${mfLines ? `<div style="font-size:13px;color:var(--muted);margin-top:8px">${mfLines}</div>` : ''}
+    <div class="mf-toolbar" style="justify-content:space-between;margin-top:14px">
+      <b>📅 오늘 ~ D+14 일정</b>
+      <button onclick="runMacroCalendarNow(this)" title="매크로 일정만 다시 생성(주 1회 자동 갱신, 필요하면 수동으로도)">🔄 매크로 새로고침</button>
+    </div>
+    ${eventsHtml}
+    ${macroNote}${macroErr}
+  `;
+}
+
 function _posFmtMoney(v, cur) {
   if (v == null) return '-';
   return cur === 'KRW' ? Math.round(v).toLocaleString('ko-KR') + '원'
@@ -3047,6 +3149,37 @@ document.getElementById('expTabsToggle').addEventListener('click', (e) => {
   document.getElementById('expTabsGroup').style.display = expTabsExpanded ? 'contents' : 'none';
   e.target.textContent = expTabsExpanded ? '⋯ 접기' : '⋯ 실험';
 });
+// v5.108: 탭별 뷰 전환 로직을 함수로 분리 — 기존엔 [data-mode] 클릭
+// 핸들러 안에만 있어서 부트스트랩(첫 로드) 경로가 이걸 안 타고 바로
+// load()만 불렀음. 캘린더가 기본 탭이 되면서 첫 로드도 이 로직을 거쳐야
+// (custom view 표시 + onEnterCalendarTab 호출) 하므로 재사용 가능하게 뺌 —
+// 클릭 핸들러와 부트스트랩 둘 다 이 함수 하나만 호출(동작 분기 이원화 방지).
+function applyTabViewState() {
+  hideFilterButtonsIfNotApplicable();   // v5.56: journal은 load() 자체를 안 타서 여기서도 호출
+  const isJournal = mode === 'journal';
+  const isMoneyflow = mode === 'moneyflow';
+  const isPositions = mode === 'positions';
+  const isCalendar = mode === 'calendar';
+  const isCustomView = isJournal || isMoneyflow || isPositions || isCalendar;
+  document.getElementById('content').style.display = isCustomView ? 'none' : '';
+  document.getElementById('journalView').style.display = isJournal ? 'block' : 'none';
+  document.getElementById('moneyflowView').style.display = isMoneyflow ? 'block' : 'none';
+  document.getElementById('positionsView').style.display = isPositions ? 'block' : 'none';
+  document.getElementById('calendarView').style.display = isCalendar ? 'block' : 'none';
+  document.getElementById('searchBar').style.display = isCustomView ? 'none' : '';
+  document.getElementById('diagBar').style.display = isCustomView ? 'none' : '';
+  document.getElementById('patternSubTabs').style.display = (mode === 'pattern') ? 'flex' : 'none';
+  document.getElementById('subDesc').textContent = isJournal
+    ? '🔥/추세전환 신호를 기록하고 결과(R)를 추적 — 주말에 CSV로 내보내 구글시트에 백업'
+    : isMoneyflow ? '💰 돈의 흐름 — 관찰용 정보(진입 신호 아님), KR/US는 위 시장 필터로 전환'
+    : isCalendar ? '📅 오늘 요약 + D+14 매크로 일정·휴장일·실적 — 참고용, 실제 일정은 바뀔 수 있어요'
+    : DESC[mode];
+  if (isJournal) { renderJournal(); }
+  else if (isMoneyflow) { onEnterMoneyflowTab(); }
+  else if (isPositions) { onEnterPositionsTab(); }
+  else if (isCalendar) { onEnterCalendarTab(); }
+  else { load(); }
+}
 document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click', () => {
   document.querySelectorAll('[data-mode]').forEach(x => x.classList.remove('active'));
   t.classList.add('active');
@@ -3066,26 +3199,7 @@ document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click'
     // 시장 동기화만 별도로.
     if (mode === 'jongga') { setMarket('kr'); loadJonggaForwardStats(); }
   }
-  hideFilterButtonsIfNotApplicable();   // v5.56: journal은 load() 자체를 안 타서 여기서도 호출
-  const isJournal = mode === 'journal';
-  const isMoneyflow = mode === 'moneyflow';
-  const isPositions = mode === 'positions';
-  const isCustomView = isJournal || isMoneyflow || isPositions;
-  document.getElementById('content').style.display = isCustomView ? 'none' : '';
-  document.getElementById('journalView').style.display = isJournal ? 'block' : 'none';
-  document.getElementById('moneyflowView').style.display = isMoneyflow ? 'block' : 'none';
-  document.getElementById('positionsView').style.display = isPositions ? 'block' : 'none';
-  document.getElementById('searchBar').style.display = isCustomView ? 'none' : '';
-  document.getElementById('diagBar').style.display = isCustomView ? 'none' : '';
-  document.getElementById('patternSubTabs').style.display = (mode === 'pattern') ? 'flex' : 'none';
-  document.getElementById('subDesc').textContent = isJournal
-    ? '🔥/추세전환 신호를 기록하고 결과(R)를 추적 — 주말에 CSV로 내보내 구글시트에 백업'
-    : isMoneyflow ? '💰 돈의 흐름 — 관찰용 정보(진입 신호 아님), KR/US는 위 시장 필터로 전환'
-    : DESC[mode];
-  if (isJournal) { renderJournal(); }
-  else if (isMoneyflow) { onEnterMoneyflowTab(); }
-  else if (isPositions) { onEnterPositionsTab(); }
-  else { load(); }
+  applyTabViewState();
 }));
 
 // ════════════════ R 기반 리스크 시스템 (v4.47) ════════════════
@@ -5397,12 +5511,19 @@ async function loadIndices() {
 loadIndices();
 setInterval(loadIndices, 300000);   // 5분마다 갱신 (레짐 포함)
 
+// v5.108 [버그수정]: v5.92의 탭↔시장 자동연동(TAB_MARKET_LABEL)이 탭 클릭
+// 핸들러에만 있고 초기 로드 경로엔 없었음 — 기본 탭이 🇺🇸/🇰🇷 라벨 탭일 때
+// market 기본값은 'all'이라 첫 로드에 다른 시장 종목이 그대로 섞여 나오던
+// 버그. applyTabViewState() 전에 현재 mode 기준으로 한 번 동기화.
+if (TAB_MARKET_LABEL[mode]) setMarket(TAB_MARKET_LABEL[mode]);
 loadJournalFromServer();   // 서버에서 일지 로드 + 구 localStorage 이전
 loadRSettings();           // R 시스템 설정 로드 (v4.47)
 loadGateSuggest();         // 시장 게이트 자동 제안 (v4.50)
 hookCalcInputs();          // 진입 폼 사이즈 자동계산 훅
 loadHidden();              // 숨긴 종목 로드 (v5.72) — load()보다 가벼워 먼저 끝남
-load();
+// v5.108: load() 직접 호출 대신 applyTabViewState() — 기본 탭이 캘린더(custom
+// view)로 바뀌어서, 클릭 핸들러와 똑같이 뷰 전환 로직을 타야 정상 표시된다.
+applyTabViewState();
 // v4.98: 진입종목 급락 알림 — 브라우저 알림 권한 요청 + 60초 자동 폴링 시작
 if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
   Notification.requestPermission().catch(() => {});
