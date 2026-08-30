@@ -5,6 +5,13 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.115 [수정] 다중 히트 배지 툴팁에 표본크기 경고 자동 병기(사용자 지시,
+        docs/kr_breakout_family_multi_hit_ev.md 후속 결정). n<50인 조합
+        (3중 n=33, 돌파+추세전환 n=8, 박스돌파+추세전환 n=12)에 "표본
+        작음: 참고용" 문구 추가 — 최소 n 하한 게이트는 걸지 않음(정보성
+        표시일 뿐이라 판단). n 값은 MULTI_HIT_SAMPLE_N 한 곳에서만
+        관리해 경고 임계값이 개별 문구와 따로 안 놀게 함. 배지/가점
+        로직 자체는 변경 없음.
 v5.114 [기능추가] KR 돌파 계열(돌파/박스돌파/추세전환) 동시 히트 배지 +
         정렬 가점(사용자 지시, docs/kr_breakout_family_multi_hit_ev.md
         사전등록 채택 결과 구현). 자카드 진단(돌파↔박스돌파 0.485=중복,
@@ -3525,7 +3532,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.114"
+VERSION = "v5.115"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -4997,6 +5004,23 @@ async def _run_scan_earnings(bundle: dict) -> dict:
 MULTI_HIT_TAB_LABEL = {"breakout": "돌파", "boxbreak": "박스돌파", "turnaround": "추세전환"}
 MULTI_HIT_SORT_BONUS = {"strong2": 8, "strong3": 15}   # score 스케일 가점, 중복(⚑)은 0
 
+# v5.115(사용자 지시): 조합별 배지/가점에 최소 n 하한은 걸지 않되(정보성
+# 표시+약한 정렬가점일 뿐 게이트가 아니므로), n<50인 조합은 툴팁에 표본
+# 경고를 자동 병기한다. n 값은 여기 한 곳에만 두고 아래서 파생시켜서,
+# 측정치가 갱신돼도 경고 조건이 따로 놀지 않게 한다.
+MULTI_HIT_SAMPLE_N = {"triple": 33, "breakout+turnaround": 8,
+                       "boxbreak+turnaround": 12, "breakout+boxbreak": 342}
+MULTI_HIT_SAMPLE_WARN_THRESHOLD = 50
+
+
+def _multi_hit_n_suffix(combo: str) -> str:
+    """'n=33' 또는 표본이 작으면 'n=33, 표본 작음: 참고용'."""
+    n = MULTI_HIT_SAMPLE_N[combo]
+    suffix = f"n={n}"
+    if n < MULTI_HIT_SAMPLE_WARN_THRESHOLD:
+        suffix += ", 표본 작음: 참고용"
+    return suffix
+
 
 def _kr_breakout_family_hit_map(data: dict, rs_ranks: dict, rs_moms: dict) -> dict:
     """오늘자 KR 돌파/박스돌파/추세전환 동시 히트 맵 (ticker -> set(label)).
@@ -5037,7 +5061,8 @@ def _multi_hit_badge_for(labels: set) -> dict | None:
     if len(labels) == 3:
         return {
             "badge": "🔱🔱",
-            "tooltip": ("돌파+박스돌파+추세전환 3중 히트 — 실측 EV 1.152R(n=33), "
+            "tooltip": (f"돌파+박스돌파+추세전환 3중 히트 — 실측 EV 1.152R"
+                        f"({_multi_hit_n_suffix('triple')}), "
                         "손절률 24.2% (단일 히트 0.252R 대비) · "
                         "docs/kr_breakout_family_multi_hit_ev.md"),
             "sort_bonus": MULTI_HIT_SORT_BONUS["strong3"],
@@ -5045,18 +5070,21 @@ def _multi_hit_badge_for(labels: set) -> dict | None:
         }
     if "turnaround" in labels:
         other = next(l for l in labels if l != "turnaround")
-        ev = "0.500R(n=8)" if other == "breakout" else "0.833R(n=12)"
+        combo = f"{other}+turnaround"
+        ev = "0.500R" if other == "breakout" else "0.833R"
         return {
             "badge": "🔱 강력",
-            "tooltip": (f"{MULTI_HIT_TAB_LABEL[other]}+추세전환 동시 히트 — 실측 EV {ev} "
+            "tooltip": (f"{MULTI_HIT_TAB_LABEL[other]}+추세전환 동시 히트 — 실측 EV {ev}"
+                        f"({_multi_hit_n_suffix(combo)}) "
                         "(단일 히트 0.252R 대비), 두 탭 히트집합 자카드 유사도 0.02~0.03"
                         "(독립 신호) · docs/kr_breakout_family_multi_hit_ev.md"),
             "sort_bonus": MULTI_HIT_SORT_BONUS["strong2"],
-            "combo": f"{other}+turnaround",
+            "combo": combo,
         }
     return {
         "badge": "⚑ 중복신호",
-        "tooltip": ("돌파+박스돌파 동시 히트 — 실측 EV 0.462R(n=342)이지만 두 탭 "
+        "tooltip": (f"돌파+박스돌파 동시 히트 — 실측 EV 0.462R"
+                    f"({_multi_hit_n_suffix('breakout+boxbreak')})이지만 두 탭 "
                     "히트집합 자카드 유사도 0.485로 같은 조건의 중복 검출에 가까워 "
                     "추가 정보가 제한적(추세전환이 낀 조합의 0.5~1.15R보다 약함) · "
                     "docs/kr_breakout_family_multi_hit_ev.md"),
