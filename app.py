@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.109 [기능개선] API_READ_TOKEN으로 테마 매핑 수동생성(POST
+        /api/theme_map/{theme}) 허용(사용자 지시). 배경: v5.105 로그인
+        게이트 도입 후 이 쓰기 엔드포인트도 세션 쿠키가 필요해져서, 스크립트/
+        curl로 테마 매핑을 트리거하려면 로그인 쿠키가 있어야 했음(비번을
+        채팅에 공유하지 않는 게 사용자 방침이라 곤란) — API_READ_TOKEN
+        헤더로도 통과하게 별도 허용목록(_is_token_writable_path) 신설.
+        기존 얼마냐봇 GET 허용목록(_is_bot_read_path, GET 전용)과는 분리된
+        함수 — 저널/포지션/손절 등 계정 데이터를 바꾸는 나머지 쓰기 API는
+        토큰으로 절대 안 열림(세션 쿠키 필수 유지), 이 엔드포인트 하나만
+        예외. 토큰 유출 시 피해도 theme_map.py 자체 비용가드
+        (DAILY_GENERATION_LIMIT=3/일)로 제한됨. 로컬에서 401(토큰 없음/틀림)
+        →통과(정상 토큰) 경로와, 무관 쓰기 API(POST /api/journal)는 토큰
+        으로도 여전히 401인 것까지 확인.
 v5.108 [버그수정+기능추가] 초기로드 탭↔시장 연동 버그 + 📅캘린더 탭 신설
         (사용자 지시). ① [버그수정] v5.92의 탭↔시장 자동연동(TAB_MARKET_LABEL)이
         [data-mode] 클릭 핸들러에만 있고 부트스트랩(첫 로드) 경로엔 없었음
@@ -3284,6 +3297,16 @@ def _is_bot_read_path(method: str, path: str) -> bool:
     return False
 
 
+# v5.109(사용자 지시): API_READ_TOKEN으로 통과 가능한 유일한 쓰기 경로 —
+# 테마 매핑 수동 생성(POST /api/theme_map/{theme}). 매핑 생성은 스크립트로
+# 트리거할 일이 있고(예: 백테스트용 테마 보강), 세션 로그인 없이도 되게
+# 해달라는 요청 — 저널/포지션/손절 등 계정 데이터를 바꾸는 나머지 쓰기
+# API는 절대 여기 안 넣는다(세션 쿠키 필수 유지). 토큰 유출 시 피해도
+# theme_map.py 자체의 비용 가드(DAILY_GENERATION_LIMIT=3/일)로 제한됨.
+def _is_token_writable_path(method: str, path: str) -> bool:
+    return method == "POST" and path.startswith("/api/theme_map/")
+
+
 def _session_secret() -> bytes:
     # 서명 키를 비밀번호에서 파생 — 비번을 바꾸면(Railway 재배포) 이전에
     # 발급된 쿠키가 자동으로 전부 무효화되는 부수 효과(의도적, 별도 무효화
@@ -3360,8 +3383,9 @@ async def login_submit(request: Request):
 async def _auth_gate(request: Request, call_next):
     """APP_PASSWORD 미설정이면 통과(게이트 꺼짐). 설정되면: /login과
     SYNC_TOKEN 자체보호 경로는 항상 통과, 유효한 세션 쿠키가 있으면 통과,
-    얼마냐봇 폴링 경로는 API_READ_TOKEN 헤더로도 통과. 나머지는 API면
-    401 JSON, 페이지면 /login으로 리다이렉트."""
+    얼마냐봇 폴링 경로 + 테마 매핑 수동생성(v5.109, 유일한 쓰기 예외)은
+    API_READ_TOKEN 헤더로도 통과. 나머지는 API면 401 JSON, 페이지면
+    /login으로 리다이렉트."""
     if not APP_PASSWORD:
         return await call_next(request)
 
@@ -3372,8 +3396,9 @@ async def _auth_gate(request: Request, call_next):
     if _verify_session_cookie(request.cookies.get(_SESSION_COOKIE)):
         return await call_next(request)
 
-    if _is_bot_read_path(request.method, path) and API_READ_TOKEN and \
-            hmac.compare_digest(request.headers.get("X-Api-Read-Token", ""), API_READ_TOKEN):
+    token_ok = bool(API_READ_TOKEN) and hmac.compare_digest(
+        request.headers.get("X-Api-Read-Token", ""), API_READ_TOKEN)
+    if token_ok and (_is_bot_read_path(request.method, path) or _is_token_writable_path(request.method, path)):
         return await call_next(request)
 
     if path.startswith("/api/"):
@@ -3381,7 +3406,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.108"
+VERSION = "v5.109"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
