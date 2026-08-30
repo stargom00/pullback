@@ -79,6 +79,7 @@
 - **패턴 탭에서 `target_basis`가 항상 `2R`인 이유**: 리스크%가 넓어(중앙값 21%) 최소 2R 바닥이 측정이동 목표보다 높게 걸림. 109/109 전건 확인. 측정이동 분기는 패턴 탭에서 사실상 죽은 코드. 눌림목/돌파 탭은 리스크가 좁아 정상 작동할 가능성 있으나 미확인.
 - **`/api/debug/{ticker}`의 modes/게이트추적이 rs_rank=80 고정 근사치로 판정됨.** 유니버스 전체 없이 종목 하나만으로는 실제 백분위 RS를 못 구해서 나는 한계(v5.39 트레이스 재작성에서도 그대로 유지). rs_min이 80~85 사이인 경계 종목(imminent/breakout/boxbreak는 rs_min=85)은 이 근사치 때문에 디버그 패널에서만 rs_min 탈락으로 뜨고 실제 스캔에선 통과할 수 있음(또는 반대). 경계 종목 판단 시 참고.
 - **GitHub Actions push 트리거가 원인 미상으로 작동 안 함** (Actions permissions 'Allow all' 확인, 빌링 정상, 워크플로 활성, main 브랜치 확인, Ruleset 없음 — 전부 배제). workflow_dispatch 수동 실행은 정상(run #1, 46초 성공). daily schedule로 대체. 큰 변경 후에는 Actions 탭에서 Run workflow 수동 실행 권장. schedule cron은 등록 후 첫 실행까지 최대 하루 걸리고 GitHub 부하에 따라 밀릴 수 있음 — 정시에 안 도는 건 정상.
+- **배포 직후 500/Application failed to respond가 잠깐 뜨는 현상 — Railway 컨테이너 교체 중 접속 시 발생.** 2026-08-30(v5.92), 2026-08-31(v5.115) 두 차례 관측, 둘 다 로컬 재현 불가·1~2분 후 자동 복구. 대응: 코드 조사 전에 1~2분 기다렸다 새로고침 먼저. 그래도 지속되면 Railway Deployments 로그 확인.
 
 ---
 
