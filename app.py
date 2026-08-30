@@ -5,6 +5,30 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.113 [기능개선] 검색 진단 화면을 tab-hit 카드 수준으로 강화(사용자 지시).
+        기존엔 /api/lookup이 지표 6개짜리 독립 소형 카드(renderLookupCard)를
+        따로 그리고 액션 버튼이 아예 없어 "조건 미달 종목을 감시 걸기"가
+        불가능했음. static/index.html: card()에 mode='search' 분기
+        (searchResultCard) 신설 — 실제 tab-hit 카드와 같은 sparkSVG/
+        fmtVolume/fmtTurnover/fmtRR 등을 그대로 재사용하고, entrySignal()
+        화이트리스트에 'search'가 없어 실제 시그널 배지가 섞일 위험 없음.
+        헤더에 "🔍 검색 결과 — 현재 시그널 없음" 배지로 실제 히트와 구분.
+        app.py: /api/lookup에 scanner.horizontal_levels(가장 가까운 상단
+        저항=참고 피벗)·_rr_block(손절=CONFIG["risk_hard_atr_mult"], 새
+        배수 발명 안 함)로 "돌파 시 참고 수치"(가정 진입/손절/리스크%/
+        전고 기준 손익비) 계산 — 실제 게이트가 쓰는 것과 같은 함수
+        재사용, 매수 신호 아님을 라벨에 명시. /api/debug의 탈락_핵심사유에
+        "(이후 조건은 미검사)" 항상 명시 + breakout/boxbreak/imminent가
+        min_bars/rs_min에서 걸린 경우 고점대비%(off_high_pct) 값을
+        [참고,미검사]로 병기(예: "고점대비 -29.1% (요구 -25% 이내)") —
+        그 뒤 게이트는 이전 게이트가 좁혀놓은 상태에 의존해 순서 밖에서
+        계산하면 값이 왜곡될 수 있어 이 한 항목만 보수적으로 추가.
+        ⚡감시/☆즐겨찾기/+일지 버튼도 추가 — quickWatch/openJournal이
+        lastHits(현재 탭 히트 목록)에서만 종목을 찾던 구조라 검색 결과
+        티커는 못 찾고 조용히 no-op했음(신규 _searchHit 전역 폴백으로
+        수정). 로컬 함수 호출(005930.KS/000660.KS 실조회)과 jsdom
+        렌더 테스트(카드 필드 14건 + renderLookupCard/openJournal/
+        quickWatch 동작 3건, 전부 pass)로 검증.
 v5.112 [버그수정] 검색창/경보등록 한글 종목명 조회 회귀(사용자 보고: "삼성전자"
         → 유니버스에 없다, "005930"은 정상). git log 전수 확인 결과 특정
         커밋의 회귀가 아니라 /api/lookup이 애초에 이름→티커 변환을 한 번도
@@ -3490,7 +3514,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.112"
+VERSION = "v5.113"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -5954,6 +5978,70 @@ async def lookup_ticker(ticker: str):
         "rsi": round(rsi, 1), "ud": ud,
         "from_high": from_high, "from_low": from_low,
     }
+
+    # v5.113: 검색 결과를 실제 탭 히트와 같은 카드 렌더러(static/index.html
+    # card())로 그릴 수 있게 카드가 요구하는 필드를 채워 넣는다 — 예전엔
+    # renderLookupCard()가 이 지표 6개만 보여주고 진입 참고 수치·액션 버튼이
+    # 아예 없었음(사용자 지시). "돌파 시 참고 수치"는 실거래 게이트가 아니라
+    # 참고용 가정 계산이므로 mode="search"로 명시하고, 실제 게이트가 쓰는
+    # 것과 동일한 함수(horizontal_levels/_rr_block/CONFIG의 ATR×1.5)를 그대로
+    # 재사용해 손절 배수를 새로 만들지 않는다.
+    from scanner import horizontal_levels, atr as _atr, _rr_block, CONFIG as _SCANNER_CONFIG, volume_info
+    payload["mode"] = "search"
+    payload["is_search_result"] = True
+    payload["ud_vol"] = ud
+    try:
+        payload["atr_pct"] = round(_atr(h, lo, c) / close * 100, 2) if close > 0 else None
+    except Exception:
+        payload["atr_pct"] = None
+    try:
+        vi = volume_info(close, v)
+        payload["volume"] = vi.get("volume")
+        payload["vol_vs_avg"] = vi.get("vol_vs_avg")
+    except Exception:
+        payload["volume"] = vol_today
+    try:
+        payload["spark"] = [round(float(x), 4) for x in c.iloc[-60:].tolist()]
+        payload["spark_ma20"] = [
+            None if math.isnan(x) else round(float(x), 4)
+            for x in c.rolling(20).mean().iloc[-60:].tolist()
+        ]
+    except Exception:
+        payload["spark"], payload["spark_ma20"] = [], []
+    # v5.61과 동일한 근사 RS 폴백 — 유니버스 캐시가 따뜻하면 정식 percentile.
+    try:
+        _bundle = await _fetch_market_data("all")
+        _real_rs = _bundle["rs_ranks"].get(ticker) if _bundle else None
+        payload["rs"] = _real_rs if _real_rs is not None else 80
+        payload["rs_is_approx"] = _real_rs is None
+    except Exception:
+        payload["rs"] = 80
+        payload["rs_is_approx"] = True
+    # "이 종목이 뜨려면 얼마가 돼야 하는가" — 가장 가까운 상단 저항을 가정
+    # 피벗으로 삼아 돌파 시 진입/손절/리스크/손익비를 계산(참고용, 게이트 아님).
+    try:
+        hl = horizontal_levels(h, lo, c)
+        payload["수평저항"] = {
+            "추천피벗": hl["pivot"], "피벗_터치횟수": hl["pivot_touches"],
+            "저항": [{"price": r["price"], "touches": r["touches"], "dist_pct": r["dist_pct"]} for r in hl["resistances"][:4]],
+            "지지": [{"price": s["price"], "touches": s["touches"], "dist_pct": s["dist_pct"]} for s in hl["supports"][:3]],
+        }
+        pivot = hl["pivot"]
+        if pivot:
+            atr_val = _atr(h, lo, c)
+            raw_stop = pivot - atr_val * _SCANNER_CONFIG["risk_hard_atr_mult"]
+            rrb = _rr_block(pivot, raw_stop, h, lo, c, entry=pivot, is_kr=is_kr)
+            payload["pivot"] = round(pivot, 2)
+            payload["pivot_type"] = "참고(수평저항)"
+            payload["entry_basis"] = "돌파 시(가정)"
+            payload["stop"] = rrb["stop"]
+            payload["risk_pct"] = rrb["risk_pct"]
+            payload["rr"] = rrb["rr"]
+            payload["target"] = rrb["target"]
+            payload["target_basis"] = rrb["target_basis"]
+            payload["hypothetical_entry"] = True
+    except Exception as _e:
+        payload["수평저항"] = {"error": str(_e)}
     return JSONResponse(payload)
 
 
@@ -6585,7 +6673,25 @@ async def debug_ticker(ticker: str):
             reasons.append(f"{label}: 탈락(사유 추적 실패)")
             continue
         last = steps[-1]
-        reasons.append(f"{label}: [{last['gate']}] 탈락 — {last.get('detail')}")
+        # v5.113(사용자 지시): 게이트는 순차 평가라 첫 탈락에서 멈춘다는 걸
+        # 항상 명시. breakout/boxbreak/imminent 세 탭은 min_bars/rs_min에서
+        # 걸리면 그 다음 게이트(고점대비낙폭)가 아예 평가되지 않는데, 이건
+        # 저비용으로 재계산 가능해서 "미검사" 값이라도 참고용으로 병기한다
+        # (다른 게이트들은 이전 게이트가 좁혀놓은 상태에 의존해 순서 밖에서
+        # 계산하면 값이 왜곡될 수 있어 보류 — 근본원칙: 재현 불가능한 값을
+        # 만들어 붙이느니 안 붙인다).
+        extra = ""
+        if name in ("breakout", "boxbreak", "imminent") and last["gate"] in ("min_bars", "min_bars_dropna", "rs_min"):
+            try:
+                from scanner import (off_high_pct as _ohp_fn, BREAKOUT_CONFIG as _bc,
+                                     BOXBREAK_CONFIG as _xc, IMMINENT_CONFIG as _ic)
+                _cfg_map = {"breakout": _bc, "boxbreak": _xc, "imminent": _ic}
+                _cfg = _cfg_map[name]
+                _ohp = _ohp_fn(c)
+                extra = f" · [참고, 미검사] 고점대비 {_ohp:.1f}% (요구 -{_cfg['max_off_high']}% 이내)"
+            except Exception:
+                extra = ""
+        reasons.append(f"{label}: [{last['gate']}] 탈락 — {last.get('detail')} (이후 조건은 미검사){extra}")
     if not reasons:
         reasons.append("5개 핵심 탭 모두 주요 게이트 통과 — RS/세부 조건에서 미세 탈락 가능성. modes와 게이트추적 대조 필요")
     # v5.61: RS가 근사치면 rs_min 게이트뿐 아니라 is_leader 분기(눌림목

@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.112</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.113</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -1496,9 +1496,81 @@ function patternWarningText(pattern) {
   return msgs[pattern] || '시점매칭 무작위 대조군보다 낫지 않음이 실측으로 확인됨.';
 }
 
+// v5.113(사용자 지시): 검색으로 조회했지만 현재 어느 탭에도 안 잡힌 종목을
+// 위한 카드 — 진단 화면을 텍스트 몇 줄에서 실제 히트 카드와 같은 수준으로
+// 끌어올린다. 스파크라인/거래량/RS/RSI/ATR/수평저항 등은 tab-hit 카드와
+// 같은 계산 함수(scanner.py의 horizontal_levels/_rr_block/volume_info)로
+// 서버가 이미 만들어 보낸 값을 그대로 표시만 한다 — 계산을 프론트에서
+// 새로 만들지 않는다. mode가 실거래 게이트 목록(pullback/breakout/...)에
+// 없어서 entrySignal() 블록·badge 체인은 자동으로 스킵된다(card()의 기존
+// 화이트리스트 조건에 'search'가 없음) — 실제 시그널처럼 보이는 배지가
+// 실수로 섞여 들어갈 걱정이 없다.
+function searchResultCard(s) {
+  const fav = favorites.includes((s.ticker || '').toUpperCase());
+  const chgCls = s.change_pct >= 0 ? 'up' : 'down';
+  const chgSign = s.change_pct >= 0 ? '+' : '';
+  const hl = s['수평저항'] || {};
+  const resList = (hl['저항'] || []).map(r =>
+    `<span style="color:#f87171;font-size:12px;margin-right:10px">${fmtPrice(r.price, s.market)} (${r.touches}회, +${r.dist_pct}%)</span>`).join('');
+  const supList = (hl['지지'] || []).map(r =>
+    `<span style="color:#4ade80;font-size:12px;margin-right:10px">${fmtPrice(r.price, s.market)} (${r.touches}회, ${r.dist_pct}%)</span>`).join('');
+  const hasHypo = s.hypothetical_entry && s.pivot != null;
+  return `<div class="card${fav ? ' fav' : ''} expanded">
+    <div class="card-expanded">
+    <div class="card-top">
+      <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기'}">${fav ? '★' : '☆'}</button>
+      <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
+      <div>
+        <div class="name">
+          <a class="name-link" href="${tvUrl(s)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.name}</a>
+          <span class="climax-tag" style="background:#152535;color:#7fb8e0;border:1px solid #2d5a8c">🔍 검색 결과 — 현재 시그널 없음</span>
+        </div>
+        <div class="tick mono">${s.ticker ? `<a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a>` : ''}</div>
+      </div>
+      <span class="mkt" style="margin-left:auto">${s.market}</span>
+    </div>
+    <div class="price-row mono">
+      <span class="price">${fmtPrice(s.close, s.market)}</span>
+      <span class="chg ${chgCls}">${chgSign}${s.change_pct}%</span>
+    </div>
+    ${s.spark && s.spark.length ? sparkSVG(s.spark, s.spark_ma20 || []) : ''}
+    <div class="metrics mono">
+      <div class="metric"><div class="k">거래량 ${s.vol_vs_avg != null ? `<span style="font-size:9px;opacity:.6">(평균 ${s.vol_vs_avg}×)</span>` : ''}</div><div class="v">${fmtVolume(s.volume, s.market)}</div></div>
+      <div class="metric"><div class="k">거래대금</div><div class="v">${fmtTurnover(s.turnover, s.market)}</div></div>
+      <div class="metric"><div class="k" title="지수 대비 초과성과 기준 백분위(종목RS-지수RS 순위)">RS</div><div class="v" style="color:${s.rs >= 80 ? 'var(--green)' : s.rs >= 65 ? 'var(--amber)' : 'var(--text)'}">${s.rs ?? '-'}${s.rs_is_approx ? ' <span style="color:var(--muted);font-size:10px" title="유니버스 캐시가 콜드라 근사치(고정값). 스캐너 탭을 한 번 로드한 뒤 재조회하면 정식 백분위가 반영됨.">(근사)</span>' : ''}</div></div>
+    </div>
+    <div class="metrics mono" style="border-top:none;padding-top:0">
+      <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi ?? '-'}</div></div>
+      <div class="metric"><div class="k">ATR</div><div class="v" title="일간 변동성(ATR/현재가)">${s.atr_pct != null ? s.atr_pct + '%' : '-'}</div></div>
+      <div class="metric"><div class="k">정배열</div><div class="v" style="color:${s.aligned ? 'var(--green)' : 'var(--muted)'}">${s.aligned ? '✓ 정배열' : '역배열'}</div></div>
+    </div>
+    ${hasHypo ? `
+    <div style="border-top:1px solid var(--line);padding-top:8px;margin-top:8px">
+      <div style="font-size:13px;font-weight:600;color:#fbbf24;margin-bottom:4px" title="실제 게이트 통과가 아니라 '이 종목이 뜨려면 얼마가 돼야 하는가'를 보여주는 참고 계산입니다 — 매수 신호가 아닙니다.">🎯 돌파 시 참고 수치 (가정 — 매수 신호 아님)</div>
+      <div class="metrics mono">
+        <div class="metric"><div class="k">피벗(참고저항)</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
+        <div class="metric"><div class="k">가정 진입가</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
+        <div class="metric"><div class="k">가정 손절 <span style="font-size:9px;opacity:.6">(ATR×1.5)</span></div><div class="v">${fmtPrice(s.stop, s.market)}</div></div>
+      </div>
+      <div class="metrics mono" style="border-top:none;padding-top:0">
+        <div class="metric"><div class="k">리스크</div><div class="v">${s.risk_pct}%</div></div>
+        <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
+      </div>
+    </div>` : `<div style="font-size:12px;color:var(--muted);margin-top:8px">참고할 만한 상단 저항이 없어 돌파 시 참고 수치를 계산할 수 없어요.</div>`}
+    <div style="border-top:1px solid var(--line);padding-top:8px;margin-top:8px">
+      <div style="font-size:13px;font-weight:600;color:#60a5fa;margin-bottom:4px">📊 수평 매물대 (참고용)</div>
+      <div style="margin-bottom:3px">저항: ${resList || '<span style="color:var(--muted);font-size:12px">없음</span>'}</div>
+      <div>지지: ${supList || '<span style="color:var(--muted);font-size:12px">없음</span>'}</div>
+    </div>
+    ${s.ticker ? `<button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button><button class="journal-btn" style="margin-left:6px;background:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'};border-color:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'}" onclick="quickWatch(this,'${s.ticker}')" ${isPendingWatch(s.ticker) ? 'disabled' : ''} title="원클릭 봇 감시 등록 — 참고 저항선을 기본값으로 제안">${isPendingWatch(s.ticker) ? '✓ 감시중' : '⚡ 감시'}</button>` : ''}
+    </div>
+  </div>`;
+}
+
 function card(s) {
   if (s.mode === 'breakdown') return breakdownCard(s);
   if (s.mode === 'jongga') return jonggaCard(s);
+  if (s.mode === 'search') return searchResultCard(s);
   const chgCls = s.change_pct >= 0 ? 'up' : 'down';
   const chgSign = s.change_pct >= 0 ? '+' : '';
   const fav = favorites.includes((s.ticker || '').toUpperCase());
@@ -2370,6 +2442,10 @@ document.getElementById('cardSearch').addEventListener('input', (e) => {
 // 유니버스 전체 종목 조회 (현재 탭에 안 잡힌 종목 검색용)
 let _lookupTimer = null;
 let _lookupLast = '';
+// v5.113: 검색 결과 카드는 lastHits(현재 탭 히트 목록)에 없는 종목이라
+// quickWatch/openJournal의 lastHits.find()가 못 찾음 — 별도로 들고 있다가
+// 두 함수가 lastHits에서 못 찾으면 여기서 폴백 조회.
+let _searchHit = null;
 function triggerLookup(query) {
   // 디바운스: 입력 멈춘 뒤 500ms 후 1회 호출
   clearTimeout(_lookupTimer);
@@ -2404,38 +2480,27 @@ function triggerLookup(query) {
   }, 500);
 }
 
+// v5.113(사용자 지시): 예전엔 이 함수가 독립된 소형 카드(지표 6개, 액션
+// 버튼 없음)를 직접 그렸음 — 실제 탭 히트와 같은 card()/searchResultCard()
+// 렌더러를 재사용하도록 교체(중복 렌더링 경로 제거). bindCardInteractions로
+// ☆즐겨찾기/✕숨기기 등 기존 카드와 동일한 위임 이벤트도 그대로 연결된다.
 function renderLookupCard(d) {
   const content = document.getElementById('content');
-  const isKr = d.market === 'KR';
-  const fmtPx = isKr ? Math.round(d.close).toLocaleString() : Number(d.close).toFixed(2);
-  const chgCls = d.change_pct >= 0 ? 'var(--px-up)' : 'var(--px-down)';
-  const chgSign = d.change_pct >= 0 ? '+' : '';
-  const turnoverStr = isKr
-    ? (d.turnover >= 1e8 ? Math.round(d.turnover/1e8).toLocaleString()+'억' : Math.round(d.turnover/1e4).toLocaleString()+'만')
-    : (d.turnover >= 1e9 ? '$'+(d.turnover/1e9).toFixed(1)+'B' : '$'+Math.round(d.turnover/1e6)+'M');
-  const tvHref = isKr
-    ? `https://www.tradingview.com/chart/?symbol=KRX:${(d.ticker||'').replace(/\.(KS|KQ)$/,'')}`
-    : `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(d.ticker)}`;
-  content.innerHTML = `
-    <div style="max-width:520px;margin:0 auto">
-      <div style="background:#1a1a24;border:1px solid #2d6a8c;border-radius:12px;padding:16px;margin-bottom:12px">
-        <div style="font-size:12px;color:#9fd4ff;margin-bottom:10px">🔍 유니버스 조회 — 이 종목은 현재 어느 시그널에도 안 잡혔어요. 참고용 현재 지표예요.</div>
-        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px">
-          <a href="${tvHref}" target="_blank" rel="noopener" style="font-size:18px;font-weight:700;color:inherit;text-decoration:none">${d.name} <span style="font-size:10px;opacity:.5">↗</span></a>
-          <span style="font-size:11px;color:var(--muted)">${d.ticker} · ${d.market}</span>
-        </div>
-        <div style="font-size:22px;font-weight:700;margin-bottom:12px">${fmtPx} <span style="font-size:14px;color:${chgCls}">${chgSign}${d.change_pct}%</span></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:13px">
-          <div><div style="color:var(--muted);font-size:11px">정배열</div><div style="color:${d.aligned?'var(--green)':'var(--muted)'}">${d.aligned?'정배열 ✓':'역배열'}</div></div>
-          <div><div style="color:var(--muted);font-size:11px">200일선 대비</div><div style="color:${(d.ma200_dist??0)>=0?'var(--px-up)':'var(--px-down)'}">${d.ma200_dist!=null?(d.ma200_dist>=0?'+':'')+d.ma200_dist+'%':'-'}</div></div>
-          <div><div style="color:var(--muted);font-size:11px">RSI</div><div>${d.rsi??'-'}</div></div>
-          <div><div style="color:var(--muted);font-size:11px">거래량비</div><div>${d.vol_mult!=null?d.vol_mult+'×':'-'} <span style="font-size:10px;color:${(d.ud??0)>=1?'var(--green)':'var(--down)'}">U/D ${d.ud??'-'}</span></div></div>
-          <div><div style="color:var(--muted);font-size:11px">거래대금</div><div>${turnoverStr}</div></div>
-          <div><div style="color:var(--muted);font-size:11px">52주 고점대비</div><div style="color:${(d.from_high??0)>=-5?'var(--px-up)':'var(--muted)'}">${d.from_high!=null?d.from_high+'%':'-'}</div></div>
-        </div>
-        <div style="margin-top:10px;font-size:11px;color:var(--muted)">52주 저점 대비 ${d.from_low!=null?'+'+d.from_low+'%':'-'} · 20일선 ${d.ma20?.toLocaleString?.()??d.ma20} · 60일선 ${d.ma60?.toLocaleString?.()??d.ma60}</div>
-      </div>
-    </div>`;
+  _searchHit = d;   // quickWatch/openJournal이 lastHits에 없는 이 티커를 찾을 수 있게
+  content.innerHTML = `<div class="grid">${card(d)}</div>`;
+  bindCardInteractions(content);
+  // v5.113: ☆즐겨찾기는 renderCards() 꼬리에서만 바인딩되는데(bindCardInteractions에
+  // 없음) 검색 카드는 renderCards()를 거치지 않고 여기서 직접 그려지므로 따로 연결.
+  content.querySelectorAll('.fav-btn').forEach(b => b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const t = b.dataset.ticker;
+    await fetch('/api/favorites', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ticker: t})});
+    const up = t.toUpperCase();
+    if (favorites.includes(up)) favorites = favorites.filter(f => f !== up);
+    else favorites.push(up);
+    renderLookupCard(d);
+  }));
 }
 
 // v5.112: 이름 검색이 여러 종목에 걸리면(부분일치) 후보 목록을 보여주고
@@ -4080,6 +4145,7 @@ const MODE_TAB_LABEL = {
   ibd9: 'IBD9',
   earnings: '실적우수',
   jongga: '종가베팅',
+  search: '검색결과',
 };
 // ── 📅 활동 달력 (v4.52): 날짜별 분석/등록 종목 한눈에 ──
 let _jcal = null;   // {y, m} 표시 중인 달
@@ -4189,7 +4255,7 @@ function modeCategory(mode) { return mode === 'surge' ? '단타' : '추세추종
 // 보여준다 — 서버(/api/watch/quick)도 같은 조건을 409로 한 번 더 강제하므로
 // (방어 이중화) 여기서 놓쳐도 최종적으로는 안전.
 async function quickWatch(btn, ticker) {
-  const s = lastHits.find(h => h.ticker === ticker);
+  const s = lastHits.find(h => h.ticker === ticker) || (_searchHit && _searchHit.ticker === ticker ? _searchHit : null);
   if (!s) return;
   if (!s.pivot) { btn.textContent = '피벗없음'; return; }
   if (s.close != null && s.close >= s.pivot) {
@@ -4309,7 +4375,7 @@ async function watchLeaderConversion(btn, ticker) {
 }
 
 function openJournal(ticker) {
-  const s = lastHits.find(h => h.ticker === ticker);
+  const s = lastHits.find(h => h.ticker === ticker) || (_searchHit && _searchHit.ticker === ticker ? _searchHit : null);
   if (!s) return;
   pendingStock = s;
   document.getElementById('jmSub').textContent = `${s.name} (${s.ticker}) · ${s.market}`;
