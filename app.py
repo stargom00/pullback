@@ -5,6 +5,36 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.110 [기능추가] 캘린더 홈 5개 섹션 확장(사용자 지시). 전부 기존 API/
+        캐시 재사용, 새 계산 최소화 원칙 — GET /api/calendar 하나에 통합
+        + 독립 호출(게이트·포지션·종가베팅후보) asyncio.gather 병렬화,
+        earnings 조회도 티커별 gather 병렬화(로컬 검증: 응답시간 캐시
+        워밍 후 약 1.4초). 배치 순서: ① 🔴D-day 경고(보유종목 실적
+        D-3 이내, get_positions()+기존 earnings 로직 교집합) ② 💼포지션
+        요약 한 줄(get_positions() 재사용, 손절선 -3%↑ 🔴강조 —
+        dist_to_stop_pct≤3, 클릭 시 포지션 탭 이동) ③ 📋오늘의 액션 큐
+        (대기 피벗 -1%↓근접·종가베팅후보 발생·대장관찰 눌림목전환, 항목
+        없으면 "오늘 대기 항목 없음" 한 줄) ④ 게이트+돈의흐름(기존
+        유지) ⑤ 🔥강세테마×스캐너 교집합(KR 돈의흐름 스냅샷의
+        stage="확산(본격)" 또는 streak_days≥2 테마 × theme_map.json ×
+        오늘 KR 돌파/박스돌파/추세전환 스캔 캐시 _cache["kr:{mode}"] 교집합
+        — 캐시 미스면 새 스캔 안 돌리고 그냥 스킵, 없으면 섹션 자체 비표시)
+        ⑥ D+14 일정(기존 유지) ⑦ 종가베팅 포워드 성적(_jongga_forward_stats()
+        재사용, 30건 미만이면 "표본 축적 중" 문구).
+        대장관찰 전환판정은 POST /api/watch/leader-check의 로직을
+        _leader_conversion_check() 공용 함수로 추출해 캘린더와 같이 씀
+        (중복 제거). [버그수정] 구현 중 발견: /api/ma·dist·vol·
+        pullback-signal·캘린더 신규 코드 총 5곳이 _data_cache 키를
+        "data:KR"/"data:US"(대문자)로 조회하고 있었는데 실제 저장 키는
+        _fetch_market_data의 f"data:{market}"이 그대로 소문자(kr/us)라
+        캐시 히트가 한 번도 안 나고 매번 "data:all" 폴백 또는 개별
+        fetch로 새던 사전 존재 버그 — 5곳 전부 소문자로 수정(로컬 재현:
+        market=kr 단일 스캔 후 대문자 키로는 캐시 미스, 소문자로 고치니
+        정상 히트 확인). 로컬 curl 전체 시나리오(대기 피벗 근접·포지션
+        근접손절·손절미설정·강세테마 매칭 로직 단위테스트) 검증 완료 —
+        단 실제 프로덕션 데이터(테마 확산 상태·종가베팅 당일 후보)로는
+        미검증, 브라우저 렌더링도 Chrome 확장 미연결로 미검증(v5.108과
+        동일한 한계).
 v5.109 [기능개선] API_READ_TOKEN으로 테마 매핑 수동생성(POST
         /api/theme_map/{theme}) 허용(사용자 지시). 배경: v5.105 로그인
         게이트 도입 후 이 쓰기 엔드포인트도 세션 쿠키가 필요해져서, 스크립트/
@@ -3406,7 +3436,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.109"
+VERSION = "v5.110"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7174,7 +7204,7 @@ async def moving_averages(ticker: str):
     이평은 매일 바뀌므로 봇이 매번 최신값을 받아 현재가와 비교."""
     ticker = ticker.upper().strip()
     df = None
-    for key in ("data:all", "data:KR", "data:US"):
+    for key in ("data:all", "data:kr", "data:us"):   # v5.110[버그수정]: 실제 캐시 키는 소문자(_fetch_market_data의 f"data:{market}")
         bundle = _data_cache.get(key)
         if bundle and ticker in bundle.get("data", {}):
             df = bundle["data"][ticker]
@@ -7311,7 +7341,7 @@ async def vol_reference(ticker: str):
     ticker = ticker.upper().strip()
     # 캐시된 전 시장 데이터에서 탐색 (없으면 개별 fetch)
     df = None
-    for key in ("data:all", "data:KR", "data:US"):
+    for key in ("data:all", "data:kr", "data:us"):   # v5.110[버그수정]: 실제 캐시 키는 소문자(_fetch_market_data의 f"data:{market}")
         bundle = _data_cache.get(key)
         if bundle and ticker in bundle.get("data", {}):
             df = bundle["data"][ticker]
@@ -7340,7 +7370,7 @@ async def distribution_signal(ticker: str):
     캐시된 일봉으로 distribution_check 실행."""
     ticker = ticker.upper().strip()
     df = None
-    for key in ("data:all", "data:KR", "data:US"):
+    for key in ("data:all", "data:kr", "data:us"):   # v5.110[버그수정]: 실제 캐시 키는 소문자(_fetch_market_data의 f"data:{market}")
         bundle = _data_cache.get(key)
         if bundle and ticker in bundle.get("data", {}):
             df = bundle["data"][ticker]
@@ -7380,7 +7410,7 @@ async def pullback_signal(ticker: str):
     ticker = ticker.upper().strip()
     df = None
     rs_rank = None
-    for key in ("data:all", "data:KR", "data:US"):
+    for key in ("data:all", "data:kr", "data:us"):   # v5.110[버그수정]: 실제 캐시 키는 소문자(_fetch_market_data의 f"data:{market}")
         bundle = _data_cache.get(key)
         if bundle and ticker in bundle.get("data", {}):
             df = bundle["data"][ticker]
@@ -7779,26 +7809,99 @@ def _next_earnings_date_cached(ticker: str):
     return data
 
 
+def _calendar_current_price(ticker: str):
+    """블로킹 아님(딕셔너리 조회만) — /api/ma 등과 동일한 패턴(app.py 다른
+    곳에 이미 4곳 있음)으로 이미 캐시된 일봉에서 현재가만 뽑는다. 캐시에
+    없으면 None(여기서 새로 fetch는 안 함 — 캘린더 탭 로드를 무겁게 만들지
+    않기 위해, 사용자 지시)."""
+    for key in ("data:all", "data:kr", "data:us"):   # v5.110[버그수정]: 실제 캐시 키는 소문자(_fetch_market_data의 f"data:{market}")
+        bundle = _data_cache.get(key)
+        if bundle and ticker in bundle.get("data", {}):
+            df = bundle["data"][ticker]
+            if df is not None and len(df):
+                try:
+                    return float(df["Close"].iloc[-1])
+                except (KeyError, IndexError, ValueError):
+                    return None
+    return None
+
+
 @app.get("/api/calendar")
 async def get_calendar():
-    """캘린더 탭 — 오늘 요약(게이트 신호등 3개 + 돈의흐름 오늘 한 문장) +
-    D+14 매크로 일정/휴장일 + 보유·즐겨찾기 종목 다음 실적일."""
+    """캘린더 탭 — 로그인 후 기본 화면(v5.108). v5.110(사용자 지시)에서
+    5개 섹션 확장: ① 보유종목 실적 D-3 경고 ② 포지션 요약 한 줄
+    ③ 오늘의 액션 큐(대기 피벗 근접·종가베팅 후보·대장관찰 전환) ⑤ 강세
+    테마×스캐너 교집합 ⑦ 종가베팅 포워드 성적. 전부 기존 API/캐시 재사용 —
+    새 스캔·새 fetch를 이 엔드포인트가 직접 트리거하지 않는다(홈 화면이라
+    로드가 무거우면 안 됨, 사용자 지시) — 캐시 미스면 그 섹션만 조용히
+    비운다."""
     today_dt = datetime.now(KST)
     today = today_dt.strftime("%Y-%m-%d")
 
-    # 게이트 신호등 3개(KR/US/종합) — 기존 market_gate() 그대로 재사용(로직 중복 없음)
-    gate = None
-    try:
-        gate_resp = await market_gate()
-        gate_body = _json.loads(gate_resp.body)
-        if gate_body.get("ok"):
-            gate = {"gate_kr": gate_body.get("gate_kr"), "gate_us": gate_body.get("gate_us"),
-                    "suggest": gate_body.get("suggest"), "why": gate_body.get("why")}
-    except Exception as e:
-        print(f"[calendar] gate 조회 실패: {e}")
+    # ── 서로 독립적인 기존 엔드포인트 3개(게이트·포지션·종가베팅후보)는
+    # 병렬로 호출 — 순차 호출 대비 캘린더 전체 응답 시간을 줄인다(사용자 지시:
+    # "API 호출 병렬화 또는 /api/calendar에 통합" 중 통합 + 병렬화 둘 다 적용).
+    gate_task = market_gate()
+    positions_task = get_positions()
+    jongga_task = jongga_candidates()
+    gate_resp, positions_resp, jongga_resp = await asyncio.gather(
+        gate_task, positions_task, jongga_task, return_exceptions=True)
 
-    # 돈의흐름 오늘 한 문장 (KR/US 각각, 있으면)
+    gate = None
+    if not isinstance(gate_resp, Exception):
+        try:
+            gate_body = _json.loads(gate_resp.body)
+            if gate_body.get("ok"):
+                gate = {"gate_kr": gate_body.get("gate_kr"), "gate_us": gate_body.get("gate_us"),
+                        "suggest": gate_body.get("suggest"), "why": gate_body.get("why")}
+        except Exception as e:
+            print(f"[calendar] gate 파싱 실패: {e}")
+    else:
+        print(f"[calendar] gate 조회 실패: {gate_resp}")
+
+    # ── ② 포지션 요약 한 줄 ──
+    positions_summary = None
+    position_tickers = set()
+    if not isinstance(positions_resp, Exception):
+        try:
+            positions_body = _json.loads(positions_resp.body)
+            plist = positions_body.get("positions") or []
+            position_tickers = {p.get("ticker") for p in plist if p.get("ticker")}
+            if plist:
+                items = [{
+                    "ticker": p.get("ticker"),
+                    "r_progress": p.get("r_progress"),
+                    # 손절선까지 -3% 이내(또는 이미 이탈) 강조 — dist_to_stop_pct는
+                    # (close-stop)/close*100라 작을수록/음수일수록 위험(사용자 지시).
+                    "near_stop": p.get("dist_to_stop_pct") is not None and p["dist_to_stop_pct"] <= 3,
+                } for p in plist]
+                s = positions_body.get("summary") or {}
+                positions_summary = {
+                    "items": items,
+                    "open_risk": s.get("open_risk"),
+                    "missing_stop_count": s.get("positions_missing_stop", 0),
+                }
+        except Exception as e:
+            print(f"[calendar] positions 파싱 실패: {e}")
+    else:
+        print(f"[calendar] positions 조회 실패: {positions_resp}")
+
+    # ── ③b 오늘 종가베팅 후보 발생 여부(14:40 이후에만 실제로 참, jongga_candidates()
+    # 자체가 시간 판정을 함 — 여기선 시간 체크 안 함) ──
+    jongga_today = None
+    if not isinstance(jongga_resp, Exception):
+        try:
+            jongga_body = _json.loads(jongga_resp.body)
+            if jongga_body.get("ok") and jongga_body.get("count"):
+                jongga_today = {"count": jongga_body["count"], "date": jongga_body.get("date")}
+        except Exception as e:
+            print(f"[calendar] jongga candidates 파싱 실패: {e}")
+    else:
+        print(f"[calendar] jongga candidates 조회 실패: {jongga_resp}")
+
+    # ── 돈의흐름: 오늘 한 문장(KR/US) + KR은 테마 stage/streak도 같이 필요(⑤용) ──
     moneyflow = {}
+    kr_snapshot = None
     for mkt in ("kr", "us"):
         available = money_flow.list_available_dates(mkt)
         entry = None
@@ -7808,7 +7911,101 @@ async def get_calendar():
             summary = money_flow_report.extract_summary(markdown) if markdown else None
             if summary:
                 entry = {"date": daykey, "final_sentence": summary.get("final_sentence")}
+            if mkt == "kr":
+                kr_snapshot = money_flow.load_snapshot(mkt, daykey)
         moneyflow[mkt] = entry
+
+    # ── ① 보유종목 실적 D-3 경고 + 실적 발표(보유+즐겨찾기, 기존 로직 유지) ──
+    favorite_tickers = {t for t in load_favorites() if t}
+    all_earn_tickers = sorted(position_tickers | favorite_tickers)
+    loop = asyncio.get_event_loop()
+    earnings = []
+    if all_earn_tickers:
+        results = await asyncio.gather(*[
+            loop.run_in_executor(_earnings_executor, _next_earnings_date_cached, tk)
+            for tk in all_earn_tickers
+        ], return_exceptions=True)
+        for tk, d in zip(all_earn_tickers, results):
+            if isinstance(d, Exception) or not d:
+                continue
+            d_minus = (datetime.strptime(d, "%Y-%m-%d").date() - today_dt.date()).days
+            earnings.append({"ticker": tk, "date": d, "d_minus": d_minus})
+    earnings.sort(key=lambda e: e["date"])
+    dday_warnings = [e for e in earnings if e["ticker"] in position_tickers and e["d_minus"] <= 3]
+
+    # ── ③a 대기(pending) 종목 중 피벗 -1% 이내 근접 — 이미 캐시된 가격만
+    # 씀(새 fetch 없음), ③c 대장관찰 눌림목 전환 감지 ──
+    journal = load_journal()
+    near_pivot = []
+    for r in journal:
+        if (r.get("status") or "entered") != "pending":
+            continue
+        ticker = r.get("ticker")
+        pivot = r.get("pivot") or r.get("entry")
+        if not ticker or not pivot:
+            continue
+        try:
+            pivot_f = float(pivot)
+        except (TypeError, ValueError):
+            continue
+        if pivot_f <= 0:
+            continue
+        close = _calendar_current_price(ticker)
+        if close is None:
+            continue
+        dist_pct = (pivot_f - close) / pivot_f * 100
+        if 0 <= dist_pct <= 1:
+            near_pivot.append({"ticker": ticker, "name": r.get("name") or ticker,
+                                "pivot": pivot_f, "close": round(close, 2), "dist_pct": round(dist_pct, 2)})
+
+    leader_watches = [r for r in journal if r.get("watch_kind") == "leader_conversion"
+                       and (r.get("status") or "watch") == "watch" and r.get("ticker")]
+    leader_converted = []
+    if leader_watches:
+        try:
+            bundle_all = await _fetch_market_data("all")
+            if bundle_all:
+                conv_set = set(_leader_conversion_check([r["ticker"] for r in leader_watches], bundle_all))
+                leader_converted = [{"ticker": r["ticker"], "name": r.get("name") or r["ticker"]}
+                                     for r in leader_watches if r["ticker"] in conv_set]
+        except Exception as e:
+            print(f"[calendar] leader-conversion 체크 실패: {e}")
+
+    # ── ⑤ 강세테마 × 스캐너 교집합 — KR 돈의흐름 확산(본격)/streak2+ 테마 소속
+    # 종목 중 오늘 돌파계열 탭 히트. _cache(기존 /api/scan 캐시)를 그대로
+    # 읽기만 함 — 미스면(해당 탭을 오늘 아무도 안 열었으면) 조용히 스킵,
+    # 새 스캔은 절대 안 돌림(사용자 지시: 홈 로드 무겁게 하지 않기). ──
+    theme_scanner_hits = []
+    if kr_snapshot:
+        themes_data = kr_snapshot.get("themes") or {}
+        strong_themes = [name for name, info in themes_data.items()
+                          if info.get("stage") == "확산(본격)" or (info.get("streak_days") or 0) >= 2]
+        for theme_name in strong_themes:
+            entry = theme_map.get(theme_name)
+            if not entry:
+                continue
+            stock_names = {s["ticker"]: s.get("name") or s["ticker"] for s in (entry.get("stocks") or [])}
+            if not stock_names:
+                continue
+            for mode, label in (("breakout", "돌파"), ("boxbreak", "박스돌파"), ("turnaround", "추세전환")):
+                cached_scan = _cache.get(f"kr:{mode}")
+                if not cached_scan or not cached_scan.get("hits"):
+                    continue
+                matched = [stock_names[h["ticker"]] for h in cached_scan["hits"] if h.get("ticker") in stock_names]
+                if matched:
+                    theme_scanner_hits.append({"theme": theme_name, "tab": label, "stocks": matched})
+
+    # ── ⑦ 종가베팅 포워드 성적 — 기존 _jongga_forward_stats() 그대로 재사용 ──
+    jongga_forward = None
+    try:
+        fwd = _jongga_forward_stats()
+        jongga_forward = {
+            "total_resolved": fwd.get("total_resolved", 0),
+            "close_basis": fwd.get("close_basis"),
+            "backtest_reference": fwd.get("backtest_reference"),
+        }
+    except Exception as e:
+        print(f"[calendar] jongga forward 조회 실패: {e}")
 
     # 매크로 일정 — 캐시에서 오늘~D+14 윈도우만
     macro_cache = _load_macro_calendar()
@@ -7829,33 +8026,22 @@ async def get_calendar():
             if not is_trading_day(mkt, dkey):
                 holidays.append({"date": dkey, "market": label, "label": "휴장"})
 
-    # 실적 발표 — 보유종목 + 즐겨찾기 dedup
-    tickers = set()
-    for p in _load_positions_raw().get("positions", []):
-        if p.get("ticker"):
-            tickers.add(p["ticker"])
-    for t in load_favorites():
-        if t:
-            tickers.add(t)
-    loop = asyncio.get_event_loop()
-    earnings = []
-    for tk in sorted(tickers):
-        d = await loop.run_in_executor(_earnings_executor, _next_earnings_date_cached, tk)
-        if d:
-            d_minus = (datetime.strptime(d, "%Y-%m-%d").date() - today_dt.date()).days
-            earnings.append({"ticker": tk, "date": d, "d_minus": d_minus})
-    earnings.sort(key=lambda e: e["date"])
-
     return JSONResponse(_clean_nan({
         "today": today,
+        "dday_warnings": dday_warnings,
+        "positions_summary": positions_summary,
+        "action_queue": {"near_pivot": near_pivot, "jongga_today": jongga_today,
+                          "leader_converted": leader_converted},
         "gate": gate,
         "moneyflow": moneyflow,
+        "theme_scanner_hits": theme_scanner_hits,
         "macro_events": macro_events,
         "macro_note": "일정은 참고용이며 변경될 수 있어요.",
         "macro_generated_at": macro_cache.get("generated_at"),
         "macro_error": macro_cache.get("last_error") if not macro_cache.get("events") else None,
         "holidays": holidays,
         "earnings": earnings,
+        "jongga_forward": jongga_forward,
     }))
 
 
@@ -8184,6 +8370,15 @@ async def watch_leader_check(request: Request):
     if bundle is None:
         return JSONResponse({"ok": True, "converted": [], "pending": True})
 
+    converted = _leader_conversion_check(tickers, bundle)
+    return JSONResponse({"ok": True, "converted": converted, "pending": False,
+                         "checked_at": time.strftime("%Y-%m-%d %H:%M:%S")})
+
+
+def _leader_conversion_check(tickers: list, bundle: dict) -> list:
+    """대장후보→눌림목 전환 판정 공용 로직 — POST /api/watch/leader-check와
+    v5.110 캘린더 탭 오늘의 액션 큐가 같이 쓴다(로직 중복 방지, v5.110에서
+    추출). bundle: _fetch_market_data("all")의 반환값."""
     data = bundle["data"]
     rs_ranks = bundle["rs_ranks"]
     rs_moms = bundle["rs_moms"]
@@ -8209,8 +8404,7 @@ async def watch_leader_check(request: Request):
         if avg_turn > 0 and avg_turn < floor_:
             continue
         converted.append(t)
-    return JSONResponse({"ok": True, "converted": converted, "pending": False,
-                         "checked_at": time.strftime("%Y-%m-%d %H:%M:%S")})
+    return converted
 
 
 @app.post("/api/journal")
