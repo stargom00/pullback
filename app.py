@@ -5,6 +5,16 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.107 [기능개선] Railway 도메인 이전 반영(사용자 지시) —
+        pullback-production → pullback2-production.up.railway.app. moneyflow
+        리포트 URL(app.py), sync_toss.py의 DEFAULT_SERVER_URL, CLAUDE.md·
+        docs/toss_position_sync_setup.md 문서 전부 교체. stock-alert
+        레포(SCANNER_URL 기본값, v2.22)도 같이 교체 — 얼마냐봇이 폴링하는
+        모든 API 호출이 새 도메인을 향하게 함. 단, sync_toss.py는 .env의
+        PULLBACK_SERVER_URL이, stock-alert는 Railway SCANNER_URL 환경변수가
+        설정돼 있으면 이 기본값보다 우선한다 — 로컬 .env(PULLBACK_SERVER_URL)는
+        미설정 확인, Railway SCANNER_URL 설정 여부는 대시보드 확인 필요
+        (설정돼 있다면 거기도 같이 갱신해야 실제로 반영됨).
 v5.106 [버그수정] 감시 등록 즉시 '진입'으로 오전환되는 버그(사용자 지시,
         재현: 8/30 컴투스 등 5건 — 등록가=피벗 34,000, 현재가 36,000, 등록
         직후 +1.6R 표시). 원인: 서버(/api/watch/quick)와 얼마냐봇은 이
@@ -3340,7 +3350,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.106"
+VERSION = "v5.107"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7578,7 +7588,7 @@ async def get_money_flow_summary(market: str):
         "strong_themes": summary.get("strong_themes"),
         "weak_themes": summary.get("weak_themes"),
         "final_sentence": summary.get("final_sentence"),
-        "url": "https://pullback-production.up.railway.app/moneyflow",
+        "url": "https://pullback2-production.up.railway.app/moneyflow",
         "error": None,
         "trading_day": is_trading_day(market, daykey),   # v5.99: 봇 이중 확인용
     })

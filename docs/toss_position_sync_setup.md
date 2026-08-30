@@ -27,7 +27,7 @@ Railway 아웃바운드 IP가 배포마다 안 고정되기 때문. 그래서 �
 
 ```
 SYNC_TOKEN=<아래 명령으로 생성한 랜덤 토큰>
-PULLBACK_SERVER_URL=https://pullback-production.up.railway.app
+PULLBACK_SERVER_URL=https://pullback2-production.up.railway.app
 ```
 
 토큰 생성:

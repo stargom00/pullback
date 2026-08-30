@@ -43,7 +43,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [sync_toss] %(message)s")
 logger = logging.getLogger("sync_toss")
 
-DEFAULT_SERVER_URL = "https://pullback-production.up.railway.app"
+DEFAULT_SERVER_URL = "https://pullback2-production.up.railway.app"
 SERVER_URL = os.environ.get("PULLBACK_SERVER_URL", DEFAULT_SERVER_URL).rstrip("/")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN")
 REQUEST_TIMEOUT = 15.0

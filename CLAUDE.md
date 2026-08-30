@@ -2,7 +2,7 @@
 
 개인용 눌림목 스캐너 웹앱. 한국/미국 시장을 스캔해 눌림목 셋업을 찾고, 뉴스 기반 섹터 분석을 제공한다. Minervini/O'Neil/IBD/SEPA 방법론 기반.
 
-- 배포: pullback-production.up.railway.app
+- 배포: pullback2-production.up.railway.app
 - 레포: stargom00/pullback
 - 배포 흐름: GitHub push → Railway 자동 배포
 
@@ -28,7 +28,7 @@
 ---
 
 ## 검증 방법
-- 라이브 URL(pullback-production.up.railway.app)은 Claude bash 네트워크 allowlist에 **없다** → curl 불가.
+- 라이브 URL(pullback2-production.up.railway.app)은 Claude bash 네트워크 allowlist에 **없다** → curl 불가.
 - `raw.githubusercontent.com`은 됨 → 배포 검증은 **레포의 raw 파일**로 한다.
 
 ---
