@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.110</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.111</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -2925,30 +2925,47 @@ function renderCalendar(data) {
   const doc = document.getElementById('calendarDoc');
   const isKrTicker = t => /\.(KS|KQ)$/.test(t || '');
 
-  // ── ① 🔴 D-day 경고(조건부) ──
+  // ── v5.111: 오늘 KR·US 둘 다 휴장(주말 포함)이면 "왜 조용한지" 상단에 설명 ──
+  const mc = data.market_closed;
+  const marketClosedHtml = mc
+    ? `<div style="font-size:12px;color:var(--muted);margin-bottom:10px">🛌 오늘 KR·US 휴장${mc.next_open ? ` — 다음 개장 ${mc.next_open}` : ''}</div>`
+    : '';
+
+  // ── ① 🔴 D-day 경고(전 섹션 중 유일하게 없으면 완전히 숨김 — 경고는 있을 때만 의미, 사용자 지시) ──
   const ddayHtml = (data.dday_warnings || []).map(e =>
     `<div style="background:#3a1f1f;border:1px solid #6b2b2b;border-radius:8px;padding:10px 14px;margin-bottom:8px;font-size:13px;color:#ff9b9b">
       ⚠️ ${e.ticker} 실적 D-${e.d_minus} — 갭 리스크, 포지션 판단 필요
     </div>`).join('');
 
-  // ── ② 💼 포지션 요약 한 줄(클릭 시 포지션 탭 이동) ──
+  // ── ② 💼 포지션 요약 — v5.111: 한 줄 텍스트 → 미니 카드 칩으로 승격(사용자 지시,
+  // 시각적 무게 부여) ──
   let positionsSummaryHtml = '';
   const posS = data.positions_summary;
   if (posS && posS.items && posS.items.length) {
-    const itemsStr = posS.items.map(it => {
+    const chips = posS.items.map(it => {
       const r = it.r_progress;
       const rStr = r != null ? `${r >= 0 ? '+' : ''}${r}R` : '-';
-      const col = it.near_stop ? '#ff6b6b' : (r != null && r >= 0 ? 'var(--px-up)' : r != null ? 'var(--px-down)' : 'var(--muted)');
-      return `<span style="${it.near_stop ? 'font-weight:700;' : ''}color:${col}">${it.near_stop ? '🔴 ' : ''}${it.ticker} ${rStr}</span>`;
-    }).join(' · ');
+      const rCol = r != null && r >= 0 ? 'var(--px-up)' : r != null ? 'var(--px-down)' : 'var(--muted)';
+      const dtsp = it.dist_to_stop_pct;
+      const distStr = dtsp == null ? '-' : dtsp >= 0 ? `-${dtsp}%` : `이미 이탈(${Math.abs(dtsp)}%)`;
+      return `<div style="display:inline-flex;align-items:center;gap:6px;border:1px solid ${it.near_stop ? '#8c2b2b' : 'var(--line)'};
+        background:${it.near_stop ? '#2a1414' : 'var(--card)'};border-radius:8px;padding:6px 10px;font-size:12px;white-space:nowrap">
+        <b>${it.ticker}</b><span style="color:${rCol}">${rStr}</span><span style="color:var(--line)">|</span>
+        <span style="color:${it.near_stop ? '#ff6b6b' : 'var(--muted)'}">손절까지 ${distStr}</span>
+      </div>`;
+    }).join('');
     const risk = posS.open_risk || {};
     const riskParts = ['KRW', 'USD'].filter(c => (risk[c] || 0) !== 0).map(c => `${Math.round(risk[c]).toLocaleString()}${c}`);
     const riskStr = riskParts.length ? riskParts.join(' / ') : '0';
     const missingStr = posS.missing_stop_count ? ` · ⚠️ 손절 미설정 ${posS.missing_stop_count}개` : '';
-    positionsSummaryHtml = `<div style="background:var(--card);border:1px solid var(--line);border-radius:8px;
-      padding:10px 14px;margin-bottom:8px;cursor:pointer;font-size:13px"
-      onclick="document.querySelector('[data-mode=positions]').click()" title="포지션 탭으로 이동">
-      💼 ${itemsStr} <span style="color:var(--muted)">· 열린 리스크 ${riskStr}${missingStr}</span>
+    positionsSummaryHtml = `<div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <b style="font-size:13px">💼 포지션</b>
+        <span onclick="document.querySelector('[data-mode=positions]').click()"
+              style="font-size:11px;color:var(--muted);cursor:pointer" title="포지션 탭으로 이동">전체 보기 →</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${chips}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">열린 리스크 ${riskStr}${missingStr}</div>
     </div>`;
   }
 
@@ -2968,7 +2985,7 @@ function renderCalendar(data) {
   const actionQueueHtml = `<div class="mf-toolbar" style="margin-top:14px"><b>📋 오늘의 액션 큐</b></div>` +
     (queueLines.length
       ? `<div style="font-size:13px;display:flex;flex-direction:column;gap:4px;margin-bottom:8px">${queueLines.join('')}</div>`
-      : `<div style="font-size:13px;color:var(--muted);margin-bottom:8px">오늘 대기 항목 없음</div>`);
+      : `<div style="font-size:13px;color:var(--muted);margin-bottom:8px">대기 항목 없음 · 개장일에 피벗 근접/종가베팅 후보가 여기 떠요</div>`);
 
   const gate = data.gate;
   const gateRow = (label, g) => `<div class="rb-item"><span class="rb-t">${label}</span>` +
@@ -2983,14 +3000,15 @@ function renderCalendar(data) {
     return `<div style="margin-top:4px">${mkt === 'kr' ? '🇰🇷' : '🇺🇸'} ${m.final_sentence}</div>`;
   }).filter(Boolean).join('');
 
-  // ── ⑤ 🔥 강세테마 × 스캐너 교집합(없으면 섹션 자체를 안 보여줌) ──
+  // ── ⑤ 🔥 강세테마 × 스캐너 교집합 — v5.111: 골격은 항상 표시, 매칭
+  // 없으면 회색 한 줄(사용자 지시 — "숨기기/표시" 균형 재조정) ──
   const themeHits = data.theme_scanner_hits || [];
-  const themeHitsHtml = themeHits.length
-    ? `<div class="mf-toolbar" style="margin-top:14px"><b>🔥 강세테마 × 스캐너</b></div>
-       <div style="font-size:13px;display:flex;flex-direction:column;gap:4px;margin-bottom:8px">
-         ${themeHits.map(t => `<div>🔥 <b>${t.theme}</b> × ${t.tab}: ${t.stocks.join(', ')}</div>`).join('')}
-       </div>`
-    : '';
+  const themeHitsHtml = `<div class="mf-toolbar" style="margin-top:14px"><b>🔥 강세테마 × 스캐너</b></div>` +
+    (themeHits.length
+      ? `<div style="font-size:13px;display:flex;flex-direction:column;gap:4px;margin-bottom:8px">
+           ${themeHits.map(t => `<div>🔥 <b>${t.theme}</b> × ${t.tab}: ${t.stocks.join(', ')}</div>`).join('')}
+         </div>`
+      : `<div style="font-size:13px;color:var(--muted);margin-bottom:8px">오늘 매칭 없음 (개장일 장중 갱신)</div>`);
 
   // 이벤트 통합: 매크로 + 휴장일 + 실적 → 날짜별로 묶어서 하루씩 표시
   const byDate = {};
@@ -3027,18 +3045,20 @@ function renderCalendar(data) {
   const macroErr = (!data.macro_events || !data.macro_events.length) && data.macro_error
     ? `<div style="font-size:11px;color:#ff9b9b;margin-top:4px">⚠️ 매크로 일정 갱신 실패(이전 캐시 유지 중): ${data.macro_error}</div>` : '';
 
-  // ── ⑦ 📊 종가베팅 포워드 성적(맨 아래) ──
-  let forwardHtml = '';
-  const fwd = data.jongga_forward;
-  if (fwd && (fwd.total_resolved || 0) > 0) {
+  // ── ⑦ 📊 종가베팅 포워드 성적(맨 아래) — v5.111: 0건이어도 항상 표시 ──
+  const fwd = data.jongga_forward || {};
+  const fwdN = fwd.total_resolved || 0;
+  let forwardHtml;
+  if (fwdN < 30) {
+    forwardHtml = `<div style="font-size:11px;color:var(--muted);margin-top:16px;text-align:center">📊 종가베팅 포워드 — 표본 축적 중 (${fwdN}건) — 월요일부터 자동 기록</div>`;
+  } else {
     const cb = fwd.close_basis || {};
     const bt = fwd.backtest_reference || {};
-    forwardHtml = (fwd.total_resolved < 30)
-      ? `<div style="font-size:11px;color:var(--muted);margin-top:16px;text-align:center">📊 종가베팅 포워드 — 표본 축적 중 (${fwd.total_resolved}건)</div>`
-      : `<div style="font-size:11px;color:var(--muted);margin-top:16px;text-align:center">📊 종가베팅 포워드 누적 ${fwd.total_resolved}건 · 평균갭 ${cb.mean_gap_pct >= 0 ? '+' : ''}${cb.mean_gap_pct}% (백테스트 ${bt.mean_gap_pct >= 0 ? '+' : ''}${bt.mean_gap_pct}%)</div>`;
+    forwardHtml = `<div style="font-size:11px;color:var(--muted);margin-top:16px;text-align:center">📊 종가베팅 포워드 누적 ${fwdN}건 · 평균갭 ${cb.mean_gap_pct >= 0 ? '+' : ''}${cb.mean_gap_pct}% (백테스트 ${bt.mean_gap_pct >= 0 ? '+' : ''}${bt.mean_gap_pct}%)</div>`;
   }
 
   doc.innerHTML = `
+    ${marketClosedHtml}
     ${ddayHtml}
     ${positionsSummaryHtml}
     ${actionQueueHtml}

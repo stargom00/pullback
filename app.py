@@ -5,6 +5,30 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.111 [기능개선] 캘린더 홈 "숨기기/표시" 균형 재조정(사용자 지시) —
+        데이터 없는 날(주말 등) 화면이 너무 빈약해 보이던 문제. ① 섹션
+        골격 7개 전부 항상 표시로 전환 — 액션큐/테마×스캐너/포워드성적은
+        데이터 없어도 섹션 자체는 유지하고 안에 회색 안내 한 줄만
+        표시(D-day 경고만 예외 — 없으면 완전 숨김 유지, 경고는 있을 때만
+        의미). ② 포지션 요약: 한 줄 텍스트 → 미니카드 칩(종목별
+        [티커 +x.xR | 손절까지 -x.x%], 근접 시 빨간 테두리)으로 승격 —
+        get_positions()에 이미 있던 dist_to_stop_pct를 positions_summary
+        items에 추가로 노출(그동안 near_stop 불리언만 있어서 프론트가
+        실제 % 숫자를 못 그렸음). ③ 상단에 시장 컨텍스트 배너 신설 —
+        오늘 KR·US 둘 다 휴장(주말 포함)이면 "🛌 오늘 KR·US 휴장 — 다음
+        개장 {날짜}"(is_trading_day 재사용, 둘 중 하나라도 열리는 가장
+        가까운 날 탐색). ④ 매크로 캘린더 생성 프롬프트(macro_calendar.py)
+        확장 — 기존 5개 카테고리(FOMC/CPI/PPI/고용보고서/GDP/금통위)에
+        연준 인사 연설·미국채 주요 입찰·미국 옵션만기(쿼드러플위칭,
+        분기말월 세번째 금요일)·KR 선물옵션 만기(매월 둘째 목요일)·빅테크
+        실적(AAPL/MSFT/GOOGL 등 보유 무관 초대형주) 추가, MAX_TOKENS
+        4000→6000·web_search max_uses 5→8 상향(카테고리 확장분 반영).
+        POST /api/calendar/macro/run을 API_READ_TOKEN 쓰기 허용목록에
+        추가(v5.109 테마매핑과 같은 패턴 — 세션 로그인 없이 새 프롬프트
+        결과 확인용). 로컬 검증: market_closed 배너(실제 일요일 기준
+        정상 감지, next_open=다음 월요일), positions_summary의
+        dist_to_stop_pct 필드 노출, 토큰 인증 경로(무토큰 401 → 토큰
+        통과) 전부 확인.
 v5.110 [기능추가] 캘린더 홈 5개 섹션 확장(사용자 지시). 전부 기존 API/
         캐시 재사용, 새 계산 최소화 원칙 — GET /api/calendar 하나에 통합
         + 독립 호출(게이트·포지션·종가베팅후보) asyncio.gather 병렬화,
@@ -3327,14 +3351,21 @@ def _is_bot_read_path(method: str, path: str) -> bool:
     return False
 
 
-# v5.109(사용자 지시): API_READ_TOKEN으로 통과 가능한 유일한 쓰기 경로 —
-# 테마 매핑 수동 생성(POST /api/theme_map/{theme}). 매핑 생성은 스크립트로
-# 트리거할 일이 있고(예: 백테스트용 테마 보강), 세션 로그인 없이도 되게
-# 해달라는 요청 — 저널/포지션/손절 등 계정 데이터를 바꾸는 나머지 쓰기
-# API는 절대 여기 안 넣는다(세션 쿠키 필수 유지). 토큰 유출 시 피해도
-# theme_map.py 자체의 비용 가드(DAILY_GENERATION_LIMIT=3/일)로 제한됨.
+# v5.109/v5.111(사용자 지시): API_READ_TOKEN으로 통과 가능한 쓰기 경로 —
+# 테마 매핑 수동 생성(POST /api/theme_map/{theme})과 매크로 캘린더 수동
+# 재생성(POST /api/calendar/macro/run) 둘뿐. 둘 다 "스크립트/curl로
+# 트리거해서 Claude 생성 결과를 바로 확인"하는 용도라 세션 로그인 없이도
+# 되게 해달라는 요청 — 저널/포지션/손절 등 계정 데이터를 바꾸는 나머지
+# 쓰기 API는 절대 여기 안 넣는다(세션 쿠키 필수 유지). 토큰 유출 시 피해도
+# 각자 비용 가드로 제한됨(theme_map.py: DAILY_GENERATION_LIMIT=3/일,
+# 매크로 캘린더: 성공 시 7일간 재생성 스킵 + 실패 시 24시간 재시도 스로틀).
+_TOKEN_WRITABLE_EXACT_PATHS = {"/api/calendar/macro/run"}
+
+
 def _is_token_writable_path(method: str, path: str) -> bool:
-    return method == "POST" and path.startswith("/api/theme_map/")
+    if method != "POST":
+        return False
+    return path.startswith("/api/theme_map/") or path in _TOKEN_WRITABLE_EXACT_PATHS
 
 
 def _session_secret() -> bytes:
@@ -3436,7 +3467,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.110"
+VERSION = "v5.111"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7871,6 +7902,9 @@ async def get_calendar():
                 items = [{
                     "ticker": p.get("ticker"),
                     "r_progress": p.get("r_progress"),
+                    # v5.111: 프론트 미니카드 칩("NVDA +2.16R | 손절까지 -4.9%")에
+                    # 표시할 실제 % 값 — near_stop 불리언만으론 숫자를 못 그림.
+                    "dist_to_stop_pct": p.get("dist_to_stop_pct"),
                     # 손절선까지 -3% 이내(또는 이미 이탈) 강조 — dist_to_stop_pct는
                     # (close-stop)/close*100라 작을수록/음수일수록 위험(사용자 지시).
                     "near_stop": p.get("dist_to_stop_pct") is not None and p["dist_to_stop_pct"] <= 3,
@@ -8026,6 +8060,19 @@ async def get_calendar():
             if not is_trading_day(mkt, dkey):
                 holidays.append({"date": dkey, "market": label, "label": "휴장"})
 
+    # v5.111: KR·US 둘 다 오늘 휴장(주말 포함)이면 "왜 조용한지" 상단에 설명 —
+    # 다음 개장일은 둘 중 하나라도 열리는 가장 가까운 날(사용자 지시).
+    market_closed = None
+    if not is_trading_day("kr", today) and not is_trading_day("us", today):
+        next_open = None
+        for i in range(1, 11):
+            d = today_dt + timedelta(days=i)
+            dkey = d.strftime("%Y-%m-%d")
+            if is_trading_day("kr", dkey) or is_trading_day("us", dkey):
+                next_open = dkey
+                break
+        market_closed = {"next_open": next_open}
+
     return JSONResponse(_clean_nan({
         "today": today,
         "dday_warnings": dday_warnings,
@@ -8042,6 +8089,7 @@ async def get_calendar():
         "holidays": holidays,
         "earnings": earnings,
         "jongga_forward": jongga_forward,
+        "market_closed": market_closed,
     }))
 
 
