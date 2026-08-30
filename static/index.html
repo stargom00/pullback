@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.115</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.116</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -715,6 +715,10 @@ tr.editing{background:rgba(242,179,61,.06)}
     <div class="row">
       <div><label id="jmEntryLabel">진입 가정가</label><input id="jmEntry" inputmode="decimal" placeholder="예: 167000"></div>
       <div><label>손절가</label><input id="jmStop" inputmode="decimal"></div>
+    </div>
+    <div class="row">
+      <div><label>수량 (선택 — 비우면 R설정 기준 자동계산)</label><input id="jmQty" inputmode="numeric" placeholder="예: 30"></div>
+      <div><label>또는 투입금액 (선택 — 수량 비었을 때만 사용)</label><input id="jmAmount" inputmode="numeric" placeholder="예: 5000000"></div>
     </div>
     <label>기록 목적</label>
     <select id="jmCat" style="width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;font-size:13px">
@@ -2990,6 +2994,15 @@ checkMoneyflowUnread();
 // 안 지워짐) — 저장 성공 시 그 필드만 새로고침 없이 즉시 갱신.
 let _positionsData = null;
 
+// v5.116: 일지 진입가 대비 토스 실제 평단가 참고 표시 — 읽기 전용, 절대
+// r.entry를 덮어쓰지 않는다(평단은 참고 정보, 일지의 진입가 기록이 원본).
+// 포지션 탭을 아직 안 연 세션이면 _positionsData가 비어있어 그냥 null 반환
+// (이 표시 하나 때문에 /api/positions를 새로 fetch하지는 않음).
+function tossAvgFor(ticker) {
+  const p = (_positionsData && _positionsData.positions || []).find(x => x.ticker === ticker);
+  return (p && p.avg_price != null) ? p.avg_price : null;
+}
+
 async function onEnterPositionsTab() {
   const doc = document.getElementById('positionsDoc');
   doc.innerHTML = '<div class="loading"><div class="spinner"></div>불러오는 중…</div>';
@@ -4400,6 +4413,11 @@ function openJournal(ticker) {
     : s.close;
   document.getElementById('jmEntry').value = entryDefault != null ? Math.round(entryDefault) : '';
   document.getElementById('jmStop').value = s.stop != null ? Math.round(s.stop) : '';
+  // 수량 기본값: R설정이 있으면 계산된 제안 수량으로 미리 채움(없으면 빈칸) —
+  // 실제 체결 수량이 다르면 사용자가 그대로 덮어쓰면 됨(자유 편집, 강제 재계산 없음).
+  const qtySuggest = (entryDefault != null && s.stop != null) ? calcShares(entryDefault, s.stop, s.market) : null;
+  document.getElementById('jmQty').value = qtySuggest ? qtySuggest.shares : '';
+  document.getElementById('jmAmount').value = '';
   // 진입가 라벨 힌트 — 돌파 계열이면 피벗 돌파가 기준임을 표시
   const elLabel = document.getElementById('jmEntryLabel');
   if (elLabel) elLabel.textContent = breakoutModes.includes(s.mode)
@@ -4594,6 +4612,13 @@ async function saveJournal() {
     }
   }
   const sized = calcShares(entry, stop, s.market);   // 사이즈 스냅샷 (설정 없으면 null)
+  // 실제 체결 수량 — 슬리피지로 R설정 제안 수량과 다르게 담았을 수 있어 사용자
+  // 입력을 최우선으로 쓴다. 우선순위: 수량 직접입력 > 투입금액÷진입가 > R설정 제안치.
+  const qtyInput = parseFloat(document.getElementById('jmQty').value) || null;
+  const amountInput = parseFloat(document.getElementById('jmAmount').value) || null;
+  const actualShares = qtyInput != null ? qtyInput
+    : (amountInput != null && entry) ? Math.floor(amountInput / entry)
+    : null;
   // 진입 시점 신호 스냅샷 (나중에 신호별 승률 검증용)
   const sig = (typeof entrySignal === 'function') ? entrySignal(s) : null;
   const rec = {
@@ -4625,15 +4650,19 @@ async function saveJournal() {
     //  entered(진입): 실제 매수 → 여기서부터 손절/목표 자동추적
     //  missed(무산): 셋업 깨짐 → 손익 0, 통계 제외
     //  closed(종료): result_r 확정
-    // 돌파 계열은 '아직 안 산 추적관찰'로 보고 기본 pending, 그 외는 즉시 entered.
     // '대기' 카테고리 = 명시적 피벗 감시 요청 → pending (봇이 돌파 알림).
     // '관찰' 카테고리 = 그냥 지켜보기 → watch (봇 알림 없음, 통계 제외).
+    // 그 외(추세추종/단타)는 카테고리 선택 그대로 즉시 entered — 예전엔 돌파
+    // 계열(mode)이면 카테고리가 '실제 매매'여도 무조건 pending으로 강등했는데,
+    // 실제 체결가가 카드 피벗보다 높은(슬리피지) 정상 매매까지 '대기'로 잘못
+    // 빠지는 사고였음(사용자 지시로 v5.116 제거) — saveEdit()의 카테고리 기반
+    // 판정과도 이제 동일한 규칙이라 두 경로가 어긋나지 않는다.
     status: forcePending ? 'pending'
       : _cat === '대기' ? 'pending'
       : _cat === '관찰' ? 'watch'
-      : ['breakout', 'imminent', 'boxbreak'].includes(s.mode) ? 'pending' : 'entered',
-    // ── R 시스템 사이즈 스냅샷 (v4.47): 오픈 리스크 정확 계산용 ──
-    shares: sized ? sized.shares : '',
+      : 'entered',
+    // ── R 시스템 사이즈 스냅샷 (v4.47, v5.116부터 실제 체결 수량 우선) ──
+    shares: actualShares != null ? actualShares : (sized ? sized.shares : ''),
     r_value_krw: sized ? sized.rKrw : '',
     alert: s.alert || '', note,
     exit: '', result_r: '', held_days: '', review: '',
@@ -5050,15 +5079,25 @@ function viewRow(r) {
     <td class="mono">${(() => {
       const isKr = /\.(KS|KQ)$/i.test(r.ticker || '');
       const entryStr = r.entry ?? '-';
+      // 토스 평단 대비 차이 — 참고용, entry를 덮어쓰지 않음. 진입 상태 + 토스
+      // 잔고에 같은 종목이 있을 때만(포지션 탭을 열어 _positionsData가 채워진
+      // 경우에 한함) 표시.
+      const tossAvg = (st === 'entered') ? tossAvgFor(r.ticker) : null;
+      const tossDiffHtml = (tossAvg && r.entry)
+        ? (() => {
+            const diffPct = Math.round((r.entry - tossAvg) / tossAvg * 1000) / 10;
+            return `<div style="font-size:9px;color:var(--muted)" title="토스 잔고 실제 평단가">토스평단 ${isKr ? Math.round(tossAvg).toLocaleString() : tossAvg.toFixed(2)} (${diffPct > 0 ? '+' : ''}${diffPct}%)</div>`;
+          })()
+        : '';
       // 진입/대기 상태이고 현재가가 있으면 진입가 아래에 현재가 표시 (진입가 → 현재가 비교)
       if (r.last_price && r.entry && (st === 'entered' || st === 'pending')) {
         const px = parseFloat(r.last_price);
         const pxStr = isKr ? Math.round(px).toLocaleString() : px.toFixed(2);
         const up = px >= parseFloat(r.entry);
         const col = up ? 'var(--px-up)' : 'var(--px-down)';
-        return `${entryStr}<div style="font-size:10px;color:${col};margin-top:1px">→ ${pxStr}</div>`;
+        return `${entryStr}<div style="font-size:10px;color:${col};margin-top:1px">→ ${pxStr}</div>${tossDiffHtml}`;
       }
-      return entryStr;
+      return entryStr + tossDiffHtml;
     })()}</td>
     <td class="mono"${broken?' style="color:#ff6b6b"':''}>${r.stop ?? '-'}</td>
     <td class="mono" style="${r.result_r&&parseFloat(r.result_r)>0?'color:var(--px-up)':r.result_r?'color:var(--px-down)':''}">${
@@ -5376,6 +5415,7 @@ function editRow(r) {
           <option value="대기" ${cat==='대기'?'selected':''}>⏳ 대기</option>
           <option value="관찰" ${cat==='관찰'?'selected':''}>👁 관찰</option>
         </select>
+        <input id="e_qty" class="ein" value="${r.shares ?? ''}" placeholder="수량" style="width:70px" inputmode="numeric" title="실제 체결 수량 — 부분체결 이후 정정 등 사후 수정용">
         <input id="e_held" class="ein" value="${r.held_days || autoHeld}" placeholder="보유일" style="width:60px" title="자동 계산된 경과일 — 필요하면 수정 가능">
         <div style="display:flex;gap:6px;margin-left:auto">
           <span class="save-btn" onclick="saveEdit(${r.id})" title="저장">💾 저장</span>
@@ -5421,6 +5461,12 @@ function saveEdit(id) {
   const entry = parseFloat(document.getElementById('e_entry').value) || null;
   const stop = parseFloat(document.getElementById('e_stop').value) || null;
   r.entry = entry; r.stop = stop;
+  // 수량 사후 수정 (부분체결 정정 등) — 빈칸이면 기존 값 유지(강제로 지우지 않음).
+  const qtyEl = document.getElementById('e_qty');
+  if (qtyEl && qtyEl.value.trim() !== '') {
+    const qty = parseFloat(qtyEl.value);
+    if (!isNaN(qty)) r.shares = qty;
+  }
   const isShort = isShortRow(r);
   // 진입가·손절 바뀌면 리스크% 재계산 (숏은 손절이 진입가 위)
   if (entry && stop && (isShort ? stop > entry : entry > stop)) {
