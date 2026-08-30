@@ -5,6 +5,29 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.112 [버그수정] 검색창/경보등록 한글 종목명 조회 회귀(사용자 보고: "삼성전자"
+        → 유니버스에 없다, "005930"은 정상). git log 전수 확인 결과 특정
+        커밋의 회귀가 아니라 /api/lookup이 애초에 이름→티커 변환을 한 번도
+        하지 않았음(항상 ticker.upper()만 하고 유니버스 키(티커)와 직접
+        대조) — 대형주가 우연히 현재 탭 결과에 카드로 있을 때만 클라이언트
+        측 부분일치 필터로 동작해온 것처럼 보였을 뿐. universe.py에
+        resolve_name_to_ticker() 신설(단일 지점) — ①입력이 이미 티커
+        ②숫자코드+KR접미사 ③이름 완전일치 ④접두일치 ⑤부분일치 순, 각
+        단계에서 후보 2개+면 그 단계에서 후보 목록 반환("두산에너"→
+        두산에너빌리티 1건은 접두일치 단일매치라 후보 없이 바로 확정,
+        "삼성"처럼 17건 걸리면 후보 목록). /api/lookup·POST /api/alerts
+        (경보 등록 — 여기도 raw 문자열을 그대로 대문자화해 파일에 쓰던
+        동일 버그) 둘 다 이 함수 하나로 통일. 즐겨찾기/감시등록(watch/
+        quick)/일지는 전부 카드·버튼에서 이미 resolve된 ticker를 받는
+        구조라 전수 점검 결과 이 버그의 영향 없음(감시 등록만 자유 텍스트
+        입력이라 실제로 뚫려 있었음). 조용한 실패 금지 원칙 적용 — 실패
+        사유를 "이름을 못 찾았어요(코드로 시도해보세요)" vs "유니버스에
+        없어요"로 구분해 반환하고, 프론트도 서버 메시지를 그대로 표시하도록
+        수정(기존엔 서버 에러 내용과 무관하게 항상 같은 하드코딩 문구를
+        띄우고 있었음 — 이것도 조용한 실패였음). 로컬 함수 호출로 검증:
+        삼성전자→005930.KS, 두산에너빌리티/두산에너(부분)→034020.KS,
+        005930→005930.KS, NVDA→NVDA 전부 정상, 존재하지 않는 이름은
+        name_not_found로 정확히 구분, 999999.KS는 not_in_universe로 구분.
 v5.111 [기능개선] 캘린더 홈 "숨기기/표시" 균형 재조정(사용자 지시) —
         데이터 없는 날(주말 등) 화면이 너무 빈약해 보이던 문제. ① 섹션
         골격 7개 전부 항상 표시로 전환 — 액션큐/테마×스캐너/포워드성적은
@@ -3467,7 +3490,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.111"
+VERSION = "v5.112"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -5516,11 +5539,31 @@ async def get_alerts():
 async def add_alert(request: Request):
     """대시보드에서 경보 종목 추가/삭제. {ticker, kind} 또는 {ticker, remove:true}"""
     body = await request.json()
-    ticker = (body.get("ticker") or "").upper().strip()
-    if not ticker:
+    raw = (body.get("ticker") or "").strip()
+    if not raw:
         return JSONResponse({"ok": False, "error": "ticker 필요"}, status_code=400)
     kind = body.get("kind", "경보")
     remove = body.get("remove", False)
+
+    if remove:
+        # 삭제는 항상 목록에 이미 저장된 정확한 티커로만 호출됨(클라이언트가
+        # dataset에서 그대로 넘김) — 이름 재해석 불필요, 오히려 위험(엉뚱한
+        # 후보로 잘못 삭제될 수 있음).
+        ticker = raw.upper()
+    else:
+        # v5.112: 여기도 검색창과 동일한 단일 지점으로 이름/코드를 해석 —
+        # 안 그러면 "삼성전자"가 그대로 대문자화된 문자열로 저장돼 어떤
+        # 스캔에도 안 걸리는 조용한 실패가 됨(사용자 보고 사례).
+        from universe import resolve_name_to_ticker
+        _uni_for_alert = get_universe(None)
+        res = resolve_name_to_ticker(raw, _uni_for_alert)
+        if res["candidates"]:
+            return JSONResponse({"ok": False, "candidates": res["candidates"], "query": raw})
+        if not res["ticker"]:
+            msg = ("이름을 못 찾았어요 — 코드로 시도해보세요."
+                   if res["reason"] == "name_not_found" else "유니버스에 없어요.")
+            return JSONResponse({"ok": False, "error": msg, "reason": res["reason"]})
+        ticker = res["ticker"]
 
     # alerts_user.txt 읽기 → 수정 → 쓰기
     entries = {}
@@ -5845,14 +5888,18 @@ async def lookup_ticker(ticker: str):
     """검색 전용: 종목이 어느 탭 조건에 안 맞아도 핵심 지표를 반환.
     프론트 검색에서 현재 탭 결과에 없을 때 이걸로 종목 데이터를 조회.
     예: /api/lookup/BIIB"""
-    ticker = ticker.strip().upper()
+    from universe import resolve_name_to_ticker
+    query = ticker.strip()
     _uni = get_universe(None)
-    # 숫자코드만 입력 시 한국 접미사 자동 매칭
-    if ticker not in _uni:
-        for suf in (".KS", ".KQ"):
-            if (ticker + suf) in _uni:
-                ticker = ticker + suf
-                break
+    res = resolve_name_to_ticker(query, _uni)
+    if res["candidates"]:
+        return JSONResponse({"candidates": res["candidates"], "query": query})
+    if not res["ticker"]:
+        # v5.112: 실패 사유를 구분 — 조용히 "없다"로만 뭉개지 않는다
+        msg = ("이름을 못 찾았어요 — 코드로 시도해보세요."
+               if res["reason"] == "name_not_found" else "유니버스에 없어요.")
+        return JSONResponse({"error": msg, "reason": res["reason"], "query": query})
+    ticker = res["ticker"]
     name = _uni.get(ticker, ticker)
     df = await asyncio.get_event_loop().run_in_executor(_executor, _fetch, ticker)
     if df is None or df.empty or len(df) < 60:

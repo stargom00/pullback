@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.111</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.112</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -2387,8 +2387,14 @@ function triggerLookup(query) {
       const d = await res.json();
       // 검색어가 그새 바뀌었으면 무시
       if (searchQuery.trim() !== q) return;
+      if (d.candidates) {
+        renderLookupCandidates(d.candidates, q);
+        return;
+      }
       if (d.error) {
-        if (hint) hint.innerHTML = `유니버스에 '${q}'이(가) 없거나 데이터를 못 가져왔어요.`;
+        // v5.112: 서버가 실패 사유를 구분해서 보내주므로 그대로 표시
+        // (예전엔 사유와 무관하게 항상 같은 문구로 뭉개고 있었음)
+        if (hint) hint.innerHTML = d.error;
         return;
       }
       renderLookupCard(d);
@@ -2432,13 +2438,51 @@ function renderLookupCard(d) {
     </div>`;
 }
 
+// v5.112: 이름 검색이 여러 종목에 걸리면(부분일치) 후보 목록을 보여주고
+// 클릭하면 그 티커로 재조회 — 조용히 첫 번째만 골라서 보여주지 않는다.
+function renderLookupCandidates(candidates, q) {
+  const content = document.getElementById('content');
+  const rows = candidates.map(c => `
+    <div class="lookup-candidate" data-ticker="${c.ticker}"
+      style="padding:10px 12px;border-radius:8px;cursor:pointer;display:flex;justify-content:space-between;gap:10px;border:1px solid var(--border,#333)">
+      <span>${c.name}</span><span style="color:var(--muted);font-size:11px">${c.ticker}</span>
+    </div>`).join('');
+  content.innerHTML = `
+    <div style="max-width:520px;margin:0 auto">
+      <div style="background:#1a1a24;border:1px solid #2d6a8c;border-radius:12px;padding:16px">
+        <div style="font-size:12px;color:#9fd4ff;margin-bottom:10px">🔍 '${q}'에 해당하는 종목이 여러 개예요 — 하나를 골라주세요.</div>
+        <div style="display:flex;flex-direction:column;gap:6px">${rows}</div>
+      </div>
+    </div>`;
+  content.querySelectorAll('.lookup-candidate').forEach(el => el.addEventListener('click', () => {
+    const t = el.dataset.ticker;
+    document.getElementById('cardSearch').value = t;
+    searchQuery = t;
+    _lookupLast = '';
+    triggerLookup(t);
+  }));
+}
+
 document.getElementById('alertAdd').addEventListener('click', async () => {
-  const t = document.getElementById('alertTicker').value.trim();
+  const input = document.getElementById('alertTicker');
+  const t = input.value.trim();
   const k = document.getElementById('alertKind').value;
   if (!t) return;
-  await fetch('/api/alerts', {method:'POST', headers:{'Content-Type':'application/json'},
+  const res = await fetch('/api/alerts', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ticker: t, kind: k})});
-  document.getElementById('alertTicker').value = '';
+  const d = await res.json();
+  // v5.112: 예전엔 응답을 아예 안 봐서 "삼성전자"가 그대로 문자열로 저장되는
+  // 조용한 실패가 있었음 — 이름/코드 해석 실패·모호를 여기서 구분해 보여준다.
+  if (d.candidates) {
+    const pick = d.candidates.map(c => `${c.name}(${c.ticker})`).join(', ');
+    alert(`'${t}'에 해당하는 종목이 여러 개예요: ${pick}\n정확한 코드로 다시 입력해주세요.`);
+    return;
+  }
+  if (d.ok === false) {
+    alert(d.error || '경보 등록에 실패했어요.');
+    return;
+  }
+  input.value = '';
   loadAlertList(); load(true);
 });
 

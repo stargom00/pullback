@@ -366,3 +366,58 @@ def get_universe(market: str) -> dict:
     else:
         base = {**kr_full, **us_full, **wl}
     return base
+
+
+def resolve_name_to_ticker(query: str, uni: dict) -> dict:
+    """검색창/경보 입력 등 자유 입력을 티커로 변환하는 단일 지점.
+    v5.112: 종목명(한글 포함) 검색이 /api/lookup에서 아예 처리된 적이
+    없었던 문제(git 히스토리 전수 확인 — 특정 커밋의 회귀가 아니라
+    원래부터 없던 경로)를 고치며 신설. 이후 종목명/코드를 받는 모든
+    엔드포인트가 이 함수 하나만 호출하도록 해서 로직이 흩어지지 않게 한다.
+
+    순서: ①입력 그대로 티커로 존재 ②숫자코드+KR접미사 ③이름 완전일치
+    ④이름 접두일치 ⑤이름 부분일치. ③~⑤ 각 단계에서 후보가 2개 이상이면
+    그 단계에서 즉시 후보 목록을 반환(더 넓은 단계까지 안 내려감).
+
+    반환: {"ticker": 확정 티커 or None,
+           "candidates": [{"ticker","name"}] or None (모호할 때만),
+           "reason": None or "empty"/"name_not_found"/"not_in_universe"}
+    ticker가 있으면 나머지는 항상 None. candidates가 있으면 ticker는 None.
+    """
+    q = (query or "").strip()
+    if not q:
+        return {"ticker": None, "candidates": None, "reason": "empty"}
+
+    q_upper = q.upper()
+    if q_upper in uni:
+        return {"ticker": q_upper, "candidates": None, "reason": None}
+    if q_upper.isdigit():
+        for suf in (".KS", ".KQ"):
+            cand = q_upper + suf
+            if cand in uni:
+                return {"ticker": cand, "candidates": None, "reason": None}
+
+    q_norm = q.replace(" ", "").lower()
+    exact, prefix, substr = [], [], []
+    for tkr, nm in uni.items():
+        nm_norm = (nm or "").replace(" ", "").lower()
+        if not nm_norm:
+            continue
+        if nm_norm == q_norm:
+            exact.append((tkr, nm))
+        elif nm_norm.startswith(q_norm):
+            prefix.append((tkr, nm))
+        elif q_norm in nm_norm:
+            substr.append((tkr, nm))
+
+    for bucket in (exact, prefix, substr):
+        if len(bucket) == 1:
+            tkr, _nm = bucket[0]
+            return {"ticker": tkr, "candidates": None, "reason": None}
+        if len(bucket) > 1:
+            cands = [{"ticker": t, "name": n} for t, n in sorted(bucket, key=lambda x: x[1])]
+            return {"ticker": None, "candidates": cands, "reason": None}
+
+    is_ticker_like = all(c.isalnum() or c in ".-" for c in q_upper) and q_upper.isascii()
+    reason = "not_in_universe" if is_ticker_like else "name_not_found"
+    return {"ticker": None, "candidates": None, "reason": reason}
