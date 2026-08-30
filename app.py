@@ -5,6 +5,17 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.114 [기능추가] KR 돌파 계열(돌파/박스돌파/추세전환) 동시 히트 배지 +
+        정렬 가점(사용자 지시, docs/kr_breakout_family_multi_hit_ev.md
+        사전등록 채택 결과 구현). 자카드 진단(돌파↔박스돌파 0.485=중복,
+        추세전환↔나머지 0.02~0.03=독립)에 따라 "개수"가 아니라 "독립성"
+        기준 — 추세전환이 낀 조합만 우대: 2조합 🔱강력(EV 0.5~0.83R),
+        3조합 🔱🔱(EV 1.152R), 돌파+박스돌파만이면 ⚑중복신호(가점 없음,
+        EV 0.462R이지만 정보 제한적). run_scan()에 _kr_breakout_family_
+        hit_map()으로 당일 3탭 동시 히트 계산(측정 스크립트 collect_family
+        로직 재사용) → 정렬 키에 score+multi_hit_sort_bonus(강력+8,
+        3중+15, 중복+0) 반영. 접힌 카드에도 🔱만 노출(⚑는 펼쳐야 보임).
+        GUIDE.md "🇰🇷 국장" 체크리스트에 한 줄 추가.
 v5.113 [기능개선] 검색 진단 화면을 tab-hit 카드 수준으로 강화(사용자 지시).
         기존엔 /api/lookup이 지표 6개짜리 독립 소형 카드(renderLookupCard)를
         따로 그리고 액션 버튼이 아예 없어 "조건 미달 종목을 감시 걸기"가
@@ -3514,7 +3525,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.113"
+VERSION = "v5.114"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -4974,6 +4985,86 @@ async def _run_scan_earnings(bundle: dict) -> dict:
     return _pending_scan_result("all", "earnings")
 
 
+# v5.114 (사용자 지시, docs/kr_breakout_family_multi_hit_ev.md 사전등록 채택) —
+# KR 돌파/박스돌파/추세전환 동시 히트 배지. 측정 결과: 자카드 진단상 돌파↔
+# 박스돌파는 0.485(같은 조건의 중복 검출)인 반면 추세전환은 나머지 둘과
+# 0.02~0.03(거의 독립) — 그래서 "히트 개수"가 아니라 "추세전환 포함 여부"로
+# 우대한다(사용자 지시: 돌파+박스돌파 쌍은 가점 없음). sort_bonus 크기는
+# scanner.py의 기존 보너스 스케일(ACCUM_SYNERGY_BONUS=10, "진짜 돌파 보너스"
+# =10 등, score가 0~100대)과 같은 자리수로 맞춤 — 실측 EV가 단일 히트
+# 0.252R 대비 추세전환 포함 2조합은 0.500~0.833R(약 2~3배), 3조합은
+# 1.152R(약 4.5배)이라 3조합에 더 큰 가점을 준다.
+MULTI_HIT_TAB_LABEL = {"breakout": "돌파", "boxbreak": "박스돌파", "turnaround": "추세전환"}
+MULTI_HIT_SORT_BONUS = {"strong2": 8, "strong3": 15}   # score 스케일 가점, 중복(⚑)은 0
+
+
+def _kr_breakout_family_hit_map(data: dict, rs_ranks: dict, rs_moms: dict) -> dict:
+    """오늘자 KR 돌파/박스돌파/추세전환 동시 히트 맵 (ticker -> set(label)).
+    docs/kr_breakout_family_multi_hit_ev.md 측정 스크립트(collect_family)와
+    동일한 히트 판정(analyze_fn + 저유동성 3억원/일 필터)을 프로덕션에서
+    재사용 — 히트 로직을 여기서 새로 만들지 않는다."""
+    from scanner import BREAKOUT_CONFIG, BOXBREAK_CONFIG, TURN_CONFIG
+    family = [
+        ("breakout", analyze_breakout, BREAKOUT_CONFIG),
+        ("boxbreak", analyze_boxbreak, BOXBREAK_CONFIG),
+        ("turnaround", analyze_turnaround, TURN_CONFIG),
+    ]
+    hit_map: dict = {}
+    for label, analyze_fn, cfg in family:
+        for t, df in data.items():
+            if not t.endswith((".KS", ".KQ")):
+                continue
+            if len(df) < cfg["min_bars"]:
+                continue
+            try:
+                result = analyze_fn(df, rs_rank=rs_ranks.get(t), rs_mom=rs_moms.get(t), is_kr=True)
+            except Exception:
+                result = None
+            if result is None:
+                continue
+            avg_turn = result.get("avg_turnover") or 0
+            if avg_turn and avg_turn < 3e8:
+                continue
+            hit_map.setdefault(t, set()).add(label)
+    return hit_map
+
+
+def _multi_hit_badge_for(labels: set) -> dict | None:
+    """labels: 오늘 이 티커가 히트한 KR 돌파계열 탭 집합(2개 이상일 때만
+    호출). 배지/툴팁(실측 EV 인용)/정렬가점 반환. 1개 이하면 None."""
+    if len(labels) < 2:
+        return None
+    if len(labels) == 3:
+        return {
+            "badge": "🔱🔱",
+            "tooltip": ("돌파+박스돌파+추세전환 3중 히트 — 실측 EV 1.152R(n=33), "
+                        "손절률 24.2% (단일 히트 0.252R 대비) · "
+                        "docs/kr_breakout_family_multi_hit_ev.md"),
+            "sort_bonus": MULTI_HIT_SORT_BONUS["strong3"],
+            "combo": "triple",
+        }
+    if "turnaround" in labels:
+        other = next(l for l in labels if l != "turnaround")
+        ev = "0.500R(n=8)" if other == "breakout" else "0.833R(n=12)"
+        return {
+            "badge": "🔱 강력",
+            "tooltip": (f"{MULTI_HIT_TAB_LABEL[other]}+추세전환 동시 히트 — 실측 EV {ev} "
+                        "(단일 히트 0.252R 대비), 두 탭 히트집합 자카드 유사도 0.02~0.03"
+                        "(독립 신호) · docs/kr_breakout_family_multi_hit_ev.md"),
+            "sort_bonus": MULTI_HIT_SORT_BONUS["strong2"],
+            "combo": f"{other}+turnaround",
+        }
+    return {
+        "badge": "⚑ 중복신호",
+        "tooltip": ("돌파+박스돌파 동시 히트 — 실측 EV 0.462R(n=342)이지만 두 탭 "
+                    "히트집합 자카드 유사도 0.485로 같은 조건의 중복 검출에 가까워 "
+                    "추가 정보가 제한적(추세전환이 낀 조합의 0.5~1.15R보다 약함) · "
+                    "docs/kr_breakout_family_multi_hit_ev.md"),
+        "sort_bonus": 0,
+        "combo": "breakout+boxbreak",
+    }
+
+
 async def run_scan(market: str, mode: str) -> dict:
     # 데이터는 시장 단위 캐시에서 (모드 바뀌어도 재호출 안 함)
     bundle = await _fetch_market_data(market)
@@ -4996,6 +5087,8 @@ async def run_scan(market: str, mode: str) -> dict:
     rs3_ranks = bundle.get("rs3_ranks", {})   # v5.71 — 구 디스크캐시 호환 위해 .get
     rs_deltas = bundle.get("rs_deltas", {})
     _scan_timing = bundle.get("timing")
+    # v5.114: KR 돌파계열 3탭에서만 동시 히트 맵 계산(다른 모드엔 해당 없음).
+    _family_hit_map = _kr_breakout_family_hit_map(data, rs_ranks, rs_moms) if mode in ("breakout", "boxbreak", "turnaround") else {}
 
     fn = {"turnaround": analyze_turnaround, "leader": analyze_leader, "super": analyze_super, "breakout": analyze_breakout, "surge": analyze_surge, "imminent": analyze_imminent, "boxbreak": analyze_boxbreak, "breakdown": analyze_breakdown, "pattern": analyze_pattern}.get(mode, analyze)
     supports_intraday = mode in ("pullback", "turnaround", "imminent", "boxbreak", "breakout", "breakdown", "pattern", "super")  # is_kr 인자를 받는 모드
@@ -5054,6 +5147,16 @@ async def run_scan(market: str, mode: str) -> dict:
         if mode == "pullback":
             result["is_super"] = analyze_super(df, rs_rank=rs_ranks.get(t),
                                                rs_mom=rs_moms.get(t), is_kr=is_kr) is not None
+        # v5.114: 이 티커가 오늘 다른 KR 돌파계열 탭에도 동시 히트했는지
+        # (docs/kr_breakout_family_multi_hit_ev.md 사전등록 채택 결과 반영).
+        _multi_labels = _family_hit_map.get(t) if _family_hit_map else None
+        if _multi_labels and len(_multi_labels) >= 2:
+            _badge = _multi_hit_badge_for(_multi_labels)
+            if _badge:
+                result["multi_hit_badge"] = _badge["badge"]
+                result["multi_hit_tooltip"] = _badge["tooltip"]
+                result["multi_hit_combo"] = _badge["combo"]
+                result["multi_hit_sort_bonus"] = _badge["sort_bonus"]
         hits.append({"ticker": t, "name": universe[t], "market": mkt,
                      "sector": _sector_of(t), "alert": alert_kind,
                      "climax": cw["climax"], "climax_reasons": cw["reasons"],
@@ -5061,7 +5164,9 @@ async def run_scan(market: str, mode: str) -> dict:
         if is_kr: diag["kr_hits"] += 1
         else: diag["us_hits"] += 1
 
-    hits.sort(key=lambda x: (x.get("triggered", False), x.get("setup_score") or x["score"]), reverse=True)
+    hits.sort(key=lambda x: (x.get("triggered", False),
+                              (x.get("setup_score") or x["score"]) + x.get("multi_hit_sort_bonus", 0)),
+              reverse=True)
     # v5.05: 💰실적우수 배지 — 스캔 하나에 수십~백여 개 히트가 나올 수 있어
     # (IBD9/Stage2와 달리 이 경로는 히트 수가 안 작음) 상위 30개만 적용.
     # 안 그러면 v4.86에서 어렵게 고친 "첫 스캔 2~4분" 속도가 다시 느려짐.

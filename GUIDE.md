@@ -20,6 +20,7 @@
 - 📦박스돌파·돌파·추세전환만 본다(탭 순서=측정 EV 순: 0.431R·0.368R·0.326R) — 되돌림 계열(눌림목·돌파임박) EV 0.089R vs 돌파 계열 0.372R, 격차 +0.283R z=4.88(사전 등록 채택) — `docs/kr_us_strategy_map.md`
 - 신호일 RSI<50인 돌파는 회피 — 손절률 66~78%(정상은 47~56%), 두 시간대 독립 재현 — `docs/kr_breakout_rsi_investigation.md`
 - RSI 70+는 무죄 — "과열이라 위험"이라는 직관은 틀렸다(z=3.37로 오히려 <50이 위험), 우열 가리지 말 것 — `docs/kr_breakout_rsi_investigation.md`
+- KR 돌파 계열에서 추세전환이 함께 뜬 종목은 EV 0.83~1.15R (단일 0.25R) — 우선 검토 — `docs/kr_breakout_family_multi_hit_ev.md`
 
 **🇺🇸 미장 = 되돌림 계열**
 - 슈퍼대장·돌파임박·눌림목 위주로 본다(탭 순서=측정 EV 순: 0.346R·0.232R·0.206R) — `docs/kr_us_strategy_map.md`
