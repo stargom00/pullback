@@ -5,6 +5,30 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.125 [기능추가] 🔁 전 리더 재점화 워치리스트(사용자 지시) —
+        docs/kr_theme_leader_reignition.md 채택 결과(D0 리더 재점화율
+        51.8% vs 대조군 39~42%, 확인진입 EV+0.755R)를 실시간 감시로
+        전환. 신규 모듈 theme_reignition.py(app.py 미의존, theme_lifecycle.py
+        와 같은 원칙) — find_watch_candidates()가 테마별 D0 사이클에서
+        지금 D0+30~D0+180거래일 창 안의 리더를 찾고, check_confirm()이
+        표준 돌파(최근 20일 고가+거래량 1.5배)로 확인진입 여부를 판정.
+        [의도적으로 백테스트와 다른 점] 백테스트의 재점화 판정(+15%/+25%
+        급등 사후 탐지)은 실시간 알림에 못 씀(급등이 끝난 뒤에야 판정) —
+        표준 돌파 정의로 대체, 응축 여부는 배지로만 병기(게이트 아님 —
+        응축 선행이 43.7%로 과반 미달). [저장/스케줄] reignition_watch.json
+        (jongga_forward.json과 같은 패턴)에 상태(watching/confirmed/expired)
+        저장, _warm_market()의 KR 장마감 후 분기에서 하루 1회
+        _refresh_reignition_watch() 호출(부분봉 오염 우려로 장중 미실행).
+        노이즈 가드: 동시 20개+ 창내 리더 시 RS 상위만 확인체크 대상(나머지는
+        표시만, alert_suppressed). 확인진입 후 포워드 R은 목표 사전정의 없이
+        손절이탈/60봉상한 시 시가평가로 확정(harness.race와는 다른 단순
+        mark-to-market — 방향성 엣지 대조용). [엔드포인트] GET
+        /api/reignition/watchlist(UI), /api/reignition/confirmed(얼마냐봇
+        폴링용 — _BOT_READ_EXACT_PATHS 추가, 실제 텔레그램 발송은 stock-alert
+        레포 쪽 구현 필요), /api/reignition/forward(포워드 통계). [UI]
+        static/index.html 대장관찰 탭 하단에 "🔁 재점화 대기" 섹션(종가베팅
+        포워드 성적 박스와 같은 패턴). GUIDE.md 3장에 "KR 사전포착 두 경로"
+        (돌파임박=고점근처 응축용 vs 재점화감시=붕괴 후 전리더용) 표 추가.
 v5.124 [기능개선] theme_map 후속 3건(사용자 지시) — ① 광의 테마(제약·바이오
         등 유니버스 후보 50개+) 상한을 8→25로 확대(theme_map.py 프롬프트
         규칙2). 하위테마 분할 대신 상한확대를 택함 — 이유: DAILY_GENERATION
@@ -3478,6 +3502,7 @@ import money_flow
 import money_flow_report
 import theme_map
 import theme_lifecycle
+import theme_reignition
 import macro_calendar
 
 app = FastAPI(title="눌림목 스캐너")
@@ -3520,6 +3545,9 @@ _SYNC_TOKEN_GATED_PATHS = {"/api/positions/sync", "/api/positions/sync_error"}
 _BOT_READ_EXACT_PATHS = {
     "/api/watch/positions", "/api/watch/pending", "/api/opening-surge",
     "/api/jongga/candidates", "/api/positions", "/api/market/gate", "/api/journal",
+    # v5.125: 얼마냐봇이 재점화 알림을 보내려면 stock-alert(별도 레포) 쪽에도
+    # 이 경로를 폴링하는 코드가 추가돼야 함 — 여기서는 데이터만 열어둠.
+    "/api/reignition/confirmed",
 }
 _BOT_READ_PATH_PREFIXES = ("/api/dist/", "/api/ma/", "/api/pullback-signal/", "/api/vol/")
 
@@ -3665,7 +3693,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.124"
+VERSION = "v5.125"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -4586,6 +4614,157 @@ def _jongga_forward_stats() -> dict:
         "backtest_reference": {"mean_gap_pct": 1.22, "n": 276, "z": 4.28,
                                 "source": "docs/kr_jongga_betting_backtest.md"},
         "recent": resolved[:30],
+    }
+
+
+# ── 🔁 전(前) 테마 리더 재점화 워치리스트 (v5.125, 사용자 지시) ──────────
+# docs/kr_theme_leader_reignition.md 채택 결과(D0 리더 재점화 51.8%,
+# 대조군 대비 z>=1.96 두 건 모두 유의, 확인진입 EV=+0.755R)를 실시간
+# 감시로 옮긴다. theme_reignition.py가 순수 계산(창 판정·피벗·확인·응축
+# 배지)을, 여기(app.py)는 저장/스케줄링/노출만 담당 — money_flow.py/
+# theme_lifecycle.py와 같은 책임 분리 원칙. 저장 파일 경로는 아래쪽
+# _resolve_persistent_path() 정의 직후에 잡는다(JONGGA_FORWARD_PATH와
+# 같은 위치, 정의 순서 무관 — 호출 시점에만 참조).
+#
+# 데이터 구조: {"테마|티커|D0날짜": {레코드}}. 레코드 상태 전이:
+#   watching(창 안, 확인진입 대기) → confirmed(표준 돌파 확인, 포워드
+#   추적 시작) 또는 expired(창 만료/테마 매핑 소실, 자동 해제).
+# 포워드 추적은 harness.race()(측정 스크립트 전용)를 프로덕션에 들여오지
+# 않고 직접 구현 — 목표(target) 사전정의 없이 손절 이탈 또는 60봉 상한
+# 시점의 시가평가 R로 확정한다(백테스트 confirm_entry_race의 target/stop
+# 경주와는 다른, 더 단순한 mark-to-market 방식 — 방향성 엣지 대조용으로는
+# 충분하지만 완전히 같은 방법론은 아님, 비교 시 참고).
+
+
+def _load_reignition_watch() -> dict:
+    if os.path.exists(REIGNITION_WATCH_PATH):
+        try:
+            with open(REIGNITION_WATCH_PATH, encoding="utf-8") as f:
+                data = _json.load(f)
+                return data if isinstance(data, dict) else {}
+        except (ValueError, OSError):
+            return {}
+    return {}
+
+
+def _save_reignition_watch(data: dict):
+    try:
+        tmp = REIGNITION_WATCH_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(data, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, REIGNITION_WATCH_PATH)
+    except OSError as e:
+        print(f"[reignition] 저장 실패: {e}")
+
+
+def _reignition_compute_candidates(bundle: dict) -> list:
+    """theme_map 전 테마 순회 + RS 상위 노이즈가드 캡까지 포함한 오늘자
+    후보 목록. 테마별 compute_theme_series+find_cycles라 무거운 편 —
+    executor에서 호출할 것(_refresh_reignition_watch가 그렇게 함)."""
+    entries = {name: theme_map.get(name) for name in theme_map.list_all().keys()}
+    entries = {name: e for name, e in entries.items() if e and e.get("stocks")}
+    if not entries:
+        return []
+    market_turnover = theme_lifecycle.market_daily_turnover(bundle["data"])
+    candidates = theme_reignition.find_watch_candidates(entries, bundle["data"], market_turnover)
+    rs_ranks = bundle.get("rs_ranks", {})
+    candidates.sort(key=lambda c: -(rs_ranks.get(c["ticker"]) or 0))
+    for i, c in enumerate(candidates):
+        # 노이즈 가드(사용자 지시: 20개+ 동시 창내 리더 시 RS 상위 우선) —
+        # 상위 MAX_ACTIVE_WATCHES만 확인진입 체크·봇알림 대상. 나머지도
+        # 계속 표시는 되지만(창 안에 있다는 사실 자체는 유효 정보) 확인
+        # 체크에서는 제외해 봇 알림 폭주를 막는다.
+        c["alert_suppressed"] = i >= theme_reignition.MAX_ACTIVE_WATCHES
+    return candidates
+
+
+async def _refresh_reignition_watch(bundle: dict):
+    """일 1회(_warm_market의 KR 장마감 후 분기에서 호출) — 창 진입/이탈
+    갱신, 확인진입 체크, 포워드 R 갱신까지 한 번에 처리."""
+    loop = asyncio.get_event_loop()
+    candidates = await loop.run_in_executor(_executor, _reignition_compute_candidates, bundle)
+    store = _load_reignition_watch()
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    data = bundle["data"]
+    current_keys = set()
+
+    for c in candidates:
+        key = f"{c['theme']}|{c['ticker']}|{c['d0_date']}"
+        current_keys.add(key)
+        rec = store.get(key)
+        if rec is None:
+            rec = {"theme": c["theme"], "ticker": c["ticker"], "name": c["name"],
+                   "d0_date": c["d0_date"], "first_seen": today, "status": "watching",
+                   "compression": None, "confirm": None, "forward": None}
+            store[key] = rec
+        rec["days_since_d0"] = c["days_since_d0"]
+        rec["window_days_left"] = c["window_days_left"]
+        rec["alert_suppressed"] = c["alert_suppressed"]
+        rec["last_checked"] = today
+        if rec["status"] == "watching" and not c["alert_suppressed"]:
+            df = data.get(c["ticker"])
+            if df is not None and len(df):
+                try:
+                    res = theme_reignition.check_confirm(df)
+                except Exception as e:
+                    res = None
+                    print(f"[reignition] {c['ticker']} 확인진입 체크 실패: {e}")
+                if res:
+                    rec["compression"] = res["compression"]
+                    if res["confirmed"]:
+                        rec["status"] = "confirmed"
+                        rec["confirm"] = {"date": today, "pivot": res["pivot"], "stop": res["stop"]}
+                        rec["forward"] = {"opened_at": today, "entry": res["pivot"], "stop": res["stop"],
+                                          "bars_held": 0, "r_progress": 0.0,
+                                          "resolved": False, "resolved_r": None, "resolved_reason": None}
+
+    # ── 창 만료(180거래일 초과) 또는 테마 매핑 자체가 사라짐 — 자동 해제 ──
+    for key, rec in store.items():
+        if rec.get("status") == "watching" and key not in current_keys:
+            rec["status"] = "expired"
+            rec["expired_at"] = today
+
+    # ── 확인진입 이후 포워드 R 갱신(손절 이탈 또는 60봉 상한 시 확정) ──
+    for key, rec in store.items():
+        fwd = rec.get("forward")
+        if not fwd or fwd.get("resolved"):
+            continue
+        df = data.get(rec["ticker"])
+        if df is None or df.empty:
+            continue
+        try:
+            close = float(df["Close"].iloc[-1])
+        except Exception:
+            continue
+        entry, stop = fwd["entry"], fwd["stop"]
+        if entry <= stop:
+            continue
+        r_now = round((close - entry) / (entry - stop), 2)
+        fwd["bars_held"] += 1
+        fwd["r_progress"] = r_now
+        if close <= stop:
+            fwd["resolved"], fwd["resolved_r"], fwd["resolved_reason"] = True, r_now, "stop"
+        elif fwd["bars_held"] >= theme_reignition.FORWARD_MAX_BARS:
+            fwd["resolved"], fwd["resolved_r"], fwd["resolved_reason"] = True, r_now, "time"
+
+    _save_reignition_watch(store)
+
+
+def _reignition_forward_stats() -> dict:
+    """/api/reignition/forward용 누적 통계 — 백테스트 +0.755R과 실전 대조."""
+    store = _load_reignition_watch()
+    resolved = [rec for rec in store.values() if (rec.get("forward") or {}).get("resolved")]
+    resolved.sort(key=lambda r: r["forward"]["opened_at"], reverse=True)
+    n = len(resolved)
+    rs_list = [r["forward"]["resolved_r"] for r in resolved]
+    ev_r = round(sum(rs_list) / n, 3) if n else None
+    win_rate = round(sum(1 for r in rs_list if r > 0) / n * 100, 1) if n else None
+    return {
+        "total_resolved": n, "ev_r": ev_r, "win_rate": win_rate,
+        "backtest_reference": {"ev_r": 0.755, "n": 53,
+                                "source": "docs/kr_theme_leader_reignition.md"},
+        "recent": [{"theme": r["theme"], "ticker": r["ticker"], "name": r["name"],
+                    "d0_date": r["d0_date"], **r["forward"]} for r in resolved[:30]],
     }
 
 
@@ -5628,6 +5807,14 @@ async def _warm_market(market: str):
                     _resolve_jongga_gaps(bundle["data"])
                 except Exception as e2:
                     print(f"[jongga-forward] EOD 처리 실패: {e2}")
+                # v5.125: 전 리더 재점화 워치리스트 — 장마감 확정 시점에
+                # 창 진입/이탈·확인진입·포워드 R을 하루 1회 갱신(장중 실시간
+                # 부분봉으로 돌파/거래량을 판정하면 v5.117류 오염 위험이라
+                # EOD 확정 데이터에서만 판정, 사용자 지시 없이 실시간화 안 함).
+                try:
+                    await _refresh_reignition_watch(bundle)
+                except Exception as e2:
+                    print(f"[reignition] EOD 갱신 실패: {e2}")
         except Exception as e:
             print(f"[scheduler] warm {market} failed: {e}")
         # 돈의 흐름은 스캔 워밍과 독립 추적 — 스캔 워밍 실패와 무관하게 시도,
@@ -5807,6 +5994,7 @@ def _resolve_persistent_path(filename: str) -> str:
 
 ALERTS_USER_PATH = _resolve_persistent_path("alerts_user.txt")
 JONGGA_FORWARD_PATH = _resolve_persistent_path("jongga_forward.json")  # v5.98 포워드 트래킹
+REIGNITION_WATCH_PATH = _resolve_persistent_path("reignition_watch.json")  # v5.125 재점화 워치리스트
 # v5.103: 포지션 보드 — 토스 잔고 동기화(수량·평단, sync_toss.py가 30분마다
 # 덮어씀)와 사용자가 UI에서 입력하는 손절가(positions_meta.json, sync가
 # 절대 안 건드림)를 별도 파일로 분리. 같은 파일에 같이 두면 다음 동기화가
@@ -7879,6 +8067,69 @@ async def theme_lifecycle_rotation():
 
     matrix = await loop.run_in_executor(_executor, _compute)
     return JSONResponse(_clean_nan({"themes": list(matrix.keys()), "matrix": matrix}))
+
+
+def _reignition_watchlist_view() -> list:
+    """대장관찰 탭 '🔁 재점화 대기' 섹션 + 봇 조회 공용 뷰. status=watching/
+    confirmed만 노출(expired는 UI에서 볼 필요 없는 소멸 이력). confirmed를
+    앞으로, 그다음 window_days_left 오름차순(창 만료 임박 = 급함)."""
+    store = _load_reignition_watch()
+    items = [{"theme": r["theme"], "ticker": r["ticker"], "name": r["name"],
+              "d0_date": r["d0_date"], "days_since_d0": r.get("days_since_d0"),
+              "window_days_left": r.get("window_days_left"), "status": r["status"],
+              "alert_suppressed": r.get("alert_suppressed", False),
+              "compression": r.get("compression"), "confirm": r.get("confirm"),
+              "forward": r.get("forward")}
+             for r in store.values() if r.get("status") in ("watching", "confirmed")]
+    items.sort(key=lambda x: (x["status"] != "confirmed", x.get("window_days_left") if x.get("window_days_left") is not None else 999))
+    return items
+
+
+@app.get("/api/reignition/watchlist")
+async def reignition_watchlist():
+    """🔁 전 리더 재점화 대기 목록 (v5.125) — docs/kr_theme_leader_reignition.md
+    채택 결과의 실시간 워치리스트. _refresh_reignition_watch()가 KR 장마감
+    후 하루 1회 갱신한 저장분을 그대로 노출(이 엔드포인트 자체는 새 계산을
+    하지 않음 — 대장관찰 탭 로드를 무겁게 만들지 않기 위함, 캘린더 탭과
+    같은 원칙)."""
+    items = _reignition_watchlist_view()
+    return JSONResponse(_clean_nan({
+        "items": items, "count": len(items),
+        "n_suppressed": sum(1 for i in items if i["alert_suppressed"]),
+        "window_start_days": theme_reignition.WATCH_WINDOW_START,
+        "window_end_days": theme_reignition.WATCH_WINDOW_END,
+    }))
+
+
+@app.get("/api/reignition/confirmed")
+async def reignition_confirmed():
+    """🔁 재점화 확인진입 오늘자 신규분 — 얼마냐봇(외부 텔레그램 봇,
+    /api/jongga/candidates와 동일 방식)이 폴링해서 자체적으로 메시지를
+    만들어 보내는 용도. 이 레포엔 텔레그램 발송 코드가 없다(얼마냐봇은
+    별도 레포) — 데이터만 제공. 문구 형식 제안:
+    '🔁 전 리더 재점화 후보: {name} ({theme} D0 리더, D+{days_since_d0})'
+    오늘 신규 확인분이 없으면 confirmed=[]로 응답(발송 여부는 봇 쪽 로직)."""
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    store = _load_reignition_watch()
+    confirmed = [
+        {"theme": r["theme"], "ticker": r["ticker"], "name": r["name"],
+         "d0_date": r["d0_date"], "days_since_d0": r.get("days_since_d0"),
+         "pivot": r["confirm"]["pivot"], "stop": r["confirm"]["stop"]}
+        for r in store.values()
+        if r.get("status") == "confirmed" and (r.get("confirm") or {}).get("date") == today
+    ]
+    return JSONResponse(_clean_nan({
+        "ok": True, "date": today, "confirmed": confirmed, "count": len(confirmed),
+        "trading_day": is_trading_day("kr", today),
+        "message_format_hint": "🔁 전 리더 재점화 후보: {name} ({theme} D0 리더, D+{days_since_d0})",
+    }))
+
+
+@app.get("/api/reignition/forward")
+async def reignition_forward():
+    """🔁 재점화 포워드 트래킹 누적 통계(v5.125) — 백테스트(+0.755R, n=53,
+    docs/kr_theme_leader_reignition.md)와 실전 결과를 계속 대조."""
+    return JSONResponse(_clean_nan(_reignition_forward_stats()))
 
 
 @app.get("/api/vol/{ticker}")

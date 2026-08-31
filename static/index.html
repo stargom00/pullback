@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.124</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.125</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -1455,6 +1455,47 @@ function jonggaForwardFooterHtml() {
     <div class="jongga-forward-sub" style="opacity:.65">실전 진입가는 이 둘 사이 어딘가 — 두 기준 다 참고할 것. 근거: docs/kr_jongga_betting_backtest.md</div>
   </div>`;
 }
+// v5.125: 🔁 전 리더 재점화 워치리스트(사용자 지시) — docs/kr_theme_leader_reignition.md
+// 채택 결과(D0 리더 재점화 51.8%, 확인진입 EV+0.755R)의 실시간 감시.
+// 대장관찰 탭 진입 시 별도로 불러온다(종가베팅 포워드와 같은 이유 —
+// 카드 스캔과 다른 엔드포인트라 load()의 일반 흐름 밖에서 처리).
+async function loadReignitionWatch() {
+  try {
+    const res = await fetch('/api/reignition/watchlist');
+    reignitionWatchData = await res.json();
+  } catch (e) {
+    reignitionWatchData = null;
+  }
+  if (mode === 'leader') renderCards();
+}
+function reignitionWatchSectionHtml() {
+  if (mode !== 'leader') return '';
+  const d = reignitionWatchData;
+  if (!d) return `<div class="jongga-forward-box">🔁 재점화 대기 목록 불러오는 중…</div>`;
+  const items = d.items || [];
+  if (!items.length) {
+    return `<div class="jongga-forward-box">
+      <div class="jongga-forward-title">🔁 재점화 대기 — 현재 창(D0+${d.window_start_days}~${d.window_end_days}거래일) 안의 전 테마리더 없음</div>
+      <div class="jongga-forward-sub">근거: docs/kr_theme_leader_reignition.md (D0 리더 재점화 51.8%, 대조군 대비 유의, 확인진입 EV+0.755R)</div>
+    </div>`;
+  }
+  const rows = items.map(it => {
+    const confirmed = it.status === 'confirmed';
+    const comp = it.compression;
+    const compTag = comp && comp.either ? ' · 응축(참고)' : '';
+    const fwd = it.forward;
+    const rTag = confirmed && fwd ? ` · ${fwd.resolved ? `확정 ${fwd.resolved_r >= 0 ? '+' : ''}${fwd.resolved_r}R(${fwd.resolved_reason === 'stop' ? '손절' : '기간만료'})` : `진행 ${fwd.r_progress >= 0 ? '+' : ''}${fwd.r_progress}R`}` : '';
+    return `<div class="jongga-forward-sub" style="display:flex;justify-content:space-between;gap:8px;padding:3px 0${confirmed ? ';color:#93c5fd' : ''}">
+      <span>${confirmed ? '🔁' : '⏳'} <b>${it.name}</b> <span style="opacity:.7">(${it.theme} D0 ${it.d0_date}, D+${it.days_since_d0})</span>${it.alert_suppressed ? ' <span title="동시 창내 후보가 많아 이번 주기 확인체크에서 제외(RS 상위 우선)">🔕혼잡</span>' : ''}</span>
+      <span style="white-space:nowrap">${confirmed ? '확인진입' + rTag : `창 ${it.window_days_left}일 남음`}${compTag}</span>
+    </div>`;
+  }).join('');
+  return `<div class="jongga-forward-box">
+    <div class="jongga-forward-title">🔁 재점화 대기 ${items.length}개 (창 D0+${d.window_start_days}~${d.window_end_days}거래일)${d.n_suppressed ? ` · 🔕혼잡 ${d.n_suppressed}개` : ''}</div>
+    ${rows}
+    <div class="jongga-forward-sub" style="opacity:.65;margin-top:6px">응축 여부는 참고 배지일 뿐 필수 조건 아님(백테스트에서 재점화 전 응축 선행 43.7%, 과반 미달) — 근거: docs/kr_theme_leader_reignition.md</div>
+  </div>`;
+}
 
 function breakdownCard(s) {
   const chgCls = s.change_pct >= 0 ? 'up' : 'down';
@@ -1884,6 +1925,7 @@ let searchQuery = '';
 let lastHits = [];
 let lastScanMeta = {};   // v5.97: 종가베팅 탭 배너용 — session_state/label/backtest_note 등 hits 밖의 필드
 let jonggaForwardStats = null;   // v5.98: /api/jongga/forward 누적 포워드 트래킹 통계 캐시
+let reignitionWatchData = null;   // v5.125: /api/reignition/watchlist 캐시 — 대장관찰 탭 🔁 재점화 대기 섹션
 let strictMode = false;
 let riskSort = false;
 let bearOkOnly = false;   // v4.65: 💎 약세장적격만
@@ -2802,7 +2844,7 @@ function renderCards() {
     </div>
     ${pfExpanded ? `<div class="grid pf-frozen-grid">${frozenList.map(card).join('')}</div>` : ''}
   ` : '';
-  content.innerHTML = mainHtml + frozenHtml + jonggaForwardFooterHtml();
+  content.innerHTML = mainHtml + frozenHtml + jonggaForwardFooterHtml() + reignitionWatchSectionHtml();
   const pfToggle = document.getElementById('pfFrozenToggle');
   if (pfToggle) {
     pfToggle.addEventListener('click', () => {
@@ -3580,6 +3622,10 @@ document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click'
     // 별개 측정이라 그 맵엔 안 넣음(마켓 불일치 배너 문구가 안 맞을 것) —
     // 시장 동기화만 별도로.
     if (mode === 'jongga') { setMarket('kr'); loadJonggaForwardStats(); }
+    // v5.125: 대장관찰 탭 진입 시 🔁 재점화 대기 섹션 데이터 로드(KR 전용
+    // 데이터라 이 탭 자체의 시장 필터는 안 건드림 — 미국 대장후보도 계속
+    // 그대로 보이게).
+    if (mode === 'leader') { loadReignitionWatch(); }
   }
   applyTabViewState();
 }));
