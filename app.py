@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.119 [문서/주석] vol_reference()의 v5.57 UD게이트 경고(⚠️ 봇 쪽 수정
+        필요, 이 레포에서는 손 안 댐)가 stock-alert v2.15에서 이미
+        해결된 뒤에도 안 지워져 있던 것 정리 — "미뤄진 구현" 전수감사
+        (2026-08-31)에서 발견. 실제 위험 없는 stale 경고였음, 로직
+        변경 없음.
 v5.118 [문서/주석] 거래량 확증 편향 수정 3단계 완료 — 시간비례 외삽
         자체의 장초반 과대추정 보정은 stock-alert/main.py에 구현(KR
         한정, VOLUME_PROJECTION_BIAS/_bias_correction_factor, v2.23).
@@ -3571,7 +3576,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.118"
+VERSION = "v5.119"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7768,15 +7773,12 @@ async def pullback_signal(ticker: str):
     을 한 번에 반환. 봇이 이 값들로 직접 게이트 판정(RS>=90, U/D>=1.5,
     주봉10EMA ±2%)한다 — 게이트 임계값 자체는 봇 쪽 로직(운영 중 튜닝 용이).
 
-    ⚠️ v5.57 [봇 쪽 수정 필요, 이 레포에서는 손 안 댐]: 이 엔드포인트가
-    공급하는 ud_ratio는 봇이 >=1.5로 하드 게이트 판정에 쓰는데, 실측
-    (docs/ud_volume_ratio_investigation.md) 결과 U/D는 방향이 역방향
-    이거나(눌림목 U/D>=1.0군 EV 0.139 vs <1.0군 0.330) 신뢰 불가로 확인됨
-    — 강한피벗 탭의 같은 종류 게이트(STRONG_PIVOT_MIN_UD)는 이미 제거
-    했음. 봇 코드가 이 레포 밖이라 여기서 값을 조작해 우회하지 않음(게이트
-    통과를 위해 서버가 조용히 값을 왜곡하는 건 정직하지 않은 방법이라
-    배제) — 봇 쪽에서 ud_ratio>=1.5 조건 자체를 게이트에서 빼는 작업
-    필요. ud_ratio 필드 값 자체는 참고용으로 계속 그대로 제공."""
+    v5.57 조사(docs/ud_volume_ratio_investigation.md): ud_ratio>=1.5 하드
+    게이트는 실측상 방향이 역방향이거나(눌림목 U/D>=1.0군 EV 0.139 vs
+    <1.0군 0.330) 신뢰 불가로 확인됨 — 강한피벗 탭의 같은 종류 게이트
+    (STRONG_PIVOT_MIN_UD)는 이미 제거했음. stock-alert v2.15에서 해결됨
+    (UD 하드게이트 제거, 현재 참고용) — ud_ratio 필드 값 자체는 참고용
+    으로 계속 그대로 제공."""
     ticker = ticker.upper().strip()
     df = None
     rs_rank = None
