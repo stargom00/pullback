@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.127</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.128</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -2715,7 +2715,12 @@ function renderCards() {
   if (jSession) {
     if (mode === 'jongga' && lastScanMeta.session_label) {
       jSession.style.display = '';
-      jSession.innerHTML = lastScanMeta.session_label;
+      // v5.128: 지금 보는 게 실제 14:40 스냅샷인지 아니면 대기/누락 안내인지
+      // 화면에 명시 — "기준 시각이 뭔지 구분이 안 된다"는 실사고 재발 방지.
+      const snap = (lastScanMeta.is_snapshot && lastScanMeta.generated_at)
+        ? ` · 📸 스냅샷 기준: ${lastScanMeta.generated_at}`
+        : '';
+      jSession.innerHTML = lastScanMeta.session_label + snap;
     } else {
       jSession.style.display = 'none';
     }
@@ -2831,7 +2836,7 @@ function renderCards() {
   list.sort((a, b) => (isFav(b) ? 1 : 0) - (isFav(a) ? 1 : 0));
   const mainHtml = list.length
     ? `<div class="grid">${list.map(card).join('')}</div>`
-    : `<div class="empty">${(strictMode && mode !== 'breakdown') ? `🎯 주도주 조건(RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓)을 모두 충족하는 종목이 없습니다.<br>엄선 필터라 비어있는 게 정상이에요. 해제하려면 '🎯 주도주만'을 다시 누르세요.` : searchQuery ? `'${searchQuery}'은(는) 이 탭의 시그널엔 없어요.<br><span id="lookupHint" style="color:var(--muted);font-size:12px">유니버스 전체에서 찾는 중…</span>` : sectorFilter ? `'${sectorFilter}' 섹터에 해당 종목이 없습니다.` : (mode === 'pattern' && patternSubFilter !== 'all') ? `${PATTERN_SUBTABS.find(p => p.key === patternSubFilter)?.label ?? patternSubFilter} 조건 통과 종목이 없습니다.<br>다른 서브탭을 선택하거나 '전체'로 돌아가세요.` : `현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : mode === 'breakdown' ? 'Stage 4 숏(붕괴)' : mode === 'stage2' ? 'Stage2' : mode === 'ibd9' ? 'IBD 9조건' : mode === 'earnings' ? '실적우수' : mode === 'strong_pivot' ? '강한피벗' : '눌림목'} 종목이 없습니다.${mode === 'stage2' ? '<br>유동성·RS70+·Stage2템플릿·거래량수축·MA수렴을 전부 통과해야 해서 0개인 날이 있는 게 정상이에요 — 필터 문제가 아니라 시장이 약하다는 신호.' : mode === 'ibd9' ? '<br>9가지 조건(3개월 수익률 30%+ 포함)을 전부 통과해야 해서 0개인 날이 있는 게 정상이에요.' : mode === 'earnings' ? '<br>RS70+ 상위 종목 중 3년 EPS 연속증가+분기 YoY25%+매출증가를 전부 통과해야 해서 0개인 날이 있는 게 정상이에요.' : mode === 'strong_pivot' ? '<br>돌파임박 + (Stage2 또는 IBD9) 이중 게이트라 0개인 날이 있는 게 정상이에요 — 실험 탭입니다.' : '<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.'}`}</div>`;
+    : `<div class="empty">${(strictMode && mode !== 'breakdown') ? `🎯 주도주 조건(RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓)을 모두 충족하는 종목이 없습니다.<br>엄선 필터라 비어있는 게 정상이에요. 해제하려면 '🎯 주도주만'을 다시 누르세요.` : searchQuery ? `'${searchQuery}'은(는) 이 탭의 시그널엔 없어요.<br><span id="lookupHint" style="color:var(--muted);font-size:12px">유니버스 전체에서 찾는 중…</span>` : sectorFilter ? `'${sectorFilter}' 섹터에 해당 종목이 없습니다.` : (mode === 'jongga') ? `종가베팅 후보가 없습니다.<br>위 시간대 안내(대기/스냅샷 기준)를 확인하세요 — 정상적으로 대기 중이거나, 오늘 스냅샷이 아직 없거나(🔄 다시 스캔으로 지금 실행 가능), 조건을 충족하는 종목이 실제로 없는 날일 수 있어요.` : (mode === 'pattern' && patternSubFilter !== 'all') ? `${PATTERN_SUBTABS.find(p => p.key === patternSubFilter)?.label ?? patternSubFilter} 조건 통과 종목이 없습니다.<br>다른 서브탭을 선택하거나 '전체'로 돌아가세요.` : `현재 조건을 충족하는 ${mode === 'turnaround' ? '추세전환' : mode === 'breakdown' ? 'Stage 4 숏(붕괴)' : mode === 'stage2' ? 'Stage2' : mode === 'ibd9' ? 'IBD 9조건' : mode === 'earnings' ? '실적우수' : mode === 'strong_pivot' ? '강한피벗' : '눌림목'} 종목이 없습니다.${mode === 'stage2' ? '<br>유동성·RS70+·Stage2템플릿·거래량수축·MA수렴을 전부 통과해야 해서 0개인 날이 있는 게 정상이에요 — 필터 문제가 아니라 시장이 약하다는 신호.' : mode === 'ibd9' ? '<br>9가지 조건(3개월 수익률 30%+ 포함)을 전부 통과해야 해서 0개인 날이 있는 게 정상이에요.' : mode === 'earnings' ? '<br>RS70+ 상위 종목 중 3년 EPS 연속증가+분기 YoY25%+매출증가를 전부 통과해야 해서 0개인 날이 있는 게 정상이에요.' : mode === 'strong_pivot' ? '<br>돌파임박 + (Stage2 또는 IBD9) 이중 게이트라 0개인 날이 있는 게 정상이에요 — 실험 탭입니다.' : '<br>장 상황에 따라 비어있는 게 자연스러운 결과예요.'}`}</div>`;
   // v5.90: 가격고정(M&A 의심) 숨김 요약 줄 — 탭 맨 아래, 펼치면 카드까지.
   // hiddenMap(사용자가 직접 숨김)의 "🙈 숨김 N" 칩과는 별개 UI — 완전
   // 은폐가 아니라 "존재는 알려주되 기본은 숨김"이 취지라 항상 한 줄은 보임.

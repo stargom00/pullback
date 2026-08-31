@@ -5,6 +5,43 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.128 [버그수정] 종가베팅 탭이 오늘 스냅샷이 아니라 임의 시각의 라이브
+        캐시를 보여주던 사고 조사·수정(사용자 지시, 실사고: 8/31 탭이
+        "10:06 캐시·후보 0건"으로 온종일 고정). 근본원인: `GET /api/scan
+        ?mode=jongga`가 일반 탭과 똑같이 `/api/scan`의 공용 캐시/10분
+        TTL/refresh 흐름을 탔음 — 장중 아무 때나(예: 오전) 탭을 열면
+        그 순간의 `_run_scan_jongga()` 라이브 결과가 `_cache["kr:jongga"]`
+        에 그대로 캐시됐고, 이 키는 스케줄러의 공식 14:40~15:00 스냅샷
+        (`_maybe_run_jongga_snapshot`)과 완전히 같은 슬롯을 공유했다 —
+        즉 "공식 스냅샷"과 "아무 때나의 라이브 재계산" 두 소스가 캐시
+        한 칸을 놓고 경합하는 구조였고, 오늘은 그 경합에서 라이브
+        재계산(오전 스캔, 조건상 후보 0건이 정상)이 이겨서 공식
+        스냅샷이 실제로 돌았는지 여부와 무관하게 화면이 오염됐다.
+        [조치] ① `_jongga_snapshot_view()` 신설 — 오늘자
+        snapshot_date가 찍힌 캐시만 신뢰, 없으면 라이브 재계산 없이
+        시간대별 대기("14:40에 갱신")/누락("🔄 다시 스캔으로 지금 실행")
+        안내만 반환. ② `_force_jongga_snapshot()` 신설 — 기존 "다시 스캔"
+        버튼(`refresh=true`)을 종가베팅 탭에서는 "자동 스케줄 창 제약 없이
+        지금 즉시 스냅샷 재실행"으로 재정의(오늘처럼 스케줄이 누락됐을
+        때 사용자가 직접 복구 가능). ③ `/api/scan` 핸들러가 mode=="jongga"
+        를 공용 캐시/TTL 로직 진입 전에 분기 — 이 모드는 더 이상 일반
+        흐름을 안 탐. ④ `run_scan()`의 jongga 분기도 안전하게
+        `_jongga_snapshot_view()`로 변경(라이브 재계산 완전 제거). ⑤
+        `/api/jongga/candidates`(봇 폴링용)도 snapshot_date!=오늘이면
+        후보 0건으로 응답 — 어제 이전 스냅샷을 오늘 것으로 오인해 봇이
+        발송하는 사고 방지. ⑥ UI: 세션 배너에 "📸 스냅샷 기준: HH:MM:SS"
+        시각 명시(is_snapshot=false면 안 붙음 — 지금 보는 게 스냅샷인지
+        대기/누락 안내인지 항상 구분 가능), 종가베팅 전용 빈 상태 문구
+        추가(기존엔 "눌림목 종목이 없습니다"로 오표시). [원인 규명 —
+        재배포 타이밍 가설] 오늘 같은 세션에서 v5.125~v5.127 세 차례
+        재배포가 있었음 — `_jongga_snapshot_date`/스케줄러 상태는
+        인메모리라 재배포 시 리셋되고, `_maybe_run_jongga_snapshot()`은
+        14:40~15:00 창을 이미 지난 뒤엔(`hm < 15*60` 미달) 그날 재시도를
+        아예 안 하므로, 그 창 부근에 재배포가 겹쳤다면 오늘자 스냅샷이
+        영구히 누락됐을 수 있다 — 다만 이건 로그/데이터를 직접 못 봐서
+        (라이브 서버 접근 불가, CLAUDE.md 검증 방법 참고) 정황 추정이고
+        확정 규명은 아님. jongga_forward.json에 8/31·8/28 기록이 있는지는
+        사용자가 라이브에서 직접 확인 필요.
 v5.127 [비용개선/문서정정] 사용자 지시 2건 — ① theme_map 일일 생성 한도를
         자동/수동 독립 카운트로 분리(v5.126에서 3건 공유 한도가 자동
         트리거 우선 소진 시 수동 생성을 막던 문제 수정). entry에
@@ -3747,7 +3784,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.127"
+VERSION = "v5.128"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -4456,6 +4493,62 @@ def _jongga_session_state(now_kst: datetime) -> dict:
     if hm < 15 * 60 + 30:
         return {"state": "active", "label": "⏰ 오늘 15:20 동시호가 전 진입용"}
     return {"state": "after", "label": "오늘 장 종료 — 내일 후보는 14:40에"}
+
+
+def _jongga_snapshot_view() -> dict:
+    """v5.128(사용자 지시, 실사고 대응) — 종가베팅 탭 조회 전용 뷰. 오늘자
+    스냅샷(_cache["kr:jongga"]의 snapshot_date==오늘)이 있으면 그대로 반환,
+    없으면 라이브 재계산 없이 시간대별 대기/누락 안내만 반환한다.
+
+    [배경] 예전엔 이 탭이 일반 /api/scan 캐시·TTL 흐름을 그대로 탔다 —
+    장중 아무 때나(예: 10:06) 탭을 열면 그 순간의 라이브 스캔이
+    `_cache["kr:jongga"]`에 캐시되고, 이후 아무도 재요청 안 하면(또는
+    14:40~15:00 스케줄 스냅샷 자체가 재배포 타이밍 등으로 누락되면) 그
+    "10:06 스캔"이 그날 내내 표시됐다(2026-08-31 실사고 — jongga betting은
+    조건상 "임박 종가" 데이터가 필요해 오전엔 후보가 0건으로 나오기 쉬워
+    증상이 더 눈에 띔). 이제 이 탭은 스케줄러의 공식 스냅샷 또는 수동
+    강제 새로고침(_force_jongga_snapshot)으로만 갱신된다."""
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    cached = _cache.get("kr:jongga")
+    if cached and cached.get("snapshot_date") == today:
+        return {**cached, "is_snapshot": True}
+    now = datetime.now(KST)
+    session = _jongga_session_state(now)
+    label = session["label"]
+    hm = now.hour * 60 + now.minute
+    if is_trading_day("kr", now) and hm >= 15 * 60:
+        # 14:40~15:00 스케줄 창이 이미 지났는데 오늘자 스냅샷이 없음 = 누락
+        label = "오늘 스냅샷이 갱신되지 않았습니다(배포 타이밍 등) — 🔄 다시 스캔으로 지금 실행할 수 있어요"
+    return {
+        "version": VERSION, "market": "kr", "mode": "jongga",
+        "scanned": 0, "fetched": 0, "diag": {}, "hits": [], "warn_count": 0,
+        "backtest_note": JONGGA_BACKTEST_NOTE, "sell_rule": JONGGA_SELL_RULE,
+        "session_state": session["state"], "session_label": label,
+        "is_snapshot": False, "snapshot_date": None, "generated_at": None,
+        "ts": time.time(),
+    }
+
+
+async def _force_jongga_snapshot() -> dict:
+    """v5.128 — 수동 새로고침(🔄) 전용. 자동 스케줄 창(14:40~15:00) 제약
+    없이 지금 즉시 스냅샷을 다시 찍는다 — 오늘자 스케줄 스냅샷이
+    재배포 타이밍 등으로 누락됐을 때 사용자가 직접 복구하는 용도."""
+    bundle = await _fetch_market_data("kr", wait_for_fresh=True)
+    if not bundle:
+        return _jongga_snapshot_view()
+    result = await _run_scan_jongga(bundle)
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    result["snapshot_date"] = today
+    result["daykey"] = _market_session_key("kr")
+    result["is_snapshot"] = True
+    _cache["kr:jongga"] = result
+    global _jongga_snapshot_date
+    _jongga_snapshot_date = today   # 스케줄러가 오늘 또 돌지 않게(이미 확보됨)
+    try:
+        _record_jongga_snapshot(today, result["hits"])
+    except Exception as e2:
+        print(f"[jongga-forward] 수동 새로고침 기록 실패: {e2}")
+    return result
 
 
 async def _run_scan_jongga(bundle: dict) -> dict:
@@ -5473,7 +5566,14 @@ async def run_scan(market: str, mode: str) -> dict:
     if mode == "strong_pivot":
         return await _run_scan_strong_pivot(bundle)
     if mode == "jongga":
-        return await _run_scan_jongga(bundle)
+        # v5.128: 이 경로로 오면(예: 향후 다른 호출부가 run_scan을 직접 부르는
+        # 경우) 안전하게 스냅샷 전용 뷰만 반환 — 라이브 재계산은 절대 안 함
+        # (원인: 예전엔 여기서 매번 _run_scan_jongga(bundle)을 새로 돌려 캐시를
+        # 덮어써서, 장중 아무 때나 탭을 열면 그 순간 값이 "오늘의 스냅샷"으로
+        # 고정돼버렸다 — 2026-08-31 실사고). 실제 서비스 경로에서는 /api/scan
+        # 핸들러가 이 함수를 거치지 않고 _jongga_snapshot_view()/
+        # _force_jongga_snapshot()로 먼저 분기한다.
+        return _jongga_snapshot_view()
     universe = bundle["universe"]
     data = bundle["data"]
     rs_ranks = bundle["rs_ranks"]
@@ -5595,8 +5695,16 @@ async def run_scan(market: str, mode: str) -> dict:
 async def scan(market: str = "all", mode: str = "imminent", refresh: bool = False):
     market = market if market in ("kr", "us", "all") else "all"
     mode = mode if mode in ("pullback", "turnaround", "leader", "super", "breakout", "surge", "imminent", "boxbreak", "breakdown", "pattern", "stage2", "ibd9", "earnings", "strong_pivot", "jongga") else "pullback"
-    key = f"{market}:{mode}"
     favs = load_favorites()
+    if mode == "jongga":
+        # v5.128(사용자 지시, 실사고 대응): 종가베팅은 일반 캐시/TTL/refresh
+        # 흐름을 안 타고 스냅샷 전용으로 분기 — 아래 일반 흐름을 그대로
+        # 태우면 refresh 없이도 TTL(10분) 만료 시 그 순간 값으로 라이브
+        # 재계산+캐시덮어쓰기가 일어나 "오늘의 스냅샷"이 오염된다(2026-08-31
+        # 실사고 원인). refresh=true는 "지금 강제로 다시 스냅샷"으로 재정의.
+        result = await _force_jongga_snapshot() if refresh else _jongga_snapshot_view()
+        return JSONResponse(_clean_nan({**result, "favorites": favs, "cached": not refresh}))
+    key = f"{market}:{mode}"
     cached = _cache.get(key)
     if cached and not refresh:
         # 장 마감 후면 TTL 무시(데이터 안 바뀜), 장중이면 10분 TTL
@@ -5968,6 +6076,8 @@ async def _maybe_run_jongga_snapshot():
             return
         result = await _run_scan_jongga(bundle)
         result["daykey"] = _market_session_key("kr")
+        result["snapshot_date"] = today   # v5.128: _jongga_snapshot_view()가 이 필드로 "오늘자" 판정
+        result["is_snapshot"] = True
         _cache["kr:jongga"] = result
         _jongga_snapshot_date = today
         print(f"[jongga] {today} 장중 스냅샷 완료 — 후보 {len(result['hits'])}개")
@@ -7939,9 +8049,12 @@ async def jongga_candidates():
     today = datetime.now(KST).strftime("%Y-%m-%d")
     trading_day = is_trading_day("kr", today)   # v5.99: 봇이 이중 확인할 수 있게 노출
     cached = _cache.get("kr:jongga")
-    if not cached:
+    # v5.128(실사고 대응): snapshot_date가 오늘이 아니면(예: 오늘 스냅샷이
+    # 아직 없거나 누락됨) 후보 없음으로 응답 — 어제 이전 스냅샷을 "오늘"로
+    # 오인해 봇이 발송하는 사고 방지.
+    if not cached or cached.get("snapshot_date") != today:
         return JSONResponse({"ok": True, "date": None, "candidates": [], "count": 0,
-                              "trading_day": trading_day})
+                              "trading_day": trading_day, "snapshot_date": cached.get("snapshot_date") if cached else None})
     hits = cached.get("hits", [])
     candidates = [
         {"ticker": h["ticker"], "name": h.get("name", h["ticker"]),
@@ -7950,6 +8063,7 @@ async def jongga_candidates():
     ]
     return JSONResponse({
         "ok": True, "date": cached.get("daykey") or cached.get("generated_at"),
+        "snapshot_date": cached.get("snapshot_date"),
         "candidates": candidates, "count": len(candidates),
         "trading_day": trading_day,
         "message_format_hint": "🌆 오늘의 종가베팅 후보 {count}개: {name}(+{change_pct}%, 거래대금 {turnover_rank}위), ...",
