@@ -5,6 +5,23 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.132 [게이트 원복] 눌림목 depth_atr 게이트(v5.71) 채택 철회 — 90개
+        체크포인트 재검증(README 규칙9)에서 원채택 근거(depth_atr 증분
+        EV 0.194R > 기존 A단독 0.108R, 20개 창)가 방향 역전(90개 창:
+        증분 0.018R < 기존 0.061R)됨을 확인(docs/kr_us_strategy_map.md
+        "재검증 결과 — 우선순위1"). `scanner.py` CONFIG 눌림폭 게이트를
+        v5.71 이전 고정%(`pullback_min`/`pullback_max_kr`/`pullback_max_us`/
+        `leader_pullback_min`)로 원복, `depth_atr` 값은 표시 전용 정보
+        필드로 존치(게이트 아님). `app.py` `_trace_pullback` 진단
+        재현 함수도 동기화(CLAUDE.md 리터럴 사본 원칙). 오늘자 전체
+        유니버스 실측: 눌림목 탭 히트 수 KR 55→46건(-16%), US 151→133건
+        (-12%), 종목 구성도 27% 교체. 이 재검증 과정에서
+        `harness.fetch_universe_data()`가 checkpoints 90개(최대offset
+        950)를 지원 못 하는(기본 2년치 fetch로 offset 450+ 부터 신규
+        히트가 조용히 0건이 되는) 버그를 발견 — `kr_days`/`us_period`
+        옵션 인자 추가(기본값은 기존과 100% 동일, opt-in만) + 4개
+        기존 스크립트가 각자 복붙해 구현하던 "확장 fetch"를 앞으로는
+        이 옵션으로 통합 가능하게 정리(README 규칙3).
 v5.131 [기능개선] 대장관찰 탭 '🔁 재점화 대기' 섹션 UI/UX 개선 3건(사용자
         지시). ① 노이즈가드(MAX_ACTIVE_WATCHES=20, RS 상위만 확인진입
         체크) 제거 — check_confirm() 실측 원가 ~4ms/종목이라 캡의 근거였던
@@ -3827,7 +3844,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.131"
+VERSION = "v5.132"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6822,6 +6839,7 @@ def _trace_pullback(df, is_kr, rs_rank, rs_3m=None, rs_delta=None):
         return {"passed": False, "fail_at": "rs_min", "steps": steps}
     rs_path = "12M" if path_12m else ("3M" if path_3m else "momentum")
     is_leader = rs_rank is not None and rs_rank >= cfg["leader_rs"]
+    pb_min = cfg["leader_pullback_min"] if is_leader else cfg["pullback_min"]
     c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
     ma10 = c.rolling(cfg["ma_short"]).mean(); ma20 = c.rolling(cfg["ma_mid"]).mean()
     ma60 = c.rolling(cfg["ma_long"]).mean(); ma200 = c.rolling(cfg["ma_trend"]).mean()
@@ -6844,6 +6862,8 @@ def _trace_pullback(df, is_kr, rs_rank, rs_3m=None, rs_delta=None):
     prev_close = float(c.iloc[-2])
     change_pct = (close / prev_close - 1) * 100 if prev_close else 0.0
     breakout_day = change_pct >= 4.0
+    pb_max = cfg.get("pullback_max_kr" if is_kr else "pullback_max_us",
+                     cfg.get("pullback_max", 0.18))
     if breakout_day:
         high60_ref = float(h.iloc[-61:-1].max())
         pullback = (high60_ref - prev_close) / high60_ref
@@ -6853,15 +6873,16 @@ def _trace_pullback(df, is_kr, rs_rank, rs_3m=None, rs_delta=None):
     else:
         last60_h = h.iloc[-60:]
         pullback = (float(last60_h.max()) - close) / float(last60_h.max())
-    # v5.71: 눌림폭 게이트를 고정%에서 depth_atr(눌림폭%÷ATR%)로 교체
+    # v5.132: 눌림폭 게이트 고정%로 복원(depth_atr는 표시 전용 — scanner.py
+    # analyze() 동기화 참고, docs/kr_us_strategy_map.md "재검증 결과 —
+    # 우선순위1"에서 depth_atr 게이트 채택 철회)
+    pullback_ok = pb_min <= pullback <= pb_max
+    if not _gate_step(steps, "눌림폭", pullback_ok,
+                       f"눌림폭 {pullback*100:.1f}% (허용 {pb_min*100:.1f}~{pb_max*100:.1f}%)"):
+        return {"passed": False, "fail_at": "눌림폭", "steps": steps}
     atr_val = _atr(h, lo, c, 14)
     atr_pct_raw = atr_val / close * 100 if close > 0 else 0.0
     depth_atr = (pullback * 100 / atr_pct_raw) if atr_pct_raw > 0 else None
-    depth_ok = depth_atr is not None and cfg["depth_atr_min"] <= depth_atr <= cfg["depth_atr_max"]
-    if not _gate_step(steps, "눌림폭", depth_ok,
-                       f"depth_atr={f'{depth_atr:.2f}' if depth_atr is not None else 'None'} "
-                       f"(허용 {cfg['depth_atr_min']}~{cfg['depth_atr_max']}) · 눌림폭 {pullback*100:.1f}% · ATR% {atr_pct_raw:.1f}"):
-        return {"passed": False, "fail_at": "눌림폭", "steps": steps}
     dist10, dist20, dist60 = (close - m10) / m10, (close - m20) / m20, (close - m60) / m60
     prox = cfg["ma_proximity"]
     prox_allow = prox + max(0.0, change_pct / 100) if change_pct >= 4.0 else prox

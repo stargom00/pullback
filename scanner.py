@@ -765,16 +765,20 @@ CONFIG = {
     "ma_mid": 20,
     "ma_long": 60,
     "ma_trend": 200,           # 장기 추세 필터
-    # v5.71: 눌림폭 게이트를 고정 %(구 pullback_min/max_kr/us)에서 ATR 상대
-    # 배수(depth_atr = 눌림폭% ÷ ATR%)로 교체. 고정 %는 종목 변동성을 무시해
-    # 저ATR 종목엔 헐겁고 고ATR 종목엔 빡빡했다 — stop_wide 배지(v4.67)가 이미
-    # 손절폭에 적용한 것과 같은 발상을 눌림폭 자체에도 적용. leader/non-leader
-    # 구분 없이 단일 범위(측정에서 그렇게 검증됨). 근거:
-    # scripts/measurements/2026-08-23_reject_tracer_ev_and_gate_e.py —
-    # depth_atr 재정의로 추가된 신호(RS는 현행 유지) n=480, EV 0.194R (현행
-    # 눌림목 신호 전체 EV 0.108R보다 우수). docs/rs_gate_e_and_depth_atr_v5.71.md.
-    "depth_atr_min": 0.5,
-    "depth_atr_max": 3.0,
+    # v5.71에서 눌림폭 게이트를 고정 %에서 ATR 상대 배수(depth_atr)로 교체
+    #했으나, 90개 체크포인트 재검증(README 규칙9)에서 원채택 근거가 방향
+    # 역전(증분 EV가 기존보다 낮아짐 — docs/kr_us_strategy_map.md "재검증
+    # 결과 — 우선순위1")돼 v5.132에서 게이트를 이 고정 %로 되돌렸다.
+    # depth_atr 자체는 표시용 정보 필드로만 계속 계산(게이트 아님, 아래
+    # analyze() 참고) — docs/rs_gate_e_and_depth_atr_v5.71.md는 이제
+    # "폐기된 근거"로만 남는다(GUIDE.md/이 CONFIG 어디서도 채택 근거로
+    # 재인용하지 않음).
+    "pullback_min": 0.03,      # 최근 고점 대비 최소 조정폭 3%
+    # 최대 조정폭 (이상이면 눌림이 아니라 새 베이스 구축 → 패턴 탭 영역)
+    # ※ 장중 고가 기준으로 측정 (종가 기준은 실제 조정을 과소평가 — 디앤디 사례:
+    #    장중고점 대비 -24%인데 종가고점 대비 -18%로 계산돼 눌림목에 잘못 표시됨)
+    "pullback_max_kr": 0.15,   # KR: 변동성 커서 15%까지 허용
+    "pullback_max_us": 0.12,   # US: 12% (미너비니 기준 건강한 눌림 상한)
     # ── 후기 스테이지/확장도 게이트 (v4.48, BHE 사후분석) ──
     # BHE 사례: 6개월 +110%, 200일선 이격 +70%의 4차 베이스 돌파(95)를 통과시켜
     # -9.4% 붕괴를 맞음. 확장도가 주 필터(BHE의 베이스들은 9%대로 얕아 카운트로 안 걸림).
@@ -799,6 +803,7 @@ CONFIG = {
     # 저ATR 종목은 영향 없음(max()라 기존 통과분이 새로 탈락하는 일 없음).
     "risk_hard_atr_mult": 1.5,
     "risk_hard_atr_cap": 15.0,
+    "pullback_max": 0.18,      # (구버전 호환용 폴백 — 시장별 키 없을 때만 사용)
     "ma_proximity": 0.035,     # 이평선과의 거리 허용치 3.5%
     "vol_contraction": 0.85,   # 최근 3일 평균 거래량 < 20일 평균 × 0.85
     "rsi_min": 35,
@@ -814,9 +819,10 @@ CONFIG = {
     "rs_momentum_floor": 50,
     "rs_delta_min": 25,
     "pivot_window": 10,        # 피벗(돌파가) = 직전 N봉 고가
-    # 주도주(RS 90+) 완화 기준: RSI만 완화(눌림폭 완화는 v5.71에서 depth_atr로
-    # 대체되며 제거 — depth_atr가 이미 변동성 상대값이라 leader 예외 불필요)
+    # 주도주(RS 90+) 완화 기준: 얕고 짧은 눌림도 인정(v5.132에서 고정%
+    # 게이트 복원과 함께 leader_pullback_min도 함께 복원)
     "leader_rs": 90,
+    "leader_pullback_min": 0.015,
     "leader_rsi_max": 72,
     # 손절 ATR 버퍼: 구조 손절(지지선) 아래로 ATR×배수만큼 여유를 둬
     # 노이즈(지지선 살짝 깨고 반등)에 털리는 걸 방지. 종목 변동성 자동 반영.
@@ -1382,6 +1388,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         return None
     rs_path = "12M" if path_12m else ("3M" if path_3m else ("momentum" if path_mom else None))
     is_leader = rs_rank is not None and rs_rank >= cfg["leader_rs"]
+    pb_min = cfg["leader_pullback_min"] if is_leader else cfg["pullback_min"]
     rsi_max = cfg["leader_rsi_max"] if is_leader else cfg["rsi_max"]
 
     c = df["Close"]
@@ -1433,9 +1440,14 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     bars_since_high = len(last60_h) - 1 - int(last60_h.idxmax())
     recent_high_ok = bars_since_high <= cfg["recent_high_window"]
 
-    # ── 3) 조정폭 (눌림 깊이) — 장중 고가 기준, ATR 상대 배수로 판정 ──
+    # ── 3) 조정폭 (눌림 깊이) — 장중 고가 기준, 시장별 상한 (v5.132 고정%
+    #    게이트로 복원 — v5.71의 depth_atr 게이트가 90개 체크포인트
+    #    재검증에서 원채택 근거 방향역전으로 채택 철회됨,
+    #    docs/kr_us_strategy_map.md "재검증 결과 — 우선순위1" 참고) ──
     #    종가 기준 측정은 실제 조정을 3~6%p 과소평가함 (고점 캔들의 윗꼬리 무시).
     #    돌파일엔 전날 종가/전날까지의 고가 기준으로 평가.
+    pb_max = cfg.get("pullback_max_kr" if is_kr else "pullback_max_us",
+                     cfg.get("pullback_max", 0.18))
     if breakout_day:
         high60_ref = float(h.iloc[-61:-1].max())
         pullback = (high60_ref - prev_close) / high60_ref
@@ -1450,15 +1462,14 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
             return None
     else:
         pullback = (high60 - close) / high60
-    # v5.71: 눌림폭 게이트를 고정 %에서 ATR 상대 배수(depth_atr)로 교체 —
-    # atr_val을 여기서 먼저 구해 아래 손절 버퍼 계산(구 1494행 근처)에도
-    # 재사용한다(중복 계산 방지). 근거: CONFIG 정의부 주석 참고.
-    atr_val = atr(h, lo, c, 14)
+    pullback_ok = pb_min <= pullback <= pb_max
+    if not pullback_ok:
+        return None
+    # depth_atr(눌림폭÷ATR%)은 v5.132부터 게이트 아님 — 표시 전용 정보
+    # 필드로만 계속 계산(카드에서 참고 가능하게 유지, 판정에는 안 씀).
+    atr_val = atr(h, lo, c, 14)     # 종목 변동성 (버퍼 + depth_atr 표시 공용)
     atr_pct_raw = atr_val / close * 100 if close > 0 else 0.0
     depth_atr = (pullback * 100 / atr_pct_raw) if atr_pct_raw > 0 else None
-    depth_ok = depth_atr is not None and cfg["depth_atr_min"] <= depth_atr <= cfg["depth_atr_max"]
-    if not depth_ok:
-        return None
 
     # ── 4) 이평선 지지 ──
     dist10 = (close - m10) / m10
@@ -1518,7 +1529,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     # ── ATR 버퍼: 구조 손절 아래로 ATR×배수만큼 여유 (노이즈 흡수) ──
     # 손절은 여전히 구조(지지선)에 고정되어 현재가 따라 안 움직이고,
     # 종목 변동성(ATR)만큼만 살짝 아래로 내려 정상 변동에 안 털리게 한다.
-    # atr_val은 v5.71부터 위(눌림폭 depth_atr 게이트)에서 이미 계산됨 — 재사용.
+    # atr_val은 위(depth_atr 표시값 계산)에서 이미 구했음 — 재사용.
     stop, stop_struct, atr_buf = apply_atr_buffer(
         stop, h, lo, c, cfg.get("atr_stop_buffer", 0.0))
     # 화면 지지선 표시를 실제 손절 기준과 일치시킴 (버퍼 전 구조 손절 기준)
@@ -1630,7 +1641,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "qa_reason": _qa["disqualify_reason"],
         **_mg,
         "pullback_pct": round(pullback * 100, 1),
-        "depth_atr": round(depth_atr, 2) if depth_atr is not None else None,  # v5.71: 눌림폭÷ATR% 게이트 실값(표시용)
+        "depth_atr": round(depth_atr, 2) if depth_atr is not None else None,  # 눌림폭÷ATR% 참고값(v5.132부터 표시 전용, 게이트 아님)
         "support_ma": disp_support,
         "ma_dist_pct": disp_support_dist,
         "vol_ratio": round(vol_ratio, 2),

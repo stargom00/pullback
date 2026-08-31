@@ -44,10 +44,10 @@ def _downcast(df):
     return df
 
 
-def _fetch_kr_one(ticker):
+def _fetch_kr_one(ticker, days=None):
     import naver_kr
     try:
-        df = naver_kr.fetch(ticker)
+        df = naver_kr.fetch(ticker) if days is None else naver_kr.fetch_history(ticker, days=days)
         if df is None or df.empty:
             return ticker, None
         return ticker, _downcast(df)
@@ -55,13 +55,13 @@ def _fetch_kr_one(ticker):
         return ticker, None
 
 
-def _fetch_us_batch(tickers):
+def _fetch_us_batch(tickers, period="2y"):
     import yfinance as yf
     out = {}
     if not tickers:
         return out
     try:
-        raw = yf.download(tickers, period="2y", interval="1d",
+        raw = yf.download(tickers, period=period, interval="1d",
                            auto_adjust=True, group_by="ticker",
                            threads=True, progress=False)
     except Exception:
@@ -84,9 +84,23 @@ def _fetch_us_batch(tickers):
 
 
 def fetch_universe_data(markets=("kr", "us"), kr_concurrency=10, us_batch_size=100,
-                         progress=True):
+                         progress=True, kr_days=None, us_period="2y"):
     """{ticker: df} 전체 유니버스 페치. app.py의 실제 fetch 함수와 동일 소스
-    (naver_kr.fetch / yf.download 2y). 반환: (data, kr_universe, us_universe)."""
+    (naver_kr.fetch / yf.download). 반환: (data, kr_universe, us_universe).
+
+    ⚠️ **기본값(kr_days=None→naver_kr.fetch() 내부 기본 730일, us_period="2y")
+    은 checkpoints 최대 offset 250까지만 안전하다** — KR 730일(≈483봉)/
+    US 2년(≈505봉)은 offset 250 + min_bars 210 = 460봉 요구치를 간신히
+    채우는 수준이라, 그보다 큰 offset(예: 규칙9 표준 checkpoints(60,950,10)
+    =90개, max offset 950)을 쓰면 필요 봉수(950+210=1160)를 못 채워
+    **조용히 후반 체크포인트 전부가 신규 히트 0건으로 멎는다**(2026-09-01
+    depth_atr 90개 체크포인트 재검증 최초 실행에서 실제로 겪은 사고 —
+    docs/kr_us_strategy_map.md "재검증 결과 — 우선순위1" 참고). 90개+
+    체크포인트를 쓰는 측정은 반드시 `kr_days=1900, us_period="5y"`를
+    명시적으로 넘길 것(이 조합이 KR≈1274봉/US≈1260봉 확보, 여러 스크립트가
+    각자 복붙해 쓰던 걸 여기로 통합 — README 규칙3). 기존 20개 체크포인트
+    스크립트들은 인자를 안 바꾸는 한 기존과 100% 동일하게 동작한다
+    (kr_days=None이면 naver_kr.fetch()로 이전과 동일 호출)."""
     from universe import get_universe
     t0 = time.time()
     kr_u = get_universe("kr") if "kr" in markets else {}
@@ -94,7 +108,7 @@ def fetch_universe_data(markets=("kr", "us"), kr_concurrency=10, us_batch_size=1
     data = {}
     if kr_u:
         with ThreadPoolExecutor(max_workers=kr_concurrency) as ex:
-            futs = {ex.submit(_fetch_kr_one, t): t for t in kr_u}
+            futs = {ex.submit(_fetch_kr_one, t, kr_days): t for t in kr_u}
             done = 0
             for fut in as_completed(futs):
                 t, df = fut.result()
@@ -107,7 +121,7 @@ def fetch_universe_data(markets=("kr", "us"), kr_concurrency=10, us_batch_size=1
         us_tickers = list(us_u.keys())
         batches = [us_tickers[i:i + us_batch_size] for i in range(0, len(us_tickers), us_batch_size)]
         for i, b in enumerate(batches):
-            data.update(_fetch_us_batch(b))
+            data.update(_fetch_us_batch(b, period=us_period))
             if progress:
                 print(f"[harness] us batch {i+1}/{len(batches)} elapsed={time.time()-t0:.0f}s", flush=True)
     if progress:
@@ -214,7 +228,12 @@ def passes_liquidity_filter(hit: dict, is_kr: bool) -> bool:
 def checkpoints(start=60, end=250, step=10):
     """all_tabs_common_yardstick_investigation.md 방법론 원문: off=60..250,
     10간격, 20지점. 다른 범위가 필요하면 호출부에서 인자로 바꾸되, 왜
-    바꿨는지 스크립트에 주석을 남길 것."""
+    바꿨는지 스크립트에 주석을 남길 것.
+
+    ⚠️ end>250(예: 규칙9 표준 90개 = checkpoints(60,950,10))을 쓸 거면
+    `fetch_universe_data(kr_days=1900, us_period="5y")`도 같이 써야 한다
+    — 기본 fetch(2년치)로는 큰 offset에서 필요 봉수를 못 채워 후반
+    체크포인트가 조용히 전부 빈다(fetch_universe_data 문서 참고)."""
     return list(range(start, end + 1, step))
 
 

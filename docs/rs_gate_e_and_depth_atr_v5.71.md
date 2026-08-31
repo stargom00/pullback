@@ -1,5 +1,15 @@
 # 눌림목 RS 게이트 E + depth_atr 눌림폭 게이트 (v5.71)
 
+> **⚠️ [2026-09-01 정정] depth_atr 눌림폭 게이트 채택 철회.** 이 문서의
+> "핵심 — harness 2R 레이스 EV" 절이 근거였던 20개 체크포인트 측정을
+> 90개로 재검증한 결과, 원채택 근거(증분 EV 0.194R > 기존 A 단독 EV
+> 0.108R)가 방향 역전(90개 창: 증분 0.018R < 기존 0.061R)됨을 확인 —
+> `scanner.py` CONFIG를 v5.71 이전 고정%(`pullback_min`/`pullback_max_kr`/
+> `pullback_max_us`/`leader_pullback_min`) 게이트로 되돌렸다(v5.132).
+> depth_atr 값 자체는 카드 표시용 정보 필드로만 남아있음(게이트 아님).
+> 상세: `docs/kr_us_strategy_map.md` "재검증 결과 — 우선순위1". **RS
+> 게이트 E(아래 절)는 이 정정 대상이 아니다 — 별도로 재검증 진행 중.**
+
 ## 계기
 
 Seulki가 MSTR/BMNR/CRCL/NBIS/PLTR(미국)·OCI홀딩스(한국) 6종목이 눌림목
