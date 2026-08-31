@@ -5,6 +5,26 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.127 [비용개선/문서정정] 사용자 지시 2건 — ① theme_map 일일 생성 한도를
+        자동/수동 독립 카운트로 분리(v5.126에서 3건 공유 한도가 자동
+        트리거 우선 소진 시 수동 생성을 막던 문제 수정). entry에
+        "trigger":"auto"|"manual" 필드 추가, `theme_map.AUTO_DAILY_LIMIT=6`
+        (money_flow 자동 트리거) / `MANUAL_DAILY_LIMIT=4`(POST 수동)로
+        분리, `today_generation_count(trigger=...)`로 선택 카운트. 에러
+        메시지도 "자동 생성 한도"/"수동 생성 한도"로 구분 표시. ②
+        CLAUDE.md에 원칙 추가: "외부 유료 API 호출 엔드포인트는 쿨다운·
+        진행중 잠금·일일 한도를 함께 구현할 것"(v5.126 비용 급증 사건
+        참조). ③ 6배 표본 재검증(2026-08-31) 결과 반영 — "KR=돌파 계열
+        우위"(z=4.88, 2026-08-29 사전 등록 채택) 결론이 90개 체크포인트
+        재검증에서 재현 안 됨(z=1.38)이 확인돼 GUIDE.md 1페이지
+        체크리스트·시장별 전략 지도 섹션의 관련 서술을 전부 정정/철회
+        (US 쪽은 반대로 유의해짐, z=-0.16→-2.97 — 되돌림 계열 우위
+        오히려 강화). `scripts/measurements/README.md`에 규칙9 신설
+        ("채택 판정은 체크포인트 90개 이상으로 할 것, 20개 창은 예비
+        관찰로만") + `docs/kr_us_strategy_map.md`에 규칙9 기준 재검증
+        대기 목록(depth_atr 게이트·RS게이트E·다중히트 보너스·RSI<50 —
+        전부 20개 창 채택, depth_atr/게이트E는 KR+US 혼합 채택 후 규칙8
+        분해에서 양쪽 다 비유의였던 이력까지 있어 우선순위 높음) 작성.
 v5.126 [비용개선] Anthropic API 비용 급증(8/26~8/31 6일 $48, 예상 20배)
         조사 후 절감 조치(사용자 지시) — 원인: money_flow_report.py
         (8/26 신설)·theme_map.py(8/29 신설)·macro_calendar.py(8/30 프롬프트
@@ -3727,7 +3747,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.126"
+VERSION = "v5.127"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -8012,6 +8032,7 @@ async def _theme_map_generate_job(job_id: str, theme_name: str):
             job["status"] = "error"
             job["error"] = entry["error"]
             return
+        entry["trigger"] = "manual"   # v5.127: 자동/수동 한도 분리 카운트용
         theme_map.save_theme_map(theme_name, entry)
         job["status"] = "done"
         job["result"] = _clean_nan({"theme": theme_name, **entry})
@@ -8027,9 +8048,11 @@ _theme_map_generating: set = set()   # v5.125: 진행 중인 테마명 — 같�
 
 @app.post("/api/theme_map/{theme_name}")
 async def theme_map_generate(theme_name: str):
-    """수동 생성(사용자 지시 4번) — 자동 생성과 같은 일일 한도를 공유한다
-    (비용 가드, 사용자 지시 7번 — 수동이라고 무제한 허용 안 함). v5.123부터
-    비동기 job — 즉시 202+job_id 반환, 실제 생성은 백그라운드, 결과는
+    """수동 생성(사용자 지시 4번) — 자동 생성과 별도 일일 한도를 쓴다
+    (v5.127, 사용자 지시: 자동 트리거가 그날 한도를 먼저 써버려 수동 생성이
+    막히던 문제 수정 — theme_map.AUTO_DAILY_LIMIT/MANUAL_DAILY_LIMIT로
+    분리, entry의 "trigger" 필드로 구분 카운트). v5.123부터 비동기 job —
+    즉시 202+job_id 반환, 실제 생성은 백그라운드, 결과는
     GET /api/theme_map/jobs/{job_id}로 조회. v5.125(사용자 지시, API 비용
     급증 조사): 같은 테마에 대해 이미 진행 중인 job이 있으면 새 job을
     또 안 만듦 — daily_generation_count는 job이 완료(save_theme_map)돼야
@@ -8037,9 +8060,9 @@ async def theme_map_generate(theme_name: str):
     들어오면 이 가드 없이는 Claude+웹서치 호출이 중복으로 나갔다."""
     if theme_name in _theme_map_generating:
         return JSONResponse({"error": f"'{theme_name}' 이미 생성 중 — 잠시 후 다시 시도"}, status_code=429)
-    if theme_map.today_generation_count() >= theme_map.DAILY_GENERATION_LIMIT:
+    if theme_map.today_generation_count(trigger="manual") >= theme_map.MANUAL_DAILY_LIMIT:
         return JSONResponse(
-            {"error": f"오늘 신규 매핑 생성 한도({theme_map.DAILY_GENERATION_LIMIT}건) 도달 — 내일 다시 시도"},
+            {"error": f"오늘 수동 생성 한도({theme_map.MANUAL_DAILY_LIMIT}건) 도달 — 내일 다시 시도"},
             status_code=429)
     job_id = uuid.uuid4().hex
     _theme_map_jobs[job_id] = {"status": "pending", "theme": theme_name, "result": None,

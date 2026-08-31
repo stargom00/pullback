@@ -363,3 +363,28 @@ Part1 자체가 이미 결론을 결정한다.
 
 근거 스크립트:
 `scripts/measurements/2026-08-31_kr_pullback_ev_persistence_regime.py`.
+
+## 20개 창 채택 결론 재검증 대기 목록 (2026-08-31, 규칙9 신설에 따라 작성)
+
+`scripts/measurements/README.md` 규칙9("채택 판정은 체크포인트 90개
+이상으로 할 것") 신설 계기가 된 "KR=돌파 계열 우위"(z 4.88→1.38) 사례
+외에, 이 레포에 현재 살아있는(scanner.py CONFIG 또는 UI 배지로 반영된)
+채택 결론 중 **checkpoints(60,250,10)=20개 표본으로만 검증된 것들**을
+찾아 목록화했다(사용자 지시 — 재측정은 안 함, 목록만).
+
+| 결론 | 반영 위치 | 원측정 표본 | 비고 |
+|---|---|---|---|
+| KR 돌파 계열 RSI<50 회피 | UI 배지(⚠️ 저모멘텀 돌파, `static/index.html` `isLowMomentumBreakout`) | `checkpoints(60,250,10)` 20개 | "시간분할 독립 재현"도 같은 20점을 반으로 나눈 것이라 진짜 별도 대표본은 아님(`docs/kr_breakout_rsi_investigation.md`) |
+| 눌림목 depth_atr 게이트(ATR 상대 눌림폭, v5.71) | **scanner.py CONFIG** `depth_atr_min/max`(실제 게이트, 배지 아님) | `checkpoints(60,250,10)` 20개, **KR+US 혼합**(규칙8 신설 전 채택) | 2026-08-29 규칙8 분해 재확인에서 KR z=1.37·US z=0.99 둘 다 비유의(이 문서 상단 "결과" 표) — 혼합 수치로 채택된 게이트가 시장별로는 유의성이 없었다는 뜻, 이중으로 재검증 필요 |
+| 눌림목 RS 게이트 E(rs_path 3M/momentum) | **scanner.py 게이트 자체**(통과 여부를 가르는 로직) + UI 배지(🔥단기주도/🚀랭크급등) | `checkpoints(60,250,10)` 20개, **KR+US 혼합**(규칙8 신설 전 채택) | depth_atr와 같은 사례 — 규칙8 분해 시 KR z=0.99·US z=0.99(이 문서 상단 "E 게이트 증분" 행) 둘 다 비유의 |
+| KR 돌파 계열 다중히트 보너스 | UI 배지+정렬 가점(`multi_hit_badge`, v5.114) | `checkpoints(60,250,10)` 20개, KR 전용 | `docs/kr_breakout_family_multi_hit_ev.md` |
+
+**종가베팅(조합A)은 목록에서 제외** — 원래 n=70(20개 창 상당)이었으나
+검정력 부족(z=1.84)을 이유로 2026-08-29에 자체적으로 checkpoints
+60~950(90개)로 확장 재측정해 n=276으로 채택된 결론이라(`docs/kr_jongga_betting_backtest.md`
+"후속 — 사전 등록 재설계" 절), 규칙9 기준을 이미 충족한다.
+
+이 목록은 "위 4개 결론이 틀렸다"는 뜻이 아니라 **"90개+ 표본으로 아직
+확인 안 됐다"**는 뜻이다 — depth_atr/게이트E는 특히 원채택 자체가
+KR/US 혼합 수치였고 이후 분해에서 양쪽 다 비유의로 나온 전례가 있어
+우선순위가 높다.

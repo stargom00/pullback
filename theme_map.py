@@ -21,7 +21,14 @@ MODEL = "claude-sonnet-4-6"   # money_flow_report.py와 동일 — 이미 이 �
 MAX_TOKENS = 6000            # v5.124: 상한 8→25 확대에 맞춰 여유 있게 상향(entry당 reason 포함 25개 fit)
 WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_uses": 5}
 STALE_DAYS = 30                 # 30일 경과 시 재생성 대상
-DAILY_GENERATION_LIMIT = 3      # 비용 가드 — 하루 신규 매핑 생성 상한(사용자 지시 7번)
+# v5.127(사용자 지시): 비용 가드 — 자동/수동 트리거를 독립적으로 카운트
+# (기존 DAILY_GENERATION_LIMIT=3 하나를 공유하던 구조는 자동 트리거가
+# 그날의 한도를 먼저 써버리면 수동 생성이 막히는 문제가 있었음). 각
+# entry에 "trigger": "auto"|"manual"을 남겨 오늘 날짜 카운트를 트리거별로
+# 분리 — CLAUDE.md 신규 원칙("외부 유료 API 호출 엔드포인트는 쿨다운·
+# 진행중 잠금·일일 한도를 함께 구현") 적용 사례.
+AUTO_DAILY_LIMIT = 6            # money_flow 강세테마 감지 자동 생성 상한
+MANUAL_DAILY_LIMIT = 4          # POST 직접 호출(수동 생성) 상한
 
 # v5.124 [설계 결정 — 사용자 지시]: 제약·바이오처럼 유니버스 내 후보가
 # 50개+인 광의 테마는 8종목 상한이 breadth%를 너무 거칠게 만듦(8종목 =
@@ -251,27 +258,33 @@ def save_theme_map(theme_name: str, entry: dict):
     _save(data)
 
 
-def _today_generation_count(data: dict) -> int:
+def _today_generation_count(data: dict, trigger: str | None = None) -> int:
+    """trigger=None이면 전체(자동+수동) 합계, "auto"/"manual"이면 그
+    트리거만 — v5.127부터 자동/수동을 독립적으로 카운트(아래 참고)."""
     today = datetime.now(KST).strftime("%Y-%m-%d")
-    return sum(1 for e in data.values() if isinstance(e, dict) and e.get("generated_at") == today)
+    return sum(1 for e in data.values() if isinstance(e, dict) and e.get("generated_at") == today
+               and (trigger is None or e.get("trigger") == trigger))
 
 
-def today_generation_count() -> int:
-    """공개 래퍼 — 호출부(app.py)가 비용 가드 체크용으로 씀(사용자 지시
-    7번, 수동 생성 API도 동일 한도 공유)."""
-    return _today_generation_count(_load())
+def today_generation_count(trigger: str | None = None) -> int:
+    """공개 래퍼 — 호출부(app.py)가 비용 가드 체크용으로 씀. v5.127부터
+    trigger="manual"로 호출(자동 생성 건수는 세지 않음 — AUTO_DAILY_LIMIT/
+    MANUAL_DAILY_LIMIT 참고, 자동 트리거가 그날 한도를 먼저 써버려 수동
+    생성이 막히던 문제 수정)."""
+    return _today_generation_count(_load(), trigger)
 
 
 def maybe_auto_generate(candidate_themes: list[str], kr_universe: dict) -> list[str]:
     """money_flow 일일 잡에서 호출(사용자 지시 4번) — 매핑이 없거나 30일
-    경과한 테마 중, 하루 신규 생성 한도(DAILY_GENERATION_LIMIT) 안에서만
-    실제로 생성한다. 반환: 이번 호출에서 실제로 생성된 테마명 리스트."""
+    경과한 테마 중, 자동 생성 일일 한도(AUTO_DAILY_LIMIT, 수동과 별도
+    카운트) 안에서만 실제로 생성한다. 반환: 이번 호출에서 실제로 생성된
+    테마명 리스트."""
     data = _load()
-    count = _today_generation_count(data)
+    count = _today_generation_count(data, trigger="auto")
     generated = []
     for theme in candidate_themes:
-        if count >= DAILY_GENERATION_LIMIT:
-            print(f"[theme_map] 일일 생성 한도({DAILY_GENERATION_LIMIT}건) 도달 — 나머지 스킵")
+        if count >= AUTO_DAILY_LIMIT:
+            print(f"[theme_map] 자동 생성 일일 한도({AUTO_DAILY_LIMIT}건) 도달 — 나머지 스킵")
             break
         existing = data.get(theme)
         if existing and not is_stale(existing):
@@ -280,6 +293,7 @@ def maybe_auto_generate(candidate_themes: list[str], kr_universe: dict) -> list[
         if entry.get("error"):
             print(f"[theme_map] {theme} 자동 생성 실패: {entry['error']}")
             continue
+        entry["trigger"] = "auto"
         data[theme] = entry
         count += 1
         generated.append(theme)
