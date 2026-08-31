@@ -115,29 +115,85 @@ def compute_theme_series(stocks: list[dict], data: dict, market_turnover: pd.Ser
     return {"tickers": list(closes.keys()), "closes": closes, "rows": rows}
 
 
-# ── 2) D0(점화일) 판정 — "점유율 z>=2 & rank1 +5%↑" 첫 날 ────────────
-def find_d0(theme_data: dict) -> dict | None:
+# ── 2) D0(점화일) 판정 — "점유율 z>=2 & rank1 +5%↑" 단일일 판정 ────────
+def _ignition_at(theme_data: dict, i: int) -> dict | None:
+    """i번째 날이 점화 조건을 충족하는지 단일 판정(find_d0/find_cycles 공용).
+    baseline은 항상 i일 기준 직전 BASELINE_WINDOW 창(과거 데이터만 사용,
+    사이클 경계와 무관하게 계산 — 진행 중이던 이전 사이클의 하락 구간이
+    baseline에 섞여도 z가 오히려 보수적으로 나오므로 문제 아님)."""
     rows = theme_data["rows"]
-    shares = [r["turnover_share_pct"] for r in rows]
-    for i, r in enumerate(rows):
-        if i < BASELINE_WINDOW or not r["ranked"]:
-            continue
-        baseline = [shares[j] for j in range(i - BASELINE_WINDOW, i) if shares[j] is not None]
-        if len(baseline) < 5 or r["turnover_share_pct"] is None:
-            continue
-        mean = sum(baseline) / len(baseline)
-        std = math.sqrt(sum((x - mean) ** 2 for x in baseline) / len(baseline))
-        if std <= 0:
-            continue
-        z = (r["turnover_share_pct"] - mean) / std
-        if z < D0_Z_THRESHOLD:
-            continue
-        leader_ticker, leader_info = r["ranked"][0]
-        if leader_info["ret_pct"] is not None and leader_info["ret_pct"] >= D0_LEADER_RET_PCT:
-            return {"index": i, "date": r["date"], "z": round(z, 2), "leader": leader_ticker,
-                    "leader_ret_pct": leader_info["ret_pct"], "turnover_share_pct": r["turnover_share_pct"],
-                    "baseline_mean": round(mean, 3), "baseline_std": round(std, 3)}
+    if i < BASELINE_WINDOW:
+        return None
+    r = rows[i]
+    if not r["ranked"] or r["turnover_share_pct"] is None:
+        return None
+    shares = [rr["turnover_share_pct"] for rr in rows]
+    baseline = [shares[j] for j in range(i - BASELINE_WINDOW, i) if shares[j] is not None]
+    if len(baseline) < 5:
+        return None
+    mean = sum(baseline) / len(baseline)
+    std = math.sqrt(sum((x - mean) ** 2 for x in baseline) / len(baseline))
+    if std <= 0:
+        return None
+    z = (r["turnover_share_pct"] - mean) / std
+    if z < D0_Z_THRESHOLD:
+        return None
+    leader_ticker, leader_info = r["ranked"][0]
+    if leader_info["ret_pct"] is None or leader_info["ret_pct"] < D0_LEADER_RET_PCT:
+        return None
+    return {"index": i, "date": r["date"], "z": round(z, 2), "leader": leader_ticker,
+            "leader_ret_pct": leader_info["ret_pct"], "turnover_share_pct": r["turnover_share_pct"],
+            "baseline_mean": round(mean, 3), "baseline_std": round(std, 3)}
+
+
+def find_d0(theme_data: dict) -> dict | None:
+    """하위호환용: 창 전체에서 첫 D0 하나만(단일 사이클 가정). 여러 사이클을
+    구분하려면 find_cycles() 사용."""
+    for i in range(len(theme_data["rows"])):
+        d0 = _ignition_at(theme_data, i)
+        if d0:
+            return d0
     return None
+
+
+def find_cycles(theme_data: dict) -> list[dict]:
+    """사이클 단위 D0 탐지(v5.122, 사용자 지시) — 이탈(exit) 판정 이후 새
+    점화 조건 충족 시 새 D0로 리셋. 이탈 이전에는 새 점화가 있어도 무시
+    (같은 사이클이 계속 진행 중인 것으로 취급 — "이탈 후에만 리셋"이라는
+    지시 그대로). 서열 그룹(rank1~4+)도 사이클별 자기 D0 기준으로 재확정.
+
+    반환: 시간순 사이클 리스트. 각 사이클 dict:
+      {d0, groups, lag, closed(bool), exit_index, exit_date,
+       phases: [{index,date,phase,evidence}, ...]}  (phases는 D0일부터
+      사이클 종료일 또는 창 끝까지 매일의 classify_phase 결과)
+    창 끝까지 이탈이 안 뜨면 마지막 사이클은 closed=False(진행 중)로 반환."""
+    rows = theme_data["rows"]
+    cycles: list[dict] = []
+    active: dict | None = None
+    i = 0
+    while i < len(rows):
+        if active is None:
+            d0 = _ignition_at(theme_data, i)
+            if d0 is None:
+                i += 1
+                continue
+            groups = assign_rank_groups(theme_data, d0)
+            active = {"d0": d0, "groups": groups, "phases": [],
+                      "closed": False, "exit_index": None, "exit_date": None}
+        cls = classify_phase(theme_data, active["d0"], active["groups"], as_of_index=i)
+        active["phases"].append({"index": i, "date": rows[i]["date"], **cls})
+        if cls["phase"] == "이탈":
+            active["closed"] = True
+            active["exit_index"] = i
+            active["exit_date"] = rows[i]["date"]
+            active["lag"] = diffusion_lag(theme_data, active["d0"], active["groups"])
+            cycles.append(active)
+            active = None
+        i += 1
+    if active is not None:
+        active["lag"] = diffusion_lag(theme_data, active["d0"], active["groups"])
+        cycles.append(active)
+    return cycles
 
 
 def assign_rank_groups(theme_data: dict, d0: dict | None) -> dict | None:
@@ -333,14 +389,29 @@ def analyze_theme(theme_name: str, stocks: list[dict], data: dict,
     theme_data = compute_theme_series(stocks, data, market_turnover)
     if theme_data is None:
         return None
-    d0 = find_d0(theme_data)
-    groups = assign_rank_groups(theme_data, d0)
-    lag = diffusion_lag(theme_data, d0, groups)
-    phase = classify_phase(theme_data, d0, groups)
+    # v5.122(사용자 지시): D0를 사이클 단위로 탐지 — 이탈 이후 새 점화 조건
+    # 충족 시 새 D0로 리셋. 상단 d0/rank_groups/diffusion_lag_trading_days/
+    # phase 필드는 하위호환을 위해 "가장 최근 사이클" 기준으로 채운다(사이클이
+    # 하나뿐이면 기존 v5.121과 동일 동작). 전체 사이클 이력은 "cycles"에 별도.
+    cycles = find_cycles(theme_data)
+    last_cycle = cycles[-1] if cycles else None
+    d0 = last_cycle["d0"] if last_cycle else None
+    groups = last_cycle["groups"] if last_cycle else None
+    lag = last_cycle.get("lag") if last_cycle else None
+    latest_idx = len(theme_data["rows"]) - 1
+    phase = classify_phase(theme_data, d0, groups, as_of_index=latest_idx)
     latest = theme_data["rows"][-1]
     ticker_rank_today = {t: i + 1 for i, (t, _) in enumerate(latest["ranked"])}
     ticker_rank_at_d0 = ({t: i + 1 for i, (t, _) in enumerate(theme_data["rows"][d0["index"]]["ranked"])}
                           if d0 else None)
+    cycles_out = [{
+        "d0": {"date": str(c["d0"]["date"].date()), "z": c["d0"]["z"], "leader": c["d0"]["leader"],
+               "leader_ret_pct": c["d0"]["leader_ret_pct"]},
+        "closed": c["closed"],
+        "exit_date": str(c["exit_date"].date()) if c["exit_date"] is not None else None,
+        "rank_groups": c["groups"],
+        "diffusion_lag_trading_days": c.get("lag"),
+    } for c in cycles]
     return {
         "theme": theme_name,
         "d0": ({"date": str(d0["date"].date()), "z": d0["z"], "leader": d0["leader"],
@@ -349,6 +420,7 @@ def analyze_theme(theme_name: str, stocks: list[dict], data: dict,
         "diffusion_lag_trading_days": lag,
         "phase": phase["phase"],
         "phase_evidence": {k: (str(v.date()) if hasattr(v, "date") else v) for k, v in phase["evidence"].items()},
+        "cycles": cycles_out,   # v5.122: 창 내 전체 사이클 이력(시간순, 마지막이 최신)
         "latest": {"date": str(latest["date"].date()), "turnover_share_pct": latest["turnover_share_pct"],
                    "breadth_pct": latest["breadth_pct"], "newhigh_pct": latest["newhigh_pct"],
                    "concentration_top3_pct": latest["concentration_top3_pct"]},
