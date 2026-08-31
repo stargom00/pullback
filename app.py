@@ -5,6 +5,24 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.121 [신규] 돈의흐름 탭에 "테마 라이프사이클 분석" 서브뷰 추가(사용자
+        지시). theme_map.json 종목리스트 기반(money_flow.py의 top100
+        sector_of 집계와 별개 계산)으로 최근 60거래일 재구성: 거래대금
+        점유율·breadth·서열별(rank1~3 vs 4+) 수익률·확산 lag·집중도.
+        점화(z≥2&대장주만↑&집중도높음)/확산(breadth≥50%&2·3등도달&집중도
+        하락)/후기(4+신고가>1~3등&대장주둔화)/이탈(점유율3일연속하락&
+        breadth<40%) 4단계를 명시 임계값으로 판정, 판정마다 근거 수치를
+        항상 동반(라벨만 던지지 않음). 자금이동 매트릭스(테마간 최근
+        20거래일 점유율변화 상관)도 추가. 신규 모듈 theme_lifecycle.py
+        (app.py 미의존, money_flow.py/theme_map.py와 같은 원칙). 신규
+        API: GET /api/theme_lifecycle/{테마}, GET /api/theme_lifecycle_rotation.
+        신규 테마 매핑 "제약·바이오"는 이 샌드박스에 ANTHROPIC_API_KEY가
+        없어 theme_map.generate_theme_map()을 실제로 호출 못 해, 알려진
+        KR 제약·바이오 8종목(JW신약 포함)을 수동 큐레이션해 로컬
+        theme_map.json에 넣고 검증함 — theme_map.json은 .gitignore
+        대상이라 이 커밋에 포함되지 않음. 배포 후 POST /api/theme_map/
+        제약·바이오로 실제 Claude 생성분으로 교체 필요(수동 큐레이션은
+        source:"manual"로 구분됨, 검증 참고 fallback).
 v5.120 [문서/주석] 역방향 감사(2026-08-31)에서 찾은 stale 경고 2건 정리:
         CLAUDE.md의 rs_rank=80 고정근사치 설명을 "콜드캐시일 때만 폴백,
         웜이면 실제 rs_ranks 사용(v5.61)"으로 갱신, GUIDE.md 저모멘텀
@@ -3407,6 +3425,7 @@ import earnings as earnings_mod
 import money_flow
 import money_flow_report
 import theme_map
+import theme_lifecycle
 import macro_calendar
 
 app = FastAPI(title="눌림목 스캐너")
@@ -3581,7 +3600,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.120"
+VERSION = "v5.121"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7697,6 +7716,60 @@ async def theme_map_generate(theme_name: str):
         return JSONResponse({"error": entry["error"]}, status_code=502)
     theme_map.save_theme_map(theme_name, entry)
     return JSONResponse(_clean_nan({"theme": theme_name, **entry}))
+
+
+@app.get("/api/theme_lifecycle/{theme_name}")
+async def theme_lifecycle_get(theme_name: str):
+    """테마 라이프사이클 분석 (v5.121, 사용자 지시) — theme_map.json 종목
+    리스트 기반 최근 60거래일 재구성(거래대금 점유율·breadth·서열별 수익률·
+    확산 lag·집중도) + 명시적 임계값 4단계(점화/확산/후기/이탈) 판정,
+    판정 근거 수치 동반(theme_lifecycle.py 참고). money_flow.py의 top100
+    한정 sector_of 기반 테마 집계와는 별개 계산(서로 다른 테마 개념)."""
+    entry = theme_map.get(theme_name)
+    if entry is None or not entry.get("stocks"):
+        return JSONResponse(
+            {"error": f"'{theme_name}' 매핑 없음 — POST /api/theme_map/{theme_name}으로 생성"},
+            status_code=404)
+    bundle = await _fetch_market_data("kr")
+    if not bundle:
+        return JSONResponse({"error": "KR 시장 데이터 로드 중 — 잠시 후 재시도"}, status_code=503)
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        _executor, theme_lifecycle.analyze_theme, theme_name, entry["stocks"], bundle["data"])
+    if result is None:
+        return JSONResponse({"error": "구성종목 데이터 부족(2개 미만 확보) — 표본부족",
+                              "theme": theme_name}, status_code=200)
+    result.pop("_theme_data", None)
+    return JSONResponse(_clean_nan(result))
+
+
+@app.get("/api/theme_lifecycle_rotation")
+async def theme_lifecycle_rotation():
+    """전체 theme_map.json 테마 간 자금 이동 매트릭스 — 최근 20거래일
+    일별 거래대금 점유율 변화(delta) 상관계수. "테마A 하락일=테마B 상승일"
+    같은 로테이션 서사를 숫자로(theme_lifecycle.rotation_matrix())."""
+    names = list(theme_map.list_all().keys())
+    if not names:
+        return JSONResponse({"error": "저장된 테마 매핑이 없습니다"}, status_code=404)
+    bundle = await _fetch_market_data("kr")
+    if not bundle:
+        return JSONResponse({"error": "KR 시장 데이터 로드 중 — 잠시 후 재시도"}, status_code=503)
+    loop = asyncio.get_event_loop()
+
+    def _compute():
+        market_turnover = theme_lifecycle.market_daily_turnover(bundle["data"])
+        series_map = {}
+        for name in names:
+            e = theme_map.get(name)
+            if not e or not e.get("stocks"):
+                continue
+            td = theme_lifecycle.compute_theme_series(e["stocks"], bundle["data"], market_turnover)
+            if td is not None:
+                series_map[name] = td
+        return theme_lifecycle.rotation_matrix(series_map)
+
+    matrix = await loop.run_in_executor(_executor, _compute)
+    return JSONResponse(_clean_nan({"themes": list(matrix.keys()), "matrix": matrix}))
 
 
 @app.get("/api/vol/{ticker}")

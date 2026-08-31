@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.120</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.121</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -692,6 +692,18 @@ tr.editing{background:rgba(242,179,61,.06)}
     <button id="moneyflowRunBtn" onclick="runMoneyflowNow()">🔄 재실행</button>
   </div>
   <div id="moneyflowDoc">불러오는 중…</div>
+
+  <!-- v5.121: 테마 라이프사이클 분석 서브뷰(사용자 지시) — theme_map.json
+       종목리스트 기반, money_flow의 top100 sector_of 집계와 별개 계산.
+       서사가 아니라 수치 기반 4단계 판정 + 근거 수치 동반이 목적. -->
+  <div class="mf-theme-lifecycle">
+    <h3 style="margin:22px 0 8px;border-top:1px solid var(--line,#30363d);padding-top:18px">🧬 테마 라이프사이클 분석</h3>
+    <div class="mf-toolbar">
+      <select id="tlThemeSel" onchange="loadThemeLifecycle(this.value)"><option value="">테마 선택…</option></select>
+      <button id="tlRotationBtn" onclick="loadRotationMatrix()">🔀 자금이동 매트릭스(최근 20일)</button>
+    </div>
+    <div id="tlDoc" class="mf-note">테마를 선택하면 최근 60거래일 재구성·단계 판정을 표시합니다.</div>
+  </div>
 </div>
 
 <!-- v5.103: 💼 포지션 보드 — 토스 잔고(로컬 sync_toss.py가 동기화) × 스캐너
@@ -2968,6 +2980,122 @@ function onEnterMoneyflowTab() {
     updateModeRecommendations();
   }
   loadMoneyflowDate(null);
+  populateThemeLifecycleSelect();
+}
+
+// v5.121: 테마 라이프사이클 분석 — theme_map.json 종목리스트 기반, money_flow
+// 탭 위쪽(top100 sector_of 집계)과는 별개 계산. 서사 대신 수치 기반 판정.
+let tlThemeNames = [];
+async function populateThemeLifecycleSelect() {
+  const sel = document.getElementById('tlThemeSel');
+  if (!sel || tlThemeNames.length) return;   // 이미 채웠으면 재요청 안 함(탭 재진입 시)
+  try {
+    const res = await fetch('/api/theme_map');
+    const d = await res.json();
+    tlThemeNames = Object.keys(d || {});
+    sel.innerHTML = '<option value="">테마 선택…</option>' +
+      tlThemeNames.map(n => `<option value="${n}">${n}${d[n].stale ? ' (오래됨)' : ''}</option>`).join('');
+  } catch (e) { /* 조용히 무시 — 사용자가 드롭다운을 열기 전엔 표시할 곳도 없음 */ }
+}
+function mfSparkSVG(vals, color) {
+  const W = 280, H = 46, PAD = 3;
+  const nums = vals.filter(v => v != null);
+  if (nums.length < 2) return '<span class="mf-note">데이터 부족</span>';
+  const min = Math.min(...nums), max = Math.max(...nums);
+  const x = i => PAD + i * (W - 2 * PAD) / (vals.length - 1);
+  const y = v => H - PAD - (v - min) / (max - min || 1) * (H - 2 * PAD);
+  let d = '';
+  vals.forEach((v, i) => { if (v != null) d += (d === '' ? 'M' : 'L') + x(i).toFixed(1) + ',' + y(v).toFixed(1) + ' '; });
+  const lastIdx = vals.map((v, i) => v != null ? i : -1).filter(i => i >= 0).pop();
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" preserveAspectRatio="none" style="display:block">
+    <path d="${d}" fill="none" stroke="${color}" stroke-width="1.5"/>
+    <circle cx="${x(lastIdx).toFixed(1)}" cy="${y(vals[lastIdx]).toFixed(1)}" r="2.5" fill="${color}"/>
+  </svg>`;
+}
+const PHASE_LABEL = {'점화':'🔥 점화','확산':'📈 확산','후기':'🌙 후기','이탈':'📉 이탈','미분류':'⚪ 미분류'};
+function tlFmtPct(v) { return v == null ? '-' : v.toFixed(1) + '%'; }
+async function loadThemeLifecycle(theme) {
+  const doc = document.getElementById('tlDoc');
+  if (!theme) { doc.innerHTML = '테마를 선택하면 최근 60거래일 재구성·단계 판정을 표시합니다.'; return; }
+  doc.innerHTML = '불러오는 중… (최초 계산은 수 초 걸릴 수 있습니다)';
+  try {
+    const [lcRes, mapRes] = await Promise.all([
+      fetch(`/api/theme_lifecycle/${encodeURIComponent(theme)}`),
+      fetch(`/api/theme_map/${encodeURIComponent(theme)}`),
+    ]);
+    const d = await lcRes.json();
+    const mapD = await mapRes.json();
+    if (d.error) { doc.innerHTML = `<p class="mf-err">⚠️ ${d.error}</p>`; return; }
+    const nameOf = t => (mapD.stocks || []).find(s => s.ticker === t)?.name || t;
+    const ev = d.phase_evidence || {};
+    const series = d.series || [];
+    const spark = (key, color) => mfSparkSVG(series.map(r => r[key]), color);
+
+    let html = `<div class="mf-tl-phase" style="font-size:16px;margin:8px 0">${PHASE_LABEL[d.phase] || d.phase}
+      <span class="mf-note">(${ev.date || ''} 기준)</span></div>`;
+
+    html += `<h3>판정 근거 수치</h3><table><tr><th>지표</th><th>값</th></tr>
+      <tr><td>거래대금 점유율</td><td>${tlFmtPct(ev.turnover_share_pct)} (z=${ev.turnover_share_z ?? '-'})</td></tr>
+      <tr><td>breadth(상승비율)</td><td>${tlFmtPct(ev.breadth_pct)}</td></tr>
+      <tr><td>20일 신고가 비율</td><td>${tlFmtPct(ev.newhigh_pct)}</td></tr>
+      <tr><td>집중도(top3 비중)</td><td>${tlFmtPct(ev.concentration_top3_pct)} — 5일전 ${tlFmtPct(ev.concentration_5d_ago)}, 창중앙값 ${tlFmtPct(ev.concentration_window_median)}</td></tr>
+      <tr><td>대장주(${nameOf(ev.leader)}) 오늘 상승</td><td>${ev.leader_up_today == null ? '-' : (ev.leader_up_today ? '예' : '아니오')}</td></tr>
+      <tr><td>2·3등주 중 1개+ 오늘 상승</td><td>${ev.any_follower_up_today == null ? '-' : (ev.any_follower_up_today ? '예' : '아니오')}</td></tr>
+      <tr><td>2·3등주 확산목표(+5%) 도달</td><td>${ev.rank2_3_diffusion_target_reached == null ? '-' : (ev.rank2_3_diffusion_target_reached ? '예' : '아니오')}</td></tr>
+      <tr><td>신고가 비율: 1~3등 vs 4등+</td><td>${tlFmtPct(ev.newhigh_pct_rank1_3)} vs ${tlFmtPct(ev.newhigh_pct_rank4plus)}</td></tr>
+      <tr><td>대장주 5일수익률 vs 테마평균</td><td>${ev.leader_5d_ret_pct ?? '-'}% vs ${ev.theme_5d_avg_ret_pct ?? '-'}%</td></tr>
+      <tr><td>점유율 3일 연속 하락</td><td>${ev.turnover_share_declining_3d ? '예' : '아니오'}</td></tr>
+      </table>`;
+
+    if (d.d0) {
+      html += `<h3>점화일(D0)</h3><p>${d.d0.date} — 점유율 z=${d.d0.z}, 대장주 ${nameOf(d.d0.leader)} 당일 ${d.d0.leader_ret_pct}%↑</p>`;
+      const g = d.rank_groups || {};
+      const lag = d.diffusion_lag_trading_days || {};
+      html += `<h3>서열별 확산 lag(D0 대비 +5% 첫 도달까지 거래일)</h3><table><tr><th>서열</th><th>종목</th><th>lag</th></tr>
+        <tr><td>rank1(대장)</td><td>${nameOf(g.rank1)}</td><td>-</td></tr>
+        <tr><td>rank2</td><td>${nameOf(g.rank2)}</td><td>${lag.rank2 == null ? '미도달' : lag.rank2 + '거래일'}</td></tr>
+        <tr><td>rank3</td><td>${nameOf(g.rank3)}</td><td>${lag.rank3 == null ? '미도달' : lag.rank3 + '거래일'}</td></tr>
+        <tr><td>rank4+ 최초</td><td>${(g.rank4plus||[]).map(nameOf).join(', ')}</td><td>${lag.rank4plus_first == null ? '미도달' : lag.rank4plus_first + '거래일'}</td></tr>
+        </table>`;
+    } else {
+      html += `<p class="mf-note">최근 60거래일 내 점화일(D0) 없음 — 점유율 z≥2 & 대장주 +5%↑ 조건을 동시에 만족한 날이 없습니다.</p>`;
+    }
+
+    html += `<h3>최근 60거래일 시계열</h3>
+      <p class="mf-note">거래대금 점유율(초록)</p>${spark('turnover_share_pct', '#3fb950')}
+      <p class="mf-note">breadth(주황)</p>${spark('breadth_pct', '#f2b33d')}
+      <p class="mf-note">집중도 top3(파랑)</p>${spark('concentration_top3_pct', '#4D8DFF')}
+      <p class="mf-note">오늘 서열: ${(mapD.stocks || []).map(s => `${s.name}(${d.ticker_rank_today?.[s.ticker] ?? '-'}위)`).join(' · ')}</p>`;
+
+    doc.innerHTML = html;
+  } catch (e) {
+    doc.innerHTML = '<p class="mf-err">불러오기 실패</p>';
+  }
+}
+async function loadRotationMatrix() {
+  const doc = document.getElementById('tlDoc');
+  doc.innerHTML = '자금이동 매트릭스 계산 중…';
+  try {
+    const res = await fetch('/api/theme_lifecycle_rotation');
+    const d = await res.json();
+    if (d.error) { doc.innerHTML = `<p class="mf-err">⚠️ ${d.error}</p>`; return; }
+    const names = d.themes || [];
+    const pairs = [];
+    names.forEach((a, i) => names.forEach((b, j) => {
+      if (i < j && d.matrix[a][b] != null) pairs.push([a, b, d.matrix[a][b]]);
+    }));
+    pairs.sort((x, y) => x[2] - y[2]);
+    const negRows = pairs.slice(0, 5).map(([a, b, c]) => `<tr><td>${a} ↔ ${b}</td><td>${c}</td></tr>`).join('');
+    const posRows = pairs.slice(-5).reverse().map(([a, b, c]) => `<tr><td>${a} ↔ ${b}</td><td>${c}</td></tr>`).join('');
+    const head = `<tr><th colspan="2">전체 테마 × 테마 점유율 변화 상관 (최근 20거래일)</th></tr>`;
+    doc.innerHTML = `<h3>가장 강한 로테이션(음의 상관) — "A 하락일=B 상승일"</h3>
+      <table>${head}${negRows || '<tr><td colspan="2">데이터 부족</td></tr>'}</table>
+      <h3>가장 강한 동행(양의 상관)</h3>
+      <table><tr><th colspan="2">테마 페어</th></tr>${posRows || '<tr><td colspan="2">데이터 부족</td></tr>'}</table>
+      <p class="mf-note">전체 매트릭스는 /api/theme_lifecycle_rotation 응답 참고(${names.length}개 테마).</p>`;
+  } catch (e) {
+    doc.innerHTML = '<p class="mf-err">불러오기 실패</p>';
+  }
 }
 // 오늘 자 새 리포트가 있는데 아직 안 열었으면 탭에 점 표시(KR/US 둘 중 하나라도) —
 // localStorage 기준으로만 가볍게 판단, 별도 폴링 없음(페이지 로드 시 1회).
