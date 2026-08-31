@@ -5,6 +5,24 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.131 [기능개선] 대장관찰 탭 '🔁 재점화 대기' 섹션 UI/UX 개선 3건(사용자
+        지시). ① 노이즈가드(MAX_ACTIVE_WATCHES=20, RS 상위만 확인진입
+        체크) 제거 — check_confirm() 실측 원가 ~4ms/종목이라 캡의 근거였던
+        "계산비용"이 무근거로 판명(theme_map 현재 커버리지 47종목 기준
+        전체 체크 <1초). 이제 창 안의 모든 후보를 매일 확인진입 체크 —
+        RS 캡 밖이라 조용히 빠지던 문제(예: 두산에너빌리티) 원천 해결.
+        ② 같은 종목이 여러 D0 사이클로 중복 표시되던 문제 — 티커별로
+        묶어 최신 D0를 기본 표시, 이전 D0는 "이전 D0 N건 보기" 접이식
+        토글로. ③ 실행 정보 추가 — `theme_reignition.check_confirm()`에
+        current_price/distance_pct/atr_stop(pivot-ATR×1.5, 표시 전용
+        참고손절 — 포워드 트래킹용 20일저가 stop과는 별개 개념)/
+        risk_pct/target_2r 필드 신설, `_refresh_reignition_watch()`가
+        매일 EOD에 `rec["exec"]`로 저장. UI: 종목명 트레이딩뷰 링크
+        (tvUrl 재사용)·⚡감시 버튼(_quickWatchRequest 재사용, 피벗을
+        기본 지정가로)·정렬 토글(창잔여일/RS순/응축여부)·만료임박(≤7일)
+        흐림 표시·섹션 상단 진입규칙 한 줄 명시. 렌더링 결과는 node로
+        추출 실행해 3개 정렬 모드+dedup 펼치기 HTML 구조 확인(브라우저
+        확장 미연결로 실제 브라우저 렌더링은 미검증).
 v5.130 [기능개선] 종가베팅 14:40~15:00 스냅샷 창을 놓쳤을 때(배포 타이밍
         등, 2026-08-31 실사고 원인) "그날 영구 누락"되던 구조 개선 —
         `_warm_market()`의 KR 장마감 확정 분기에 EOD 폴백 추가: 오늘
@@ -3809,7 +3827,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.130"
+VERSION = "v5.131"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -4843,9 +4861,13 @@ def _save_reignition_watch(data: dict):
 
 
 def _reignition_compute_candidates(bundle: dict) -> list:
-    """theme_map 전 테마 순회 + RS 상위 노이즈가드 캡까지 포함한 오늘자
-    후보 목록. 테마별 compute_theme_series+find_cycles라 무거운 편 —
-    executor에서 호출할 것(_refresh_reignition_watch가 그렇게 함)."""
+    """theme_map 전 테마 순회한 오늘자 후보 목록. 테마별
+    compute_theme_series+find_cycles라 무거운 편 — executor에서 호출할
+    것(_refresh_reignition_watch가 그렇게 함).
+
+    v5.130: RS 상위 캡(노이즈가드) 제거 — check_confirm() 실측 원가
+    ~4ms/종목이라 전체 후보를 다 체크해도 무시할 수준(theme_map 현재
+    커버리지 기준 총 <1초). RS 정렬 자체는 표시 순서 참고용으로 유지."""
     entries = {name: theme_map.get(name) for name in theme_map.list_all().keys()}
     entries = {name: e for name, e in entries.items() if e and e.get("stocks")}
     if not entries:
@@ -4854,12 +4876,8 @@ def _reignition_compute_candidates(bundle: dict) -> list:
     candidates = theme_reignition.find_watch_candidates(entries, bundle["data"], market_turnover)
     rs_ranks = bundle.get("rs_ranks", {})
     candidates.sort(key=lambda c: -(rs_ranks.get(c["ticker"]) or 0))
-    for i, c in enumerate(candidates):
-        # 노이즈 가드(사용자 지시: 20개+ 동시 창내 리더 시 RS 상위 우선) —
-        # 상위 MAX_ACTIVE_WATCHES만 확인진입 체크·봇알림 대상. 나머지도
-        # 계속 표시는 되지만(창 안에 있다는 사실 자체는 유효 정보) 확인
-        # 체크에서는 제외해 봇 알림 폭주를 막는다.
-        c["alert_suppressed"] = i >= theme_reignition.MAX_ACTIVE_WATCHES
+    for c in candidates:
+        c["rs_rank"] = rs_ranks.get(c["ticker"])
     return candidates
 
 
@@ -4884,9 +4902,9 @@ async def _refresh_reignition_watch(bundle: dict):
             store[key] = rec
         rec["days_since_d0"] = c["days_since_d0"]
         rec["window_days_left"] = c["window_days_left"]
-        rec["alert_suppressed"] = c["alert_suppressed"]
+        rec["rs_rank"] = c.get("rs_rank")
         rec["last_checked"] = today
-        if rec["status"] == "watching" and not c["alert_suppressed"]:
+        if rec["status"] == "watching":   # v5.130: 노이즈가드 캡 제거 — 전 후보 매일 체크
             df = data.get(c["ticker"])
             if df is not None and len(df):
                 try:
@@ -4896,6 +4914,13 @@ async def _refresh_reignition_watch(bundle: dict):
                     print(f"[reignition] {c['ticker']} 확인진입 체크 실패: {e}")
                 if res:
                     rec["compression"] = res["compression"]
+                    # v5.130: 실행 정보(피벗/현재가/거리%/참고손절/리스크%/2R목표) —
+                    # UI 카드 표시용, 매일 갱신(장중 라이브 아님, EOD 확정치).
+                    rec["exec"] = {
+                        "pivot": res["pivot"], "current_price": res["current_price"],
+                        "distance_pct": res["distance_pct"], "atr_stop": res["atr_stop"],
+                        "risk_pct": res["risk_pct"], "target_2r": res["target_2r"],
+                    }
                     if res["confirmed"]:
                         rec["status"] = "confirmed"
                         rec["confirm"] = {"date": today, "pivot": res["pivot"], "stop": res["stop"]}
@@ -8314,18 +8339,32 @@ async def theme_lifecycle_rotation():
 
 def _reignition_watchlist_view() -> list:
     """대장관찰 탭 '🔁 재점화 대기' 섹션 + 봇 조회 공용 뷰. status=watching/
-    confirmed만 노출(expired는 UI에서 볼 필요 없는 소멸 이력). confirmed를
-    앞으로, 그다음 window_days_left 오름차순(창 만료 임박 = 급함)."""
+    confirmed만 노출(expired는 UI에서 볼 필요 없는 소멸 이력).
+
+    v5.130: 같은 종목이 여러 D0 사이클로 중복 표시되던 문제 — 티커별로
+    묶어 최신 D0를 primary, 나머지를 older(펼치기용)로 반환. 그룹 정렬은
+    기존과 동일(confirmed 우선 → window_days_left 오름차순, primary
+    기준)."""
     store = _load_reignition_watch()
     items = [{"theme": r["theme"], "ticker": r["ticker"], "name": r["name"],
               "d0_date": r["d0_date"], "days_since_d0": r.get("days_since_d0"),
               "window_days_left": r.get("window_days_left"), "status": r["status"],
-              "alert_suppressed": r.get("alert_suppressed", False),
+              "rs_rank": r.get("rs_rank"),
               "compression": r.get("compression"), "confirm": r.get("confirm"),
-              "forward": r.get("forward")}
+              "forward": r.get("forward"), "exec": r.get("exec")}
              for r in store.values() if r.get("status") in ("watching", "confirmed")]
-    items.sort(key=lambda x: (x["status"] != "confirmed", x.get("window_days_left") if x.get("window_days_left") is not None else 999))
-    return items
+
+    by_ticker: dict[str, list] = {}
+    for it in items:
+        by_ticker.setdefault(it["ticker"], []).append(it)
+    groups = []
+    for ticker, cycles in by_ticker.items():
+        cycles.sort(key=lambda x: x["d0_date"], reverse=True)
+        primary, older = cycles[0], cycles[1:]
+        groups.append({**primary, "ticker": ticker, "older_cycles": older})
+    groups.sort(key=lambda x: (x["status"] != "confirmed",
+                               x.get("window_days_left") if x.get("window_days_left") is not None else 999))
+    return groups
 
 
 @app.get("/api/reignition/watchlist")
@@ -8336,9 +8375,10 @@ async def reignition_watchlist():
     하지 않음 — 대장관찰 탭 로드를 무겁게 만들지 않기 위함, 캘린더 탭과
     같은 원칙)."""
     items = _reignition_watchlist_view()
+    n_cycles = len(items) + sum(len(i["older_cycles"]) for i in items)
     return JSONResponse(_clean_nan({
-        "items": items, "count": len(items),
-        "n_suppressed": sum(1 for i in items if i["alert_suppressed"]),
+        "items": items, "count": len(items), "n_cycles": n_cycles,
+        "entry_rule": "대기 중엔 관망 · 20일 고가 돌파 + 거래량 1.5배 확인 시 진입 (검증 EV +0.755R) · 손절 ATR×1.5",
         "window_start_days": theme_reignition.WATCH_WINDOW_START,
         "window_end_days": theme_reignition.WATCH_WINDOW_END,
     }))

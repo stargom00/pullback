@@ -19,6 +19,14 @@ app.py에 의존하지 않고 시장 데이터를 인자로 받아 계산만 한
 기반"). 응축(ATR/거래량 수축) 여부는 배지로만 병기하고 게이트로 쓰지
 않는다 — 백테스트에서 재점화 전 응축 선행이 43.7%(과반 미달)였으므로
 필수 조건으로 걸면 실제 재점화의 과반을 놓친다(docs/kr_theme_leader_reignition.md).
+
+[v5.130] 노이즈가드(MAX_ACTIVE_WATCHES=20, RS 상위만 확인진입 체크) 제거.
+check_confirm() 실측 원가 ~4ms/종목 — theme_map 커버리지가 수백 종목으로
+늘어도 전체 체크 비용이 초 단위 미만이라 캡을 둘 이유가 없었다(원래
+캡의 근거였던 "계산비용"이 측정 결과 무근거로 판명). 사용자가 지적한
+실제 문제(사용 예: 두산에너빌리티가 RS 캡 밖이라 확인진입 체크에서
+조용히 빠짐)를 캡을 없애 원천 해결 — 이제 창 안의 모든 후보를 매일
+확인진입 체크한다.
 """
 from __future__ import annotations
 
@@ -38,7 +46,10 @@ PIVOT_LOOKBACK = 20           # 피벗 = 최근 20거래일 고가(당일 제외
 CONFIRM_VOL_MULT = 1.5
 CONFIRM_VOL_AVG_WINDOW = 50   # 트레일링 거래량 평균 창(당일 제외)
 COMPRESSION_LOOKBACK = 20     # 참고 배지 전용(게이트 아님)
-MAX_ACTIVE_WATCHES = 20       # 노이즈 가드 — 동시 창내 리더 초과 시 RS 상위만 확인진입 체크 대상
+EXEC_ATR_STOP_MULT = 1.5      # 실행정보 표시용 참고 손절(진입가-ATR×1.5) — CLAUDE.md
+                              # ATR 상대 손절폭 관례의 배수 재사용. 포워드 트래킹
+                              # 확인진입 stop(20일 저가, 백테스트와 동일 정의)과는
+                              # 별개 — 이건 순수 카드 표시용 참고치.
 FORWARD_MAX_BARS = 60         # 확인진입 후 포워드 추적 최대 봉수(백테스트 confirm_entry_race와 동일)
 
 
@@ -103,16 +114,34 @@ def compression_ref(df) -> dict | None:
 def check_confirm(df) -> dict | None:
     """오늘 봉이 표준 돌파(최근 20거래일 고가 상향 돌파 + 거래량 1.5배)
     조건을 충족하는지. df: 종목 OHLCV(마지막 행이 오늘). 반환 None =
-    판정에 필요한 봉 수 부족."""
+    판정에 필요한 봉 수 부족.
+
+    v5.130: 실행 정보(카드 표시용) 필드 추가 — current_price/distance_pct/
+    atr_stop/risk_pct/target_2r. `stop`(20일 저가, 포워드 트래킹용 확인진입
+    손절 — 백테스트와 동일 정의, 절대 변경 금지)과 `atr_stop`(표시 전용
+    참고 손절 = pivot - ATR×1.5)은 서로 다른 개념이니 혼동 주의."""
     n = len(df)
     if n < PIVOT_LOOKBACK + CONFIRM_VOL_AVG_WINDOW + 1:
         return None
-    high, low, vol = df["High"], df["Low"], df["Volume"]
+    high, low, close, vol = df["High"], df["Low"], df["Close"], df["Volume"]
     pivot = float(high.iloc[-(PIVOT_LOOKBACK + 1):-1].max())
     stop = float(low.iloc[-(PIVOT_LOOKBACK + 1):-1].min())
     avg_vol = scanner.nonzero_vol_mean(vol.iloc[-(CONFIRM_VOL_AVG_WINDOW + 1):-1])  # 거래정지일 제외 v5.129
     today_high = float(high.iloc[-1])
     today_vol = float(vol.iloc[-1])
     confirmed = today_high >= pivot and avg_vol > 0 and today_vol >= CONFIRM_VOL_MULT * avg_vol
+
+    current_price = float(close.iloc[-1])
+    atr14 = scanner.atr(high, low, close, 14)
+    atr_stop = pivot - atr14 * EXEC_ATR_STOP_MULT
+    risk_pct = (pivot - atr_stop) / pivot * 100 if pivot > 0 else None
+    target_2r = pivot + 2 * (pivot - atr_stop) if atr_stop < pivot else None
+    distance_pct = (pivot - current_price) / current_price * 100 if current_price > 0 else None
+
     return {"pivot": pivot, "stop": stop, "confirmed": bool(confirmed),
-            "compression": compression_ref(df)}
+            "compression": compression_ref(df),
+            "current_price": current_price,
+            "distance_pct": round(distance_pct, 2) if distance_pct is not None else None,
+            "atr_stop": round(atr_stop, 2),
+            "risk_pct": round(risk_pct, 2) if risk_pct is not None else None,
+            "target_2r": round(target_2r, 2) if target_2r is not None else None}
