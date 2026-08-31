@@ -5,6 +5,20 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.130 [기능개선] 종가베팅 14:40~15:00 스냅샷 창을 놓쳤을 때(배포 타이밍
+        등, 2026-08-31 실사고 원인) "그날 영구 누락"되던 구조 개선 —
+        `_warm_market()`의 KR 장마감 확정 분기에 EOD 폴백 추가: 오늘
+        `_jongga_snapshot_date`가 아직 안 찍혔으면 확정 종가 데이터로
+        지금 대신 스냅샷을 찍는다(재점화 EOD 갱신과 같은 원칙 — 좁은
+        창 대신 "장마감 후 첫 스케줄러 틱"에 걸리게 함). 스냅샷 출처를
+        `snapshot_source`("intraday"|"eod_fallback")로 구분해 forward
+        기록(`jongga_forward.json`)·`/api/jongga/candidates`·UI 배너에
+        전부 반영. `_jongga_snapshot_view()`의 15:00~15:45 구간 안내문도
+        "아직 폴백 돌 시간 전"과 "폴백도 지났는데 진짜 누락"으로 분리
+        (전자에서 성급하게 "🔄 다시 스캔" 유도하지 않도록). 수동 새로고침
+        (`_force_jongga_snapshot`)도 호출 시점이 장마감 후면 동일하게
+        eod_fallback로 분류. 스모크 테스트(가짜 데이 키로 두 시나리오
+        검증: 창 놓침→폴백 발동/기록, 이미 실행됨→덮어쓰기 안 함) 통과.
 v5.129 [버그수정] 거래정지(0거래량) 구간이 트레일링 거래량평균 분모를
         희석해 재개일 vol_mult가 부풀려지던 문제 수정(사용자 지시,
         036800 유니버스 조사 중 발견). scanner.nonzero_vol_mean() 신설
@@ -3795,7 +3809,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.129"
+VERSION = "v5.130"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -4528,14 +4542,20 @@ def _jongga_snapshot_view() -> dict:
     label = session["label"]
     hm = now.hour * 60 + now.minute
     if is_trading_day("kr", now) and hm >= 15 * 60:
-        # 14:40~15:00 스케줄 창이 이미 지났는데 오늘자 스냅샷이 없음 = 누락
-        label = "오늘 스냅샷이 갱신되지 않았습니다(배포 타이밍 등) — 🔄 다시 스캔으로 지금 실행할 수 있어요"
+        if hm < 15 * 60 + 45:
+            # v5.129: 14:40~15:00 창은 지났지만 아직 EOD 폴백(장마감 15:40
+            # 확정 + 스케줄러 4분 틱)이 돌 시간이 안 됨 — 누락 단정 금지.
+            label = "장중 스냅샷 창(14:40~15:00)이 지났습니다 — 장마감 후(약 15:40~15:45) 자동 폴백 스냅샷을 기다리는 중"
+        else:
+            # 폴백도 돌 만큼 지났는데 여전히 없음 = 진짜 누락(재배포 타이밍 등)
+            label = "오늘 스냅샷이 갱신되지 않았습니다(배포 타이밍 등) — 🔄 다시 스캔으로 지금 실행할 수 있어요"
     return {
         "version": VERSION, "market": "kr", "mode": "jongga",
         "scanned": 0, "fetched": 0, "diag": {}, "hits": [], "warn_count": 0,
         "backtest_note": JONGGA_BACKTEST_NOTE, "sell_rule": JONGGA_SELL_RULE,
         "session_state": session["state"], "session_label": label,
         "is_snapshot": False, "snapshot_date": None, "generated_at": None,
+        "snapshot_source": None,
         "ts": time.time(),
     }
 
@@ -4549,14 +4569,19 @@ async def _force_jongga_snapshot() -> dict:
         return _jongga_snapshot_view()
     result = await _run_scan_jongga(bundle)
     today = datetime.now(KST).strftime("%Y-%m-%d")
+    daykey = _market_session_key("kr")
+    # v5.129: 장마감 확정 후 누른 수동 새로고침은 EOD 폴백과 같은 데이터
+    # 실체(확정 종가)라 source도 동일하게 분류 — 장중에 누르면 실시간.
+    source = "eod_fallback" if daykey else "intraday"
     result["snapshot_date"] = today
-    result["daykey"] = _market_session_key("kr")
+    result["daykey"] = daykey
     result["is_snapshot"] = True
+    result["snapshot_source"] = source
     _cache["kr:jongga"] = result
     global _jongga_snapshot_date
     _jongga_snapshot_date = today   # 스케줄러가 오늘 또 돌지 않게(이미 확보됨)
     try:
-        _record_jongga_snapshot(today, result["hits"])
+        _record_jongga_snapshot(today, result["hits"], source=source)
     except Exception as e2:
         print(f"[jongga-forward] 수동 새로고침 기록 실패: {e2}")
     return result
@@ -5982,6 +6007,26 @@ async def _warm_market(market: str):
                     _resolve_jongga_gaps(bundle["data"])
                 except Exception as e2:
                     print(f"[jongga-forward] EOD 처리 실패: {e2}")
+                # v5.129: 종가베팅 EOD 폴백 — 오늘(daykey) 14:40~15:00 장중
+                # 스냅샷이 안 돌았으면(배포 타이밍 등으로 창을 놓친 경우,
+                # 2026-08-31 실사고와 동일 유형) 장마감 확정 데이터로 지금
+                # 대신 찍는다. 재점화 EOD 갱신과 같은 원칙 — 좁은 창에
+                # 의존하지 않고 "장마감 후 첫 틱"에 자연스럽게 걸리게 한다.
+                global _jongga_snapshot_date
+                if _jongga_snapshot_date != daykey:
+                    try:
+                        fb_result = await _run_scan_jongga(bundle)
+                        fb_result["daykey"] = daykey
+                        fb_result["snapshot_date"] = daykey
+                        fb_result["is_snapshot"] = True
+                        fb_result["snapshot_source"] = "eod_fallback"
+                        _cache["kr:jongga"] = fb_result
+                        _jongga_snapshot_date = daykey
+                        print(f"[jongga] {daykey} EOD 폴백 스냅샷 완료(14:40 창 누락) — "
+                              f"후보 {len(fb_result['hits'])}개")
+                        _record_jongga_snapshot(daykey, fb_result["hits"], source="eod_fallback")
+                    except Exception as e2:
+                        print(f"[jongga] EOD 폴백 스냅샷 실패: {e2}")
                 # v5.125: 전 리더 재점화 워치리스트 — 장마감 확정 시점에
                 # 창 진입/이탈·확인진입·포워드 R을 하루 1회 갱신(장중 실시간
                 # 부분봉으로 돌파/거래량을 판정하면 v5.117류 오염 위험이라
@@ -8078,6 +8123,7 @@ async def jongga_candidates():
     return JSONResponse({
         "ok": True, "date": cached.get("daykey") or cached.get("generated_at"),
         "snapshot_date": cached.get("snapshot_date"),
+        "snapshot_source": cached.get("snapshot_source"),   # v5.129: "intraday" | "eod_fallback"
         "candidates": candidates, "count": len(candidates),
         "trading_day": trading_day,
         "message_format_hint": "🌆 오늘의 종가베팅 후보 {count}개: {name}(+{change_pct}%, 거래대금 {turnover_rank}위), ...",
