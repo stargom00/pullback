@@ -39,9 +39,8 @@ top-down(매크로→섹터) 레이어가 없다. 이 스크립트는 그 레이
 이 항목은 실행 시 자동으로 건너뛰고 사유를 출력한다(가짜 비교를 만들지
 않음). 다른 두 항목(레짐전략/시장전체)은 정상 비교.
 
-근거 문서(작성 예정): docs/kr_us_macro_regime_sector_investigation.md
+근거 문서: docs/macro_regime_sector.md
 """
-import math
 import sys
 import time
 from collections import Counter
@@ -230,39 +229,10 @@ def build_sector_return_panel(price_data: dict, is_kr: bool) -> tuple[pd.DataFra
     return rel_ret, market_ret, {s: sector_counts[s] for s in valid_sectors}, sector_ret
 
 
-# ── 통계 유틸 ────────────────────────────────────────────────────────
-def welch_zscore(sample_a: pd.Series, sample_b: pd.Series):
-    """두 연속표본(하위N/상위N 섹터의 상대수익률 관측치 풀) 평균격차 z통계량.
-    harness.ev_gap_zscore와 같은 목적(README 규칙7)이나 대상이 이산 R
-    3값이 아니라 연속 월간수익률이라 새로 구현 — Welch z(모분산 대신
-    표본분산 사용, 표본이 충분히 크다는 가정)."""
-    a = sample_a.dropna()
-    b = sample_b.dropna()
-    if len(a) < 3 or len(b) < 3:
-        return None, False
-    va, vb = a.var(ddof=1), b.var(ddof=1)
-    se = math.sqrt(va / len(a) + vb / len(b))
-    if se == 0:
-        return None, False
-    z = (b.mean() - a.mean()) / se
-    return z, abs(z) >= 1.96
-
-
-def hypergeom_overlap_pvalue(overlap: int, s_total: int, k: int = TOPN) -> float | None:
-    """무작위로 독립적인 두 top-k 선택이 overlap개 이상 겹칠 확률(단측
-    초과확률, 우연 기준선). 초기하분포: 모집단 S, "성공"집합 크기 k(첫
-    반기 top-k), 두번째 반기에서 k개 뽑을 때 겹침 개수의 분포."""
-    if s_total < k or overlap > k:
-        return None
-
-    def _pmf(x):
-        if x > k or x > s_total - k:
-            return 0.0
-        num = math.comb(k, x) * math.comb(s_total - k, k - x)
-        den = math.comb(s_total, k)
-        return num / den if den else 0.0
-
-    return sum(_pmf(x) for x in range(overlap, k + 1))
+# ── 통계 유틸 (harness.py로 승격됨, README 규칙3 — 2026-09-01 단기반응
+# 측정 스크립트도 동일 로직이 필요해져 하네스로 옮기고 여기선 재사용만) ──
+welch_zscore = harness.welch_zscore
+hypergeom_overlap_pvalue = harness.hypergeom_overlap_pvalue
 
 
 # ── 측정 1: 셀별 상/하위 섹터 + 일관성 ────────────────────────────────

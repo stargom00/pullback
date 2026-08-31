@@ -299,3 +299,42 @@ def ev_gap_zscore(ev_lower: dict, ev_upper: dict):
     gap = ev_upper["ev_R"] - ev_lower["ev_R"]
     z = gap / se
     return z, abs(z) >= 1.96
+
+
+# ── 7) 연속표본 두 그룹 격차 유의성 + 랭킹 겹침 유의성 (규칙7) ──────────
+# 2026-09-01 매크로 레짐/단기반응 섹터 측정에서 처음 필요해져 그 스크립트
+# 로컬에 구현했다가, 두 번째 스크립트(단기반응)에서도 똑같이 필요해져
+# 여기로 승격(README "하네스에 없는 새 로직이 필요하면 하네스를 확장"
+# 원칙). ev_gap_zscore는 -1R/0R/+2R 이산분포 전용이라 연속값(월간/주간
+# 수익률)에는 못 써 별도로 둔다.
+def welch_zscore(sample_a: pd.Series, sample_b: pd.Series):
+    """두 연속표본(예: 하위/상위 섹터의 수익률 관측치 풀) 평균격차
+    z통계량 — Welch z(표본분산 사용, 표본이 충분히 크다는 가정)."""
+    a = sample_a.dropna()
+    b = sample_b.dropna()
+    if len(a) < 3 or len(b) < 3:
+        return None, False
+    va, vb = a.var(ddof=1), b.var(ddof=1)
+    se = (va / len(a) + vb / len(b)) ** 0.5
+    if se == 0:
+        return None, False
+    z = (b.mean() - a.mean()) / se
+    return z, abs(z) >= 1.96
+
+
+def hypergeom_overlap_pvalue(overlap: int, s_total: int, k: int = 3):
+    """무작위로 독립적인 두 top-k 선택이 overlap개 이상 겹칠 확률(단측
+    초과확률, 우연 기준선). 초기하분포: 모집단 s_total, "성공"집합 크기
+    k(첫 반기 top-k), 두번째 반기에서 k개 뽑을 때 겹침 개수의 분포."""
+    import math
+    if s_total < k or overlap > k:
+        return None
+
+    def _pmf(x):
+        if x > k or x > s_total - k:
+            return 0.0
+        num = math.comb(k, x) * math.comb(s_total - k, k - x)
+        den = math.comb(s_total, k)
+        return num / den if den else 0.0
+
+    return sum(_pmf(x) for x in range(overlap, k + 1))
