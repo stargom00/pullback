@@ -131,22 +131,34 @@ def resolve_sector_tickers() -> tuple[list, list]:
     return kr, us
 
 
-def fetch_kr_monthly(tickers: list, days: int = 3650) -> dict:
+def fetch_kr_monthly(tickers: list, days: int = 3650, concurrency: int = 12) -> dict:
     """KR 섹터 종목 월봉 종가 + 최근 평균거래대금(유동성 컷용, 현재시점
-    1회성 — 스크립트 상단 docstring 참고)."""
-    out = {}
-    t0 = time.time()
-    for i, t in enumerate(tickers):
+    1회성 — 스크립트 상단 docstring 참고). harness.fetch_universe_data의
+    ThreadPoolExecutor 패턴 재사용(README 규칙3)."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _one(t):
         df = naver_kr.fetch_history(t, days=days)
         if df is None or df.empty or len(df) < 40:
-            continue
+            return t, None
         close_m = df["Close"].resample("ME").last().dropna()
         if len(close_m) < 24:   # 최소 2년치 없으면 랭킹에 넣기엔 너무 짧음
-            continue
+            return t, None
         recent_turnover = float((df["Close"] * df["Volume"]).tail(60).mean())
-        out[t] = {"close_m": close_m, "turnover": recent_turnover}
-        if (i + 1) % 50 == 0:
-            log(f"[kr] {i+1}/{len(tickers)} elapsed={time.time()-t0:.0f}s")
+        return t, {"close_m": close_m, "turnover": recent_turnover}
+
+    out = {}
+    t0 = time.time()
+    done = 0
+    with ThreadPoolExecutor(max_workers=concurrency) as ex:
+        futs = {ex.submit(_one, t): t for t in tickers}
+        for fut in as_completed(futs):
+            t, res = fut.result()
+            if res is not None:
+                out[t] = res
+            done += 1
+            if done % 50 == 0:
+                log(f"[kr] {done}/{len(tickers)} elapsed={time.time()-t0:.0f}s")
     log(f"[kr] 완료 {len(out)}/{len(tickers)} elapsed={time.time()-t0:.0f}s")
     return out
 
@@ -297,9 +309,19 @@ def measure1_cell_rankings(rel_ret_next: pd.DataFrame, regime: pd.DataFrame, mar
 # ── 측정 2: 시기 반분 재현 ────────────────────────────────────────────
 def measure2_split_half(rel_ret_next: pd.DataFrame, regime: pd.DataFrame, market_label: str):
     log(f"\n{'='*70}\n측정2 — {market_label} 시기 반분 재현(사전 등록 채택 기준: 겹침률 {ADOPT_OVERLAP_THRESHOLD:.0%}+)\n{'='*70}")
-    months_sorted = regime.index.sort_values()
+    # 레짐 시계열(최대 440개월, DXY/TNX/VIX 가용기간)과 종목 수익률 실제
+    # 가용기간이 다르다(KR은 naver_kr 특성상 ~10년 이내) — 전체 레짐
+    # 인덱스를 반으로 쪼개면 시장 데이터가 아예 없는 구간이 통째로 "전반"에
+    # 들어가 모든 셀이 표본부족으로 나오는 버그가 있었다(2026-09-01 최초
+    # 실행에서 KR 8/8셀 전부 표본부족으로 발견, 원인 확인 후 수정). 반드시
+    # "실제 수익률 데이터가 있는 월"만 추려 그 범위를 반으로 쪼갠다.
+    covered_months = rel_ret_next.dropna(how="all").index
+    months_sorted = regime.index.intersection(covered_months).sort_values()
     mid = len(months_sorted) // 2
     first_half, second_half = months_sorted[:mid], months_sorted[mid:]
+    log(f"  실제 데이터 가용 구간: {months_sorted.min().date() if len(months_sorted) else 'N/A'} ~ "
+        f"{months_sorted.max().date() if len(months_sorted) else 'N/A'} ({len(months_sorted)}개월) "
+        f"→ 전반 {len(first_half)}개월 / 후반 {len(second_half)}개월")
     s_total = rel_ret_next.shape[1]
 
     def _top_by_cell(month_index):
