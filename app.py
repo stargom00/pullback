@@ -5,6 +5,13 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.118 [문서/주석] 거래량 확증 편향 수정 3단계 완료 — 시간비례 외삽
+        자체의 장초반 과대추정 보정은 stock-alert/main.py에 구현(KR
+        한정, VOLUME_PROJECTION_BIAS/_bias_correction_factor, v2.23).
+        여기(app.py)는 vol_reference() 주석만 갱신 — "시간 보정은
+        봇에서"로 미뤄져 있던 표현이 실제 구현 위치를 안 가리키고
+        있었음(양쪽 다 서로 미루던 부분), 이제 정확한 함수/파일 위치를
+        명시. 조사 전체 기록: docs/volume_confirm_bias_investigation.md.
 v5.117 [버그수정] 거래량 확증(얼마냐봇) 편향 수정 1단계 — 분모 오염 제거
         (사용자 지시). /api/vol/{ticker}의 avg_volume_50/20이 장중 호출
         시 '오늘'의 진행 중인 부분봉을 50/20일 평균에 그대로 섞어 넣고
@@ -3564,7 +3571,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.117"
+VERSION = "v5.118"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7686,9 +7693,11 @@ async def theme_map_generate(theme_name: str):
 async def vol_reference(ticker: str):
     """종목의 평균 거래량 참조값 (v4.50.1) — 봇의 돌파 거래량 확증용.
     캐시된 일봉에서 50일 평균 거래량을 반환. 네이버 실시간 누적 거래량과
-    나눠서 봇이 '예상 거래량비'를 계산한다 (시간 보정은 봇에서, v5.117
-    거래량 확증 편향 수정 1단계 — 나머지 편향은 main.py의 시간비례 외삽
-    자체에 있고 여기서 다루지 않음)."""
+    나눠서 봇이 '예상 거래량비'를 계산한다. v5.117에서 이 함수의 부분봉
+    오염(아래 참조)만 고쳤고, 시간비례 외삽 자체의 장초반 과대추정 편향은
+    stock-alert/main.py의 VOLUME_PROJECTION_BIAS/_bias_correction_factor()에서
+    KR 한정으로 보정한다(근거: docs/volume_confirm_bias_investigation.md).
+    이 함수는 그 보정과 무관 — 완결된 일봉 평균만 정확히 돌려주면 된다."""
     ticker = ticker.upper().strip()
     # 캐시된 전 시장 데이터에서 탐색 (없으면 개별 fetch)
     df = None
