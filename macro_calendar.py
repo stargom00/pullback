@@ -22,9 +22,13 @@ MAX_TOKENS = 6000   # v5.111: 카테고리 7개로 확장(연준연설/국채입
                      # 잘렸던 전례(v5.87)를 감안해 여유 있게 상향
 WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_uses": 8}   # v5.111: 카테고리 5→7개로 늘어 5→8 상향
 
-PROMPT_TEMPLATE = """너는 투자자를 위한 경제 캘린더를 만드는 애널리스트다. web_search 도구를 \
-사용해서 오늘({today})부터 4주(28일) 이내의 미국(US)과 한국(KR) 주요 경제/통화정책 일정을 \
-조사해라.
+# v5.125(사용자 지시, API 비용 급증 조사): 날짜만 빼면 매 호출 100% 동일한
+# 텍스트라 system + cache_control로 분리(주 1회 자동 갱신은 캐시 TTL을
+# 넘기지만, 프롬프트 튜닝 중 수동 재실행을 짧은 간격으로 반복할 때는 캐시가
+# 적중해 입력비를 ~90% 아낀다 — 손해는 없음, 캐시 미스여도 원래 내던 토큰).
+SYSTEM_PROMPT = """너는 투자자를 위한 경제 캘린더를 만드는 애널리스트다. web_search 도구를 \
+사용해서 오늘부터 4주(28일) 이내의 미국(US)과 한국(KR) 주요 경제/통화정책 일정을 \
+조사해라. 오늘 날짜는 사용자 메시지에 별도로 주어진다.
 
 포함할 이벤트(v5.111 확장 — 항목이 너무 적으면 화면이 허전하니 아래 카테고리를 \
 전부 훑어서 4주 안에 해당하는 건 빠짐없이 담아라):
@@ -51,11 +55,11 @@ PROMPT_TEMPLATE = """너는 투자자를 위한 경제 캘린더를 만드는 �
 날짜순으로 정렬해서 담아라:
 
 ```json
-{{
+{
   "events": [
-    {{"date": "YYYY-MM-DD", "country": "US", "event": "FOMC 금리결정", "importance": "high"}}
+    {"date": "YYYY-MM-DD", "country": "US", "event": "FOMC 금리결정", "importance": "high"}
   ]
-}}
+}
 ```"""
 
 
@@ -70,15 +74,14 @@ def generate_calendar(today: str) -> tuple[list | None, str | None]:
     except ImportError:
         return None, "anthropic 패키지 미설치 (requirements.txt 확인)"
 
-    prompt = PROMPT_TEMPLATE.format(today=today)
-
     try:
         client = anthropic.Anthropic(api_key=api_key)
         resp = client.messages.create(
             model=MODEL,
             max_tokens=MAX_TOKENS,
+            system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
             tools=[WEB_SEARCH_TOOL],
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": f"오늘 날짜는 {today}이다. 이 날짜 기준으로 조사해라."}],
         )
     except Exception as e:
         return None, f"Claude API 호출 실패: {type(e).__name__}: {e}"

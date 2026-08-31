@@ -37,10 +37,12 @@ DAILY_GENERATION_LIMIT = 3      # 비용 가드 — 하루 신규 매핑 생성 
 # 좁은 테마는 실제 후보가 8개 미만이면 규칙1(환각 금지)에 따라 Claude가
 # 자연히 더 적게 반환하므로, 테마별로 "50개+인지" 사전 판정하는 로직은
 # 불필요 — 상한을 균일하게 25로 올리는 것만으로 광의/협의 테마 모두 처리됨.
-PROMPT_TEMPLATE = """너는 한국 주식시장 테마 분석가다. 아래 테마와 사업적으로
+# v5.125(사용자 지시, API 비용 급증 조사): 테마명 한 줄만 빼면 매 호출
+# 100% 동일한 텍스트라 system + cache_control로 분리 — DAILY_GENERATION_
+# LIMIT=3/day라 같은 날 여러 테마를 몰아서 생성할 때(자동/수동 모두)
+# 두 번째 호출부터 캐시 적중, 입력비 ~90% 절감.
+SYSTEM_PROMPT = """너는 한국 주식시장 테마 분석가다. 사용자가 준 테마와 사업적으로
 직결된 **한국거래소(코스피/코스닥) 상장사**의 관련주 명단을 만들어라.
-
-테마: {theme}
 
 규칙:
 1. **실재하는 한국 상장사만** — 상장 여부가 불확실하면 넣지 마라. 웹서치로
@@ -66,7 +68,7 @@ PROMPT_TEMPLATE = """너는 한국 주식시장 테마 분석가다. 아래 테�
 
 ```json
 [
-  {{"ticker": "005930", "name": "삼성전자", "market": "KOSPI", "rank": 1, "reason": "..."}},
+  {"ticker": "005930", "name": "삼성전자", "market": "KOSPI", "rank": 1, "reason": "..."},
   ...
 ]
 ```
@@ -185,13 +187,13 @@ def generate_theme_map(theme_name: str, kr_universe: dict) -> dict:
     except ImportError:
         return {"error": "anthropic 패키지 미설치"}
 
-    prompt = PROMPT_TEMPLATE.format(theme=theme_name)
     try:
         client = anthropic.Anthropic(api_key=api_key)
         resp = client.messages.create(
             model=MODEL, max_tokens=MAX_TOKENS,
+            system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
             tools=[WEB_SEARCH_TOOL],
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": f"테마: {theme_name}"}],
         )
     except Exception as e:
         return {"error": f"Claude API 호출 실패: {type(e).__name__}: {e}"}

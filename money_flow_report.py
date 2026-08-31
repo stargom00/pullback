@@ -37,6 +37,25 @@ def _load_prompt() -> str | None:
         return None
 
 
+# v5.125(사용자 지시, API 비용 급증 조사) — 입력 다이어트. Claude가 실제로
+# 쓰는 값(종목당 분류·등락률·거래대금 규모)은 그대로 두고 중복/과잉정밀도만
+# 뺀다: volume(turnover=종가×거래량이라 이미 포함), prev_rank(rank_change로
+# 대체 가능한 파생값) 제거 + turnover/mcap_approx 소수점 반올림. 로컬
+# 시뮬레이션(scripts/measurements 없이 직접 확인, 100종목 기준) 실측
+# 40% 문자수 감소 — indent=2(원본 저장용 포맷) 대신 컴팩트 JSON으로 보내는
+# 효과가 그 중 대부분(공백 제거만으로 32%p). 디스크 저장용 원본 snapshot은
+# 건드리지 않음(호출부가 그대로 저장) — 이 함수는 API 입력 사본만 만든다.
+def _diet_snapshot(snapshot: dict) -> dict:
+    def _diet_row(r: dict) -> dict:
+        d = {k: v for k, v in r.items() if k not in ("volume", "prev_rank")}
+        if d.get("turnover") is not None:
+            d["turnover"] = round(d["turnover"])
+        if d.get("mcap_approx") is not None:
+            d["mcap_approx"] = round(d["mcap_approx"])
+        return d
+    return {**snapshot, "top": [_diet_row(r) for r in (snapshot.get("top") or [])]}
+
+
 def generate_report(snapshot: dict) -> tuple[str | None, str | None]:
     """(markdown, error) 튜플 — 정확히 하나만 채워짐. snapshot은
     money_flow.compute_snapshot()/run_daily()의 반환값 그대로."""
@@ -53,16 +72,21 @@ def generate_report(snapshot: dict) -> tuple[str | None, str | None]:
     except ImportError:
         return None, "anthropic 패키지 미설치 (requirements.txt 확인)"
 
-    input_json = json.dumps(snapshot, ensure_ascii=False, indent=2, default=str)
-    user_content = f"{prompt}\n```json\n{input_json}\n```"
+    # v5.125: 고정 프롬프트(~2000토큰)를 system으로 분리 + cache_control —
+    # 하루 KR/US 각 1회 자동 실행 + 수동 재실행(🔄) 시 짧은 간격 반복
+    # 호출이면 캐시 적중해 이 부분 입력비가 ~90% 절감된다(캐시 미스여도
+    # 손해 없음 — 어차피 매번 내던 토큰).
+    input_json = json.dumps(_diet_snapshot(snapshot), ensure_ascii=False,
+                             separators=(",", ":"), default=str)
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
         resp = client.messages.create(
             model=MODEL,
             max_tokens=MAX_TOKENS,
+            system=[{"type": "text", "text": prompt, "cache_control": {"type": "ephemeral"}}],
             tools=[WEB_SEARCH_TOOL],
-            messages=[{"role": "user", "content": user_content}],
+            messages=[{"role": "user", "content": f"```json\n{input_json}\n```"}],
         )
     except Exception as e:
         return None, f"Claude API 호출 실패: {type(e).__name__}: {e}"

@@ -5,6 +5,40 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.126 [비용개선] Anthropic API 비용 급증(8/26~8/31 6일 $48, 예상 20배)
+        조사 후 절감 조치(사용자 지시) — 원인: money_flow_report.py
+        (8/26 신설)·theme_map.py(8/29 신설)·macro_calendar.py(8/30 프롬프트
+        확장) 세 기능 모두 이번 비용 급증 구간에 활발히 개발/테스트되던
+        중이었고, 그중 `/api/moneyflow/{market}/run`(🔄 재실행 버튼)이
+        **아무 제한도 없이** 클릭마다 Claude+웹서치(최대 5회) 풀프라이스
+        호출을 그대로 내보내는 걸 확인 — 가장 유력한 단일 원인으로 판단
+        (같은 날 버그수정 커밋 3건이 있었던 걸 보면 반복 재실행 테스트
+        정황). 조치 4건: ① `/api/moneyflow/{market}/run`에 시장별 2분
+        쿨다운+진행중 잠금 신설(기존엔 전혀 없었음). ②
+        `/api/calendar/macro/run`에도 짧은(2분) 쿨다운 추가(기존
+        `_macro_calendar_task_running` 동시실행 잠금은 있었으나 순차
+        재클릭은 못 막았음, 24시간 재시도 스로틀은 실패 후 자동재시도용이라
+        별개). ③ `/api/theme_map/{theme}`에 테마별 진행중 잠금 추가(완료
+        전 같은 테마 중복 POST 방지 — 기존엔 일일 생성 한도 카운트가 완료
+        후에만 올라가서 그 사이 중복 호출이 안 막혔음). ④ 세 모듈 다
+        prompt caching 적용(`system` + `cache_control: ephemeral`) —
+        고정 프롬프트(테마생성/매크로캘린더/돈의흐름 해석 지침, 각
+        ~600~2000토큰 추정)를 반복 호출 시 캐시 히트로 입력비 최대 90%
+        절감 가능(대시보드에 "Not enabled"로 떠 있던 것 해결). ⑤
+        money_flow_report.py 입력 다이어트 — 스냅샷 JSON을 `indent=2`
+        pretty-print에서 컴팩트(`separators=(",",":")`) 인코딩으로
+        전환(순수 공백 제거, 로컬 시뮬레이션 실측 -32%) + 종목당 중복/
+        과잉정밀도 필드 제거(volume은 turnover에 이미 반영, prev_rank는
+        rank_change로 대체 가능 — 정보 손실 없음) + turnover/mcap_approx
+        정수 반올림(합산 실측 -40%). [범위 밖] 웹서치 max_uses 상한은
+        이미 3개 모듈 다 설정돼 있었음(theme_map=5, money_flow_report=5,
+        macro_calendar=8) — 신설 아님, 하향 조정도 안 함(품질 저하 우려,
+        진짜 원인은 호출 빈도였다는 게 이번 조사 결론). 서버사이드
+        web_search 툴은 한 API 호출 안에서도 검색 왕복마다 누적 컨텍스트를
+        다시 토크나이즈해 과금하므로(멀티턴 내부 루프), 338회 검색 자체가
+        입력토큰 급증의 직접 원인이라기보다 "호출이 몇 번이나 됐는지"가
+        진짜 변수라고 판단 — 정확한 호출 횟수는 Anthropic 대시보드(코드/
+        로그로는 재구성 불가) 확인 필요.
 v5.125 [기능추가] 🔁 전 리더 재점화 워치리스트(사용자 지시) —
         docs/kr_theme_leader_reignition.md 채택 결과(D0 리더 재점화율
         51.8% vs 대조군 39~42%, 확인진입 EV+0.755R)를 실시간 감시로
@@ -3693,7 +3727,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.125"
+VERSION = "v5.126"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7984,6 +8018,11 @@ async def _theme_map_generate_job(job_id: str, theme_name: str):
     except Exception as e:
         job["status"] = "error"
         job["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        _theme_map_generating.discard(theme_name)
+
+
+_theme_map_generating: set = set()   # v5.125: 진행 중인 테마명 — 같은 테마 중복 호출 방지
 
 
 @app.post("/api/theme_map/{theme_name}")
@@ -7991,7 +8030,13 @@ async def theme_map_generate(theme_name: str):
     """수동 생성(사용자 지시 4번) — 자동 생성과 같은 일일 한도를 공유한다
     (비용 가드, 사용자 지시 7번 — 수동이라고 무제한 허용 안 함). v5.123부터
     비동기 job — 즉시 202+job_id 반환, 실제 생성은 백그라운드, 결과는
-    GET /api/theme_map/jobs/{job_id}로 조회."""
+    GET /api/theme_map/jobs/{job_id}로 조회. v5.125(사용자 지시, API 비용
+    급증 조사): 같은 테마에 대해 이미 진행 중인 job이 있으면 새 job을
+    또 안 만듦 — daily_generation_count는 job이 완료(save_theme_map)돼야
+    올라가서, 완료 전에 같은 테마로 재요청(더블클릭·재시도 스크립트)이
+    들어오면 이 가드 없이는 Claude+웹서치 호출이 중복으로 나갔다."""
+    if theme_name in _theme_map_generating:
+        return JSONResponse({"error": f"'{theme_name}' 이미 생성 중 — 잠시 후 다시 시도"}, status_code=429)
     if theme_map.today_generation_count() >= theme_map.DAILY_GENERATION_LIMIT:
         return JSONResponse(
             {"error": f"오늘 신규 매핑 생성 한도({theme_map.DAILY_GENERATION_LIMIT}건) 도달 — 내일 다시 시도"},
@@ -7999,6 +8044,7 @@ async def theme_map_generate(theme_name: str):
     job_id = uuid.uuid4().hex
     _theme_map_jobs[job_id] = {"status": "pending", "theme": theme_name, "result": None,
                                 "error": None, "created_at": datetime.now(KST).isoformat()}
+    _theme_map_generating.add(theme_name)
     asyncio.create_task(_theme_map_generate_job(job_id, theme_name))
     return JSONResponse(
         {"job_id": job_id, "status": "pending", "theme": theme_name,
@@ -8491,18 +8537,42 @@ async def get_money_flow_summary(market: str):
     })
 
 
+_moneyflow_manual_running: dict = {}    # {"kr": True} — 시장별 진행 중 플래그
+_moneyflow_manual_last_run: dict = {}   # {"kr": epoch_ts} — 마지막 수동 실행 완료 시각
+_MONEYFLOW_MANUAL_COOLDOWN_SEC = 120    # v5.125(사용자 지시, API 비용 급증 조사)
+
+
 @app.post("/api/moneyflow/{market}/run")
 async def run_money_flow_now(market: str):
+    """수동 재실행(🔄 버튼) — v5.125부터 쿨다운+진행중 잠금 추가. 원래
+    아무 제한이 없어서 클릭 한 번마다 money_flow_report.generate_report()
+    (Claude+웹서치 최대 5회, ~16000 max_tokens) 풀프라이스 호출이 그대로
+    나갔다 — API 비용 급증(6일간 $48, 예상의 20배) 조사에서 확인된 유력한
+    원인 중 하나(money_flow.py가 2026-08-26에 신설돼 비용 급증 시작일과
+    겹침 — 그날 같은 세션에서 버그 수정 3건이 나온 걸 보면 반복 재실행
+    테스트가 있었을 가능성이 높음). macro_calendar의 기존 가드(진행중
+    플래그+재시도 스로틀)와 같은 패턴."""
     bad = _moneyflow_market_or_400(market)
     if bad:
         return bad
-    daykey = datetime.now(KST).strftime("%Y-%m-%d")
+    if _moneyflow_manual_running.get(market):
+        return JSONResponse({"error": "이미 진행 중 — 잠시 후 다시 시도"}, status_code=429)
+    remaining = _MONEYFLOW_MANUAL_COOLDOWN_SEC - (time.time() - _moneyflow_manual_last_run.get(market, 0))
+    if remaining > 0:
+        return JSONResponse({"error": f"너무 잦은 재실행 — {int(remaining)}초 후 다시 시도 (비용 보호)"},
+                             status_code=429)
+    _moneyflow_manual_running[market] = True
     try:
-        result = await _run_money_flow(market, daykey)
-    except Exception as e:
-        return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=500)
-    available = money_flow.list_available_dates(market)
-    return JSONResponse(_clean_nan({"market": market, "date": daykey, "available_dates": available, **result}))
+        daykey = datetime.now(KST).strftime("%Y-%m-%d")
+        try:
+            result = await _run_money_flow(market, daykey)
+        except Exception as e:
+            return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=500)
+        available = money_flow.list_available_dates(market)
+        return JSONResponse(_clean_nan({"market": market, "date": daykey, "available_dates": available, **result}))
+    finally:
+        _moneyflow_manual_last_run[market] = time.time()
+        _moneyflow_manual_running[market] = False
 
 
 # ══════════════════ v5.108: 캘린더 탭 ══════════════════
@@ -8882,7 +8952,24 @@ async def run_macro_calendar_now():
     단일 리소스라 별도 job_id 체계 없이, 기존 _macro_calendar_task_running
     플래그 + 캐시 파일의 generated_at/last_attempt_at/last_error를 그대로
     진행상태로 재사용(새 저장소 안 만듦) — GET /api/calendar/macro/status로
-    폴링. 이미 진행 중이면 _refresh_macro_calendar_bg 자체 가드가 중복 실행 방지."""
+    폴링. 이미 진행 중이면 _refresh_macro_calendar_bg 자체 가드가 중복 실행 방지.
+    v5.125(사용자 지시, API 비용 급증 조사): 짧은 수동 재실행 쿨다운 추가 —
+    기존 _macro_calendar_attempt_throttled()의 24시간 기준은 "실패 후
+    자동재시도 폭주 방지"용이라 정상 완료 직후의 연타 클릭은 못 막았음
+    (프롬프트 튜닝 중 반복 클릭 시나리오, macro_calendar.py가 이번 비용
+    급증 구간(2026-08-30)에 실제로 프롬프트 확장 작업이 있었음). 별도의
+    짧은(2분) 쿨다운을 여기서만 체크 — 자동 스케줄러의 24시간 로직은 그대로."""
+    if _macro_calendar_task_running:
+        return JSONResponse({"error": "이미 진행 중 — 잠시 후 다시 시도"}, status_code=429)
+    last_attempt = (_load_macro_calendar() or {}).get("last_attempt_at")
+    if last_attempt:
+        try:
+            age_sec = (datetime.now(KST) - datetime.fromisoformat(last_attempt)).total_seconds()
+        except (ValueError, TypeError):
+            age_sec = 999
+        if age_sec < 120:
+            return JSONResponse({"error": f"너무 잦은 재실행 — {int(120 - age_sec)}초 후 다시 시도 (비용 보호)"},
+                                 status_code=429)
     asyncio.create_task(_refresh_macro_calendar_bg())
     return JSONResponse(_clean_nan({"status": "started", **_load_macro_calendar(),
                                      "poll": "/api/calendar/macro/status"}), status_code=202)
