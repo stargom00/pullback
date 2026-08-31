@@ -5,6 +5,23 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.124 [기능개선] theme_map 후속 3건(사용자 지시) — ① 광의 테마(제약·바이오
+        등 유니버스 후보 50개+) 상한을 8→25로 확대(theme_map.py 프롬프트
+        규칙2). 하위테마 분할 대신 상한확대를 택함 — 이유: DAILY_GENERATION
+        _LIMIT=3/day 예산상 광의 테마 하나를 4개로 쪼개면 그날 예산을 다
+        써버림, 이번 계기인 JW신약 3중히트도 섹터 전체 단위 확산판정이
+        목적이었지 하위테마 분리가 필요한 사례가 아니었음. 좁은 테마는
+        Claude가 실재 후보만 반환(환각금지 규칙1)하므로 "50개+" 사전판정
+        로직 불필요. MAX_TOKENS 4000→6000 동반 상향. ② "정적 rank=시총순"
+        오해 정정 — 실제로는 theme_map.py 생성 프롬프트 기준 사업직결도
+        순위(시총 아님). 프롬프트 규칙3에 명시 추가 + static/index.html
+        테마 라이프사이클 서브뷰에 정적/거래대금/회전율 3종 서열을 나란히
+        표시하는 표+툴팁 신설(2fe72b8가 API에만 노출하고 UI는 동시편집
+        충돌로 미완이었던 부분 완료) — 회전율 열에 ★판정기준 표시. ③
+        제약·바이오 재생성은 이 환경에 ANTHROPIC_API_KEY가 없어 직접
+        실행 불가 — 사용자가 실제 키로 POST 재실행 후 GET /api/theme_lifecycle
+        /제약·바이오 재호출하면 새 매핑이 코드 변경 없이 그대로 반영됨
+        (analyze_theme은 theme_map.json을 매 호출 시 다시 읽음).
 v5.123 [버그수정] theme_map API 두 가지 수정(사용자 지시, 실사용자 재현
         버그) — ① GET /api/theme_map, GET /api/theme_map/{theme}가
         API_READ_TOKEN 허용목록에 없어서 POST(생성)는 되는데 GET(조회)은
@@ -3648,7 +3665,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.123"
+VERSION = "v5.124"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

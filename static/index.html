@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.123</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.124</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3074,8 +3074,23 @@ async function loadThemeLifecycle(theme) {
     html += `<h3>최근 60거래일 시계열</h3>
       <p class="mf-note">거래대금 점유율(초록)</p>${spark('turnover_share_pct', '#3fb950')}
       <p class="mf-note">breadth(주황)</p>${spark('breadth_pct', '#f2b33d')}
-      <p class="mf-note">집중도 top3(파랑)</p>${spark('concentration_top3_pct', '#4D8DFF')}
-      <p class="mf-note">오늘 서열: ${(mapD.stocks || []).map(s => `${s.name}(${d.ticker_rank_today?.[s.ticker] ?? '-'}위)`).join(' · ')}</p>`;
+      <p class="mf-note">집중도 top3(파랑)</p>${spark('concentration_top3_pct', '#4D8DFF')}`;
+
+    // v5.124: 정적/거래대금/회전율 3종 서열 나란히 표시. D0/리더 판정은
+    // 회전율(turnover_ratio) 기준(2fe72b8, 4개 실사이클 백테스트 3/4 정답)
+    // — 나머지 둘은 참고용으로만 노출, 열 헤더에 채택 방식 표시.
+    const methodLabel = { static: '정적', turnover: '거래대금', turnover_ratio: '회전율' };
+    const authMethod = d.leader_rank_method || 'turnover_ratio';
+    html += `<h3>오늘 서열 (3종 병기)
+        <span class="mf-note" title="정적=테마 매핑 생성 시점(theme_map.json) 1회 고정, 사업직결도(이 재료와의 사업 연관성) 순 — 시가총액 아님. 거래대금/회전율=매일 재계산되는 동적 서열. 라이프사이클의 대장주·D0·단계 판정은 회전율(오늘 거래대금÷자기 20일 평균) 기준을 채택(실사이클 백테스트 4건 중 3건 정답, 정적·거래대금은 각 2/4) — 정적 rank1과 실제 판정된 대장주가 다른 종목일 수 있는 이유가 이것입니다.">ⓘ 서열 기준 설명</span>
+      </h3>
+      <table><tr><th>종목</th><th>정적(사업직결도)</th><th>거래대금</th><th>회전율${authMethod === 'turnover_ratio' ? ' ★판정기준' : ''}</th></tr>
+        ${(mapD.stocks || []).map(s => `<tr><td>${s.name}</td>
+          <td>${d.ticker_rank_today_static?.[s.ticker] ?? '-'}위</td>
+          <td>${d.ticker_rank_today?.[s.ticker] ?? '-'}위</td>
+          <td>${d.ticker_rank_today_turnover_ratio?.[s.ticker] ?? '-'}위</td></tr>`).join('')}
+      </table>
+      <p class="mf-note">정적 rank는 테마 매핑 생성 시 1회 고정된 "사업직결도"(시가총액 아님) 순위이고, 대장주·D0 판정에는 매일 재계산되는 회전율 서열을 씁니다 — 위 표에서 정적 1위와 실제 판정 대장주가 다른 종목으로 보이는 게 정상입니다.</p>`;
 
     doc.innerHTML = html;
   } catch (e) {
