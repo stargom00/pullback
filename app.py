@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.117 [버그수정] 거래량 확증(얼마냐봇) 편향 수정 1단계 — 분모 오염 제거
+        (사용자 지시). /api/vol/{ticker}의 avg_volume_50/20이 장중 호출
+        시 '오늘'의 진행 중인 부분봉을 50/20일 평균에 그대로 섞어 넣고
+        있었음(KR: naver_kr.fetch가 오늘 거래일을 실시간으로 채워 반환,
+        US: yfinance 일봉도 장중 갱신됨). 부분봉이 섞이면 평균이 낮아져
+        봇의 '예상 거래량비(%)'가 시간비례 외삽 편향 위에 한 번 더
+        부풀려짐. 마지막 행이 오늘 날짜이고 해당 시장이 장중이면
+        (_is_market_open_now) 평균 계산에서 제외. 실측(005930.KS,
+        08-31 10:12 KST): avg50 29,302,219(오염) → 29,865,350(수정,
+        +1.9%), 실제 엔드포인트 종단 호출로 확인. 종가베팅(analyze_jongga)
+        은 이 엔드포인트를 쓰지 않고 자체 vol.iloc[-21:-1] 창(원래부터
+        당일 제외)이라 이번 수정과 무관 — 영향 없음 확인. 거래량 확증
+        편향 수정 3단계 중 1단계, 다음 단계는 표본 확대 재측정.
 v5.116 [기능추가/버그수정] 일지 진입 기록 실거래 기준 자유입력(사용자 지시).
         (1) 일지 모달에 수량/투입금액 입력칸 신설 — 카드 계산값을 기본값
         으로 채우되 자유 편집, 저장 시 우선순위는 수량직접입력 > 투입금액
@@ -3551,7 +3564,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.116"
+VERSION = "v5.117"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7673,7 +7686,9 @@ async def theme_map_generate(theme_name: str):
 async def vol_reference(ticker: str):
     """종목의 평균 거래량 참조값 (v4.50.1) — 봇의 돌파 거래량 확증용.
     캐시된 일봉에서 50일 평균 거래량을 반환. 네이버 실시간 누적 거래량과
-    나눠서 봇이 '예상 거래량비'를 계산한다 (시간 보정은 봇에서)."""
+    나눠서 봇이 '예상 거래량비'를 계산한다 (시간 보정은 봇에서, v5.117
+    거래량 확증 편향 수정 1단계 — 나머지 편향은 main.py의 시간비례 외삽
+    자체에 있고 여기서 다루지 않음)."""
     ticker = ticker.upper().strip()
     # 캐시된 전 시장 데이터에서 탐색 (없으면 개별 fetch)
     df = None
@@ -7691,6 +7706,16 @@ async def vol_reference(ticker: str):
         return JSONResponse({"ok": False}, status_code=404)
     try:
         vol = df["Volume"]
+        # v5.117[버그수정]: 장중 호출 시 df의 마지막 행이 '오늘'의 진행 중인
+        # 부분봉일 수 있다(KR: naver_kr.fetch가 오늘 거래일을 실시간으로 채워
+        # 반환함 — fetch() docstring 참조. US: yfinance 일봉도 장중엔 당일
+        # 거래량이 계속 갱신됨). 이 부분봉이 50/20일 평균에 섞이면 완결된
+        # 거래일보다 표본 하나가 적게 반영돼 평균이 낮아지고, 그 결과 봇의
+        # '예상 거래량비(%)'가 한 번 더 부풀려진다(시간비례 외삽 편향과는
+        # 별개의 추가 왜곡). 평균은 항상 완결된 일봉만으로 계산한다.
+        is_kr = naver_kr.is_kr(ticker)
+        if len(vol) and vol.index[-1].date() == datetime.now(KST).date() and _is_market_open_now(is_kr):
+            vol = vol.iloc[:-1]
         avg50 = float(vol.iloc[-50:].mean())
         avg20 = float(vol.iloc[-20:].mean())
         return JSONResponse({"ok": True, "ticker": ticker,
