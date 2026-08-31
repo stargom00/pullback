@@ -7,7 +7,10 @@
 
 `docs/all_tabs_common_yardstick_investigation.md`의 시점매칭 체크포인트 방식을
 그대로 재사용: `off=60..250`(10 간격, 20지점) 전체 유니버스(KR 1503 + US 2120,
-delisted 4종목 제외 실제 3612종목 페치)에 대해 각 체크포인트마다 데이터를 그
+delisted 4종목 제외 실제 3612종목 페치)
+**유니버스 범위 캐비어트**: KR 1503은 KRX 전체 상장사가 아니라 "정적
+254 ∪ 거래대금 상위 1500" 범위 — 저유동성 종목 구조적 제외. 상세:
+`docs/kr_us_market_structure.md` §5 상단, `docs/kr_universe_coverage_investigation.md`.에 대해 각 체크포인트마다 데이터를 그
 시점까지 잘라(`df.iloc[:len(df)-off]`) `analyze()`류 함수를 실제로 돌리고,
 그 뒤에 남은 `off`봉의 미래 데이터로 2R 레이스를 진행. RS/RS모멘텀도 체크포인트
 시점 기준으로 재계산(미국은 단일 벤치마크라 랭킹에 상수 오프셋이라 벤치마크

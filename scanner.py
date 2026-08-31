@@ -25,6 +25,17 @@ def is_kr_market_open(now: datetime | None = None) -> bool:
     return 9 * 60 <= minutes <= 15 * 60 + 30
 
 
+def nonzero_vol_mean(window: pd.Series) -> float:
+    """거래정지(거래량 0)를 뺀 실거래일만의 평균 거래량 (v5.129).
+    호출부가 넘긴 window(이미 트레일링 슬라이스 완료)에 거래정지로 인한
+    0거래량 봉이 섞이면 단순 .mean()은 분모가 희석돼 재개일 vol_mult가
+    실제보다 부풀려진다(docs/kr_data_hygiene_three_types.md 참고).
+    창 전체가 0(완전정지)이면 0.0 — 기존 vol_avg>0 게이트가 그대로
+    fail-safe로 작동하도록 유지."""
+    nz = window[window > 0]
+    return float(nz.mean()) if len(nz) > 0 else 0.0
+
+
 def climax_warning(c: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series) -> dict:
     """미너비니식 클라이맥스(과열/소진) 경고 감지.
     급등은 매수가 아니라 '매도/경계' 신호 — 포물선·최대하락일·소진갭·과도이격.
@@ -650,7 +661,7 @@ def volume_info(close: float, v: pd.Series) -> dict:
     """
     vol_today = float(v.iloc[-1]) if len(v) else 0.0
     turnover = close * vol_today   # 거래대금 근사 (종가 기준)
-    avg50 = float(v.iloc[-50:].mean()) if len(v) >= 5 else 0.0
+    avg50 = nonzero_vol_mean(v.iloc[-50:]) if len(v) >= 5 else 0.0
     vol_vs_avg = round(vol_today / avg50, 2) if avg50 > 0 else None
     return {
         "volume": round(vol_today),
@@ -2554,7 +2565,7 @@ def analyze_breakout(df: pd.DataFrame, rs_rank: int | None = None,
 
     # ── 거래량 동반 확인 ──
     vol_today = float(v.iloc[-1])
-    vol_avg = float(v.iloc[-51:-1].mean())   # 직전 50봉 평균(오늘 제외)
+    vol_avg = nonzero_vol_mean(v.iloc[-51:-1])   # 직전 50봉 평균(오늘 제외, 거래정지일 제외 v5.129)
     vol_mult = vol_today / vol_avg if vol_avg > 0 else 0.0
     if vol_mult < cfg["vol_mult"]:
         return None            # 거래량 없는 돌파 = 가짜 가능성
@@ -2690,7 +2701,7 @@ def analyze_boxbreak(df: pd.DataFrame, rs_rank: int | None = None,
 
     # ── 거래량 동반 (박스돌파의 생명) ──
     vol_today = float(v.iloc[-1])
-    vol_avg = float(v.iloc[-51:-1].mean())   # 직전 50봉 평균(오늘 제외)
+    vol_avg = nonzero_vol_mean(v.iloc[-51:-1])   # 직전 50봉 평균(오늘 제외, 거래정지일 제외 v5.129)
     vol_mult = vol_today / vol_avg if vol_avg > 0 else 0.0
     if vol_mult < cfg["vol_mult"]:
         return None
@@ -3041,7 +3052,7 @@ def analyze_surge(df: pd.DataFrame, rs_rank: int | None = None,
 
     # ── 2) 거래량 급증 (20일 평균 대비) ──
     vol_today = float(v.iloc[-1])
-    vol_avg = float(v.iloc[-21:-1].mean())   # 직전 20봉 평균(오늘 제외)
+    vol_avg = nonzero_vol_mean(v.iloc[-21:-1])   # 직전 20봉 평균(오늘 제외, 거래정지일 제외 v5.129)
     vol_mult = vol_today / vol_avg if vol_avg > 0 else 0.0
     if vol_mult < cfg["vol_mult"]:
         return None
@@ -3050,8 +3061,8 @@ def analyze_surge(df: pd.DataFrame, rs_rank: int | None = None,
     qd = cfg["quiet_days"]
     if len(c) > qd + 21:
         # (a) 직전 qd일 거래량이 그 이전 20일 평균 대비 조용했나
-        prior_vol_avg = float(v.iloc[-(qd + 21):-(qd + 1)].mean())
-        recent_vol_avg = float(v.iloc[-(qd + 1):-1].mean())
+        prior_vol_avg = nonzero_vol_mean(v.iloc[-(qd + 21):-(qd + 1)])
+        recent_vol_avg = nonzero_vol_mean(v.iloc[-(qd + 1):-1])
         if prior_vol_avg > 0 and recent_vol_avg / prior_vol_avg > cfg["quiet_vol_max"]:
             return None   # 직전 며칠 이미 거래량 터짐 = 첫날 아님
         # (b) 직전 qd일 누적 상승폭이 과하지 않았나
@@ -3687,7 +3698,7 @@ def quiet_accumulation_score(df: pd.DataFrame, window: int = 60) -> dict:
     if len(daily_ret) and float(daily_ret.max()) >= QUIET_ACCUM_DQ_SURGE_PCT:
         return _quiet_accum_dq("급등포함_조용하지않음")
 
-    avg_vol = float(v_win.mean())
+    avg_vol = nonzero_vol_mean(v_win)
     max_vol = float(v_win.max())
     if avg_vol > 0 and max_vol / avg_vol >= QUIET_ACCUM_DQ_VOL_MULT:
         return _quiet_accum_dq("이벤트성")
@@ -4583,7 +4594,7 @@ def analyze_jongga(df: pd.DataFrame, turnover_rank: int | None = None,
     vol_win = v.iloc[-(cfg["volume_lookback"] + 1):-1]
     if len(vol_win) < cfg["volume_lookback"]:
         return None
-    vol_avg = float(vol_win.mean())
+    vol_avg = nonzero_vol_mean(vol_win)
     if vol_avg <= 0 or vol_t < vol_avg * cfg["volume_mult_min"]:
         return None
 

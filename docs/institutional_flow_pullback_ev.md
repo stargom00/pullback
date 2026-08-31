@@ -59,6 +59,9 @@
 
 ## 방법론
 
+- **유니버스 범위 캐비어트**: KR 약 1,504종목(정적 254 ∪ 거래대금 상위
+  1500) 범위 내 — KRX 전체 상장사 아님, 저유동성 종목 구조적 제외.
+  상세: `docs/kr_us_market_structure.md` §5 상단, `docs/kr_universe_coverage_investigation.md`.
 - **눌림목 KR 히트**: `harness.py` + `scanner.analyze()`(CONFIG) 그대로
   호출, off=60~250 10간격 20지점(기존 캠페인들과 동일 표준), 저유동성
   하드필터(`harness.passes_liquidity_filter`) 통과분만. **대조군이

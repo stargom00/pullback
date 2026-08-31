@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+import scanner
+
 import theme_lifecycle as tl
 
 WATCH_WINDOW_START = 30      # 거래일 — 백테스트(2026-08-31_kr_theme_leader_reignition.py)와 동일
@@ -108,7 +110,7 @@ def check_confirm(df) -> dict | None:
     high, low, vol = df["High"], df["Low"], df["Volume"]
     pivot = float(high.iloc[-(PIVOT_LOOKBACK + 1):-1].max())
     stop = float(low.iloc[-(PIVOT_LOOKBACK + 1):-1].min())
-    avg_vol = float(vol.iloc[-(CONFIRM_VOL_AVG_WINDOW + 1):-1].mean())
+    avg_vol = scanner.nonzero_vol_mean(vol.iloc[-(CONFIRM_VOL_AVG_WINDOW + 1):-1])  # 거래정지일 제외 v5.129
     today_high = float(high.iloc[-1])
     today_vol = float(vol.iloc[-1])
     confirmed = today_high >= pivot and avg_vol > 0 and today_vol >= CONFIRM_VOL_MULT * avg_vol

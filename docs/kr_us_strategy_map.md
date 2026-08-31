@@ -16,6 +16,9 @@ KR/US 분해가 이미 나와 있었다(둘 다 US가 견인, KR이 부진하고
 
 - **체크포인트**: `harness.checkpoints(60, 250, 10)` — 20개 지점, 이 레포의
   표준 스펙(규칙6/7/8 근거 문서들과 동일).
+- **유니버스 범위 캐비어트**: KR 약 1,504종목(정적 254 ∪ 거래대금 상위
+  1500) 범위 내 — KRX 전체 상장사 아님, 저유동성 종목 구조적 제외.
+  상세: `docs/kr_us_market_structure.md` §5 상단, `docs/kr_universe_coverage_investigation.md`.
 - **히트 판정**: 각 탭의 실제 프로덕션 `analyze_*()` 함수 + 현재
   CONFIG(v5.71 기준 — 눌림목은 게이트E/depth_atr 반영 최신판, 돌파·박스돌파는
   v5.70의 rs_min 탭별 분리 반영, 추세전환·돌파임박은 원 CONFIG) 그대로 호출.

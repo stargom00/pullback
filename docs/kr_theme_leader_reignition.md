@@ -12,6 +12,9 @@ KR 테마의 전(前) 사이클 점화 리더(D0 leader, `theme_lifecycle.py`의
   전력기기·원전/제약·바이오) × KR 1900일 fetch(≈1273봉,
   `2026-08-31_kr_pullback_support_breach_1900d.py`의
   `fetch_kr_long_universe()` 재사용) × 가용 전체 기간.
+  **유니버스 범위 캐비어트**: KR 약 1,504종목(정적 254 ∪ 거래대금 상위
+  1500) 범위 내 — KRX 전체 상장사 아님, 저유동성 종목 구조적 제외.
+  상세: `docs/kr_us_market_structure.md` §5 상단, `docs/kr_universe_coverage_investigation.md`.
 - **D0/리더 추출**: `theme_lifecycle.compute_theme_series()` +
   `find_cycles()`를 window=가용 전체 기간으로 그대로 재사용(사이클 리셋
   로직 재구현 안 함). 리더 판정은 회전율 기준(`LEADER_RANK_METHOD =

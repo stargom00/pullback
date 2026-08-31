@@ -5,6 +5,17 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.129 [버그수정] 거래정지(0거래량) 구간이 트레일링 거래량평균 분모를
+        희석해 재개일 vol_mult가 부풀려지던 문제 수정(사용자 지시,
+        036800 유니버스 조사 중 발견). scanner.nonzero_vol_mean() 신설
+        (0거래량 봉 제외 평균, 창 전체가 0이면 기존처럼 0.0 반환)해
+        volume_info/analyze_breakout/analyze_boxbreak/패턴·급등탭/
+        quiet_accum 실격판정/analyze_imminent 6곳 + theme_reignition.
+        check_confirm(재점화 확인진입)까지 전부 교체. 실측(오늘자 KR
+        1504종목): 1.5배 게이트(돌파/박스돌파/재점화) 기준 가짜 통과
+        3건 제거(알에프세미 5.19x→0.42x, 한국캐피탈 2.19x→1.36x,
+        트리니티항공 1.85x→1.29x), 진짜 고거래량 12건은 그대로 유지.
+        상세: docs/kr_data_hygiene_three_types.md.
 v5.128 [버그수정] 종가베팅 탭이 오늘 스냅샷이 아니라 임의 시각의 라이브
         캐시를 보여주던 사고 조사·수정(사용자 지시, 실사고: 8/31 탭이
         "10:06 캐시·후보 0건"으로 온종일 고정). 근본원인: `GET /api/scan
@@ -3784,7 +3795,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.128"
+VERSION = "v5.129"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -4641,10 +4652,11 @@ def _save_jongga_forward(data: dict):
         print(f"[jongga-forward] 저장 실패: {e}")
 
 
-def _record_jongga_snapshot(date_str: str, hits: list):
-    """14:40~15:00 스냅샷 확정 시(스케줄러 1회 실행분에서만 호출 —
-    사용자가 탭을 열 때마다 도는 라이브 스캔에서는 호출 안 함, 중복/
-    조기기록 방지) 오늘자 후보를 전부 기록."""
+def _record_jongga_snapshot(date_str: str, hits: list, source: str = "intraday"):
+    """14:40~15:00 스냅샷(source="intraday") 또는 장마감 후 폴백
+    (source="eod_fallback", v5.129) 확정 시(스케줄러 1회 실행분에서만
+    호출 — 사용자가 탭을 열 때마다 도는 라이브 스캔에서는 호출 안 함,
+    중복/조기기록 방지) 오늘자 후보를 전부 기록."""
     fwd = _load_jongga_forward()
     day_rec = fwd.setdefault(date_str, {})
     now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
@@ -4656,6 +4668,7 @@ def _record_jongga_snapshot(date_str: str, hits: list):
         day_rec[t] = {
             "ticker": t, "name": h.get("name", t),
             "snapshot_price": h.get("close"), "snapshot_ts": now_str,
+            "snapshot_source": source,   # v5.129: "intraday"(14:4x 정상) | "eod_fallback"(창 놓쳐 마감후 복구)
             "turnover_rank": h.get("turnover_rank"), "change_pct_snapshot": h.get("change_pct"),
             "vol_mult": h.get("vol_mult"), "off_high_pct": h.get("off_high_pct"), "wick_pct": h.get("wick_pct"),
             "close_price": None, "eod_recorded": False,
@@ -6078,11 +6091,12 @@ async def _maybe_run_jongga_snapshot():
         result["daykey"] = _market_session_key("kr")
         result["snapshot_date"] = today   # v5.128: _jongga_snapshot_view()가 이 필드로 "오늘자" 판정
         result["is_snapshot"] = True
+        result["snapshot_source"] = "intraday"   # v5.129
         _cache["kr:jongga"] = result
         _jongga_snapshot_date = today
         print(f"[jongga] {today} 장중 스냅샷 완료 — 후보 {len(result['hits'])}개")
         try:
-            _record_jongga_snapshot(today, result["hits"])  # v5.98 포워드 트래킹 기록
+            _record_jongga_snapshot(today, result["hits"], source="intraday")  # v5.98 포워드 트래킹 기록
         except Exception as e2:
             print(f"[jongga-forward] 스냅샷 기록 실패: {e2}")
     except Exception as e:
