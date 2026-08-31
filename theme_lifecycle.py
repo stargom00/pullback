@@ -25,6 +25,7 @@ import pandas as pd
 WINDOW = 60             # 분석/출력 창(거래일)
 BASELINE_WINDOW = 20    # z-score 기준선 창(거래일)
 NEWHIGH_WINDOW = 20     # N일 신고가 판정 창
+TURNOVER_RATIO_WINDOW = 20   # 회전율(오늘 거래대금 ÷ 자기 트레일링 평균) 기준 창
 D0_Z_THRESHOLD = 2.0
 D0_LEADER_RET_PCT = 5.0
 DIFFUSION_TARGET_RET_PCT = 5.0
@@ -33,6 +34,16 @@ LATE_STAGE_LOOKBACK = 5      # 후기 판정: 대장주 추세둔화 비교용 5
 CONCENTRATION_TREND_LOOKBACK = 5   # 확산 판정: 집중도 하락 추세 비교 기준일
 EXIT_STREAK_DAYS = 3
 EXIT_BREADTH_MAX_PCT = 40.0
+
+# v5.123(사용자 지시) — D0/리더 판정에 쓰는 서열 방식. 3종(정적/거래대금/
+# 회전율) 중 4개 실사이클(제약바이오 2·반도체 2) 백테스트 결과 회전율이
+# 3/4로 최고 적중(정적 2/4, 거래대금 2/4) — 특히 제약바이오 cycle1(6/17)
+# 에서 거래대금 1위였던 알테오젠이 아니라 회전율 26배로 튄 JW신약이 실제
+# 당일 최대상승(+29.9%) 종목이었음을 회전율만 잡아냄. n=4라 확정적이진
+# 않음(반도체 cycle2처럼 테마 전체가 동반 급등한 날은 회전율이 오히려
+# 저유동 종목을 과대평가해 오판 — 4건 중 유일한 오답 사례). 상세 근거는
+# docs/theme_lifecycle_leader_rank_backtest.md.
+LEADER_RANK_METHOD = "turnover_ratio"
 
 
 # ── 원시 시계열 헬퍼 ─────────────────────────────────────────────────
@@ -65,9 +76,18 @@ def market_daily_turnover(data: dict) -> pd.Series:
 def compute_theme_series(stocks: list[dict], data: dict, market_turnover: pd.Series,
                           window: int = WINDOW) -> dict | None:
     """stocks: theme_map.json entry의 stocks 리스트([{ticker,name,rank,reason}]).
+    theme_map.json의 rank는 "시총순"이 아니라 Claude 생성 프롬프트가 요구하는
+    "테마 사업 직결도 순위(1=대장주)" — 정적 서열은 이 정의를 그대로 쓴다.
+
     반환: {"tickers": [...], "closes": {ticker: Series}, "rows": [일자별 dict, ...]}
-    rows[i]["ranked"] = 그날 거래대금 순으로 정렬된 [(ticker, {close,turnover,
-    ret_pct,up,newhigh}), ...] — 대장/2등/3등 서열의 원천."""
+    rows[i]에 서열 3종을 병기:
+      "ranked"              = 거래대금(절대값) 순 [(ticker, {...}), ...]
+      "ranked_static"       = theme_map.json의 정적 rank(사업직결도) 순
+      "ranked_turnover_ratio" = 오늘 거래대금 ÷ 자기 트레일링 20일 평균
+                                거래대금(당일 제외) 배수 순 — "회전율" 서열.
+                                평균을 못 구하는 종목(이력 부족)은 맨 뒤로.
+    각 방식의 rank1이 D0/리더 판정의 후보 — LEADER_RANK_METHOD가 실제 채택."""
+    static_rank_map = {s["ticker"]: s.get("rank") for s in stocks}
     tickers = [s["ticker"] for s in stocks]
     closes, turnovers = {}, {}
     for t in tickers:
@@ -101,18 +121,42 @@ def compute_theme_series(stocks: list[dict], data: dict, market_turnover: pd.Ser
             n_up += int(is_up)
             n_newhigh += int(is_newhigh)
             theme_turnover += float(tv)
+            ts = turnovers[t]
+            avg20 = ts.loc[ts.index < d].tail(TURNOVER_RATIO_WINDOW)
+            avg20_val = float(avg20.mean()) if len(avg20) >= 5 else None
+            turnover_ratio = (float(tv) / avg20_val) if avg20_val and avg20_val > 0 else None
             per_stock[t] = {"close": float(price), "turnover": float(tv), "ret_pct": ret,
-                             "up": is_up, "newhigh": bool(is_newhigh)}
+                             "up": is_up, "newhigh": bool(is_newhigh),
+                             "static_rank": static_rank_map.get(t),
+                             "turnover_ratio": turnover_ratio}
         mkt_tv = market_turnover.get(d)
         share = (theme_turnover / mkt_tv * 100) if mkt_tv and mkt_tv > 0 else None
         ranked = sorted(per_stock.items(), key=lambda kv: kv[1]["turnover"], reverse=True)
+        ranked_static = sorted(
+            per_stock.items(),
+            key=lambda kv: kv[1]["static_rank"] if kv[1]["static_rank"] is not None else 999)
+        ranked_turnover_ratio = sorted(
+            per_stock.items(),
+            key=lambda kv: (kv[1]["turnover_ratio"] is None, -(kv[1]["turnover_ratio"] or 0.0)))
         top3_tv = sum(v["turnover"] for _, v in ranked[:3])
         conc = (top3_tv / theme_turnover * 100) if theme_turnover > 0 else None
         rows.append({"date": d, "turnover_share_pct": share,
                       "breadth_pct": (n_up / n_counted * 100) if n_counted else None,
                       "newhigh_pct": (n_newhigh / n_counted * 100) if n_counted else None,
-                      "concentration_top3_pct": conc, "n_counted": n_counted, "ranked": ranked})
+                      "concentration_top3_pct": conc, "n_counted": n_counted,
+                      "ranked": ranked, "ranked_static": ranked_static,
+                      "ranked_turnover_ratio": ranked_turnover_ratio})
     return {"tickers": list(closes.keys()), "closes": closes, "rows": rows}
+
+
+def _leader_ranked(row: dict, method: str = LEADER_RANK_METHOD) -> list:
+    """D0/리더 판정에 실제로 쓰는 서열 리스트 선택. method는 '정적/거래대금/
+    회전율' 3종 중 하나 — LEADER_RANK_METHOD(모듈 상수, 백테스트로 확정)가
+    기본값. 다른 두 방식은 API 응답에 참고용으로 계속 노출되지만 D0/리더
+    판정 로직 자체는 이 함수를 거친 것만 쓴다."""
+    key = {"static": "ranked_static", "turnover": "ranked",
+           "turnover_ratio": "ranked_turnover_ratio"}.get(method, "ranked_turnover_ratio")
+    return row.get(key) or []
 
 
 # ── 2) D0(점화일) 판정 — "점유율 z>=2 & rank1 +5%↑" 단일일 판정 ────────
@@ -125,7 +169,8 @@ def _ignition_at(theme_data: dict, i: int) -> dict | None:
     if i < BASELINE_WINDOW:
         return None
     r = rows[i]
-    if not r["ranked"] or r["turnover_share_pct"] is None:
+    leader_list = _leader_ranked(r)
+    if not leader_list or r["turnover_share_pct"] is None:
         return None
     shares = [rr["turnover_share_pct"] for rr in rows]
     baseline = [shares[j] for j in range(i - BASELINE_WINDOW, i) if shares[j] is not None]
@@ -138,7 +183,7 @@ def _ignition_at(theme_data: dict, i: int) -> dict | None:
     z = (r["turnover_share_pct"] - mean) / std
     if z < D0_Z_THRESHOLD:
         return None
-    leader_ticker, leader_info = r["ranked"][0]
+    leader_ticker, leader_info = leader_list[0]
     if leader_info["ret_pct"] is None or leader_info["ret_pct"] < D0_LEADER_RET_PCT:
         return None
     return {"index": i, "date": r["date"], "z": round(z, 2), "leader": leader_ticker,
@@ -197,11 +242,14 @@ def find_cycles(theme_data: dict) -> list[dict]:
 
 
 def assign_rank_groups(theme_data: dict, d0: dict | None) -> dict | None:
-    """D0 당일 거래대금 서열로 rank1/2/3/4+를 고정 — 이후 각 그룹의
-    "확산 lag"을 추적하려면 서열이 매일 바뀌면 안 되므로 점화일 기준 고정."""
+    """D0 당일 LEADER_RANK_METHOD(회전율) 서열로 rank1/2/3/4+를 고정 — 이후
+    각 그룹의 "확산 lag"을 추적하려면 서열이 매일 바뀌면 안 되므로 점화일
+    기준 고정. v5.123까지는 거래대금 서열이었으나, 4개 실사이클 백테스트
+    (docs/theme_lifecycle_leader_rank_backtest.md)에서 회전율이 실제 점화
+    종목을 더 잘 맞혀(3/4 vs 거래대금 2/4) 이 서열로 교체."""
     if d0 is None:
         return None
-    ranked = theme_data["rows"][d0["index"]]["ranked"]
+    ranked = _leader_ranked(theme_data["rows"][d0["index"]])
     groups = {"rank1": None, "rank2": None, "rank3": None, "rank4plus": []}
     for i, (t, _) in enumerate(ranked):
         if i == 0:
@@ -287,7 +335,8 @@ def classify_phase(theme_data: dict, d0: dict | None, groups: dict | None,
     ev["concentration_high_vs_window_median"] = conc_high
     ev["concentration_window_median"] = conc_median
 
-    leader = groups["rank1"] if groups else (r["ranked"][0][0] if r["ranked"] else None)
+    _fallback_ranked = _leader_ranked(r)
+    leader = groups["rank1"] if groups else (_fallback_ranked[0][0] if _fallback_ranked else None)
     leader_up = ranked_today.get(leader, {}).get("up") if leader else None
     ev["leader"] = leader
     ev["leader_up_today"] = leader_up
@@ -401,9 +450,26 @@ def analyze_theme(theme_name: str, stocks: list[dict], data: dict,
     latest_idx = len(theme_data["rows"]) - 1
     phase = classify_phase(theme_data, d0, groups, as_of_index=latest_idx)
     latest = theme_data["rows"][-1]
-    ticker_rank_today = {t: i + 1 for i, (t, _) in enumerate(latest["ranked"])}
-    ticker_rank_at_d0 = ({t: i + 1 for i, (t, _) in enumerate(theme_data["rows"][d0["index"]]["ranked"])}
-                          if d0 else None)
+
+    def _rank_map(row):
+        return {t: i + 1 for i, (t, _) in enumerate(row["ranked"])}
+
+    def _rank_map_static(row):
+        return {t: i + 1 for i, (t, _) in enumerate(row["ranked_static"])}
+
+    def _rank_map_ratio(row):
+        return {t: i + 1 for i, (t, _) in enumerate(row["ranked_turnover_ratio"])}
+
+    # v5.123: 정적/거래대금/회전율 3종 병기(사용자 지시) — D0/리더 판정
+    # 자체는 LEADER_RANK_METHOD(회전율) 하나만 쓰지만, 나머지 2종도 참고용
+    # 으로 항상 같이 노출한다("판정만 던지지 말고 근거 병기"와 같은 원칙).
+    ticker_rank_today = _rank_map(latest)
+    ticker_rank_today_static = _rank_map_static(latest)
+    ticker_rank_today_turnover_ratio = _rank_map_ratio(latest)
+    d0_row = theme_data["rows"][d0["index"]] if d0 else None
+    ticker_rank_at_d0 = _rank_map(d0_row) if d0_row else None
+    ticker_rank_at_d0_static = _rank_map_static(d0_row) if d0_row else None
+    ticker_rank_at_d0_turnover_ratio = _rank_map_ratio(d0_row) if d0_row else None
     cycles_out = [{
         "d0": {"date": str(c["d0"]["date"].date()), "z": c["d0"]["z"], "leader": c["d0"]["leader"],
                "leader_ret_pct": c["d0"]["leader_ret_pct"]},
@@ -428,7 +494,12 @@ def analyze_theme(theme_name: str, stocks: list[dict], data: dict,
                      "breadth_pct": r["breadth_pct"], "newhigh_pct": r["newhigh_pct"],
                      "concentration_top3_pct": r["concentration_top3_pct"]}
                     for r in theme_data["rows"][-WINDOW:]],
-        "ticker_rank_today": ticker_rank_today,
+        "leader_rank_method": LEADER_RANK_METHOD,   # D0/리더 판정에 실제로 쓰인 서열 방식
+        "ticker_rank_today": ticker_rank_today,                    # 거래대금 순
+        "ticker_rank_today_static": ticker_rank_today_static,      # 정적(테마 사업직결도) 순
+        "ticker_rank_today_turnover_ratio": ticker_rank_today_turnover_ratio,  # 회전율 순(판정 기준)
         "ticker_rank_at_d0": ticker_rank_at_d0,
+        "ticker_rank_at_d0_static": ticker_rank_at_d0_static,
+        "ticker_rank_at_d0_turnover_ratio": ticker_rank_at_d0_turnover_ratio,
         "_theme_data": theme_data,   # 내부용(rotation_matrix 등 다중 테마 계산 재사용) — API 응답 시 제거할 것
     }
