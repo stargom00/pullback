@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.122</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.123</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3174,9 +3174,21 @@ async function onEnterCalendarTab() {
 }
 
 async function runMacroCalendarNow(btn) {
+  // v5.123: POST가 즉시 202로 응답(백그라운드 생성)하도록 바뀌어서, 예전처럼
+  // POST 완료 = 생성 완료가 아님 — /status를 짧게 폴링해서 실제 완료(또는
+  // 실패) 시점에 새로고침한다. 최대 90초 폴링 후엔 타임아웃으로 포기하고
+  // 일단 새로고침(백그라운드는 서버에서 계속 진행됨, UI만 그만 기다림).
   if (btn) { btn.disabled = true; btn.textContent = '생성 중…'; }
   try {
     await fetch('/api/calendar/macro/run', { method: 'POST' });
+    const deadline = Date.now() + 90000;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 3000));
+      const res = await fetch('/api/calendar/macro/status');
+      if (!res.ok) break;
+      const status = await res.json();
+      if (!status.generating) break;
+    }
   } catch (e) { /* 무시 — 아래서 어차피 다시 불러옴 */ }
   await onEnterCalendarTab();
 }

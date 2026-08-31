@@ -5,6 +5,26 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.123 [버그수정] theme_map API 두 가지 수정(사용자 지시, 실사용자 재현
+        버그) — ① GET /api/theme_map, GET /api/theme_map/{theme}가
+        API_READ_TOKEN 허용목록에 없어서 POST(생성)는 되는데 GET(조회)은
+        세션 로그인 없이 401로 막혀 있었음 — 로컬 재현으로 확인(POST는
+        정상 토큰이면 실제로 인증 통과함, 사용자가 겪은 POST 401은 토큰값
+        불일치 등 코드 밖 원인으로 추정 — CLAUDE.md 참고). _TOKEN_READABLE_
+        EXACT_PATHS/_TOKEN_READABLE_PATH_PREFIXES 신설, GET 두 경로 추가.
+        ② POST /api/theme_map/{theme}가 Claude 생성 완료까지 동기 대기해서
+        Railway 프록시 타임아웃(upstream error)에 걸림 — 비동기 job으로
+        전환: 즉시 202+job_id, 백그라운드 생성(asyncio.create_task, 기존
+        _run_money_flow_bg류와 같은 패턴), GET /api/theme_map/jobs/{job_id}
+        로 상태 폴링. job은 인메모리(다른 캐시들과 동일하게 재배포 시
+        초기화, 영속화 불필요). 매크로 캘린더 수동재생성(POST /api/
+        calendar/macro/run)도 같은 동기대기 문제가 있어 함께 전환 — 단
+        이쪽은 종목별이 아닌 단일 리소스라 별도 job_id 없이 기존
+        _macro_calendar_task_running 플래그 + 캐시 파일 자체를 진행상태로
+        재사용(GET /api/calendar/macro/status 신설). static/index.html의
+        runMacroCalendarNow()도 POST 완료=생성완료 가정을 버리고 /status
+        폴링으로 갱신(theme_map POST는 프론트에서 호출하는 곳이 원래
+        없어서 UI 쪽 변경 불필요, GET 두 곳만 이미 사용 중).
 v5.122 [기능개선] 테마 라이프사이클 D0를 사이클 단위로 탐지(사용자 지시) —
         이탈(이탈) 판정 이후 새 점화 조건(z>=2 & 대장주+5%↑) 충족 시 새
         D0로 리셋, 서열그룹도 새 D0 기준으로 재확정. theme_lifecycle.py에
@@ -3392,6 +3412,7 @@ import hmac
 import math
 import os
 import time
+import uuid
 import json as _json
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor
@@ -3506,13 +3527,25 @@ def _is_bot_read_path(method: str, path: str) -> bool:
 # 쓰기 API는 절대 여기 안 넣는다(세션 쿠키 필수 유지). 토큰 유출 시 피해도
 # 각자 비용 가드로 제한됨(theme_map.py: DAILY_GENERATION_LIMIT=3/일,
 # 매크로 캘린더: 성공 시 7일간 재생성 스킵 + 실패 시 24시간 재시도 스로틀).
+# v5.123[버그수정]: GET /api/theme_map, GET /api/theme_map/{theme}가 이
+# 목록에 없어서 curl로 생성 결과를 바로 조회할 수 없던 문제 — POST(생성)만
+# 되고 GET(조회)은 세션 로그인 없이 막혀 있었음. 같은 용도(curl로 트리거·
+# 확인)이므로 GET도 함께 허용.
 _TOKEN_WRITABLE_EXACT_PATHS = {"/api/calendar/macro/run"}
+_TOKEN_READABLE_EXACT_PATHS = {"/api/theme_map", "/api/calendar/macro/status"}
+_TOKEN_READABLE_PATH_PREFIXES = ("/api/theme_map/",)
 
 
 def _is_token_writable_path(method: str, path: str) -> bool:
     if method != "POST":
         return False
     return path.startswith("/api/theme_map/") or path in _TOKEN_WRITABLE_EXACT_PATHS
+
+
+def _is_token_readable_path(method: str, path: str) -> bool:
+    if method != "GET":
+        return False
+    return path in _TOKEN_READABLE_EXACT_PATHS or path.startswith(_TOKEN_READABLE_PATH_PREFIXES)
 
 
 def _session_secret() -> bytes:
@@ -3591,9 +3624,9 @@ async def login_submit(request: Request):
 async def _auth_gate(request: Request, call_next):
     """APP_PASSWORD 미설정이면 통과(게이트 꺼짐). 설정되면: /login과
     SYNC_TOKEN 자체보호 경로는 항상 통과, 유효한 세션 쿠키가 있으면 통과,
-    얼마냐봇 폴링 경로 + 테마 매핑 수동생성(v5.109, 유일한 쓰기 예외)은
-    API_READ_TOKEN 헤더로도 통과. 나머지는 API면 401 JSON, 페이지면
-    /login으로 리다이렉트."""
+    얼마냐봇 폴링 경로 + 테마 매핑 수동생성(v5.109, 유일한 쓰기 예외) +
+    테마 매핑/작업상태 조회(v5.123)는 API_READ_TOKEN 헤더로도 통과.
+    나머지는 API면 401 JSON, 페이지면 /login으로 리다이렉트."""
     if not APP_PASSWORD:
         return await call_next(request)
 
@@ -3606,7 +3639,8 @@ async def _auth_gate(request: Request, call_next):
 
     token_ok = bool(API_READ_TOKEN) and hmac.compare_digest(
         request.headers.get("X-Api-Read-Token", ""), API_READ_TOKEN)
-    if token_ok and (_is_bot_read_path(request.method, path) or _is_token_writable_path(request.method, path)):
+    if token_ok and (_is_bot_read_path(request.method, path) or _is_token_writable_path(request.method, path)
+                      or _is_token_readable_path(request.method, path)):
         return await call_next(request)
 
     if path.startswith("/api/"):
@@ -3614,7 +3648,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.122"
+VERSION = "v5.123"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7713,23 +7747,67 @@ async def theme_map_get(theme_name: str):
                                      "stale": theme_map.is_stale(entry)}))
 
 
+# v5.123[버그수정]: 생성(Claude+web_search)이 길면 Railway 프록시가 응답을
+# 못 기다리고 upstream error로 끊어버림(실사용자 재현) — 동기 응답을
+# 비동기 작업(job)으로 전환. POST는 즉시 202+job_id만 반환하고 실제 생성은
+# asyncio.create_task로 백그라운드에서 진행(이 파일의 기존 fire-and-forget
+# 관례 — _run_money_flow_bg/_refresh_macro_calendar_bg와 동일 패턴 재사용),
+# GET /api/theme_map/jobs/{job_id}로 상태를 폴링한다. job 상태는 다른
+# 인메모리 캐시들과 동일하게 재배포 시 초기화됨(영속화 불필요 — 생성
+# 자체가 몇 분 내 끝나는 일회성 작업).
+_theme_map_jobs: dict = {}  # {job_id: {"status", "theme", "result", "error", "created_at"}}
+
+
+async def _theme_map_generate_job(job_id: str, theme_name: str):
+    job = _theme_map_jobs[job_id]
+    job["status"] = "running"
+    try:
+        bundle = await _fetch_market_data("kr", wait_for_fresh=True)
+        if not bundle:
+            job["status"] = "error"
+            job["error"] = "KR 시장 데이터 로드 실패"
+            return
+        loop = asyncio.get_event_loop()
+        entry = await loop.run_in_executor(_executor, theme_map.generate_theme_map, theme_name, bundle["universe"])
+        if entry.get("error"):
+            job["status"] = "error"
+            job["error"] = entry["error"]
+            return
+        theme_map.save_theme_map(theme_name, entry)
+        job["status"] = "done"
+        job["result"] = _clean_nan({"theme": theme_name, **entry})
+    except Exception as e:
+        job["status"] = "error"
+        job["error"] = f"{type(e).__name__}: {e}"
+
+
 @app.post("/api/theme_map/{theme_name}")
 async def theme_map_generate(theme_name: str):
     """수동 생성(사용자 지시 4번) — 자동 생성과 같은 일일 한도를 공유한다
-    (비용 가드, 사용자 지시 7번 — 수동이라고 무제한 허용 안 함)."""
+    (비용 가드, 사용자 지시 7번 — 수동이라고 무제한 허용 안 함). v5.123부터
+    비동기 job — 즉시 202+job_id 반환, 실제 생성은 백그라운드, 결과는
+    GET /api/theme_map/jobs/{job_id}로 조회."""
     if theme_map.today_generation_count() >= theme_map.DAILY_GENERATION_LIMIT:
         return JSONResponse(
             {"error": f"오늘 신규 매핑 생성 한도({theme_map.DAILY_GENERATION_LIMIT}건) 도달 — 내일 다시 시도"},
             status_code=429)
-    bundle = await _fetch_market_data("kr", wait_for_fresh=True)
-    if not bundle:
-        return JSONResponse({"error": "KR 시장 데이터 로드 실패"}, status_code=503)
-    loop = asyncio.get_event_loop()
-    entry = await loop.run_in_executor(_executor, theme_map.generate_theme_map, theme_name, bundle["universe"])
-    if entry.get("error"):
-        return JSONResponse({"error": entry["error"]}, status_code=502)
-    theme_map.save_theme_map(theme_name, entry)
-    return JSONResponse(_clean_nan({"theme": theme_name, **entry}))
+    job_id = uuid.uuid4().hex
+    _theme_map_jobs[job_id] = {"status": "pending", "theme": theme_name, "result": None,
+                                "error": None, "created_at": datetime.now(KST).isoformat()}
+    asyncio.create_task(_theme_map_generate_job(job_id, theme_name))
+    return JSONResponse(
+        {"job_id": job_id, "status": "pending", "theme": theme_name,
+         "poll": f"/api/theme_map/jobs/{job_id}"},
+        status_code=202)
+
+
+@app.get("/api/theme_map/jobs/{job_id}")
+async def theme_map_job_status(job_id: str):
+    job = _theme_map_jobs.get(job_id)
+    if job is None:
+        return JSONResponse({"error": f"job '{job_id}' 없음(만료 또는 오타 — 재배포로 초기화됐을 수도 있음)"},
+                             status_code=404)
+    return JSONResponse(_clean_nan({"job_id": job_id, **job}))
 
 
 @app.get("/api/theme_lifecycle/{theme_name}")
@@ -8529,9 +8607,24 @@ async def get_calendar():
 @app.post("/api/calendar/macro/run")
 async def run_macro_calendar_now():
     """수동 재생성 트리거 — 최초 배포 직후 캐시가 비어있을 때, 또는 오래돼
-    수동으로 새로고침하고 싶을 때. 이미 진행 중이면 조용히 현재 캐시 반환."""
-    await _refresh_macro_calendar_bg()
-    return JSONResponse(_clean_nan(_load_macro_calendar()))
+    수동으로 새로고침하고 싶을 때. v5.123[버그수정]: 기존엔 Claude 생성이
+    끝날 때까지 await해서 Railway 프록시 타임아웃(upstream error)에 걸릴
+    수 있었음(theme_map POST와 같은 문제) — asyncio.create_task로 백그라운드
+    전환, 즉시 202 반환. 매크로 캘린더는 테마 매핑과 달리 종목별이 아닌
+    단일 리소스라 별도 job_id 체계 없이, 기존 _macro_calendar_task_running
+    플래그 + 캐시 파일의 generated_at/last_attempt_at/last_error를 그대로
+    진행상태로 재사용(새 저장소 안 만듦) — GET /api/calendar/macro/status로
+    폴링. 이미 진행 중이면 _refresh_macro_calendar_bg 자체 가드가 중복 실행 방지."""
+    asyncio.create_task(_refresh_macro_calendar_bg())
+    return JSONResponse(_clean_nan({"status": "started", **_load_macro_calendar(),
+                                     "poll": "/api/calendar/macro/status"}), status_code=202)
+
+
+@app.get("/api/calendar/macro/status")
+async def macro_calendar_status():
+    """POST /api/calendar/macro/run이 던진 백그라운드 생성의 진행상태 —
+    새 저장소 없이 기존 캐시 파일 + 실행중 플래그 재사용(위 설명 참고)."""
+    return JSONResponse(_clean_nan({"generating": _macro_calendar_task_running, **_load_macro_calendar()}))
 
 
 @app.get("/moneyflow")
