@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.120 [문서/주석] 역방향 감사(2026-08-31)에서 찾은 stale 경고 2건 정리:
+        CLAUDE.md의 rs_rank=80 고정근사치 설명을 "콜드캐시일 때만 폴백,
+        웜이면 실제 rs_ranks 사용(v5.61)"으로 갱신, GUIDE.md 저모멘텀
+        돌파 배지 설명의 "US 미검증"을 "US 검증 완료·정반대 방향 확인
+        (z=2.39)"으로 28번째 줄 체크리스트와 일치시킴. 로직 변경 없음.
 v5.119 [문서/주석] vol_reference()의 v5.57 UD게이트 경고(⚠️ 봇 쪽 수정
         필요, 이 레포에서는 손 안 댐)가 stock-alert v2.15에서 이미
         해결된 뒤에도 안 지워져 있던 것 정리 — "미뤄진 구현" 전수감사
@@ -3576,7 +3581,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.119"
+VERSION = "v5.120"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
