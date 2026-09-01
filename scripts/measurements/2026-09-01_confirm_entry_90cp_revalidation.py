@@ -156,45 +156,64 @@ def run_pullback(pb_hits):
     }
 
 
-def run_imminent(im_hits):
+def run_imminent_variant(im_hits, use_high: bool, stop_key: str):
+    """2026-09-01(사용자 지시): 돌파임박 확인규칙을 눌림목(안C')과 통일할지
+    판단하기 위한 요인분해. entry조건(High/Close)과 손절정의(signal_low/
+    구조적stop h['stop'])를 독립으로 바꿔가며 3개 변형을 잰다 — 임의로
+    한쪽만 바꾸고 결과가 좋다고 채택하면 어느 요인이 기여했는지 구분 불가.
+    stop_key: 'signal_low' 또는 'stop'(구조적)."""
     a_outcomes, c_outcomes, hybrid_outcomes = [], [], []
     n_confirmed = 0
+    finder = find_confirm_high if use_high else find_confirm_close
     for h in im_hits:
         a_out = harness.race(h["close"], h["stop"], h["future"])
         a_outcomes.append(a_out)
-        conf = find_confirm_high(h)
+        conf = finder(h)
         if conf is None:
             hybrid_outcomes.append(a_out)
             continue
-        k, trigger_price = conf
+        if use_high:
+            k, trigger_price = conf
+        else:
+            k, trigger_price, _close_price = conf
         n_confirmed += 1
         fut_after = h["future"].iloc[k:]
-        # 안C 손절 = 신호일 저가(원 정의 3.1 — analyze_imminent()의 구조적
-        # stop과 다름, 재정의).
-        c_out = harness.race(trigger_price, h["signal_low"], fut_after)
+        stop_val = h[stop_key]
+        c_out = harness.race(trigger_price, stop_val, fut_after)
         c_outcomes.append(c_out)
         hybrid_outcomes.append(c_out)
 
     return {
         "n_hits_total": len(im_hits),
         "안A_전체": harness.ev_summary(a_outcomes),
-        "안C_진입분": harness.ev_summary(c_outcomes),
+        "확인진입분": harness.ev_summary(c_outcomes),
         "하이브리드_전체(미진입=안A로 대체)": harness.ev_summary(hybrid_outcomes),
-        "진입률_C": round(n_confirmed / len(im_hits), 4) if im_hits else None,
+        "진입률": round(n_confirmed / len(im_hits), 4) if im_hits else None,
     }
 
 
 def run(data, bench, out_path=None):
     pb_hits, im_hits = collect_hits(data, bench)
+    im_high_signallow = run_imminent_variant(im_hits, use_high=True, stop_key="signal_low")   # = 안C 원 정의
+    im_close_signallow = run_imminent_variant(im_hits, use_high=False, stop_key="signal_low")  # entry조건만 교체
+    im_close_structural = run_imminent_variant(im_hits, use_high=False, stop_key="stop")       # entry+손절 둘 다 교체(안C'와 완전동일 방식)
+
+    def _z(base):
+        z, sig = harness.ev_gap_zscore(base["안A_전체"], base["확인진입분"])
+        return {"z": z, "significant": sig}
+
+    pb_report = run_pullback(pb_hits)
     report = {
         "offsets": f"{OFFSETS[0]}..{OFFSETS[-1]} step10 ({len(OFFSETS)}개)",
-        "pullback_안C'": run_pullback(pb_hits),
-        "imminent_안C": run_imminent(im_hits),
+        "pullback_안C'": pb_report,
+        "imminent_원정의_High_신호일저가": {**im_high_signallow, "z_vs_안A": _z(im_high_signallow)},
+        "imminent_변형_Close_신호일저가": {**im_close_signallow, "z_vs_안A": _z(im_close_signallow)},
+        "imminent_변형_Close_구조적stop": {**im_close_structural, "z_vs_안A": _z(im_close_structural)},
     }
-    pb_report = report["pullback_안C'"]
-    im_report = report["imminent_안C"]
     print(f"[PULLBACK 안C'] {pb_report}", flush=True)
-    print(f"[IMMINENT 안C] {im_report}", flush=True)
+    print(f"[IMMINENT High+신호저가(원정의)] {report['imminent_원정의_High_신호일저가']}", flush=True)
+    print(f"[IMMINENT Close+신호저가] {report['imminent_변형_Close_신호일저가']}", flush=True)
+    print(f"[IMMINENT Close+구조적stop] {report['imminent_변형_Close_구조적stop']}", flush=True)
     if out_path:
         with open(out_path, "w") as f:
             json.dump(report, f, ensure_ascii=False, indent=2)

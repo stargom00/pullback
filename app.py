@@ -5,6 +5,29 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.141 [정정+기능] 돌파임박 확인진입(안C) 방법론 요인분해 재측정 후 통일
+        (사용자 지시 후속 — v5.138 재확인 직후 "지금 바로 고친다" 선택,
+        이어서 "Close 기준 통일 전 90개 창 재측정으로 검증부터" 조건부
+        승인). 배경: 지난 턴에 만든 `_pending_watch_confirm_check()`가
+        두 탭 다 종가기준으로 판정하는데, 안C 원 정의(90개 재검증 완료,
+        v5.138)는 고가(High)기준+신호일저가손절이라 돌파임박 🔴 항목이
+        검증된 정의와 다른 조건으로 판정되고 있었음. 종가기준으로
+        임의 통일하지 않고 먼저 재측정(`2026-09-01_confirm_entry_90cp_
+        revalidation.py`에 요인분해 3변형 추가): 고가+신호일저가(원
+        정의, EV 0.658R,z=22.0) / 종가+신호일저가(EV **1.062R**,
+        z=**34.7**) / 종가+구조적stop(EV 0.802R,z=24.7). **종가기준이
+        원 정의보다 오히려 더 강한 신호로 확인**(EV +61%, z 22.0→34.7)
+        — 임의 완화가 아니라 실측으로 더 나은 정의를 찾은 경우. 손절은
+        신호일저가 쪽이 구조적stop보다 32% 높은 EV(1.062 vs 0.802R,
+        둘 다 유의)라 신규 인프라 비용 감수하고 채택: `_registration_day_
+        low(df, reg_date)` 신설 — 감시 등록일(v5.44 "등록일 고가"와 같은
+        근사 관례)의 실제 저가를 캐시된 OHLCV에서 조회. 등록일 데이터를
+        못 구하면(주말 수동등록 등) 검증된 정의를 충족 못 한 것으로 보고
+        확인 자체를 취소(구조적 stop으로 조용히 폴백 안 함 — "검증된
+        규칙 충족만 🔴" 원칙 유지). `CONFIRM_RULE_BY_TAB` 인용을 최종
+        수치로 갱신. 눌림목(안C')은 원래도 종가기준+구조적stop이라
+        변경 없음. `docs/kr_us_strategy_map.md` "재검증 결과 —
+        우선순위5" 절에 요인분해 표 추가 예정.
 v5.140 [근본수정] 돈의흐름 자동실행 19분 재실행 사고 근본 원인 수정(사용자
         지시 B) — `_moneyflow_warmed`(프로세스 메모리 dict, 재시작마다
         리셋)를 영구 볼륨(마커 파일)으로 교체. `_resolve_persistent_path()`
@@ -3972,7 +3995,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.140"
+VERSION = "v5.141"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -9018,12 +9041,18 @@ def _calendar_ticker_df(ticker: str):
 
 def _pending_watch_confirm_check(df, pivot: float):
     """대기(pending) 감시 종목의 표준 확인진입 판정 — "종가가 피벗(신호일
-    고가 레벨) 초과 + 거래량 트레일링 50일 평균의 1.5배 이상"
-    (docs/pullback_stop_width_and_entry_timing.md 안C', docs/
-    imminent_stop_entry_investigation.md 안C와 동일 정의, theme_reignition.
-    check_confirm()과도 같은 골격). scanner.nonzero_vol_mean()으로 거래정지
-    희석 방지(v5.129)까지 그대로 재사용. 반환: (confirmed, close, vol_mult)
-    또는 데이터 부족시 (False, None, None)."""
+    고가 레벨) 초과 + 거래량 트레일링 50일 평균의 1.5배 이상". 원래는
+    눌림목 안C'의 정의를 그대로 가져와 두 탭에 공용 적용한 것이었는데,
+    2026-09-01 90개 체크포인트 요인분해 재측정(사용자 지시)에서 돌파임박도
+    종가기준이 원 정의(고가기준+신호일저가손절, EV 0.658R,z=22.0)보다
+    오히려 더 강한 신호로 확인됨(종가기준+신호일저가손절 EV 1.062R,
+    z=34.7 / 종가기준+구조적stop EV 0.802R,z=24.7 — 셋 다 유의하지만
+    종가기준 쪽이 최고). 따라서 이 확인조건(종가기준)은 두 탭 다 그대로
+    유지 — 손절 정의만 탭별로 다름(아래 호출부에서 돌파임박은
+    `_registration_day_low()`로 재정의, 눌림목은 안 건드림).
+    scanner.nonzero_vol_mean()으로 거래정지 희석 방지(v5.129)까지 그대로
+    재사용. 반환: (confirmed, close, vol_mult) 또는 데이터 부족시
+    (False, None, None)."""
     if df is None or len(df) < 51 or not pivot or pivot <= 0:
         return False, None, None
     close_s, vol_s = df["Close"], df["Volume"]
@@ -9033,6 +9062,28 @@ def _pending_watch_confirm_check(df, pivot: float):
     vol_mult = round(today_vol / avg_vol, 2) if avg_vol > 0 else 0.0
     confirmed = today_close > pivot and avg_vol > 0 and today_vol >= 1.5 * avg_vol
     return confirmed, round(today_close, 2), vol_mult
+
+
+def _registration_day_low(df, reg_date: str):
+    """감시 등록일(=근사 신호일, v5.44 "등록일 고가"와 같은 관례 — 신호
+    최초감지일이 아니라 사용자가 관찰/감시 등록한 날짜) 저가 조회 —
+    돌파임박 확인진입(안C 계열) 손절 재정의용. 2026-09-01 재측정에서
+    "종가기준확인+신호일저가손절"(EV 1.062R,z=34.7)이 "종가기준확인+
+    구조적stop"(EV 0.802R,z=24.7)보다 32% 더 높은 EV로 채택 — 둘 다
+    유의하지만 신호일저가 쪽이 명확히 우세해 신규 인프라(이 함수) 비용을
+    감수. 등록일이 df 인덱스에 없으면(주말 수동등록 등 예외) None —
+    호출부는 None이면 원 정의 충족 실패로 처리(구조적 stop으로 조용히
+    폴백하지 않음 — "검증된 규칙 충족만 🔴" 원칙)."""
+    if df is None or not reg_date:
+        return None
+    try:
+        import pandas as pd
+        ts = pd.Timestamp(reg_date)
+        if ts in df.index:
+            return round(float(df.loc[ts, "Low"]), 2)
+    except Exception:
+        pass
+    return None
 
 
 @app.get("/api/calendar")
@@ -9248,12 +9299,15 @@ async def get_calendar():
     #    지시).
     # v5.138: v5.137에서 "재검증 대기"로 강등했던 두 EV — 우선순위5
     # 90개 체크포인트 재검증 완료(REAFFIRMED, 유일한 생존 사례).
-    # docs/kr_us_strategy_map.md "재검증 결과 — 우선순위5" 참고. 90개
-    # 창 수치로 갱신(원측정 0.796R/0.923R보다 낮아졌지만 안A 대비 상대
-    # 우위는 오히려 커짐 — z=22.0/18.5로 depth_atr류보다 한 자릿수 더
-    # 유의).
+    # docs/kr_us_strategy_map.md "재검증 결과 — 우선순위5" 참고.
+    # v5.141(사용자 지시 후속): 돌파임박은 원 정의(고가기준확인+신호일
+    # 저가손절)를 눌림목과 같은 종가기준확인으로 통일할지 요인분해
+    # 재측정 — 종가기준이 오히려 더 강함이 확인돼(EV 0.658→1.062R,
+    # z=22.0→34.7) 채택. 손절은 신호일저가(등록일 저가로 근사,
+    # `_registration_day_low()`)가 구조적stop보다 32% 높은 EV(1.062 vs
+    # 0.802R)라 신규 캡처 비용 감수하고 채택.
     CONFIRM_RULE_BY_TAB = {
-        "돌파임박": "안C 확인진입 — EV 0.658R(n=3461, 90개 창 z=22.0) · docs/imminent_stop_entry_investigation.md",
+        "돌파임박": "안C 확인진입(종가기준+등록일저가손절) — EV 1.062R(n=2610, 90개 창 z=34.7) · docs/imminent_stop_entry_investigation.md",
         "눌림목": "안C' 확인진입 — EV 0.849R(n=1283, 90개 창 z=18.5) · docs/pullback_stop_width_and_entry_timing.md",
     }
     pending_near, pending_far = 0, 0
@@ -9272,6 +9326,7 @@ async def get_calendar():
         rule = CONFIRM_RULE_BY_TAB.get(tab)
         confirmed = False
         close = None
+        df = None
         if rule:
             df = _calendar_ticker_df(ticker)
             confirmed, close, vol_mult = _pending_watch_confirm_check(df, pivot_f)
@@ -9284,6 +9339,16 @@ async def get_calendar():
             stop_f = float(stop_f) if stop_f is not None else None
         except (TypeError, ValueError):
             stop_f = None
+        # v5.141: 돌파임박 손절 재정의(등록일 저가) — 2026-09-01 재측정
+        # 근거는 위 CONFIRM_RULE_BY_TAB 주석 참고. 등록일 데이터를 못
+        # 구하면(주말 수동등록 등) 검증된 정의를 충족 못 한 것이므로
+        # 확인 자체를 취소(구조적 stop으로 조용히 대체하지 않음).
+        if confirmed and tab == "돌파임박":
+            reg_low = _registration_day_low(df, r.get("date"))
+            if reg_low is not None and reg_low < pivot_f:
+                stop_f = reg_low
+            else:
+                confirmed = False
         dist_pct = round((pivot_f - close) / pivot_f * 100, 2)
         if rule and confirmed:
             target_2r = round(pivot_f + 2 * (pivot_f - stop_f), 2) if stop_f and pivot_f > stop_f else None
