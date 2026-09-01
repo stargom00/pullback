@@ -5,6 +5,17 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.142 [UI] "오늘의 결정" 카드 레이아웃 CSS Grid로 재구성(사용자 지시,
+        static/index.html만 수정). 컨테이너
+        `grid-template-columns:repeat(auto-fill,minmax(320px,1fr))`로
+        와이드 3~4열/노트북 2~3열/모바일 1열 자동 조정(max-width 1400px).
+        카드 내부를 4행 세로 스택으로 통일 — 1행 종목명+시장배지, 2행
+        핵심 가격정보(15px 강조: 즉시행동은 진입→손절, 근접은 현재가→
+        피벗(돌파%)), 3행 설명(2줄 말줄임, `-webkit-line-clamp`), 4행
+        ⚡감시/+일지 버튼(width:auto, 좌측정렬, `margin-top:auto`로 카드
+        하단 고정). 카드는 `min-height:148px`+flex column으로 설명
+        길이가 달라도 그리드 행이 안 흔들리게. 그룹 헤더(🔴/🟠/🟡)는
+        `grid-column:1/-1`로 그리드 안에서 전체 폭 차지.
 v5.141 [정정+기능] 돌파임박 확인진입(안C) 방법론 요인분해 재측정 후 통일
         (사용자 지시 후속 — v5.138 재확인 직후 "지금 바로 고친다" 선택,
         이어서 "Close 기준 통일 전 90개 창 재측정으로 검증부터" 조건부
@@ -3995,7 +4006,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.141"
+VERSION = "v5.142"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
