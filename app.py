@@ -5,6 +5,24 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.137 [정정+UI] "오늘의 결정" 안C/안C' 인용 표기 및 카드 레이아웃 수정
+        (사용자 지시). 사용자가 인용한 "안C 0.719R"은 KR단독 분해값 착오로
+        확인(문서엔 없음, 실제는 안C 0.796R). 다만 안C(0.796R,n=701)/
+        안C'(0.923R,n=261) 둘 다 `checkpoints(60,250,10)`=20개 창 계열 —
+        오늘 규칙9로 재검증한 4건(depth_atr/RS게이트E/다중히트/RSI<50)이
+        전부 90개에서 채택 철회된 것과 같은 출신이라, 재검증 완료 전까지
+        `CONFIRM_RULE_BY_TAB`(app.py) 인용 문구를 "검증 EV" → "EV
+        …(20개 창 — 재검증 대기)"로 강등 표기. 우선순위5로
+        `docs/kr_us_strategy_map.md`에 등록, 90개 재검증 스크립트
+        `scripts/measurements/2026-09-01_confirm_entry_90cp_revalidation.py`
+        신설·실행(결과는 별도 기록). 감사 결과 재점화(1900일 이벤트기반,
+        n=53)와 종가베팅(90개 창 기확장, z=4.28)은 이미 대표본이라 대상
+        아님. [UI] "오늘의 결정" 카드 `max-width:900px;margin:0 auto`로
+        와이드 화면 가독성 개선, ⚡감시/+일지 버튼 `width:auto;padding:4px
+        16px`+우측정렬로 절반폭 차지 문제 수정, 🟡근접을 돌파%
+        부호로 분리(dist_pct>0 아직 피벗 아래=🟡근접 / dist_pct≤0
+        이미 돌파=🟠 신규 그룹) — 성격이 다른 신호(진입 검토 전 vs
+        확인 대기)가 같은 노란불로 섞여 있던 문제.
 v5.136 [신규] 캘린더(홈) 탭 최상단 "🎯 오늘의 결정" 섹션 — 시스템 최종
         출력층(사용자 지시). 34개 목록·여러 탭에 흩어진 검증 규칙(재점화
         확인 +0.755R · 종가베팅 +1.22%,n=276 · 돌파임박 안C 0.796R,n=701 ·
@@ -3915,7 +3933,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.136"
+VERSION = "v5.137"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -9157,9 +9175,13 @@ async def get_calendar():
     #    0.923R,n=261)만 검증된 확인규칙 존재. 그 외 탭은 피벗교차만으론
     #    🔴 인용 근거가 없어 🟡(확인규칙 미검증)로 낮춤 — "검증된 규칙
     #    충족만 🔴" 원칙(사용자 지시).
+    # v5.137: 두 EV 다 60~250(20개) 체크포인트 계열 — 규칙9 재검증에서
+    # 5/5 철회된 것과 같은 출신이라 "검증"이 아니라 "재검증 대기"로 강등
+    # 표기(사용자 지시, 우선순위5 등록). 90개 재검증 완료 시 이 문구를
+    # 갱신할 것.
     CONFIRM_RULE_BY_TAB = {
-        "돌파임박": "안C 확인진입 — 검증 EV 0.796R(n=701) · docs/imminent_stop_entry_investigation.md",
-        "눌림목": "안C' 확인진입 — 검증 EV 0.923R(n=261) · docs/pullback_stop_width_and_entry_timing.md",
+        "돌파임박": "안C 확인진입 — EV 0.796R(n=701, 20개 창 — 재검증 대기) · docs/imminent_stop_entry_investigation.md",
+        "눌림목": "안C' 확인진입 — EV 0.923R(n=261, 20개 창 — 재검증 대기) · docs/pullback_stop_width_and_entry_timing.md",
     }
     pending_near, pending_far = 0, 0
     for r in journal:

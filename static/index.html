@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.136</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.137</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3339,11 +3339,12 @@ function renderTodayDecisionHtml(td) {
   const mktOf = item => (item.market || '').toUpperCase() === 'KR' || /\.(KS|KQ)$/.test(item.ticker || '') ? 'KR' : 'US';
   const actions = (item, showWatch) => {
     _todayDecisionMap[item.key] = item;
+    const btnStyle = 'width:auto;padding:4px 16px;font-size:11px';
     const watchBtn = showWatch
-      ? `<button class="journal-btn" style="padding:3px 9px;font-size:11px" onclick="decisionQuickWatch(this,'${item.key}')">⚡ 감시</button>`
+      ? `<button class="journal-btn" style="${btnStyle}" onclick="decisionQuickWatch(this,'${item.key}')">⚡ 감시</button>`
       : '';
-    return `<div style="display:flex;gap:6px;margin-top:6px">${watchBtn}` +
-      `<button class="journal-btn" style="padding:3px 9px;font-size:11px" onclick="decisionOpenJournal('${item.key}')">+ 일지</button></div>`;
+    return `<div style="display:flex;justify-content:flex-end;gap:6px;margin-top:6px">${watchBtn}` +
+      `<button class="journal-btn" style="${btnStyle}" onclick="decisionOpenJournal('${item.key}')">+ 일지</button></div>`;
   };
   const nameLink = item => `<a class="name-link" href="${tvUrl(item)}" target="_blank" rel="noopener">${item.name}</a>`;
 
@@ -3366,7 +3367,11 @@ function renderTodayDecisionHtml(td) {
     </div>`;
   }).join('');
 
-  const nearHtml = (td.near || []).map(item => {
+  // v5.137(사용자 지시): 근접(🟡)에 "아직 피벗 아래"와 "이미 피벗 위(확인
+  // 대기)"가 섞여 있었다 — 성격이 다른 신호라 돌파% 부호로 그룹 분리.
+  // dist_pct>0 = 아직 피벗 아래(표시 "-X%") / dist_pct<=0 = 이미 돌파(표시
+  // "돌파 +X%") — 백엔드 부호 정의(app.py get_calendar) 그대로.
+  const renderNearRow = item => {
     const mkt = mktOf(item);
     const dist = item.dist_pct;
     const distStr = dist == null ? '-' : dist <= 0 ? `돌파 +${Math.abs(dist)}%` : `-${dist}%`;
@@ -3377,7 +3382,11 @@ function renderTodayDecisionHtml(td) {
         `${item.stop_if_triggered != null ? ` · 손절 ${fmtPrice(item.stop_if_triggered, mkt)}` : ''}</div>
       ${actions(item, item.source !== 'reignition')}
     </div>`;
-  }).join('');
+  };
+  const nearBelow = (td.near || []).filter(item => (item.dist_pct ?? 1) > 0);
+  const nearCrossed = (td.near || []).filter(item => (item.dist_pct ?? 1) <= 0);
+  const nearHtml = nearBelow.map(renderNearRow).join('');
+  const crossedHtml = nearCrossed.map(renderNearRow).join('');
 
   const waiting = td.waiting || {};
   const waitingParts = Object.entries(waiting).filter(([, n]) => n > 0)
@@ -3388,16 +3397,21 @@ function renderTodayDecisionHtml(td) {
     : '';
 
   if (!(td.immediate || []).length && !(td.near || []).length) {
-    return `<div class="mf-toolbar"><b>🎯 오늘의 결정</b></div>
+    return `<div style="max-width:900px;margin:0 auto">
+      <div class="mf-toolbar"><b>🎯 오늘의 결정</b></div>
       <div style="font-size:13px;color:var(--muted);margin-bottom:10px">오늘 행동할 것 없음${td.waiting_total ? ` — 대기 ${td.waiting_total}건` : ''}</div>
-      ${waitingHtml}`;
+      ${waitingHtml}
+    </div>`;
   }
 
-  return `<div class="mf-toolbar"><b>🎯 오늘의 결정</b></div>
+  return `<div style="max-width:900px;margin:0 auto">
+    <div class="mf-toolbar"><b>🎯 오늘의 결정</b></div>
     ${immediateHtml ? `<div style="font-size:12px;color:#ff9b9b;font-weight:700;margin-bottom:4px">🔴 즉시 행동</div>${immediateHtml}` : ''}
+    ${crossedHtml ? `<div style="font-size:12px;color:#ffb27a;font-weight:700;margin-bottom:4px">🟠 이미 돌파(확인 필요)</div>${crossedHtml}` : ''}
     ${nearHtml ? `<div style="font-size:12px;color:#ffd98a;font-weight:700;margin-bottom:4px">🟡 근접</div>${nearHtml}` : ''}
     ${waitingHtml}
-    <div style="margin-bottom:6px"></div>`;
+    <div style="margin-bottom:6px"></div>
+  </div>`;
 }
 
 function renderCalendar(data) {
