@@ -5,6 +5,14 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.139 [긴급/킬스위치] 돈의흐름 자동실행 19분 재실행 사고(Railway 재시작마다
+        `_moneyflow_warmed`가 프로세스 메모리라 리셋되던 문제) 진단 확정 후,
+        원인 수정(게이트 영속화) 전 즉시 차단 조치(사용자 지시 A). 환경변수
+        `MONEYFLOW_AUTO_ENABLED`(기본 "1", "0"이면 끔)로 `_warm_market()`의
+        스케줄러발 자동 리포트 생성만 건너뛴다 — 수동 재실행 버튼(POST
+        `/api/moneyflow/{market}/run`)은 이 가드 밖이라 그대로 동작. Railway
+        환경변수 하나로 즉시 자동실행을 끌 수 있게 함. 게이트 영속화(B)는
+        후속 커밋에서 진행.
 v5.138 [재검증 완료] 우선순위5(안C/안C' 확인진입) 90개 체크포인트 재검증
         결과 — **채택 철회 아님, 재확인(REAFFIRMED)**. 오늘 재검증한
         5건(depth_atr/RS게이트E/다중히트/RSI<50/이번 건) 중 유일하게
@@ -3951,7 +3959,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.138"
+VERSION = "v5.139"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6075,10 +6083,15 @@ async def _warm_market(market: str):
         # 돈의 흐름은 스캔 워밍과 독립 추적 — 스캔 워밍 실패와 무관하게 시도,
         # 서로의 실패가 전파되지 않음. Claude API 호출이 오래(10~30초+) 걸릴
         # 수 있어 create_task로 던져 4분 주기 스케줄러 루프를 막지 않는다.
-        mfkey = f"{market}:{daykey}"
-        if not _moneyflow_warmed.get(mfkey):
-            _moneyflow_warmed[mfkey] = True
-            asyncio.create_task(_run_money_flow_bg(market, daykey))
+        # v5.139(사용자 지시, 자동실행 19분 재실행 사고 킬스위치): _moneyflow_
+        # warmed가 프로세스 메모리에만 있어 재시작마다 리셋되고 자동경로가
+        # 반복 실행됨 — 원인 수정(B, 영속화) 전 즉시 차단용. 수동 버튼
+        # 경로(POST /api/moneyflow/{market}/run)는 이 가드 밖이라 영향 없음.
+        if os.environ.get("MONEYFLOW_AUTO_ENABLED", "1") != "0":
+            mfkey = f"{market}:{daykey}"
+            if not _moneyflow_warmed.get(mfkey):
+                _moneyflow_warmed[mfkey] = True
+                asyncio.create_task(_run_money_flow_bg(market, daykey))
         return
     # ── 장중: 캐시가 8분 이상 묵었으면 미리 갱신 (사용자 요청 전에) ──
     # DATA_TTL(10분)보다 짧은 주기로 데워, 사용자가 열 때 항상 신선한 캐시 확보.
