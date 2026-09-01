@@ -5,6 +5,28 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.149 [부분교체] 종가베팅 turnover_rank 계산에 v2 유니버스 부분 적용
+        (사용자 지시). 배경: 2026-09-01 재측정(z=3.54, n=292)으로 채택
+        유지가 확정됐지만 운영은 여전히 `fetch_top_value()`(91% 시총
+        폴백)를 써서 측정-실행 불일치 상태였음. `get_universe("kr")`
+        자체(돌파/눌림목/추세전환 등 전 탭 공유 유니버스)는 v2로
+        재측정된 적이 없어 전면 교체 대신 `_run_scan_jongga()`의
+        turnover_rank 계산에만 `naver_kr.fetch_top_turnover_v2()`를
+        적용하는 부분 교체로 한정 — 스캔 대상 종목군(kr_data)은 그대로,
+        그 종목에 매기는 순위만 정확해짐. 환경변수
+        `JONGGA_TURNOVER_SOURCE=v1|v2`(기본 v2)로 코드 배포 없이 즉시
+        롤백 가능(v5.139 킬스위치와 같은 패턴). 44회 요청
+        실패/incomplete 시 캐시 저장 없이 v1으로 폴백 + 로그(모든 실패
+        경로가 원인을 print, `except: pass` 없음). 캐시:
+        `kr_turnover_v7_jongga_{날짜}.json`(universe.py의
+        `kr_universe_v6_*.json`과 이름 분리, `/data` 볼륨, 하루 1회
+        갱신 — 그날 첫 호출이 62초 콜드스타트 감수 후 캐시, 이후 캐시
+        히트). `diag.turnover_rank_source`로 v1/v2 여부를 응답에서
+        바로 확인 가능(검증 방법은 docs/kr_jongga_betting_backtest.md
+        "운영 반영 완료" 절). `JONGGA_BACKTEST_NOTE`/`GUIDE.md` 6.5장의
+        "운영 미반영" 캐비어트 제거, "당일 거래대금 상위 100(전종목
+        기준, v2 유니버스)"로 확정. `naver_kr.fetch_top_turnover_v2()`
+        캐시 읽기/incomplete/저장 3개 시나리오를 격리 테스트로 검증.
 v5.148 [비용절감] 돈의흐름(money flow) 리포트 매일→주 1회 전환(사용자
         지시, 월 ~$50 → ~$8). 토요일 09:00 KST 이후 그 주의 실제 마지막
         거래일(보통 금요일, 공휴일이면 그 이전 — `_last_trading_daykey()`
@@ -4145,7 +4167,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.148"
+VERSION = "v5.149"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -4848,12 +4870,70 @@ STAGE2_RS_PCTILE_MIN = 70
 # (load_kr_dynamic)은 아직 fetch_top_value()(구버전)를 그대로 쓴다 —
 # 즉 화면에 뜨는 후보는 여전히 구 유니버스 기준. 운영 교체 계획은
 # docs/kr_jongga_betting_backtest.md "운영 반영 계획" 절 참고.
-JONGGA_BACKTEST_NOTE = ("이 조건 과거 평균 익일갭 +1.22% (n=276, 비용차감후, "
-                          "왕복0.3% 가정) — z=4.28, 구 유니버스 기준 "
-                          "(docs/kr_jongga_betting_backtest.md) · 2026-09-01 재검증"
-                          "(신규 유니버스): +0.80% (n=292) — z=3.54, 채택 유지 "
-                          "· ⚠️ 운영은 아직 구 유니버스(교체 전)")
+JONGGA_BACKTEST_NOTE = ("이 조건 과거 평균 익일갭 +0.80% (n=292, 비용차감후, "
+                          "왕복0.3% 가정) — z=3.54, 당일 거래대금 상위 100"
+                          "(전종목 기준, v2 유니버스) (docs/kr_jongga_betting_"
+                          "backtest.md) · 구 유니버스(시총폴백 91%) 기준 원측정: "
+                          "+1.22% (n=276) — z=4.28")
 JONGGA_SELL_RULE = "익일 시초가~9:05 전량 매도"
+
+# ── 종가베팅 turnover_rank — v2(진짜 거래대금 상위) 부분 교체 (v5.149) ──
+# 배경: get_universe("kr") 자체는 91% 시총폴백(naver_kr.fetch_top_value
+# 페이지네이션 버그, docs/kr_universe_turnover_pagination_investigation.md)이
+# 그대로 남아있고, 이걸 전면 교체하면 돌파/눌림목/추세전환 등 다른 탭의
+# 스캔 모집단까지 같이 바뀐다 — 그 탭들은 v2로 재측정된 적이 없어 전면
+# 교체는 하지 않는다(사용자 지시). 대신 종가베팅의 turnover_rank 계산
+# 에만 naver_kr.fetch_top_turnover_v2()를 부분 적용 — get_universe("kr")
+# 자체(스캔 대상 종목군)는 그대로 두고, 그 종목들에 매기는 순위만
+# 정확한 거래대금 기준으로 바꾼다.
+JONGGA_TURNOVER_SOURCE_ENV = "JONGGA_TURNOVER_SOURCE"   # v1|v2, 기본 v2. Railway 환경변수만 바꾸면 코드 배포 없이 즉시 롤백 가능(v5.139 킬스위치와 같은 패턴).
+
+
+def _jongga_turnover_v2_cache_path(daykey: str) -> str:
+    """universe.py의 kr_universe_v6_*.json과 절대 안 겹치는 v7 네임스페이스
+    (별도 캐시 파일 — 신구 데이터가 섞일 위험 없음, 사용자 지시)."""
+    return _resolve_persistent_path(f"kr_turnover_v7_jongga_{daykey}.json")
+
+
+def _load_jongga_turnover_v2_rank() -> "dict | None":
+    """오늘자 캐시(하루 1회, 콜드스타트 44회 요청·약 62초라 캐시 필수)가
+    있으면 그대로 쓰고, 없으면 naver_kr.fetch_top_turnover_v2()를 호출해
+    캐시에 저장한다. 실패했거나 stats.incomplete=True(일부 페이지 요청
+    실패로 부분 유니버스)면 None을 반환해 호출부가 v1으로 폴백하게 한다
+    — 조용히 부분 유니버스로 넘어가지 않는다(사용자 지시, except:pass
+    금지 — 아래 모든 실패 경로가 로그를 남긴다)."""
+    daykey = datetime.now(KST).strftime("%Y-%m-%d")
+    cache_path = _jongga_turnover_v2_cache_path(daykey)
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, encoding="utf-8") as f:
+                cached = _json.load(f)
+            cached_universe = cached.get("universe")
+            if isinstance(cached_universe, dict) and cached_universe:
+                return {t: i + 1 for i, t in enumerate(cached_universe.keys())}
+            print(f"[jongga] turnover v2 캐시가 비어있음({cache_path}) — 새로 받는다")
+        except (OSError, ValueError) as e:
+            print(f"[jongga] turnover v2 캐시 읽기 실패({cache_path}): {e} — 새로 받는다")
+    try:
+        fetched_universe, stats = naver_kr.fetch_top_turnover_v2()
+    except Exception as e:
+        print(f"[jongga] turnover v2 fetch 예외 발생, v1로 폴백: {type(e).__name__}: {e}")
+        return None
+    if stats.get("incomplete"):
+        print(f"[jongga] turnover v2 결과 incomplete(일부 페이지 요청 실패로 "
+              f"부분 유니버스) — v1로 폴백, 캐시 저장 안 함. stats={stats}")
+        return None
+    if not fetched_universe:
+        print(f"[jongga] turnover v2 결과가 비어있음 — v1로 폴백. stats={stats}")
+        return None
+    try:
+        _save_json_atomic(cache_path, {
+            "universe": fetched_universe, "stats": stats,
+            "generated_at": datetime.now(KST).isoformat(),
+        })
+    except OSError as e:
+        print(f"[jongga] turnover v2 캐시 저장 실패(이번 호출 결과는 그대로 사용): {e}")
+    return {t: i + 1 for i, t in enumerate(fetched_universe.keys())}
 
 
 def _jongga_session_state(now_kst: datetime) -> dict:
@@ -4946,20 +5026,36 @@ async def _run_scan_jongga(bundle: dict) -> dict:
     diag = {"kr_universe": sum(1 for t in universe if naver_kr.is_kr(t)),
             "kr_fetched": len(kr_data), "kr_hits": 0}
 
-    # ── 거래대금(종가×거래량) 순위 — RS랭크와 동일하게 cross-sectional이라
-    # analyze_jongga() 밖에서 미리 계산(scripts/measurements/2026-08-29_kr_
-    # jongga_betting_backtest_extended.py의 turnover_rank_at()과 동일 정의) ──
-    turnovers = {}
-    for t, df in kr_data.items():
-        c, v = df.get("Close"), df.get("Volume")
-        if c is None or v is None or len(c) < 1 or len(v) < 1:
-            continue
-        try:
-            turnovers[t] = float(c.iloc[-1]) * float(v.iloc[-1])
-        except Exception:
-            continue
-    ranked = sorted(turnovers.items(), key=lambda kv: kv[1], reverse=True)
-    turnover_rank = {t: i + 1 for i, (t, _) in enumerate(ranked)}
+    # ── 거래대금 순위 — RS랭크와 동일하게 cross-sectional이라 analyze_jongga()
+    # 밖에서 미리 계산. v5.149(사용자 지시, 부분 교체): 기본(v2)은
+    # naver_kr.fetch_top_turnover_v2()의 진짜 거래대금 순위를 쓰고, kr_data
+    # (get_universe("kr") 기반, 안 바뀜)에 있는 종목만 그 순위로 매핑한다.
+    # 실패/incomplete/환경변수(JONGGA_TURNOVER_SOURCE=v1)면 기존 v1 방식
+    # (kr_data 내부 close×volume 재계산, scripts/measurements/2026-08-29_kr_
+    # jongga_betting_backtest_extended.py의 turnover_rank_at()과 동일 정의)
+    # 으로 폴백 — v2가 조회 못한(top_n 밖) 종목은 순위 없음(None)으로
+    # 남아 analyze_jongga()의 base 조건(상위100)을 자연히 통과 못 한다.
+    turnover_source = os.environ.get(JONGGA_TURNOVER_SOURCE_ENV, "v2").lower()
+    turnover_rank = None
+    turnover_rank_source = "v1"
+    if turnover_source == "v2":
+        v2_rank = _load_jongga_turnover_v2_rank()
+        if v2_rank is not None:
+            turnover_rank = {t: v2_rank[t] for t in kr_data if t in v2_rank}
+            turnover_rank_source = "v2"
+    if turnover_rank is None:
+        turnovers = {}
+        for t, df in kr_data.items():
+            c, v = df.get("Close"), df.get("Volume")
+            if c is None or v is None or len(c) < 1 or len(v) < 1:
+                continue
+            try:
+                turnovers[t] = float(c.iloc[-1]) * float(v.iloc[-1])
+            except Exception:
+                continue
+        ranked = sorted(turnovers.items(), key=lambda kv: kv[1], reverse=True)
+        turnover_rank = {t: i + 1 for i, (t, _) in enumerate(ranked)}
+    diag["turnover_rank_source"] = turnover_rank_source
 
     hits = []
     for t, df in kr_data.items():
