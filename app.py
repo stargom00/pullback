@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.140 [근본수정] 돈의흐름 자동실행 19분 재실행 사고 근본 원인 수정(사용자
+        지시 B) — `_moneyflow_warmed`(프로세스 메모리 dict, 재시작마다
+        리셋)를 영구 볼륨(마커 파일)으로 교체. `_resolve_persistent_path()`
+        (JOURNAL_DIR→/data→앱폴더, theme_map.py의 _resolve_theme_map_dir과
+        같은 우선순위)로 디렉터리를 잡고, 시장:daykey별 마커 파일을
+        `os.O_CREAT|os.O_EXCL`로 생성 — read-then-write가 아니라 "파일이
+        없을 때만 성공"하는 단일 시스템콜이라 레플리카가 여러 개여도 같은
+        /data 볼륨을 보는 한 정확히 하나만 성공(POSIX 보장. /data가 O_EXCL
+        원자성이 약한 네트워크 파일시스템이면 이 보장이 깨질 수 있음 —
+        Railway 볼륨은 해당 안 된다고 보고 채택). v5.139 킬스위치
+        (MONEYFLOW_AUTO_ENABLED)는 원인 수정과 무관한 비상 스위치라 그대로
+        유지. .gitignore에 `moneyflow_warmed_*.marker` 추가(로컬 실행 시
+        생성되는 마커가 git 상태를 더럽히지 않게).
 v5.139 [긴급/킬스위치] 돈의흐름 자동실행 19분 재실행 사고(Railway 재시작마다
         `_moneyflow_warmed`가 프로세스 메모리라 리셋되던 문제) 진단 확정 후,
         원인 수정(게이트 영속화) 전 즉시 차단 조치(사용자 지시 A). 환경변수
@@ -3959,7 +3972,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.139"
+VERSION = "v5.140"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -5960,7 +5973,35 @@ _warm_intraday_ts: dict = {}   # {market: 마지막 장중 워밍 시각}
 # 1단계(money_flow.py, 거래대금 상위 100+테마 집계)와 2단계(money_flow_
 # report.py, Claude API 해석)를 순차 실행. 스케줄러(장마감 후 1회)와
 # 수동 재실행(POST /api/moneyflow/{market}/run) 공통 진입점.
-_moneyflow_warmed: dict = {}  # {"kr:daykey": True} — 스캔 워밍과 별도 추적
+# v5.140(사용자 지시 B, 19분 재실행 사고 근본수정): 게이트를 프로세스
+# 메모리(dict)가 아니라 영구 볼륨(마커 파일)에 둔다 — Railway 재배포/재시작
+# 마다 앱 폴더는 새로 체크아웃되지만 /data는 유지되므로(_resolve_persistent_
+# path 문서 참고, theme_map.py의 _resolve_theme_map_dir과 같은 JOURNAL_DIR→
+# /data→앱폴더 우선순위), 재시작해도 "오늘 이미 돌았음"이 살아남는다.
+# 마커 생성은 os.O_CREAT|os.O_EXCL(단일 시스템콜, "파일이 없을 때만 생성
+# 성공") — read-then-write가 아니라 원자적 check-and-set이라, 레플리카가
+# 여러 개여도 같은 /data 볼륨을 보는 한 정확히 하나만 성공한다(POSIX
+# 파일시스템 보장). 단, /data가 진짜 로컬/블록 볼륨이 아니라 O_EXCL
+# 원자성이 약한 네트워크 파일시스템이면(예: 일부 NFS 구성) 이 보장이
+# 깨질 수 있음 — Railway 볼륨은 통상 이 케이스가 아니라고 보고 채택.
+def _moneyflow_warmed_marker(mfkey: str) -> str:
+    safe = mfkey.replace(":", "_").replace("/", "_")
+    persistent_dir = os.path.dirname(_resolve_persistent_path("moneyflow_warmed_probe"))
+    return os.path.join(persistent_dir, f"moneyflow_warmed_{safe}.marker")
+
+
+def _mark_moneyflow_warmed(mfkey: str) -> bool:
+    """마커 파일을 원자적으로 생성 — 내가 방금 새로 만들었으면 True(=이번
+    호출이 실행 담당), 이미 있었으면(다른 레플리카가 먼저 표시) False."""
+    try:
+        fd = os.open(_moneyflow_warmed_marker(mfkey), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return False
+    except OSError as e:
+        print(f"[moneyflow] warmed 마커 생성 실패({mfkey}): {e}")
+        return False
 
 
 async def _run_money_flow(market: str, daykey: str) -> dict:
@@ -6083,14 +6124,13 @@ async def _warm_market(market: str):
         # 돈의 흐름은 스캔 워밍과 독립 추적 — 스캔 워밍 실패와 무관하게 시도,
         # 서로의 실패가 전파되지 않음. Claude API 호출이 오래(10~30초+) 걸릴
         # 수 있어 create_task로 던져 4분 주기 스케줄러 루프를 막지 않는다.
-        # v5.139(사용자 지시, 자동실행 19분 재실행 사고 킬스위치): _moneyflow_
-        # warmed가 프로세스 메모리에만 있어 재시작마다 리셋되고 자동경로가
-        # 반복 실행됨 — 원인 수정(B, 영속화) 전 즉시 차단용. 수동 버튼
-        # 경로(POST /api/moneyflow/{market}/run)는 이 가드 밖이라 영향 없음.
+        # v5.139(사용자 지시, 자동실행 19분 재실행 사고 킬스위치): 원인
+        # 수정(v5.140, 영속 마커) 후에도 남겨둠 — Railway 환경변수 하나로
+        # 즉시 자동실행을 끌 수 있는 비상 스위치. 수동 버튼 경로(POST
+        # /api/moneyflow/{market}/run)는 이 가드 밖이라 영향 없음.
         if os.environ.get("MONEYFLOW_AUTO_ENABLED", "1") != "0":
             mfkey = f"{market}:{daykey}"
-            if not _moneyflow_warmed.get(mfkey):
-                _moneyflow_warmed[mfkey] = True
+            if _mark_moneyflow_warmed(mfkey):
                 asyncio.create_task(_run_money_flow_bg(market, daykey))
         return
     # ── 장중: 캐시가 8분 이상 묵었으면 미리 갱신 (사용자 요청 전에) ──
