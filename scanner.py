@@ -810,14 +810,11 @@ CONFIG = {
     "rsi_max": 62,
     "recent_high_window": 40,  # 60일 고점이 최근 N봉 안에 있어야 함
     "rs_min": 80,              # RS 등급 최소치 (눌림목=조정 중이라 80, 약간 여유)
-    # v5.71: RS 게이트 E = A(12개월 RS>=rs_min) OR B(3개월 RS>=rs_min) OR
-    # C(12개월 RS>=rs_momentum_floor 且 20거래일 전 대비 랭크상승>=rs_delta_min).
-    # B는 rs_min을 그대로 재사용(측정에서 동일 80으로 검증) — 별도 키 안 둠.
-    # 근거: scripts/measurements/2026-08-23_reject_tracer_rs_variants.py +
-    # 2026-08-23_reject_tracer_ev_and_gate_e.py — E\A 증분 EV 0.235R(n=869)가
-    # 현행 A 단독 EV 0.108R보다 우수. docs/rs_gate_e_and_depth_atr_v5.71.md.
-    "rs_momentum_floor": 50,
-    "rs_delta_min": 25,
+    # v5.71에서 RS 게이트를 E(A∪B∪C, 3개월RS/랭크급등 경로 추가)로
+    # 확장했으나, 90개 체크포인트 재검증(README 규칙9)에서 원채택 근거
+    # 방향역전 + KR EV 마이너스(-0.053R) 확인돼 v5.133에서 A 단독으로
+    # 원복(rs_momentum_floor/rs_delta_min 키 제거 — 더 이상 안 씀).
+    # docs/kr_us_strategy_map.md "재검증 결과 — 우선순위2".
     "pivot_window": 10,        # 피벗(돌파가) = 직전 N봉 고가
     # 주도주(RS 90+) 완화 기준: 얕고 짧은 눌림도 인정(v5.132에서 고정%
     # 게이트 복원과 함께 leader_pullback_min도 함께 복원)
@@ -1375,18 +1372,14 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     if len(df) < cfg["min_bars"]:
         return None
 
-    # ── 0) RS 필터(3경로 E=A∪B∪C, v5.71) + 주도주 판정 ──
-    # A(12개월 RS) / B(3개월 RS) / C(RS 50+이면서 20거래일 만에 랭크 25+ 상승)
-    # 중 하나만 만족하면 통과. rs_rank가 None이면(유니버스 밖 호출 등) 기존과
-    # 동일하게 필터 자체를 생략 — rs_3m/rs_delta만 있고 rs_rank가 없는 호출은
-    # 실제 파이프라인에 없음(app.py가 셋 다 같은 번들에서 채움).
-    path_12m = rs_rank is not None and rs_rank >= cfg["rs_min"]
-    path_3m = rs_3m is not None and rs_3m >= cfg["rs_min"]
-    path_mom = (rs_rank is not None and rs_rank >= cfg["rs_momentum_floor"]
-                and rs_delta is not None and rs_delta >= cfg["rs_delta_min"])
-    if rs_rank is not None and not (path_12m or path_3m or path_mom):
+    # ── 0) RS 필터 + 주도주 판정 (v5.133: E=A∪B∪C 게이트 채택 철회, A만
+    # 단독 사용으로 원복 — 90개 체크포인트 재검증에서 원채택 근거 방향
+    # 역전 + KR EV가 마이너스로 확인됨, docs/kr_us_strategy_map.md
+    # "재검증 결과 — 우선순위2". rs_3m/rs_delta 파라미터는 게이트에서는
+    # 안 쓰지만 카드 참고 표시용으로 계속 계산해 반환은 함(depth_atr와
+    # 같은 처리).) ──
+    if rs_rank is not None and rs_rank < cfg["rs_min"]:
         return None
-    rs_path = "12M" if path_12m else ("3M" if path_3m else ("momentum" if path_mom else None))
     is_leader = rs_rank is not None and rs_rank >= cfg["leader_rs"]
     pb_min = cfg["leader_pullback_min"] if is_leader else cfg["pullback_min"]
     rsi_max = cfg["leader_rsi_max"] if is_leader else cfg["rsi_max"]
@@ -1624,9 +1617,8 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "setup_score": setup_score,
         "rs": rs_rank,
         "rs_mom": rs_mom,
-        "rs_3m": rs_3m,
-        "rs_delta": rs_delta,
-        "rs_path": rs_path,   # v5.71: "12M" | "3M" | "momentum" | None(RS필터 생략시)
+        "rs_3m": rs_3m,        # 참고 표시용(게이트 아님, v5.133) — 3개월 RS 백분위
+        "rs_delta": rs_delta,  # 참고 표시용(게이트 아님, v5.133) — 20거래일 전 대비 랭크 변화
         "leader": is_leader,
         "mode": "pullback",
         # v5.68: 돌파임박(v5.44)과 같은 "확인 후 진입" 일지 트리거용 —

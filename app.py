@@ -5,6 +5,25 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.133 [게이트 원복] 눌림목 RS 게이트 E(v5.71, A∪B∪C) 채택 철회 — 90개
+        체크포인트 재검증(README 규칙9)에서 원채택 근거(E\\A 증분 EV
+        0.235R > A단독 0.108R, 20개 창)가 방향 역전(90개 창: 증분
+        0.034R < 기존 0.084R)됐을 뿐 아니라, KR/US 분해에서 KR EV가
+        -0.053R로 마이너스임을 확인(US는 +0.089R 유지, z=2.94 유의 —
+        depth_atr 때와 달리 유의성은 얻었지만 "KR에서 해롭다"는 나쁜
+        신호). docs/kr_us_strategy_map.md "재검증 결과 — 우선순위2".
+        시장별 분리안(KR만 A단독·US는 E 유지)은 "오늘 철회한 z=4.88과
+        같은 종류의 사후선택"이라 기각하고 A안(단순 원복)만 채택.
+        `scanner.py` CONFIG의 RS 게이트를 A 단독(`rs_min≥80`)으로
+        되돌림, `rs_momentum_floor`/`rs_delta_min` 키 삭제. `rs_path`
+        필드는 depth_atr와 다르게 **완전 삭제**(값이 아니라 "어느
+        경로로 게이트를 통과했나"라는 사실 자체를 담는 필드라 게이트가
+        A 단독이 되면 항상 "12M"/None만 나오는 죽은 정보가 됨) —
+        `static/index.html`의 🔥단기주도/🚀랭크급등 배지 2곳(카드
+        배지열 + `collapsedBadgeIconsHtml` 접힌 아이콘)도 함께 제거.
+        `rs_3m`/`rs_delta` 값 자체는 depth_atr와 동일하게 카드 참고
+        표시 필드로 존치(계산 파이프라인 무변경). `app.py`
+        `_trace_pullback` 동기화. 테스트 전체 통과 확인.
 v5.132 [게이트 원복] 눌림목 depth_atr 게이트(v5.71) 채택 철회 — 90개
         체크포인트 재검증(README 규칙9)에서 원채택 근거(depth_atr 증분
         EV 0.194R > 기존 A단독 0.108R, 20개 창)가 방향 역전(90개 창:
@@ -3844,7 +3863,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.132"
+VERSION = "v5.133"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6812,11 +6831,9 @@ def _gate_risk_pct(rrb, pivot):
 
 
 def _trace_pullback(df, is_kr, rs_rank, rs_3m=None, rs_delta=None):
-    """v5.71: rs_3m/rs_delta는 옵션 — /api/debug는 단일 종목만 보고 있어
-    유니버스 전체 백분위(rs_3m)나 20거래일 전 랭크(rs_delta)를 낼 수 없다
-    (rs_rank 자체도 이미 근사치인 것과 같은 한계, CLAUDE.md '알려진 설계 갭'
-    참고). None으로 두면 3M/momentum 경로는 자동으로 평가 안 되고 12M 경로만
-    본다 — scanner.analyze()와 동일한 None 처리 규약."""
+    """v5.133: RS 게이트는 A(12개월 rs_rank) 단독 — rs_3m/rs_delta 인자는
+    더 이상 게이트 판정에 안 쓰이고(v5.71 E게이트 채택 철회, scanner.py
+    analyze() 동기화) 시그니처만 호환용으로 유지(호출부 정리는 별도)."""
     from scanner import (CONFIG as cfg, rsi as _rsi, select_pivot, significant_support,
                          apply_atr_buffer, _rr_block, _risk_hard_ok, late_stage_info,
                          _price_frozen_block, anchored_vwap, atr as _atr)
@@ -6827,17 +6844,12 @@ def _trace_pullback(df, is_kr, rs_rank, rs_3m=None, rs_delta=None):
     df = df.dropna(subset=["Close", "Volume"]).copy()
     if not _gate_step(steps, "min_bars_dropna", len(df) >= cfg["min_bars"], f"{len(df)}봉"):
         return {"passed": False, "fail_at": "min_bars_dropna", "steps": steps}
-    # v5.71: RS 게이트 E = A(12개월) OR B(3개월) OR C(RS50+ 且 20일랭크+25)
-    path_12m = rs_rank is not None and rs_rank >= cfg["rs_min"]
-    path_3m = rs_3m is not None and rs_3m >= cfg["rs_min"]
-    path_mom = (rs_rank is not None and rs_rank >= cfg["rs_momentum_floor"]
-                and rs_delta is not None and rs_delta >= cfg["rs_delta_min"])
-    rs_ok = path_12m or path_3m or path_mom
-    if not _gate_step(steps, "rs_min", rs_ok,
-                       f"12M rs={rs_rank}(요구{cfg['rs_min']}+) · 3M rs_3m={rs_3m}(요구{cfg['rs_min']}+) · "
-                       f"모멘텀 rs={rs_rank}&rs_delta={rs_delta}(요구 rs{cfg['rs_momentum_floor']}+ 且 delta{cfg['rs_delta_min']}+)"):
+    # v5.133: RS 게이트 E(A∪B∪C) 채택 철회, A 단독으로 원복 — scanner.py
+    # analyze() 동기화(CLAUDE.md 리터럴 사본 원칙). docs/kr_us_strategy_map.md
+    # "재검증 결과 — 우선순위2".
+    rs_ok = rs_rank is None or rs_rank >= cfg["rs_min"]
+    if not _gate_step(steps, "rs_min", rs_ok, f"rs={rs_rank}(요구 {cfg['rs_min']}+)"):
         return {"passed": False, "fail_at": "rs_min", "steps": steps}
-    rs_path = "12M" if path_12m else ("3M" if path_3m else "momentum")
     is_leader = rs_rank is not None and rs_rank >= cfg["leader_rs"]
     pb_min = cfg["leader_pullback_min"] if is_leader else cfg["pullback_min"]
     c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
@@ -6926,7 +6938,7 @@ def _trace_pullback(df, is_kr, rs_rank, rs_3m=None, rs_delta=None):
     _gate_step(steps, "가격고정(정보용, 비차단)", True,
                f"price_frozen={pf.get('price_frozen')} {pf.get('price_frozen_reasons')}")
     return {"passed": True, "fail_at": None, "steps": steps, "pivot": round(pivot, 2), "pivot_type": pivot_type,
-            "risk_pct": card_risk, "gate_risk_pct": gate_risk, "stop": round(stop, 2), "rs_path": rs_path}
+            "risk_pct": card_risk, "gate_risk_pct": gate_risk, "stop": round(stop, 2)}
 
 
 def _trace_turnaround(df, is_kr, rs_rank, rs_mom):
