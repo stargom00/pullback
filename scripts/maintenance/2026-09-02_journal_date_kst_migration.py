@@ -54,6 +54,16 @@
   python3 scripts/maintenance/2026-09-02_journal_date_kst_migration.py            # dry-run(기본)
   python3 scripts/maintenance/2026-09-02_journal_date_kst_migration.py --apply    # 실제 반영(백업 후)
 
+**⚠️ `--apply` 실행 전 필수: 이 앱을 열어둔 브라우저 탭을 전부 닫을 것
+(또는 최소한 그 탭에서 아무 조작도 하지 말 것).** 서버(`load_journal()`)
+는 매번 디스크에서 새로 읽어 이 문제가 없지만, 브라우저의 `journalCache`
+(전역 JS 변수)는 탭이 열릴 때 한 번 로드된 뒤 계속 메모리에 남아있다가
+`setJournal()`(감시 등록·자동 가격갱신·일지 수정 등)이 호출될 때마다
+그 스냅샷을 통째로 `POST /api/journal`해 파일을 덮어쓴다 — 이 스크립트가
+방금 고친 내용이 그대로 도로 사라진다(2026-09-02 실제 발생, CLAUDE.md
+"알려진 설계 갭" 참고). 안전한 순서: 브라우저 탭 닫기 → `--apply`
+실행 → 파일 재확인 → 그 다음에 새로고침/재접속.
+
 **이 스크립트는 아직 실행되지 않았다** — dry-run 결과를 사용자에게
 보고한 뒤 --apply 여부를 지시받는다.
 """
