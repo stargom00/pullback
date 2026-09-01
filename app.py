@@ -5,6 +5,26 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.136 [신규] 캘린더(홈) 탭 최상단 "🎯 오늘의 결정" 섹션 — 시스템 최종
+        출력층(사용자 지시). 34개 목록·여러 탭에 흩어진 검증 규칙(재점화
+        확인 +0.755R · 종가베팅 +1.22%,n=276 · 돌파임박 안C 0.796R,n=701 ·
+        눌림목 안C' 0.923R,n=261)을 "오늘 무엇을 얼마에 사고 어디서 자를지"
+        결정 형태로 재구성. `/api/calendar`가 `today_decision`
+        {immediate, near, waiting, waiting_total}을 새로 반환 — 기존 캐시만
+        재사용(새 스캔/새 fetch 없음, 홈 로드 원칙 유지). 🔴즉시행동은
+        검증된 확인규칙을 "오늘" 충족한 것만(재점화 확인진입 오늘분/
+        종가베팅 오늘 스냅샷/감시(pending) 종목의 피벗돌파+거래량1.5배
+        확인 — `_pending_watch_confirm_check()` 신설, 안C·안C'와 동일
+        정의). 확인규칙이 없는 탭(돌파/박스돌파 등)은 피벗교차만으론
+        🔴 인용 근거가 없어 🟡(확인규칙 미검증 명시)로 낮춤 — 근거 없는
+        배지 금지 원칙. 🟡근접은 재점화 창내 ±2%/감시 피벗근접/돌파임박
+        상위 5. ⚪대기는 소스별 개수만, 클릭 시 펼침. 각 항목 진입가·
+        손절가(리스크%)·2R목표·권장수량(기존 `calcShares()`/`rSettings`
+        재사용, 새 사이징 로직 없음)을 한 줄로. ⚡감시/+일지 버튼은
+        기존 `_quickWatchRequest()`/`openJournal()`(`_searchHit` 폴백)
+        패턴 재사용 — 새 등록 엔드포인트 없음. 항목 0건이면 "오늘
+        행동할 것 없음" 한 줄. (참고: 사용자가 인용한 "안C 0.719R"은
+        문서에서 못 찾음 — 실제 검증치 0.796R(n=701)로 표기.)
 v5.135 [기능제거] KR 돌파 계열 RSI<50 저모멘텀 배지(v5.94) 채택 철회 —
         90개 체크포인트 재검증(README 규칙9)에서 원측정(시간 반분
         양쪽 다 gap≤-0.5R·|z|≥2.97로 채택)의 격차 **부호 자체가
@@ -3895,7 +3915,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.135"
+VERSION = "v5.136"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -8894,6 +8914,38 @@ def _calendar_current_price(ticker: str):
     return None
 
 
+def _calendar_ticker_df(ticker: str):
+    """_calendar_current_price와 동일 원칙(캐시만, 새 fetch 없음) — 볼륨
+    확인진입 판정(안C/안C')엔 종가 하나가 아니라 OHLCV 전체가 필요해서
+    df 자체를 반환하는 버전. v5.136 오늘의 결정 섹션 전용."""
+    for key in ("data:all", "data:kr", "data:us"):
+        bundle = _data_cache.get(key)
+        if bundle and ticker in bundle.get("data", {}):
+            df = bundle["data"][ticker]
+            if df is not None and len(df):
+                return df
+    return None
+
+
+def _pending_watch_confirm_check(df, pivot: float):
+    """대기(pending) 감시 종목의 표준 확인진입 판정 — "종가가 피벗(신호일
+    고가 레벨) 초과 + 거래량 트레일링 50일 평균의 1.5배 이상"
+    (docs/pullback_stop_width_and_entry_timing.md 안C', docs/
+    imminent_stop_entry_investigation.md 안C와 동일 정의, theme_reignition.
+    check_confirm()과도 같은 골격). scanner.nonzero_vol_mean()으로 거래정지
+    희석 방지(v5.129)까지 그대로 재사용. 반환: (confirmed, close, vol_mult)
+    또는 데이터 부족시 (False, None, None)."""
+    if df is None or len(df) < 51 or not pivot or pivot <= 0:
+        return False, None, None
+    close_s, vol_s = df["Close"], df["Volume"]
+    today_close = float(close_s.iloc[-1])
+    avg_vol = scanner_mod.nonzero_vol_mean(vol_s.iloc[-51:-1])
+    today_vol = float(vol_s.iloc[-1])
+    vol_mult = round(today_vol / avg_vol, 2) if avg_vol > 0 else 0.0
+    confirmed = today_close > pivot and avg_vol > 0 and today_vol >= 1.5 * avg_vol
+    return confirmed, round(today_close, 2), vol_mult
+
+
 @app.get("/api/calendar")
 async def get_calendar():
     """캘린더 탭 — 로그인 후 기본 화면(v5.108). v5.110(사용자 지시)에서
@@ -9042,6 +9094,163 @@ async def get_calendar():
         except Exception as e:
             print(f"[calendar] leader-conversion 체크 실패: {e}")
 
+    # ── v5.136: 🎯 오늘의 결정 — 시스템의 최종 출력층(사용자 지시). 기존
+    # 데이터를 재사용해 즉시행동(🔴 검증된 규칙 충족)/근접(🟡)/대기(⚪개수)
+    # 3단으로 재분류. 새 스캔/새 fetch 트리거 안 함(캘린더 원칙 그대로) —
+    # 캐시 미스면 그 소스만 조용히 비움.
+    immediate, near, waiting = [], [], {}
+
+    # ① 재점화 확인진입(오늘) — docs/kr_theme_leader_reignition.md,
+    #    확인진입 EV +0.755R(대조군 대비 유의, z>=1.96 두 건).
+    try:
+        reignition_items = _reignition_watchlist_view()
+    except Exception as e:
+        reignition_items = []
+        print(f"[calendar] 재점화 조회 실패: {e}")
+    reignition_watching_near, reignition_watching_far = 0, 0
+    for it in reignition_items:
+        if it["status"] == "confirmed" and (it.get("confirm") or {}).get("date") == today:
+            c = it["confirm"]
+            pivot, stop = c["pivot"], c["stop"]
+            target_2r = round(pivot + 2 * (pivot - stop), 2) if pivot > stop else None
+            immediate.append({
+                "source": "reignition", "key": f"reignition:{it['ticker']}",
+                "ticker": it["ticker"], "name": it["name"], "market": "KR", "mode": "reignition",
+                "entry": pivot, "stop": stop, "target_2r": target_2r,
+                "close": _calendar_current_price(it["ticker"]) or pivot, "pivot": pivot,
+                "reason": f"재점화 확인진입({it['theme']} D0리더) — 검증 EV +0.755R, "
+                          "대조군 대비 유의(z≥1.96) · docs/kr_theme_leader_reignition.md",
+            })
+        elif it["status"] == "watching":
+            dist = (it.get("exec") or {}).get("distance_pct")
+            if dist is not None and 0 <= dist <= 2:
+                ex = it["exec"]
+                near.append({
+                    "source": "reignition", "key": f"reignition:{it['ticker']}",
+                    "ticker": it["ticker"], "name": it["name"], "market": "KR", "mode": "reignition",
+                    "current_price": ex["current_price"], "pivot": ex["pivot"], "dist_pct": dist,
+                    "entry_if_triggered": ex["pivot"], "stop_if_triggered": ex["atr_stop"],
+                    "close": ex["current_price"], "stop": ex["atr_stop"],
+                    "reason": f"재점화 창 내({it['theme']}) 피벗까지 {dist:+.1f}% — "
+                              "돌파+거래량1.5배 확인 시 진입(EV +0.755R)",
+                })
+                reignition_watching_near += 1
+            else:
+                reignition_watching_far += 1
+    waiting["reignition"] = reignition_watching_far
+
+    # ② 종가베팅(오늘 공식 스냅샷 확정분만 — 장중 라이브 캐시 아님, v5.128
+    #    사고 재발 방지 원칙 그대로) — JONGGA_BACKTEST_NOTE(+1.22%, n=276).
+    jongga_cached = _cache.get("kr:jongga")
+    if jongga_cached and jongga_cached.get("snapshot_date") == today:
+        for h in jongga_cached.get("hits", []):
+            immediate.append({
+                "source": "jongga", "key": f"jongga:{h['ticker']}",
+                "ticker": h["ticker"], "name": h.get("name", h["ticker"]), "market": "KR", "mode": "jongga",
+                "entry": h.get("close"), "stop": None, "target_2r": None,
+                "close": h.get("close"), "pivot": h.get("close"), "sector": h.get("sector"),
+                "reason": f"종가베팅(거래대금 {h.get('turnover_rank','?')}위) — {JONGGA_BACKTEST_NOTE} · "
+                          f"매도: {JONGGA_SELL_RULE}",
+            })
+
+    # ③ 감시(pending) 확인진입 — 돌파임박(안C 0.796R,n=701)/눌림목(안C'
+    #    0.923R,n=261)만 검증된 확인규칙 존재. 그 외 탭은 피벗교차만으론
+    #    🔴 인용 근거가 없어 🟡(확인규칙 미검증)로 낮춤 — "검증된 규칙
+    #    충족만 🔴" 원칙(사용자 지시).
+    CONFIRM_RULE_BY_TAB = {
+        "돌파임박": "안C 확인진입 — 검증 EV 0.796R(n=701) · docs/imminent_stop_entry_investigation.md",
+        "눌림목": "안C' 확인진입 — 검증 EV 0.923R(n=261) · docs/pullback_stop_width_and_entry_timing.md",
+    }
+    pending_near, pending_far = 0, 0
+    for r in journal:
+        if (r.get("status") or "entered") != "pending":
+            continue
+        ticker = r.get("ticker")
+        try:
+            pivot_f = float(r.get("pivot") or r.get("entry") or 0)
+        except (TypeError, ValueError):
+            pivot_f = 0
+        if not ticker or pivot_f <= 0:
+            continue
+        tab = r.get("tab")
+        market = r.get("market") or ("KR" if ticker.endswith((".KS", ".KQ")) else "US")
+        rule = CONFIRM_RULE_BY_TAB.get(tab)
+        confirmed = False
+        close = None
+        if rule:
+            df = _calendar_ticker_df(ticker)
+            confirmed, close, vol_mult = _pending_watch_confirm_check(df, pivot_f)
+        if close is None:
+            close = _calendar_current_price(ticker)
+        if close is None:
+            continue
+        stop_f = r.get("stop")
+        try:
+            stop_f = float(stop_f) if stop_f is not None else None
+        except (TypeError, ValueError):
+            stop_f = None
+        dist_pct = round((pivot_f - close) / pivot_f * 100, 2)
+        if rule and confirmed:
+            target_2r = round(pivot_f + 2 * (pivot_f - stop_f), 2) if stop_f and pivot_f > stop_f else None
+            immediate.append({
+                "source": "pending_watch", "key": f"pending:{r.get('id')}",
+                "ticker": ticker, "name": r.get("name") or ticker, "market": market,
+                "mode": r.get("mode_raw") or None, "sector": r.get("sector"),
+                "entry": pivot_f, "stop": stop_f, "target_2r": target_2r,
+                "close": close, "pivot": pivot_f,
+                "reason": f"{tab} {rule}",
+            })
+        elif dist_pct <= 2:
+            if dist_pct <= 0:
+                # 피벗은 넘었는데(종가>피벗) 거래량 확인 요건 미충족, 또는
+                # 확인 규칙 자체가 없는 탭 — 근접(🟡)으로만, EV 인용 없이.
+                reason = f"{tab or '감시'} 피벗 돌파" + (" — 거래량 확인 대기" if rule else " — 확인규칙 미검증, 사용자 판단")
+            else:
+                reason = f"{tab or '감시'} 피벗까지 {dist_pct:.1f}%"
+            near.append({
+                "source": "pending_watch", "key": f"pending:{r.get('id')}",
+                "ticker": ticker, "name": r.get("name") or ticker, "market": market,
+                "mode": r.get("mode_raw") or None, "sector": r.get("sector"),
+                "current_price": close, "pivot": pivot_f, "dist_pct": dist_pct,
+                "entry_if_triggered": pivot_f, "stop_if_triggered": stop_f,
+                "close": close, "stop": stop_f,
+                "reason": reason,
+            })
+            pending_near += 1
+        else:
+            pending_far += 1
+    waiting["pending_watch"] = pending_far
+
+    # ④ 돌파임박 상위 — 캐시만(새 스캔 없음), 참고 근접 후보로만.
+    imminent_hits = []
+    for mkt in ("kr", "us"):
+        cached_scan = _cache.get(f"{mkt}:imminent")
+        if cached_scan and cached_scan.get("hits"):
+            imminent_hits.extend(cached_scan["hits"])
+    imminent_hits.sort(key=lambda h: h.get("score") or 0, reverse=True)
+    IMMINENT_TOP_N = 5
+    for h in imminent_hits[:IMMINENT_TOP_N]:
+        pivot, close = h.get("pivot"), h.get("close")
+        if not pivot or not close:
+            continue
+        near.append({
+            "source": "imminent", "key": f"imminent:{h['ticker']}",
+            "ticker": h["ticker"], "name": h.get("name", h["ticker"]), "market": h.get("market"),
+            "mode": "imminent", "sector": h.get("sector"), "rs": h.get("rs"),
+            "current_price": close, "pivot": pivot, "dist_pct": round((pivot - close) / pivot * 100, 2),
+            "entry_if_triggered": pivot, "stop_if_triggered": h.get("stop"),
+            "close": close, "stop": h.get("stop"),
+            "reason": "돌파임박 상위 후보 — 참고(확인진입 전환 시 안C 규칙 적용)",
+        })
+    waiting["imminent"] = max(0, len(imminent_hits) - IMMINENT_TOP_N)
+
+    immediate.sort(key=lambda x: x["source"] != "reignition")   # 재점화 우선(가장 강한 근거)
+    near.sort(key=lambda x: x.get("dist_pct", 999))
+    today_decision = {
+        "immediate": immediate, "near": near, "waiting": waiting,
+        "waiting_total": sum(waiting.values()),
+    }
+
     # ── ⑤ 강세테마 × 스캐너 교집합 — KR 돈의흐름 확산(본격)/streak2+ 테마 소속
     # 종목 중 오늘 돌파계열 탭 히트. _cache(기존 /api/scan 캐시)를 그대로
     # 읽기만 함 — 미스면(해당 탭을 오늘 아무도 안 열었으면) 조용히 스킵,
@@ -9112,6 +9321,7 @@ async def get_calendar():
 
     return JSONResponse(_clean_nan({
         "today": today,
+        "today_decision": today_decision,
         "dday_warnings": dday_warnings,
         "positions_summary": positions_summary,
         "action_queue": {"near_pivot": near_pivot, "jongga_today": jongga_today,

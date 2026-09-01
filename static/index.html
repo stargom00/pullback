@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.135</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.136</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3321,6 +3321,85 @@ async function runMacroCalendarNow(btn) {
 const GATE_EMOJI = { confirmed: '🟢', pressure: '🟡', correction: '🔴' };
 const GATE_LABEL = { confirmed: '확인된 상승', pressure: '조정 압박', correction: '조정' };
 
+// ── v5.136: 🎯 오늘의 결정 — 사용자 지시. 스캐너가 '조건에 걸린 종목'까지만
+// 알려주고 '오늘 무엇을 얼마에 사고 어디서 자를지'가 없다는 핵심 결함 대응.
+// 검증된 진입 규칙(재점화 확인 +0.755R · 종가베팅 +1.22%,n=276 · 돌파임박
+// 안C 0.796R,n=701 · 눌림목 안C' 0.923R,n=261)을 오늘 충족한 것만 🔴,
+// 그 외 근접은 🟡, 나머지는 개수만 ⚪ — /api/calendar의 today_decision을
+// 그대로 렌더(집계는 서버에서 끝, 여기선 표시+액션 버튼만).
+const _tdWaitingLabel = { reignition: '재점화 창', pending_watch: '감시 대기', imminent: '돌파임박 후보' };
+let _tdWaitingOpen = false;
+function toggleTodayDecisionWaiting() {
+  _tdWaitingOpen = !_tdWaitingOpen;
+  const el = document.getElementById('tdWaitingDetail');
+  if (el) el.style.display = _tdWaitingOpen ? '' : 'none';
+}
+function renderTodayDecisionHtml(td) {
+  if (!td) return '';
+  const mktOf = item => (item.market || '').toUpperCase() === 'KR' || /\.(KS|KQ)$/.test(item.ticker || '') ? 'KR' : 'US';
+  const actions = (item, showWatch) => {
+    _todayDecisionMap[item.key] = item;
+    const watchBtn = showWatch
+      ? `<button class="journal-btn" style="padding:3px 9px;font-size:11px" onclick="decisionQuickWatch(this,'${item.key}')">⚡ 감시</button>`
+      : '';
+    return `<div style="display:flex;gap:6px;margin-top:6px">${watchBtn}` +
+      `<button class="journal-btn" style="padding:3px 9px;font-size:11px" onclick="decisionOpenJournal('${item.key}')">+ 일지</button></div>`;
+  };
+  const nameLink = item => `<a class="name-link" href="${tvUrl(item)}" target="_blank" rel="noopener">${item.name}</a>`;
+
+  const immediateHtml = (td.immediate || []).map(item => {
+    const mkt = mktOf(item);
+    const qty = (item.entry != null && item.stop != null) ? calcShares(item.entry, item.stop, mkt) : null;
+    const stopStr = item.stop != null
+      ? `${fmtPrice(item.stop, mkt)}${qty ? ` (-${qty.riskPct}%)` : ''}`
+      : '없음(오버나이트 단발)';
+    const qtyStr = qty ? `${qty.shares.toLocaleString()}주`
+      : item.stop == null ? '금액 기준 직접 판단' : 'R설정 필요';
+    return `<div style="border:1px solid #6b2b2b;background:#2a1414;border-radius:8px;padding:10px 12px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <div><b>${nameLink(item)}</b> <span class="mkt">${mkt}</span> <span class="tick mono" style="font-size:11px">${item.ticker}</span></div>
+      </div>
+      <div style="font-size:12.5px;margin-top:4px">진입 <b>${fmtPrice(item.entry, mkt)}</b> · 손절 <b>${stopStr}</b>` +
+        `${item.target_2r != null ? ` · 2R목표 <b>${fmtPrice(item.target_2r, mkt)}</b>` : ''} · 수량 <b>${qtyStr}</b></div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">${item.reason}</div>
+      ${actions(item, false)}
+    </div>`;
+  }).join('');
+
+  const nearHtml = (td.near || []).map(item => {
+    const mkt = mktOf(item);
+    const dist = item.dist_pct;
+    const distStr = dist == null ? '-' : dist <= 0 ? `돌파 +${Math.abs(dist)}%` : `-${dist}%`;
+    return `<div style="border:1px solid var(--line);background:var(--card);border-radius:8px;padding:8px 12px;margin-bottom:6px">
+      <div><b>${nameLink(item)}</b> <span class="mkt">${mkt}</span>
+        <span style="float:right;font-size:12px">${fmtPrice(item.current_price, mkt)} → 피벗 ${fmtPrice(item.pivot, mkt)} (${distStr})</span></div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">${item.reason} — 뚫으면 진입 ${fmtPrice(item.entry_if_triggered, mkt)}` +
+        `${item.stop_if_triggered != null ? ` · 손절 ${fmtPrice(item.stop_if_triggered, mkt)}` : ''}</div>
+      ${actions(item, item.source !== 'reignition')}
+    </div>`;
+  }).join('');
+
+  const waiting = td.waiting || {};
+  const waitingParts = Object.entries(waiting).filter(([, n]) => n > 0)
+    .map(([k, n]) => `${_tdWaitingLabel[k] || k} ${n}건`);
+  const waitingHtml = td.waiting_total
+    ? `<div style="font-size:12px;color:var(--muted);margin-top:4px;cursor:pointer" onclick="toggleTodayDecisionWaiting()">⚪ 대기 ${td.waiting_total}건 — 클릭해서 펼치기</div>
+       <div id="tdWaitingDetail" style="display:${_tdWaitingOpen ? '' : 'none'};font-size:11px;color:var(--muted);margin-top:2px">${waitingParts.join(' · ')}</div>`
+    : '';
+
+  if (!(td.immediate || []).length && !(td.near || []).length) {
+    return `<div class="mf-toolbar"><b>🎯 오늘의 결정</b></div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:10px">오늘 행동할 것 없음${td.waiting_total ? ` — 대기 ${td.waiting_total}건` : ''}</div>
+      ${waitingHtml}`;
+  }
+
+  return `<div class="mf-toolbar"><b>🎯 오늘의 결정</b></div>
+    ${immediateHtml ? `<div style="font-size:12px;color:#ff9b9b;font-weight:700;margin-bottom:4px">🔴 즉시 행동</div>${immediateHtml}` : ''}
+    ${nearHtml ? `<div style="font-size:12px;color:#ffd98a;font-weight:700;margin-bottom:4px">🟡 근접</div>${nearHtml}` : ''}
+    ${waitingHtml}
+    <div style="margin-bottom:6px"></div>`;
+}
+
 function renderCalendar(data) {
   const doc = document.getElementById('calendarDoc');
   const isKrTicker = t => /\.(KS|KQ)$/.test(t || '');
@@ -3457,7 +3536,11 @@ function renderCalendar(data) {
     forwardHtml = `<div style="font-size:11px;color:var(--muted);margin-top:16px;text-align:center">📊 종가베팅 포워드 누적 ${fwdN}건 · 평균갭 ${cb.mean_gap_pct >= 0 ? '+' : ''}${cb.mean_gap_pct}% (백테스트 ${bt.mean_gap_pct >= 0 ? '+' : ''}${bt.mean_gap_pct}%)</div>`;
   }
 
+  _todayDecisionMap = {};
+  const todayDecisionHtml = renderTodayDecisionHtml(data.today_decision);
+
   doc.innerHTML = `
+    ${todayDecisionHtml}
     ${marketClosedHtml}
     ${ddayHtml}
     ${positionsSummaryHtml}
@@ -4441,6 +4524,7 @@ const MODE_TAB_LABEL = {
   earnings: '실적우수',
   jongga: '종가베팅',
   search: '검색결과',
+  reignition: '재점화',
 };
 // ── 📅 활동 달력 (v4.52): 날짜별 분석/등록 종목 한눈에 ──
 let _jcal = null;   // {y, m} 표시 중인 달
@@ -4712,6 +4796,39 @@ function openJournal(ticker) {
 function closeJournal() {
   document.getElementById('journalModal').classList.remove('open');
   pendingStock = null;
+}
+
+// ── v5.136: 🎯 오늘의 결정 항목 액션 — 캘린더 탭이 lastHits(스캔 결과)를
+// 안 갖고 있어도(오늘의 결정은 여러 소스를 합친 별도 목록) 감시등록/일지
+// 저장이 되게, reignitionQuickWatch(_quickWatchRequest 직접 호출)와
+// openJournal(_searchHit 폴백) 두 기존 패턴을 항목 소스별로 그대로 재사용.
+let _todayDecisionMap = {};
+function _decisionHitShape(item) {
+  const market = (item.market || '').toUpperCase() === 'KR' || /\.(KS|KQ)$/.test(item.ticker || '') ? 'KR' : 'US';
+  return {
+    ticker: item.ticker, name: item.name, market, mode: item.mode || null,
+    sector: item.sector || '', close: item.close ?? item.current_price ?? null,
+    stop: item.stop ?? item.stop_if_triggered ?? null,
+    pivot: item.pivot ?? item.entry_if_triggered ?? null,
+    rs: item.rs ?? null,
+  };
+}
+function decisionOpenJournal(key) {
+  const item = _todayDecisionMap[key];
+  if (!item) return;
+  _searchHit = _decisionHitShape(item);
+  openJournal(item.ticker);
+}
+async function decisionQuickWatch(btn, key) {
+  const item = _todayDecisionMap[key];
+  if (!item) return;
+  const s = _decisionHitShape(item);
+  if (!s.pivot) { btn.textContent = '피벗없음'; return; }
+  await _quickWatchRequest(s, btn, {
+    ticker: s.ticker, name: s.name, market: s.market,
+    pivot: s.pivot, stop: s.stop, tab: modeTab(s.mode), score: null,
+    reg_price: s.close,
+  });
 }
 
 // ── 수동 종목 추가 (스캐너에 없는 종목) ──
