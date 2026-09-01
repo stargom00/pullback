@@ -5,6 +5,35 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.146 [버그수정] 일지/스캔 타임스탬프 UTC→KST 통일(사용자 지시).
+        발견: `/api/watch/quick`(⚡감시 원클릭 등록 — 스캐너 카드/재점화/
+        대장전환/"오늘의 결정" 공유)이 `datetime.now()`를 타임존 없이
+        호출해 Railway 서버(UTC) 날짜를 그대로 `date`/`watch_start_date`에
+        저장 — KST 00:00~08:59에 등록하면 하루 밀렸다(이 파일 전체에서
+        타임존 없는 `datetime.now()`는 이 한 줄이 유일했음, 확인 완료).
+        `datetime.now(KST)`로 수정. 같은 유형의 버그가 `time.strftime(
+        "%Y-%m-%d %H:%M:%S")`(모듈 레벨, 서버 로컬시간=UTC 사용) 형태로
+        9곳 더 있었음 — `_run_scan_jongga`(종가베팅 스냅샷 시각 표시가
+        UTC였던 원인)/`_run_scan_stage2`/`_run_scan_strong_pivot`/
+        `_run_scan_ibd9`/`_run_scan_earnings_inner`/`_pending_scan_result`/
+        `run_scan`(거의 전 탭 공용)/`inverse_scan`/대장전환 체크
+        `checked_at` — 전부 `datetime.now(KST).strftime(...)`로 통일.
+        `static/index.html`의 일지 목록 정렬(5343행)에 `(b.id||0)-
+        (a.id||0)` 타이브레이커 추가 — 같은 날짜(또는 종료일) 레코드가
+        여러 건이면 기존엔 JS stable sort 특성상 등록 순서(오래된 게
+        위)로 남던 걸 등록 시각(`id`=epoch ms) 내림차순(최근이 위)으로.
+        `id`는 클라이언트(`Date.now()`)/서버(`int(time.time()*1000)`)
+        양쪽 다 이 버그의 영향을 안 받는 순수 타임스탬프라 기존 레코드도
+        정렬은 즉시 정상화됨(별도 마이그레이션 불필요). `date`/
+        `watch_start_date` 저장값 자체를 바로잡는 마이그레이션 스크립트
+        (`scripts/maintenance/2026-09-02_journal_date_kst_migration.py`)는
+        작성만 하고 미실행 — dry-run 기본, `--apply` 시에만 반영, 백업
+        자동 생성, `id` 없음/2026-07-01~현재 밖으로 계산되는 레코드는
+        건드리지 않고 경고만(합성 데이터로 로직 검증 완료). moneyflow
+        마커 daykey는 `_market_session_key()`(`datetime.now(KST)` 기반)를
+        그대로 써서 이미 KST 기준임을 확인 — 전환 불필요(사용자 확인:
+        관측했던 "07:40"은 마커 파일 OS mtime이었고 파일명 자체의
+        daykey는 KST 2026-09-01이 맞았음).
 v5.145 [재검증 완료] 종가베팅 신규 유니버스(진짜 거래대금 상위) 재측정
         결과 반영(사용자 지시 3단계). `naver_kr.fetch_top_turnover_v2()`
         (신설, m.stock.naver.com 기반 — 기존 `fetch_top_value()`는
@@ -4067,7 +4096,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.145"
+VERSION = "v5.146"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -4907,7 +4936,7 @@ async def _run_scan_jongga(bundle: dict) -> dict:
         "backtest_note": JONGGA_BACKTEST_NOTE, "sell_rule": JONGGA_SELL_RULE,
         "session_state": session["state"], "session_label": session["label"],
         "timing": bundle.get("timing"),
-        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "ts": time.time(),
+        "generated_at": datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"), "ts": time.time(),
     }
 
 
@@ -5301,7 +5330,7 @@ async def _run_scan_stage2(bundle: dict) -> dict:
         "scanned": len(universe), "fetched": len(data), "diag": diag,
         "hits": hits, "sector_summary": sector_summary, "warn_count": 0,
         "timing": bundle.get("timing"),
-        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "ts": time.time(),
+        "generated_at": datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"), "ts": time.time(),
     }
 
 
@@ -5450,7 +5479,7 @@ async def _run_scan_strong_pivot(bundle: dict) -> dict:
         "scanned": len(universe), "fetched": len(data), "diag": diag,
         "hits": hits, "sector_summary": sector_summary, "warn_count": warn_count,
         "timing": bundle.get("timing"),
-        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "ts": time.time(),
+        "generated_at": datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"), "ts": time.time(),
     }
 
 
@@ -5545,7 +5574,7 @@ async def _run_scan_ibd9(bundle: dict) -> dict:
         "scanned": len(universe), "fetched": len(data), "diag": diag,
         "hits": hits, "sector_summary": sector_summary, "warn_count": 0,
         "timing": bundle.get("timing"),
-        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "ts": time.time(),
+        "generated_at": datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"), "ts": time.time(),
     }
 
 
@@ -5712,7 +5741,7 @@ async def _run_scan_earnings_inner(bundle: dict) -> dict:
         "scanned": len(universe), "fetched": len(data), "diag": diag,
         "hits": hits, "sector_summary": sector_summary, "warn_count": 0,
         "timing": bundle.get("timing"), "partial": timed_out,
-        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "ts": time.time(),
+        "generated_at": datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"), "ts": time.time(),
     }
 
 
@@ -5725,7 +5754,7 @@ def _pending_scan_result(market: str, mode: str) -> dict:
         "version": VERSION, "market": market, "mode": mode,
         "pending": True, "scanned": 0, "fetched": 0,
         "diag": {}, "hits": [], "sector_summary": [], "warn_count": 0,
-        "timing": None, "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "timing": None, "generated_at": datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
         "ts": time.time(),
     }
 
@@ -5890,7 +5919,7 @@ async def run_scan(market: str, mode: str) -> dict:
         "sector_summary": sector_summary,
         "warn_count": warn_count,
         "timing": _scan_timing,
-        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "generated_at": datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
         "ts": time.time(),
     }
 
@@ -6061,7 +6090,7 @@ async def inverse_scan(market: str = "all", refresh: bool = False):
         "version": VERSION, "market": market,
         "hits": hits, "regime": regime, "regime_txt": regime_txt,
         "strong_count": strong_n,
-        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "generated_at": datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
         "ts": time.time(),
     }
     _inverse_cache[key] = result
@@ -9892,7 +9921,7 @@ async def watch_quick(request: Request):
     import time as _t
     rec = {
         "id": int(_t.time() * 1000),
-        "date": datetime.now().strftime("%Y-%m-%d"),
+        "date": datetime.now(KST).strftime("%Y-%m-%d"),
         "ticker": ticker,
         "name": body.get("name") or ticker,
         "market": body.get("market") or ("KR" if ticker[:1].isdigit() else "US"),
@@ -9963,7 +9992,7 @@ async def watch_leader_check(request: Request):
 
     converted = _leader_conversion_check(tickers, bundle)
     return JSONResponse({"ok": True, "converted": converted, "pending": False,
-                         "checked_at": time.strftime("%Y-%m-%d %H:%M:%S")})
+                         "checked_at": datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")})
 
 
 def _leader_conversion_check(tickers: list, bundle: dict) -> list:
