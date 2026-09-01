@@ -846,6 +846,21 @@ z=34.7)". 아래 애플리케이션 로직(`get_calendar()`)도 함께 갱신 �
 돌파임박 pending 확인 시 `_registration_day_low()`로 손절을 재계산,
 실패 시 🔴 승격을 취소(🟡로 유지).
 
+### 같은 비교를 재점화 확인진입에도 적용 — 판단 불가(변경 없음)
+
+돌파임박의 Close>High 결과를 보고 재점화 확인진입(`theme_reignition.
+check_confirm()`, 원래도 고가기준 "안C형")도 같은 방식으로 재측정
+(2026-09-01, 사용자 지시). **결과: z=0.40, 비유의** — Close(0.90R,
+nv=41)가 High(0.78R,nv=50)보다 점추정치는 높지만 표본이 너무 작아
+(재점화 자체가 희귀 사건이라 69건이 상한에 가까움) 우연과 구분 불가.
+돌파임박(z=34.7, n수천)과 근본적으로 다른 표본 성격 — 재점화는
+체크포인트를 늘려서 해결되는 유형이 아니다. 두 정의 다 사전등록
+임계값(EV≥0.30R)을 여유있게 충족해 **`check_confirm()`은 변경하지
+않음**(근거 없이 프로덕션 코드를 바꾸지 않는다). 상세는
+`docs/kr_theme_leader_reignition.md` "후속 — 확인진입 Close vs High
+재측정" 참고, 근거 스크립트
+`scripts/measurements/2026-09-01_reignition_confirm_close_vs_high.py`.
+
 ## 종합 — 규칙9 재검증 4건 전체 요약
 
 `scripts/measurements/README.md` 규칙9 신설의 계기였던 "KR=돌파 계열
