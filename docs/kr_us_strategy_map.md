@@ -634,21 +634,30 @@ recent가 근소 미달(+0.109R), earlier는 사실상 0(-0.001R)로 완전히
 유효해 보인다. 다만 이 진단이 맞다는 것과 "그래서 다중히트가 EV를
 높인다"는 것은 별개 질문이었고, 후자가 이번에 기각됐다.
 
-### 채택 철회 판정 및 반영 항목 (실행 대기)
+### 채택 철회 판정 및 반영 항목 — 실행 완료 (v5.134, 2026-09-01)
 
-**채택 철회 권장.** depth_atr/RS게이트E와 달리 이번엔 시장별 분리
-같은 절충안을 검토할 여지도 없다(KR 전용 측정이라 애초에 시장 분해
-축이 없음) — 단순하고 명확한 전면 철회 대상.
+**채택 철회 및 기능 제거 완료.** depth_atr/RS게이트E와 달리 이번엔
+시장별 분리 같은 절충안을 검토할 여지도 없었다(KR 전용 측정이라 애초에
+시장 분해 축이 없음) — 단순하고 명확한 전면 철회.
 
-- **제거 후보**: `app.py`의 `multi_hit_badge`/`multi_hit_tooltip`
-  계산 로직(v5.114) + `_multi_hit_n_suffix()`/`MULTI_HIT_SAMPLE_N`
-  (v5.115 표본작음 경고). `static/index.html`의 배지 렌더링(카드
-  배지열 + `collapsedBadgeIconsHtml`의 🔱 접힌아이콘, 이전 대화에서
-  확인된 위치) + 정렬 가점 로직. 코드 변경은 사용자 확인 후 실행.
-- **GUIDE.md**: 다중히트 배지/가점을 언급하는 서술이 있으면 제거
-  방향 확정 후 갱신.
-- **`docs/kr_breakout_family_multi_hit_ev.md`**: 상단에 정정 배너
-  추가 필요(원채택 근거 완전 소멸, 이 재검증 절 인용).
+- `app.py`: `_kr_breakout_family_hit_map()`/`_multi_hit_badge_for()`/
+  `MULTI_HIT_TAB_LABEL`/`MULTI_HIT_SORT_BONUS`/`MULTI_HIT_SAMPLE_N`/
+  `MULTI_HIT_SAMPLE_WARN_THRESHOLD`/`_multi_hit_n_suffix()` 전부 삭제.
+  `run_scan()`의 `_family_hit_map` 계산 호출과 배지 부착 블록 삭제,
+  정렬 키에서 `multi_hit_sort_bonus` 항 제거.
+- `static/index.html`: 카드 배지열의 🔱🔱/🔱강력/⚑중복신호 렌더링과
+  `collapsedBadgeIconsHtml`의 🔱 접힌카드 아이콘 2곳 삭제.
+- **GUIDE.md**: "🇰🇷 국장" 체크리스트의 다중히트 추천 문구를 취소선+
+  정정 각주로 갱신(기존 "KR=돌파 계열" 철회 항목과 동일 스타일).
+- **`docs/kr_breakout_family_multi_hit_ev.md`**: 상단 정정 배너 추가.
+
+**오늘자(2026-09-01) 배지 영향 범위 실측** — 게이트가 아니라 배지/
+정렬 전용 기능이라 "히트 수"는 안 바뀌지만, 몇 종목이 배지 표시
+대상이었는지 측정: KR 전체 유니버스에서 오늘 다중히트(2개+) 종목은
+**단 2건**(돌파+박스돌파 1건, 박스돌파+추세전환 1건) — 원래도 실제
+영향받는 카드 수 자체가 하루 기준으로는 매우 적은 기능이었다(90개
+체크포인트 누적으로도 전체 4,855건 중 1,900건(39%)이 2개+였지만,
+스냅샷 하루로 보면 희소 이벤트).
 
 근거 스크립트: `scripts/measurements/2026-09-01_kr_multi_hit_90cp_revalidation.py`
 (실행시간 450초).
