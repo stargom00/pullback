@@ -83,8 +83,39 @@ def _fetch_us_batch(tickers, period="2y"):
     return out
 
 
+def assert_sufficient_depth(data: dict, offsets: list, min_bars: int = 210):
+    """fetch 직후, 체크포인트 루프 시작 전에 호출할 것 — checkpoints(...)의
+    max offset을 감당 못 하는 fetch면 즉시 AssertionError로 실패시킨다.
+
+    배경(2026-09-01): depth_atr 90개 체크포인트 재검증 최초 실행에서
+    `fetch_universe_data()` 기본값(730일/2년)으로 `checkpoints(60,950,10)`을
+    돌려 31번째 체크포인트 이후 신규 히트가 **조용히 0건으로 멎는** 사고가
+    있었다. 당시엔 그 자리에서 발견해 결과가 발표되기 전에 잡았지만(전체
+    측정 재감사 결과 실제로 오염된 기발표 측정은 0건, 2026-09-01 감사),
+    다음에도 사람이 기억해서 fetch 깊이를 맞추는 방식은 구조적으로
+    재발한다 — docstring 경고만으로는 "경고를 실패로 만든다"는 이
+    프로젝트의 원칙(CLAUDE.md)에 안 맞는다. 이 함수가 그 경고를 실제
+    실패로 바꾼다.
+
+    판정: 필요봉수=max(offsets)+min_bars 미만인 티커 비율이 20% 넘으면
+    실패(상장 초기 종목 소수가 못 채우는 건 정상이라 그 정도는 허용 —
+    "다수가 못 채운다"만 진짜 fetch-depth 문제로 간주)."""
+    if not data or not offsets:
+        return
+    need = max(offsets) + min_bars
+    short = sum(1 for df in data.values() if len(df) < need)
+    frac = short / len(data)
+    if frac > 0.2:
+        raise AssertionError(
+            f"[harness] fetch 깊이 부족: 필요봉수={need}(max_offset={max(offsets)}+"
+            f"min_bars={min_bars}), {short}/{len(data)}종목({frac:.0%})이 미달 — "
+            f"fetch_universe_data(kr_days=1900, us_period='5y')처럼 확장 fetch를 쓸 것 "
+            f"(harness.py fetch_universe_data() 문서 참고)."
+        )
+
+
 def fetch_universe_data(markets=("kr", "us"), kr_concurrency=10, us_batch_size=100,
-                         progress=True, kr_days=None, us_period="2y"):
+                         progress=True, kr_days=None, us_period="2y", validate_offsets=None):
     """{ticker: df} 전체 유니버스 페치. app.py의 실제 fetch 함수와 동일 소스
     (naver_kr.fetch / yf.download). 반환: (data, kr_universe, us_universe).
 
@@ -100,7 +131,13 @@ def fetch_universe_data(markets=("kr", "us"), kr_concurrency=10, us_batch_size=1
     명시적으로 넘길 것(이 조합이 KR≈1274봉/US≈1260봉 확보, 여러 스크립트가
     각자 복붙해 쓰던 걸 여기로 통합 — README 규칙3). 기존 20개 체크포인트
     스크립트들은 인자를 안 바꾸는 한 기존과 100% 동일하게 동작한다
-    (kr_days=None이면 naver_kr.fetch()로 이전과 동일 호출)."""
+    (kr_days=None이면 naver_kr.fetch()로 이전과 동일 호출).
+
+    `validate_offsets`에 그대로 쓸 `OFFSETS` 리스트를 넘기면(예:
+    `fetch_universe_data(kr_days=1900, us_period="5y", validate_offsets=OFFSETS)`)
+    fetch 직후 `assert_sufficient_depth()`를 자동 호출해 깊이 부족을
+    즉시 실패시킨다 — **새 스크립트는 이 인자를 항상 넘길 것**(경고
+    문서를 읽고 기억하는 것보다 실패가 훨씬 안전하다)."""
     from universe import get_universe
     t0 = time.time()
     kr_u = get_universe("kr") if "kr" in markets else {}
@@ -126,6 +163,8 @@ def fetch_universe_data(markets=("kr", "us"), kr_concurrency=10, us_batch_size=1
                 print(f"[harness] us batch {i+1}/{len(batches)} elapsed={time.time()-t0:.0f}s", flush=True)
     if progress:
         print(f"[harness] fetched {len(data)} tickers total, elapsed={time.time()-t0:.0f}s", flush=True)
+    if validate_offsets:
+        assert_sufficient_depth(data, validate_offsets)
     return data, kr_u, us_u
 
 
@@ -233,7 +272,11 @@ def checkpoints(start=60, end=250, step=10):
     ⚠️ end>250(예: 규칙9 표준 90개 = checkpoints(60,950,10))을 쓸 거면
     `fetch_universe_data(kr_days=1900, us_period="5y")`도 같이 써야 한다
     — 기본 fetch(2년치)로는 큰 offset에서 필요 봉수를 못 채워 후반
-    체크포인트가 조용히 전부 빈다(fetch_universe_data 문서 참고)."""
+    체크포인트가 조용히 전부 빈다(fetch_universe_data 문서 참고). 이
+    함수의 반환값을 그대로 `fetch_universe_data(..., validate_offsets=이_반환값)`에
+    넘기면 fetch 직후 자동으로 깊이를 검증해 실패시킨다 — 새 스크립트는
+    이렇게 쓸 것(2026-09-01 depth_atr 사고 재발 방지, `assert_sufficient_depth()`
+    참고)."""
     return list(range(start, end + 1, step))
 
 

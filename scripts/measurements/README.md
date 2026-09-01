@@ -89,13 +89,27 @@ rs_min 85→80, 슈퍼대장 즉시진입 ATR×2) — 전부 같은 이유로 �
    전이다 — 목록은 `docs/kr_us_strategy_map.md` "20개 창 채택 결론
    재검증 대기 목록" 절 참고(재측정은 안 함, 목록만).
 
+10. **90개+ 체크포인트를 쓰는 스크립트는 `fetch_universe_data(...,
+    validate_offsets=OFFSETS)`를 반드시 쓴다 — fetch 깊이 부족을 경고
+    문서가 아니라 실제 실패로 만든다.** 2026-09-01 depth_atr 90개
+    체크포인트 재검증 최초 실행에서, 기본 fetch(730일/2년)로
+    `checkpoints(60,950,10)`을 돌려 31번째 체크포인트 이후 신규 히트가
+    조용히 0건으로 멎는 사고가 있었다(당일 발견해 결과 발표 전에 잡음 —
+    전체 재감사 결과 이 사고로 오염된 기발표 측정은 0건, 아래 감사표
+    포함해 90개 창 스크립트 10개 전수 확인). `harness.assert_sufficient_depth()`
+    신설(`fetch_universe_data()`의 `validate_offsets` 인자로 자동 연결) —
+    필요봉수(max_offset+min_bars) 미만 종목이 20% 넘으면 `AssertionError`.
+    docstring 경고만으로는 사람이 기억해야 하는 구조라 같은 사고가
+    재발할 수 있다는 게 이 규칙의 근거(CLAUDE.md "경고가 아니라 실패로
+    만든다" 원칙과 동일).
+
 ## 기존 docs/*.md 측정 스크립트 존재 여부 (2026-08-14 감사)
 
 | 문서 | 인용된 스크립트 | 존재 여부 |
 |---|---|---|
 | `pullback_stop_width_and_entry_timing.md` | `2026-08-14_pullback_stop_width_and_entry_timing.py` | ✅ 여기 있음(v5.68부터) |
 | `all_tabs_common_yardstick_investigation.md` | Script A~F, `entrysignal_before_after.py`, `item_pass_rates_all5.py`, `super_immediate_entry.py`, `super_pullback_prefilter_check.py`, `super_status_atr2.py`, `surge_accum_followup.py` | ❌ 전부 재현 불가 (Script A의 추세전환 부분·Script B/E의 Stage2 부분은 2026-08-25 재현 가능한 후속 스크립트로 대체 측정됨 — 아래 참고, 원본 자체는 여전히 없음) |
-| `imminent_stop_entry_investigation.md` | (파일명 없이 인라인 서술) | ❌ 재현 불가 |
+| `imminent_stop_entry_investigation.md` | (파일명 없이 인라인 서술) | ❌ 원본 재현 불가 — 단, 2026-09-01 `2026-09-01_confirm_entry_90cp_revalidation.py`가 90개 창으로 독립 재구현해 핵심 결론(안A≪안C, 하이브리드<안A) 재확인 + 더 나은 정의(종가기준) 발견 |
 | `leader_to_pullback_watch.md` | `leader_check_cost.py`, `leader_to_pullback_dist.py` | ❌ 재현 불가 |
 | `rs_definition_and_slope_investigation.md` | (파일명 없이 인라인 서술, `test_trace_parity.py` 등은 별개로 실존) | ❌ 재현 불가 |
 | `ud_volume_ratio_investigation.md` | (파일명 없이 인라인 서술) | ❌ 재현 불가 |

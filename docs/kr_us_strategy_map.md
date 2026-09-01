@@ -411,6 +411,52 @@ fetch로 해결해둔 전례가 있었는데 처음에 확인 안 하고 harness
 썼다가 똑같이 걸림 — 그 전례의 확장 fetch를 그대로 가져와 재실행해
 아래 결과를 얻었다(재현 가능하게 스크립트에 경위 주석 포함).
 
+### 영향 범위 전수 감사 (2026-09-01, 사용자 지시로 재확인)
+
+이 버그가 다른 기존 측정도 오염시켰을 가능성을 감사(당시 1차 감사에서
+"영향 없음" 결론, 이후 새로 실행된 90개 창 측정들까지 포함해 재확인).
+`checkpoints(60,950,10)`(90개, max offset 950)을 쓰는 스크립트 전부를
+찾아 fetch 방식을 확인:
+
+| 스크립트 | fetch 방식 | 상태 |
+|---|---|---|
+| `2026-08-29_kr_gap_trade_backtest.py` | 자체 `fetch_kr_long_universe`, `days=1900` | ✅ 안전 |
+| `2026-08-29_kr_jongga_betting_backtest_extended.py` | 〃, `days=1900` | ✅ 안전 |
+| `2026-08-31_kr_pullback_final_largesample_check.py` | 〃, KR`days=1900`/US`period=5y` | ✅ 안전 |
+| `2026-08-31_kr_pullback_support_breach_1900d.py` | 〃, `days=1900`(문제의 최초 해결 전례) | ✅ 안전 |
+| `2026-08-31_kr_theme_stage_signal_ev.py` | 위 스크립트의 fetch 재사용 | ✅ 안전 |
+| `2026-09-01_confirm_entry_90cp_revalidation.py` | `harness.fetch_universe_data(kr_days=1900,us_period="5y")` | ✅ 안전 |
+| `2026-09-01_kr_multi_hit_90cp_revalidation.py` | `harness.fetch_universe_data(kr_days=1900)` (KR전용) | ✅ 안전 |
+| `2026-09-01_depth_atr_gate_90cp_revalidation.py` | 자체 `fetch_kr_long_universe`, `days=1900`(이 버그를 잡은 스크립트 본인) | ✅ 안전 |
+| `2026-09-01_kr_rsi_under50_90cp_revalidation.py` | `harness.fetch_universe_data(kr_days=1900)` (KR전용) | ✅ 안전 |
+| `2026-09-01_rs_gate_e_90cp_revalidation.py` | `harness.fetch_universe_data(kr_days=1900,us_period="5y")` | ✅ 안전 |
+
+**결론: 90개 창을 쓴 10개 스크립트 전부 확장 fetch를 이미 쓰고
+있었다 — 영향받은 기존 측정은 0건**(1차 감사와 동일 결론, 이후
+신설된 5개 스크립트까지 포함해도 유지). 버그는 depth_atr 재검증 최초
+실행 중 그 자리에서 발견해 결과가 나오기 전에 잡혔고, 이후 스크립트들은
+전부 그 교훈(확장 fetch 필요)을 이어받아 작성됐다.
+
+**규칙9 재검증 4건 + KR/US 대표본 확인도 전부 확장 fetch 사용 확인**:
+- 우선순위1~4(depth_atr/RS게이트E/다중히트/RSI<50): 위 표에 포함,
+  전부 ✅.
+- "KR=돌파 계열" z=4.88→1.38 재검증(`2026-08-31_kr_pullback_final_largesample_check.py`):
+  위 표에 포함, KR`days=1900`/US`period=5y` 확인.
+- 눌림목 KR<US 격차 z=2.95→2.40(같은 스크립트, 같은 실행): 동일.
+
+**harness 기본 fetch를 확장으로 바꿀지 판단**: **바꾸지 않는 것을
+제안한다.** 이유: (1) 20개 창 스크립트(60~250)는 기본값(730일/2년)으로
+이미 충분해서(필요봉수 460봉 vs 확보 483~505봉) 바꿀 필요가 없고,
+불필요하게 fetch 시간만 늘어난다(1900일 KR fetch는 730일보다 유의미하게
+오래 걸림). (2) 기본값을 바꾸면 기존 20개 창 스크립트들의 결과가
+"재실행하면 다른 값이 나오는" 상태가 돼 재현성이 오히려 나빠진다(규칙5
+"결과 데이터는 커밋 안 함, 재실행하면 재현되는 게 요점"과 충돌).
+**대신 구조적 가드를 추가했다** — `harness.assert_sufficient_depth()`
+신설 + `fetch_universe_data(..., validate_offsets=OFFSETS)`로 자동 연결
+(README 규칙10). 90개+ 체크포인트 스크립트가 이 인자를 빠뜨리면 fetch
+직후 바로 `AssertionError`로 실패 — "문서를 읽고 기억하기"에서 "실패해서
+알게 되기"로 바꿨다.
+
 ### 결과 비교 (원측정 20개 창 vs 재검증 90개 창)
 
 cohort(c) = depth_atr 증분(현재 라이브 RS게이트E 위에서, 구 고정%
