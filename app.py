@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.135 [기능제거] KR 돌파 계열 RSI<50 저모멘텀 배지(v5.94) 채택 철회 —
+        90개 체크포인트 재검증(README 규칙9)에서 원측정(시간 반분
+        양쪽 다 gap≤-0.5R·|z|≥2.97로 채택)의 격차 **부호 자체가
+        역전**됨을 확인: 이전 절반 -0.507R→+0.120R, 최근 절반
+        -0.645R→-0.017R, 둘 다 비유의. 이번에 재검증한 4건(depth_atr/
+        RS게이트E/다중히트/RSI<50) 전부 채택 철회 — 5건 연속(원조
+        "KR=돌파 계열" z=4.88 포함) 20개 체크포인트 채택이 90개에서
+        전멸, README 규칙9가 사후적으로 정당화됨(docs/kr_us_strategy_map.md
+        "종합 — 규칙9 재검증 4건 전체 요약"). `static/index.html`의
+        `isLowMomentumBreakout()` 함수 및 3개 호출부(신호등 warn·
+        `collapsedBadgeIconsHtml` ⚠️ 아이콘·카드 배지열) 전부 삭제
+        (게이트 아니라 배지 전용이라 scanner.py 무변경). GUIDE.md
+        3곳 정정. 오늘자 KR 돌파계열 히트 17건 중 배지 대상은 1건.
 v5.134 [기능제거] KR 돌파 계열 다중히트(🔱/⚑) 배지+정렬가점(v5.114)
         채택 철회 — 90개 체크포인트 재검증(README 규칙9)에서 채택
         근거 3가지(풀링 격차 유의, 단조성, 시간반분 재현)가 전부
@@ -3882,7 +3895,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.134"
+VERSION = "v5.135"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
