@@ -11,12 +11,19 @@ scanner.py는 참조하지 않는다(눌림목 등 매매 신호 로직과 무�
 app.py에 대한 의존성이 없다(app.py → money_flow 방향으로만 import).
 
 【핵심 판단 2가지 — 설계 근거】
-1. **테마 지속성(streak)**: "거래대금 상위에 등장" = 그 테마가 당일
-   테마별 거래대금 점유율 기준 상위 THEME_STREAK_RANK_THRESHOLD(=10)위
-   이내에 든 날. 모든 테마를 "등장"으로 치면(거의 항상 최소 1종목은
-   top100에 있어 사실상 전부 매일 등장) streak가 무의미해지므로,
-   "눈에 띄게 강한 테마"만 카운트되도록 순위 컷을 둠 — 단발 등장(순위
-   컷 밖으로 밀려나면 streak 리셋)과 연속 등장을 구분하는 게 목적.
+1. **테마 지속성(streak)**: "거래대금 상위에 등장" = 그 테마가 이번
+   실행(스냅샷) 시점 기준 테마별 거래대금 점유율 상위
+   THEME_STREAK_RANK_THRESHOLD(=10)위 이내에 든 회차. 모든 테마를
+   "등장"으로 치면(거의 항상 최소 1종목은 top100에 있어 사실상 매번
+   등장) streak가 무의미해지므로, "눈에 띄게 강한 테마"만 카운트되도록
+   순위 컷을 둠 — 단발 등장(순위 컷 밖으로 밀려나면 streak 리셋)과
+   연속 등장을 구분하는 게 목적. **주의(2026-09-02, 사용자 지시)**:
+   필드명은 `streak_periods`(실행 1회 = 1 period)이고 `streak_unit`
+   필드가 그 period의 실제 단위를 명시한다(moneyflow가 매일 실행이면
+   "day", 주 1회면 "week" — 지금은 v5.147부터 주 1회 전환으로 "week").
+   과거엔 `streak_days`라는 이름이었는데, 실행 주기가 바뀌면 이름이
+   거짓말을 하게 되는 문제(예: 주 1회인데 이름은 "days") 자체를 막기
+   위해 주기 중립적인 이름 + 명시적 단위 필드로 바꿨다.
 2. **확산 단계**: 테마 내 top100 편입 종목을 거래대금 순으로 대장주/
    2등주/3등주로 서열화하고, 등락 여부로 4단계 규칙 분류:
    - 초기: 대장주만 상승, 2·3등주는 상승 안 함
@@ -228,7 +235,12 @@ def _aggregate_themes(top_rows: list[dict]) -> dict:
     return themes
 
 
-# ── 5) 지속성(streak) + 전일 대비 점유율 변화 — 전일 스냅샷과 대조 ────
+# ── 5) 지속성(streak) + 직전 스냅샷 대비 점유율 변화 ────
+# v5.147(사용자 지시): 필드명을 실행 주기 중립적인 streak_periods로 바꾸고
+# 현재 주기를 streak_unit에 명시("week" — moneyflow 주 1회 전환, 2026-09-02).
+STREAK_UNIT = "week"
+
+
 def _attach_streak(themes: dict, prev_snapshot: dict | None) -> dict:
     ranked_today = sorted(themes.items(), key=lambda kv: kv[1]["turnover_share_pct"], reverse=True)
     today_top_set = {name for name, _ in ranked_today[:THEME_STREAK_RANK_THRESHOLD]}
@@ -236,15 +248,20 @@ def _attach_streak(themes: dict, prev_snapshot: dict | None) -> dict:
     prev_shares = {}
     if prev_snapshot:
         for name, info in (prev_snapshot.get("themes") or {}).items():
-            prev_streaks[name] = info.get("streak_days", 0)
+            # 전환 전(매일 실행 시절) 스냅샷은 구 필드명 streak_days로 저장돼
+            # 있음 — 전환 직후 첫 주간 실행이 이걸 못 읽고 0으로 리셋하지
+            # 않도록 폴백으로 읽는다(일회성 하위호환, 구 스냅샷이 전부
+            # 밀려나면 자연히 안 쓰이게 됨).
+            prev_streaks[name] = info.get("streak_periods", info.get("streak_days", 0))
             prev_shares[name] = info.get("turnover_share_pct")
     for name, info in themes.items():
         in_top_today = name in today_top_set
         info["in_streak_rank"] = in_top_today
+        info["streak_unit"] = STREAK_UNIT
         if in_top_today:
-            info["streak_days"] = prev_streaks.get(name, 0) + 1
+            info["streak_periods"] = prev_streaks.get(name, 0) + 1
         else:
-            info["streak_days"] = 0
+            info["streak_periods"] = 0
         prev_share = prev_shares.get(name)
         info["turnover_share_change_pct"] = (
             round(info["turnover_share_pct"] - prev_share, 2) if prev_share is not None else None

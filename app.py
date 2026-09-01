@@ -5,6 +5,34 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.148 [비용절감] 돈의흐름(money flow) 리포트 매일→주 1회 전환(사용자
+        지시, 월 ~$50 → ~$8). 토요일 09:00 KST 이후 그 주의 실제 마지막
+        거래일(보통 금요일, 공휴일이면 그 이전 — `_last_trading_daykey()`
+        가 `is_trading_day()`로 역산) 날짜를 daykey로 써서 기존 마커
+        (`_moneyflow_warmed_*.marker`)/저장 함수를 형식 변경 없이 재사용.
+        트리거를 `_warm_market()`의 매일 EOD 분기에서 빼고 새 함수
+        `_maybe_run_weekly_money_flow()`(스케줄러 루프에서 4분마다 체크)로
+        분리 — 수동 재실행 버튼은 원래부터 이 마커 시스템을 안 타는
+        완전히 독립된 경로라 간섭 없음(확인 완료). 일일 API 상한 20회는
+        3개 모듈(money_flow_report/theme_map/macro_calendar) 공유 값이라
+        유지(moneyflow 감소를 이유로 낮추면 나머지 둘만 조여짐, 사용자
+        결정). 이번 주(9/2 수요일 배포 이전 월~수 매일 마커 이미 생성됨)는
+        9/5(토) 한 번 더 돌고 다음 주부터 완전히 주 1회로 안정화.
+        부수 수정 — **`streak_days`를 `streak_periods`+`streak_unit`
+        ("week")로 개명**(사용자 지시: "필드명과 의미가 어긋나는 문제를
+        오늘 세 번 겪었다, 기록만 하면 잊힌다"): 실행 주기가 바뀌면서
+        "1 증가=1일"이 더 이상 사실이 아니게 됨(v5.100부터 있던 필드,
+        이름이 실제 단위를 반영 못 하게 되는 클래스의 버그). 개명 범위
+        전부 확인 후 수정 — `money_flow.py`(`_attach_streak`, 구 스냅샷
+        `streak_days` 폴백 읽기로 하위호환), `app.py`(`_warm_market`의
+        theme_map 자동생성 트리거 `streak_periods>=2`, `get_calendar()`의
+        강세테마×스캐너 교집합, `/moneyflow` 디버그 페이지 표시),
+        `static/index.html`(동일 디버그 페이지 코드, `streak_unit`값에
+        따라 "주"/"일" 동적 표시), `docs/money_flow_prompt.md`(Claude
+        프롬프트 본문 — "일"/"어제"/"당일" 관련 서술을 실행 주기 표현으로
+        수정, 이 파일은 실제로 Claude API에 그대로 전달되는 텍스트라 필드명
+        불일치가 리포트 품질에 직접 영향). CLAUDE.md에 원칙 추가 + 이번
+        전환 세부사항 기록.
 v5.147 [버그수정] "오늘의 결정" 캐시 오염/날짜표시 누락 수정(사용자 지시,
         조사 후속). 배경: 로그인 직후엔 정상 표시되던 "오늘의 결정"이
         새로고침하면 비는 사고 조사 — 근본 원인은 `_cache`(app.py 인메모리
@@ -4117,7 +4145,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.147"
+VERSION = "v5.148"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6189,13 +6217,17 @@ async def _run_money_flow(market: str, daykey: str) -> dict:
     else:
         print(f"[moneyflow] {market} {daykey} 2단계 실패(1단계만 저장됨): {error}")
     # v5.100(사용자 지시 4번): KR 강세 테마(확산 단계 진입 또는 streak
-    # 2일+) 감지 시, 매핑 없는(또는 30일 경과) 테마만 자동 생성. US는
+    # 2주+) 감지 시, 매핑 없는(또는 30일 경과) 테마만 자동 생성. US는
     # theme_map이 "KR 관련주" 전용(사용자 지시 1번)이라 대상 아님.
+    # v5.147(사용자 지시): moneyflow가 주 1회로 바뀌면서 streak_days가
+    # streak_periods로 개명됐고, 이 필드의 1 증가 = 1주(streak_unit=
+    # "week")다 — 아래 ">= 2"는 이제 "2일 연속"이 아니라 "2주 연속"
+    # 판정이다(money_flow.py STREAK_UNIT 참고).
     if market == "kr":
         try:
             candidate_themes = [
                 name for name, info in (snapshot.get("themes") or {}).items()
-                if info.get("stage") == "확산(본격)" or (info.get("streak_days") or 0) >= 2
+                if info.get("stage") == "확산(본격)" or (info.get("streak_periods") or 0) >= 2
             ]
             if candidate_themes:
                 generated = await loop.run_in_executor(
@@ -6216,6 +6248,48 @@ async def _run_money_flow_bg(market: str, daykey: str):
         await _run_money_flow(market, daykey)
     except Exception as e:
         print(f"[moneyflow] scheduler run failed {market} {daykey}: {e}")
+
+
+# v5.147(사용자 지시, 비용 절감: 월 ~$50 → ~$8): 돈의흐름을 매일→주 1회로
+# 전환. 토요일이면 KR·US 둘 다 한 주가 완전히 끝난 상태(일요일까지
+# 기다려도 데이터는 동일 — 주말엔 거래 자체가 없음)라 토요일을 택했다.
+# 09:00 KST는 US 마감 확정(_market_session_key의 us_closed 기준 06:00)
+# 이후 데이터 제공처 지연을 감안한 여유. daykey는 "오늘"(토요일)이 아니라
+# 그 주의 실제 마지막 거래일(보통 금요일, 공휴일이면 그 이전)로 계산해서
+# 기존 마커/저장 함수(_moneyflow_warmed_marker/_mark_moneyflow_warmed/
+# money_flow.save_report_markdown)를 형식 변경 없이 그대로 재사용 —
+# 이 날짜는 주 1회만 발생하므로 ISO 주차 같은 새 포맷이 필요 없다.
+# 수동 버튼(POST /api/moneyflow/{market}/run)은 이 함수를 전혀 거치지
+# 않는 완전히 독립된 경로(자체 쿨다운+진행중 잠금)라 서로 간섭하지 않는다.
+_MONEYFLOW_WEEKLY_WEEKDAY = 5   # 월요일=0 기준 토요일
+_MONEYFLOW_WEEKLY_HOUR = 9      # KST 09:00 이후
+
+
+def _last_trading_daykey(market: str, from_dt: datetime) -> str:
+    """from_dt(포함)부터 거슬러 올라가 그 시장의 가장 최근 실제 거래일
+    날짜(YYYY-MM-DD)를 찾는다 — 금요일이 공휴일이면 목요일 이전까지 감."""
+    d = from_dt
+    for _ in range(10):   # 안전판 — 10일 넘게 거래일이 없을 일은 없음
+        key = d.strftime("%Y-%m-%d")
+        if is_trading_day(market, key):
+            return key
+        d -= timedelta(days=1)
+    return from_dt.strftime("%Y-%m-%d")   # 이론상 도달 안 함(안전판 폴백)
+
+
+async def _maybe_run_weekly_money_flow():
+    now = datetime.now(KST)
+    if now.weekday() != _MONEYFLOW_WEEKLY_WEEKDAY or now.hour < _MONEYFLOW_WEEKLY_HOUR:
+        return
+    # v5.139 킬스위치 그대로 재사용 — 주 1회로 바뀌어도 비상 정지 수단은 유지.
+    if os.environ.get("MONEYFLOW_AUTO_ENABLED", "1") == "0":
+        print("[moneyflow] 주간 자동실행 스킵 — MONEYFLOW_AUTO_ENABLED=0")
+        return
+    for market in ("kr", "us"):
+        daykey = _last_trading_daykey(market, now)
+        mfkey = f"{market}:{daykey}"
+        if _mark_moneyflow_warmed(mfkey):
+            asyncio.create_task(_run_money_flow_bg(market, daykey))
 
 
 async def _warm_market(market: str):
@@ -6282,22 +6356,10 @@ async def _warm_market(market: str):
                     print(f"[reignition] EOD 갱신 실패: {e2}")
         except Exception as e:
             print(f"[scheduler] warm {market} failed: {e}")
-        # 돈의 흐름은 스캔 워밍과 독립 추적 — 스캔 워밍 실패와 무관하게 시도,
-        # 서로의 실패가 전파되지 않음. Claude API 호출이 오래(10~30초+) 걸릴
-        # 수 있어 create_task로 던져 4분 주기 스케줄러 루프를 막지 않는다.
-        # v5.139(사용자 지시, 자동실행 19분 재실행 사고 킬스위치): 원인
-        # 수정(v5.140, 영속 마커) 후에도 남겨둠 — Railway 환경변수 하나로
-        # 즉시 자동실행을 끌 수 있는 비상 스위치. 수동 버튼 경로(POST
-        # /api/moneyflow/{market}/run)는 이 가드 밖이라 영향 없음.
-        if os.environ.get("MONEYFLOW_AUTO_ENABLED", "1") != "0":
-            mfkey = f"{market}:{daykey}"
-            if _mark_moneyflow_warmed(mfkey):
-                asyncio.create_task(_run_money_flow_bg(market, daykey))
-        else:
-            # v5.143: 킬스위치가 실제로 스킵을 발동했다는 증거를 로그에 남김
-            # (이전엔 else가 없어 Railway 로그만으로 "꺼져서 스킵"과 "게이트가
-            # 이미 True라 스킵" 구분이 안 됐음).
-            print(f"[moneyflow] {market} {daykey} 자동실행 스킵 — MONEYFLOW_AUTO_ENABLED=0")
+        # v5.147(사용자 지시, 비용 절감): 돈의흐름 자동실행을 여기(매일
+        # EOD 시점)에서 뺐다 — 주 1회(토요일)로 전환, 실제 트리거는
+        # `_maybe_run_weekly_money_flow()`(스케줄러 루프에서 별도 호출).
+        # 이 함수 자체(스캔 워밍/종가베팅/재점화 EOD 갱신)는 매일 그대로.
         return
     # ── 장중: 캐시가 8분 이상 묵었으면 미리 갱신 (사용자 요청 전에) ──
     # DATA_TTL(10분)보다 짧은 주기로 데워, 사용자가 열 때 항상 신선한 캐시 확보.
@@ -6407,7 +6469,8 @@ async def _scheduler_loop():
     - 장 마감 후: 하루 1회 (데이터 고정)
     - 장중: 8분 이상 묵은 캐시를 미리 갱신 → 사용자는 항상 캐시 히트,
             콜드 스캔으로 인한 '스캔 실패'가 사라짐.
-    - 🇰🇷 종가베팅: 14:40~15:00 사이 1회 스냅샷(v5.97, 아래 참고)."""
+    - 🇰🇷 종가베팅: 14:40~15:00 사이 1회 스냅샷(v5.97, 아래 참고).
+    - 💰 돈의흐름: 토요일 09:00 KST 이후 주 1회(v5.147, 아래 참고)."""
     await asyncio.sleep(20)  # 부팅 직후 잠깐 대기
     while True:
         try:
@@ -6416,6 +6479,7 @@ async def _scheduler_loop():
                 await _warm_market(market)
             await _maybe_run_jongga_snapshot()
             _maybe_refresh_macro_calendar()   # v5.108: 캘린더 탭 매크로 일정, 주 1회
+            await _maybe_run_weekly_money_flow()   # v5.147: 돈의흐름 주 1회 전환
         except Exception as e:
             print(f"[scheduler] loop error: {e}")
         await asyncio.sleep(240)  # 4분
@@ -9605,12 +9669,14 @@ async def get_calendar():
     # ── ⑤ 강세테마 × 스캐너 교집합 — KR 돈의흐름 확산(본격)/streak2+ 테마 소속
     # 종목 중 오늘 돌파계열 탭 히트. _cache(기존 /api/scan 캐시)를 그대로
     # 읽기만 함 — 미스면(해당 탭을 오늘 아무도 안 열었으면) 조용히 스킵,
-    # 새 스캔은 절대 안 돌림(사용자 지시: 홈 로드 무겁게 하지 않기). ──
+    # 새 스캔은 절대 안 돌림(사용자 지시: 홈 로드 무겁게 하지 않기).
+    # v5.147: streak_days→streak_periods 개명(moneyflow 주 1회 전환,
+    # 1 증가=1주) — 아래 ">= 2"는 "2주 연속" 판정. ──
     theme_scanner_hits = []
     if kr_snapshot:
         themes_data = kr_snapshot.get("themes") or {}
         strong_themes = [name for name, info in themes_data.items()
-                          if info.get("stage") == "확산(본격)" or (info.get("streak_days") or 0) >= 2]
+                          if info.get("stage") == "확산(본격)" or (info.get("streak_periods") or 0) >= 2]
         for theme_name in strong_themes:
             entry = theme_map.get(theme_name)
             if not entry:
@@ -9803,7 +9869,7 @@ function fmtTop(snapshot) {
   const themeRows = Object.entries(snapshot.themes || {}).sort((a,b) => b[1].turnover_share_pct - a[1].turnover_share_pct).map(([name, t]) =>
     `<tr><td>${name}</td><td>${t.n}</td><td>${t.breadth_pct}%</td><td>${t.avg_change_pct}%</td>` +
     `<td>${t.turnover_share_pct}%${t.turnover_share_change_pct != null ? ` (${t.turnover_share_change_pct>0?'+':''}${t.turnover_share_change_pct}%p)` : ''}</td>` +
-    `<td>${t.streak_days}일</td><td>${t.stage}</td></tr>`
+    `<td>${t.streak_periods}${t.streak_unit === 'week' ? '주' : t.streak_unit === 'day' ? '일' : (t.streak_unit || '')} 연속</td><td>${t.stage}</td></tr>`
   ).join('');
   return `<p class="mf-note">AI 해석 리포트가 없어 1단계 계산 결과(테마 집계 + 거래대금 상위 30)만 표로 표시합니다.</p>
   <h3>테마 집계</h3>
