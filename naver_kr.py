@@ -388,6 +388,112 @@ def fetch_top_value(top_n: int = 800, include_etf: bool = False) -> dict:
     return out
 
 
+# ── 거래대금 상위 v2 — 모바일 API 기반, fetch_top_value()와 완전 독립 ──
+# (2026-09-01, 사용자 지시) 발견: fetch_top_value()가 긁는
+# finance.naver.com/sise/sise_quant.naver는 page 파라미터가 응답에
+# 반영되지 않는 버그가 있어(실측 재현 — page 1~59 전부 동일 콘텐츠 반환)
+# 거래대금 기준으로는 시장당 ~90개 정도만 건지고, 나머지는 전부 시가총액
+# 폴백으로 채워지고 있었다(전체 1500 중 91%가 시총 폴백). 그 사고 원인
+# 조사 중 발견한 대체 소스 — m.stock.naver.com의 모바일 API는 같은 사이트
+# 안의 다른 페이지지만 page 파라미터가 정상 동작(실측 확인, page별로
+# 실제 다른 종목 반환)하고, 시총순 정렬(marketValue) 응답에도 종목별
+# 당일 누적거래대금(accumulatedTradingValue)이 이미 포함돼 있어, 전체
+# 시장을 훑어 거래대금 기준으로 직접 재정렬하면 "진짜" 거래대금 상위
+# 리스트를 만들 수 있다.
+#
+# **fetch_top_value()는 건드리지 않는다** — 이 함수는 비교 측정용 병행
+# 경로다. 종가베팅 백테스트 재측정에서 이 유니버스로 채택 여부가 갈리기
+# 전까지 운영 경로(get_universe/load_kr_dynamic)는 기존 그대로 둔다
+# (사용자 지시).
+_MSTOCK_MARKETVALUE_URL = "https://m.stock.naver.com/api/stocks/marketValue/{market}"
+_MSTOCK_PAGE_SIZE = 100          # 실측 확인: 100은 정상, 1000은 서버가 비JSON 응답으로 거부
+_MSTOCK_MAX_CONSEC_FAILS = 2     # 같은 시장에서 연속 실패 시 그 시장 페이징 중단(부분 결과 + incomplete 플래그)
+
+
+def _mstock_parse_trading_value(raw) -> int | None:
+    """accumulatedTradingValue 문자열("3,308,883", 단위 백만원)을 정수로.
+    파싱 불가 종목은 순위에서 제외(값 없이 섞으면 정렬이 왜곡됨)."""
+    try:
+        return int(str(raw).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_top_turnover_v2(top_n: int = 1500, page_size: int = _MSTOCK_PAGE_SIZE) -> tuple[dict, dict]:
+    """m.stock.naver.com 기반 "진짜" 거래대금 상위 top_n. 반환:
+    (universe: {코드.KS/.KQ: 이름}, stats: 진단정보).
+
+    stats 필드: kospi_total/kosdaq_total(서버가 보고한 시장 전체 종목 수),
+    kospi_fetched/kosdaq_fetched(실제로 받은 종목 수), skipped_etf,
+    incomplete(연속 실패로 한 시장이라도 끝까지 못 훑었으면 True — 이
+    경우 순위가 편향됐을 수 있어 호출부가 결과를 신뢰하기 전에 확인해야
+    함), errors(예외 메시지 목록).
+
+    fetch_top_value()와 달리 시장별 미리 배분(per_market)하지 않고 전체
+    시장을 다 훑은 뒤 실제 거래대금(accumulatedTradingValue)으로 직접
+    정렬한다 — 그래야 "거래대금 상위"라는 이름이 실제와 맞는다."""
+    all_rows: list[tuple[str, str, int]] = []
+    stats = {"kospi_total": None, "kosdaq_total": None,
+              "kospi_fetched": 0, "kosdaq_fetched": 0,
+              "skipped_etf": 0, "incomplete": False, "errors": []}
+
+    for market, suffix, total_key, fetched_key in (
+        ("KOSPI", ".KS", "kospi_total", "kospi_fetched"),
+        ("KOSDAQ", ".KQ", "kosdaq_total", "kosdaq_fetched"),
+    ):
+        page = 1
+        consec_fails = 0
+        while True:
+            data = None
+            for attempt in range(2):   # 페이지당 최대 2회 시도(최초+재시도 1회)
+                try:
+                    resp = requests.get(
+                        _MSTOCK_MARKETVALUE_URL.format(market=market),
+                        params={"page": page, "pageSize": page_size},
+                        headers=_HEADERS, timeout=_TIMEOUT,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    break
+                except (requests.RequestException, ValueError) as e:
+                    if attempt == 1:
+                        stats["errors"].append(f"{market} page={page}: {type(e).__name__}: {e}")
+            if data is None:
+                consec_fails += 1
+                if consec_fails >= _MSTOCK_MAX_CONSEC_FAILS:
+                    # 이 시장은 여기서 중단 — 남은 종목을 놓친 채로 부분
+                    # 결과만 갖고 있다는 뜻이라 incomplete로 명시(조용히
+                    # 갭 있는 순위를 진짜처럼 반환하지 않는다).
+                    stats["incomplete"] = True
+                    break
+                page += 1
+                continue
+            consec_fails = 0
+            if stats[total_key] is None:
+                stats[total_key] = data.get("totalCount")
+            stocks = data.get("stocks") or []
+            if not stocks:
+                break
+            for s in stocks:
+                code, name = s.get("itemCode"), s.get("stockName")
+                val = _mstock_parse_trading_value(s.get("accumulatedTradingValue"))
+                if not code or not name or val is None:
+                    continue
+                if _is_etf_like(name):
+                    stats["skipped_etf"] += 1
+                    continue
+                all_rows.append((f"{code}{suffix}", name, val))
+                stats[fetched_key] += 1
+            _time.sleep(0.1)
+            page += 1
+            if stats[total_key] is not None and (page - 1) * page_size >= stats[total_key]:
+                break   # 서버가 밝힌 전체 종목 수만큼 다 받았으면 정상 종료
+
+    all_rows.sort(key=lambda r: r[2], reverse=True)
+    universe = {t: n for t, n, _v in all_rows[:top_n]}
+    return universe, stats
+
+
 # ── 시가총액 상위 (거래대금 상위와 병합해 커버리지 확대) ──
 _MARKETSUM_URL = "https://finance.naver.com/sise/sise_market_sum.naver"
 
