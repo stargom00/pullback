@@ -5,6 +5,27 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.147 [버그수정] "오늘의 결정" 캐시 오염/날짜표시 누락 수정(사용자 지시,
+        조사 후속). 배경: 로그인 직후엔 정상 표시되던 "오늘의 결정"이
+        새로고침하면 비는 사고 조사 — 근본 원인은 `_cache`(app.py 인메모리
+        dict, 재시작 시 리셋)가 Railway 재배포 사이에 잠깐 비어 스케줄러
+        (4분 주기)가 재워밍할 때까지 그런 것으로 확인(1번, 구조적 특성이라
+        안내 문구만 추가). 조사 중 독립된 버그 2건 추가 발견해 같이 수정.
+        (2) `/api/alerts`(경보 추가/삭제)가 `_cache.clear()`로 전체 스캔
+        캐시를 무차별 삭제 — 경보와 무관한 종가베팅(`kr:jongga`) 등도
+        같이 날아가 "오늘의 결정"이 비는 부작용이 있었다. 각 `_run_scan_*`
+        본문에서 `load_alerts()`/`alert_kind` 실사용 여부를 추적해
+        `_ALERT_DEPENDENT_SCAN_MODES`(pullback/turnaround/leader/super/
+        breakout/surge/imminent/boxbreak/breakdown/pattern/strong_pivot)로
+        범위를 좁힘 — jongga/stage2/ibd9/earnings는 alerts를 안 읽으므로
+        보존. (3) `_cache[f"{mkt}:imminent"]`에 날짜 체크가 아예 없어
+        오늘 아직 재웜 전이면 어제 장마감 스냅샷이 "오늘 것"처럼 표시될
+        수 있었음 — daykey(장마감 확정) 또는 ts(장중 워밍)로 스냅샷 날짜를
+        역산해 hit에 붙이고, 오늘과 다르면 카드에 "⚠️ MM-DD 스냅샷(장중
+        갱신 전)" 표시. 종가베팅 카드에도 "📸 MM-DD 종가 기준" 상시 표기
+        (종가베팅 탭 기존 📸 배너 패턴 재사용). (1) "오늘의 결정"/"오늘의
+        액션 큐" 빈 상태 문구에 "방금 배포했다면 캐시 워밍 중이라 몇 분
+        뒤 다시 채워집니다" 캐비어트 추가.
 v5.146 [버그수정] 일지/스캔 타임스탬프 UTC→KST 통일(사용자 지시).
         발견: `/api/watch/quick`(⚡감시 원클릭 등록 — 스캐너 카드/재점화/
         대장전환/"오늘의 결정" 공유)이 `datetime.now()`를 타임존 없이
@@ -4096,7 +4117,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.146"
+VERSION = "v5.147"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6464,6 +6485,21 @@ POSITIONS_META_PATH = _resolve_persistent_path("positions_meta.json")
 SYNC_ERROR_PATH = _resolve_persistent_path("sync_error.json")
 
 
+# v5.147(사용자 지시, "오늘의 결정" 조사 후속): `run_scan()`이 `load_alerts()`를
+# 읽어 각 hit에 `alert` 필드를 붙이는 모드만 alerts 변경에 실제로 영향을
+# 받는다 — 코드 추적 결과(각 _run_scan_* 함수 본문에서 load_alerts()/alert_kind
+# 사용 여부 확인): 일반 경로(analyze_* 디스패치, run_scan 5844행부터)를 타는
+# pullback/turnaround/leader/super/breakout/surge/imminent/boxbreak/breakdown/
+# pattern과, 별도 함수지만 자체적으로 load_alerts()를 호출하는 strong_pivot이
+# 대상. jongga/stage2/ibd9/earnings는 각자 `"alert": None`을 하드코딩하거나
+# (stage2/ibd9/earnings) alerts를 아예 안 읽어(jongga) 무관 — 이 4개를 지우면
+# "오늘의 결정"의 종가베팅 스냅샷 등 무관 캐시만 조용히 날아가는 부작용이 있었다.
+_ALERT_DEPENDENT_SCAN_MODES = {
+    "pullback", "turnaround", "leader", "super", "breakout", "surge",
+    "imminent", "boxbreak", "breakdown", "pattern", "strong_pivot",
+}
+
+
 @app.get("/api/alerts")
 async def get_alerts():
     return JSONResponse(load_alerts())
@@ -6517,8 +6553,14 @@ async def add_alert(request: Request):
         f.write("# 대시보드에서 추가한 경보 종목 (자동 생성)\n")
         for tk, kd in sorted(entries.items()):
             f.write(f"{tk} {kd}\n")
-    # 캐시 무효화 (다음 스캔에 반영)
-    _cache.clear()
+    # 캐시 무효화 (다음 스캔에 반영) — v5.147: alerts가 실제로 반영되는
+    # 모드만 지운다(_ALERT_DEPENDENT_SCAN_MODES). 예전엔 _cache.clear()로
+    # 전체를 지워서, 경보 하나 추가/삭제할 때마다 무관한 종가베팅
+    # 스냅샷(kr:jongga)까지 같이 사라져 "오늘의 결정"이 비는 부작용이 있었다.
+    for k in list(_cache.keys()):
+        _, _, mode = k.partition(":")
+        if mode in _ALERT_DEPENDENT_SCAN_MODES:
+            del _cache[k]
     return JSONResponse({"ok": True, "alerts": entries})
 
 
@@ -9411,6 +9453,11 @@ async def get_calendar():
                 "ticker": h["ticker"], "name": h.get("name", h["ticker"]), "market": "KR", "mode": "jongga",
                 "entry": h.get("close"), "stop": None, "target_2r": None,
                 "close": h.get("close"), "pivot": h.get("close"), "sector": h.get("sector"),
+                # v5.147: 종가베팅 탭 자체의 📸 스냅샷 배너와 같은 정보를 카드에도
+                # 표기(사용자 지시) — 이 분기는 이미 snapshot_date==today로 걸러져
+                # 있어 "오늘" 고정이지만, 표시 자체가 없다는 지적(9/1 종가인데
+                # 오늘 장중으로 오해 가능)에 대응해 항상 명시한다.
+                "snapshot_date": jongga_cached.get("snapshot_date"),
                 "reason": f"종가베팅(거래대금 {h.get('turnover_rank','?')}위) — {JONGGA_BACKTEST_NOTE} · "
                           f"매도: {JONGGA_SELL_RULE}",
             })
@@ -9504,17 +9551,38 @@ async def get_calendar():
     waiting["pending_watch"] = pending_far
 
     # ④ 돌파임박 상위 — 캐시만(새 스캔 없음), 참고 근접 후보로만.
+    # v5.147: 이 캐시엔 날짜 체크가 전혀 없어서(사용자 발견), 오늘 아직
+    # 재웜이 안 됐으면 어제 장마감 스냅샷이 "오늘 것"처럼 그대로 노출될
+    # 수 있었다 — 배제하지 않고(캘린더 원칙: 캐시미스여도 스캔 안 돌림)
+    # 대신 소스 스캔의 날짜를 hit마다 붙여서 카드에 경고를 표시한다.
+    # daykey는 장마감 확정 스냅샷에만 붙는다(_market_session_key) — 장중
+    # 워밍은 daykey=None, ts만 있어 그 경우엔 ts를 KST 날짜로 환산.
+    def _snapshot_date_of(cached_scan):
+        if not cached_scan:
+            return None
+        if cached_scan.get("daykey"):
+            return cached_scan["daykey"]
+        ts = cached_scan.get("ts")
+        if ts:
+            return datetime.fromtimestamp(ts, KST).strftime("%Y-%m-%d")
+        return None
+
     imminent_hits = []
     for mkt in ("kr", "us"):
         cached_scan = _cache.get(f"{mkt}:imminent")
         if cached_scan and cached_scan.get("hits"):
-            imminent_hits.extend(cached_scan["hits"])
+            snap_date = _snapshot_date_of(cached_scan)
+            for h in cached_scan["hits"]:
+                h = dict(h)  # 원본 캐시 dict를 변형하지 않도록 얕은 복사
+                h["_snapshot_date"] = snap_date
+                imminent_hits.append(h)
     imminent_hits.sort(key=lambda h: h.get("score") or 0, reverse=True)
     IMMINENT_TOP_N = 5
     for h in imminent_hits[:IMMINENT_TOP_N]:
         pivot, close = h.get("pivot"), h.get("close")
         if not pivot or not close:
             continue
+        snap_date = h.get("_snapshot_date")
         near.append({
             "source": "imminent", "key": f"imminent:{h['ticker']}",
             "ticker": h["ticker"], "name": h.get("name", h["ticker"]), "market": h.get("market"),
@@ -9522,6 +9590,7 @@ async def get_calendar():
             "current_price": close, "pivot": pivot, "dist_pct": round((pivot - close) / pivot * 100, 2),
             "entry_if_triggered": pivot, "stop_if_triggered": h.get("stop"),
             "close": close, "stop": h.get("stop"),
+            "snapshot_date": snap_date, "snapshot_stale": bool(snap_date) and snap_date != today,
             "reason": "돌파임박 상위 후보 — 참고(확인진입 전환 시 안C 규칙 적용)",
         })
     waiting["imminent"] = max(0, len(imminent_hits) - IMMINENT_TOP_N)
