@@ -13,3 +13,6 @@ sync_error.json
 sync_toss.log
 macro_calendar.json
 moneyflow_warmed_*.marker
+money_flow_report_state.json
+macro_calendar_guard_state.json
+api_call_guard_state.json

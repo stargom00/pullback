@@ -5,6 +5,30 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.143 [근본수정] 돈의흐름 restart-loop 비용 사고 근본 재발방지(사용자 지시
+        1·2·4·6번, 킬스위치가 아니라 구조 수정). ① `money_flow_report.
+        generate_report()`/`theme_map.generate_theme_map()`/`macro_calendar.
+        generate_calendar()` 세 함수 자신이 "이미 오늘 생성했다"/쿨다운
+        상태를 파일(영구 볼륨, JOURNAL_DIR→/data→앱폴더)에 기록·재확인 —
+        macro_calendar.py가 원래 쓰던 파일 기반 staleness 패턴을 나머지
+        둘에 이식. 어느 경로(스케줄러/수동 HTTP/향후 새 호출부)로 불려도
+        우회 불가능(방어가 라우트가 아니라 함수 최상단에 있음). ② 신규
+        `api_call_guard.py`(세 모듈이 공유, app.py 미의존) — 하루 총
+        20회 상한을 전역으로 강제, 14회 도달 시 경고·20회 도달 시 차단
+        메시지를 파일에 1회만 기록(`GET /api/apiguard/status`로 노출,
+        얼마냐봇 폴링 대상 — 이 레포엔 텔레그램 발송 코드가 없음, 실제
+        전송은 stock-alert 쪽에 폴링 코드 추가가 별도로 필요). ③
+        `theme_map.generate_theme_map()`에 `trigger` 인자 추가(반환 entry에
+        `trigger` 포함) — 호출부(app.py/maybe_auto_generate)가 사후에
+        `entry["trigger"]=...`로 채우던 걸 제거, 함수 자신이 트리거별
+        일일한도(AUTO/MANUAL_DAILY_LIMIT)를 재확인. ④ `money_flow_report.
+        generate_report(snapshot, market, daykey)`로 시그니처 변경(호출부
+        1곳, `app.py`의 `_run_money_flow` 갱신). v5.139 킬스위치
+        (MONEYFLOW_AUTO_ENABLED)와 v5.140 마커파일은 그대로 유지 — 전자는
+        비상 온오프, 후자는 "1단계 무료 계산을 4분마다 반복 안 하기 위한"
+        별개 목적(유료 API 안전은 이제 함수 레벨 게이트가 유일한 진원지).
+        CLAUDE.md에 "유료 API 가드는 함수 레벨+영속 저장" 원칙 추가
+        (2026-08-31/09-01 두 차례 사고 근거).
 v5.142 [UI] "오늘의 결정" 카드 레이아웃 CSS Grid로 재구성(사용자 지시,
         static/index.html만 수정). 컨테이너
         `grid-template-columns:repeat(auto-fill,minmax(320px,1fr))`로
@@ -3817,6 +3841,7 @@ import theme_map
 import theme_lifecycle
 import theme_reignition
 import macro_calendar
+import api_call_guard
 
 app = FastAPI(title="눌림목 스캐너")
 
@@ -3861,6 +3886,10 @@ _BOT_READ_EXACT_PATHS = {
     # v5.125: 얼마냐봇이 재점화 알림을 보내려면 stock-alert(별도 레포) 쪽에도
     # 이 경로를 폴링하는 코드가 추가돼야 함 — 여기서는 데이터만 열어둠.
     "/api/reignition/confirmed",
+    # v5.141: Claude API 일일 상한 경고/차단 텔레그램 발송도 마찬가지로
+    # stock-alert 쪽에 이 경로를 폴링하는 코드가 추가돼야 실제 발송이 된다 —
+    # 여기서는 데이터(pending_alert)만 열어둠.
+    "/api/apiguard/status",
 }
 _BOT_READ_PATH_PREFIXES = ("/api/dist/", "/api/ma/", "/api/pullback-signal/", "/api/vol/")
 
@@ -4006,7 +4035,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.142"
+VERSION = "v5.143"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6055,7 +6084,8 @@ async def _run_money_flow(market: str, daykey: str) -> dict:
         _executor, money_flow.run_daily, market, daykey,
         bundle["data"], bundle["universe"], _sector_of, methodology_note,
     )
-    markdown, error = await loop.run_in_executor(_executor, money_flow_report.generate_report, snapshot)
+    markdown, error = await loop.run_in_executor(
+        _executor, money_flow_report.generate_report, snapshot, market, daykey)
     if markdown:
         money_flow.save_report_markdown(market, daykey, markdown)
         print(f"[moneyflow] {market} {daykey} 리포트 생성 완료")
@@ -6166,6 +6196,11 @@ async def _warm_market(market: str):
             mfkey = f"{market}:{daykey}"
             if _mark_moneyflow_warmed(mfkey):
                 asyncio.create_task(_run_money_flow_bg(market, daykey))
+        else:
+            # v5.143: 킬스위치가 실제로 스킵을 발동했다는 증거를 로그에 남김
+            # (이전엔 else가 없어 Railway 로그만으로 "꺼져서 스킵"과 "게이트가
+            # 이미 True라 스킵" 구분이 안 됐음).
+            print(f"[moneyflow] {market} {daykey} 자동실행 스킵 — MONEYFLOW_AUTO_ENABLED=0")
         return
     # ── 장중: 캐시가 8분 이상 묵었으면 미리 갱신 (사용자 요청 전에) ──
     # DATA_TTL(10분)보다 짧은 주기로 데워, 사용자가 열 때 항상 신선한 캐시 확보.
@@ -8320,12 +8355,12 @@ async def _theme_map_generate_job(job_id: str, theme_name: str):
             job["error"] = "KR 시장 데이터 로드 실패"
             return
         loop = asyncio.get_event_loop()
-        entry = await loop.run_in_executor(_executor, theme_map.generate_theme_map, theme_name, bundle["universe"])
+        entry = await loop.run_in_executor(
+            _executor, theme_map.generate_theme_map, theme_name, bundle["universe"], "manual")
         if entry.get("error"):
             job["status"] = "error"
             job["error"] = entry["error"]
             return
-        entry["trigger"] = "manual"   # v5.127: 자동/수동 한도 분리 카운트용
         theme_map.save_theme_map(theme_name, entry)
         job["status"] = "done"
         job["result"] = _clean_nan({"theme": theme_name, **entry})
@@ -9549,6 +9584,17 @@ async def macro_calendar_status():
     """POST /api/calendar/macro/run이 던진 백그라운드 생성의 진행상태 —
     새 저장소 없이 기존 캐시 파일 + 실행중 플래그 재사용(위 설명 참고)."""
     return JSONResponse(_clean_nan({"generating": _macro_calendar_task_running, **_load_macro_calendar()}))
+
+
+@app.get("/api/apiguard/status")
+async def api_guard_status():
+    """Claude API 일일 총량 상한(v5.141, 사용자 지시 4번) 상태 노출 —
+    money_flow_report/theme_map/macro_calendar 셋을 합쳐 하루 20회, 14회
+    도달 시 경고·20회 도달 시 차단 메시지가 pending_alert에 한 번 채워진다.
+    이 레포엔 텔레그램 발송 코드가 없다(얼마냐봇은 별도 레포, money_flow.py
+    류와 같은 원칙) — 이 엔드포인트는 얼마냐봇이 폴링해서 텔레그램으로
+    전달하는 걸 전제로 한다(얼마냐봇 쪽 폴링 코드는 이 레포 범위 밖)."""
+    return JSONResponse(api_call_guard.status())
 
 
 @app.get("/moneyflow")

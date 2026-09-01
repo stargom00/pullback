@@ -16,6 +16,8 @@ import os
 import re
 from datetime import datetime, timedelta, timezone
 
+import api_call_guard
+
 KST = timezone(timedelta(hours=9))
 MODEL = "claude-sonnet-4-6"   # money_flow_report.py와 동일 — 이미 이 앱에서 검증된 조합
 MAX_TOKENS = 6000            # v5.124: 상한 8→25 확대에 맞춰 여유 있게 상향(entry당 reason 포함 25개 fit)
@@ -178,14 +180,31 @@ def _code_from_ticker(raw: str) -> str:
     return digits[:6] if len(digits) >= 6 else digits
 
 
-def generate_theme_map(theme_name: str, kr_universe: dict) -> dict:
+def generate_theme_map(theme_name: str, kr_universe: dict, trigger: str = "manual") -> dict:
     """theme_name에 대해 Claude(web_search)로 KR 관련주 생성 + 스캐너
     유니버스 대조 검증(환각 방지, 사용자 지시 2번). kr_universe:
     {ticker(.KS/.KQ 포함): name} — universe.get_universe("kr") 그대로
     전달받는다. 반환: {generated_at, stocks:[{ticker,name,rank,reason}],
-    source:"claude", removed:[...]} 또는 실패 시 {"error": ...}(예외를
-    던지지 않음 — money_flow_report.py와 동일 원칙, 호출부가 항상
-    안전하게 처리 가능하게)."""
+    source:"claude", removed:[...], trigger} 또는 실패 시 {"error": ...}
+    (예외를 던지지 않음 — money_flow_report.py와 동일 원칙, 호출부가 항상
+    안전하게 처리 가능하게).
+
+    trigger="auto"|"manual" — v5.141(사용자 지시, 돈의흐름 restart-loop
+    사고 재발방지 2번): 지금까지는 호출자(maybe_auto_generate/app.py)가
+    호출 "전에" today_generation_count로 한도를 확인했는데, 이 함수 자체는
+    무방비였다 — 새 호출 경로가 하나라도 생기면 그 경로가 사전 체크를
+    깜빡하는 순간 한도가 무의미해진다. 그래서 이 함수 자신이 트리거별
+    일일 한도와 전역 상한(api_call_guard)을 다시 확인한다."""
+    limit = AUTO_DAILY_LIMIT if trigger == "auto" else MANUAL_DAILY_LIMIT
+    if _today_generation_count(_load(), trigger=trigger) >= limit:
+        return {"error": f"오늘 {trigger} 생성 한도({limit}건) 도달"}
+
+    allowed, alert = api_call_guard.check_and_count("theme_map")
+    if alert:
+        print(f"[theme_map] {alert}")
+    if not allowed:
+        return {"error": "일일 Claude API 호출 상한 도달 — 차단됨(비용 보호)"}
+
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         return {"error": "ANTHROPIC_API_KEY 환경변수 미설정"}
@@ -248,7 +267,7 @@ def generate_theme_map(theme_name: str, kr_universe: dict) -> dict:
 
     return {
         "generated_at": datetime.now(KST).strftime("%Y-%m-%d"),
-        "stocks": stocks, "source": "claude", "removed": removed,
+        "stocks": stocks, "source": "claude", "removed": removed, "trigger": trigger,
     }
 
 
@@ -289,11 +308,10 @@ def maybe_auto_generate(candidate_themes: list[str], kr_universe: dict) -> list[
         existing = data.get(theme)
         if existing and not is_stale(existing):
             continue
-        entry = generate_theme_map(theme, kr_universe)
+        entry = generate_theme_map(theme, kr_universe, trigger="auto")
         if entry.get("error"):
             print(f"[theme_map] {theme} 자동 생성 실패: {entry['error']}")
             continue
-        entry["trigger"] = "auto"
         data[theme] = entry
         count += 1
         generated.append(theme)

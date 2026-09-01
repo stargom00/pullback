@@ -15,7 +15,11 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import datetime, timedelta, timezone
 
+import api_call_guard
+
+KST = timezone(timedelta(hours=9))
 MODEL = "claude-sonnet-4-6"
 MAX_TOKENS = 6000   # v5.111: 카테고리 7개로 확장(연준연설/국채입찰/옵션만기 등 추가)돼
                      # 웹서치 왕복·이벤트 수가 늘어남 — money_flow_report.py가 8000에서
@@ -63,8 +67,74 @@ SYSTEM_PROMPT = """너는 투자자를 위한 경제 캘린더를 만드는 애�
 ```"""
 
 
+# v5.141(사용자 지시, 돈의흐름 restart-loop 사고 재발방지 2번): app.py의
+# 7일 staleness+24시간 재시도 스로틀은 "UI 신선도" 정책이라 그대로 app.py에
+# 남긴다(제품 판단이지 비용 안전 문제가 아님) — 대신 이 함수 자신은 아주
+# 짧은 최소 호출 간격 + 전역 상한(api_call_guard)만 자체 확인해서, 앞으로
+# 어떤 새 호출부가 생기든(app.py의 스케줄러/수동 라우트를 거치지 않고
+# 직접 이 함수를 부르는 경우 포함) 최소한의 폭주는 막는다.
+MIN_CALL_INTERVAL_SEC = 60
+
+
+def _resolve_guard_dir() -> str:
+    candidates = []
+    env_dir = os.environ.get("JOURNAL_DIR")
+    if env_dir:
+        candidates.append(env_dir)
+    candidates.append("/data")
+    candidates.append(os.path.dirname(__file__))
+    for d in candidates:
+        try:
+            os.makedirs(d, exist_ok=True)
+            test = os.path.join(d, ".write_test")
+            with open(test, "w") as f:
+                f.write("ok")
+            os.remove(test)
+            return d
+        except OSError:
+            continue
+    return os.path.dirname(__file__)
+
+
+GUARD_STATE_PATH = os.path.join(_resolve_guard_dir(), "macro_calendar_guard_state.json")
+
+
+def _load_guard() -> dict:
+    try:
+        with open(GUARD_STATE_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_guard(data: dict):
+    try:
+        tmp = GUARD_STATE_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, GUARD_STATE_PATH)
+    except OSError as e:
+        print(f"[macro_calendar] 가드 상태 저장 실패: {e}")
+
+
 def generate_calendar(today: str) -> tuple[list | None, str | None]:
     """(events, error) 튜플 — 정확히 하나만 채워짐. today: "YYYY-MM-DD"."""
+    guard = _load_guard()
+    now_ts = datetime.now(KST).timestamp()
+    last_ts = guard.get("last_attempt_ts")
+    if last_ts and (now_ts - last_ts) < MIN_CALL_INTERVAL_SEC:
+        remaining = int(MIN_CALL_INTERVAL_SEC - (now_ts - last_ts))
+        return None, f"너무 잦은 호출 — {remaining}초 후 다시 시도(비용 보호)"
+    guard["last_attempt_ts"] = now_ts
+    _save_guard(guard)
+
+    allowed, alert = api_call_guard.check_and_count("macro_calendar")
+    if alert:
+        print(f"[macro_calendar] {alert}")
+    if not allowed:
+        return None, "일일 Claude API 호출 상한 도달 — 차단됨(비용 보호)"
+
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         return None, "ANTHROPIC_API_KEY 환경변수 미설정"
