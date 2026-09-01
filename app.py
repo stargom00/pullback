@@ -5,6 +5,20 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.144 [정정] 종가베팅 base 조건("거래대금 상위100") 표기 정정 + 재측정
+        대기 캐비어트(사용자 지시, 재측정 1단계 — 안전장치 먼저). 발견:
+        base 조건이 실제로는 "KR 전종목"이 아니라 `get_universe("kr")`
+        유니버스(~1500종목) 내 거래대금 상위100 — 이 유니버스는
+        `naver_kr.fetch_top_value()`의 `sise_quant.naver` 페이지네이션이
+        깨져(page 파라미터 무시, 실측 재현) 91%가 시가총액 순위 폴백으로
+        채워지고 있었음(별도 조사). `JONGGA_BACKTEST_NOTE`에 "⚠️ base
+        조건 재정의 확인 중 — z=4.28은 시총상위 유니버스 내 거래대금
+        기준, 재측정 대기" 추가 — "오늘의 결정" 🔴 인용 문구에도 그대로
+        반영됨(코드 변경 없이 상수만 수정이라 자동 전파). GUIDE.md
+        303행 + `docs/kr_jongga_betting_backtest.md` 상단 경고배너·판정
+        절 정정. **운영 경로(fetch_top_value, 유니버스 구성)는 이번엔
+        안 건드림** — 비교 측정 전엔 바꾸지 않는다는 원칙(다음 단계는
+        별도 유니버스 함수로 재측정 후 결정).
 v5.143 [근본수정] 돈의흐름 restart-loop 비용 사고 근본 재발방지(사용자 지시
         1·2·4·6번, 킬스위치가 아니라 구조 수정). ① `money_flow_report.
         generate_report()`/`theme_map.generate_theme_map()`/`macro_calendar.
@@ -4035,7 +4049,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.143"
+VERSION = "v5.144"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -4726,8 +4740,16 @@ STAGE2_RS_PCTILE_MIN = 70
 # +1.22%, base 대비 z=4.28). 조건 자체는 scanner.analyze_jongga()에
 # 그대로 있음 — 여기(app.py)는 KR 전종목 거래대금 순위(cross-sectional,
 # RS랭크와 같은 이유로 analyze_jongga() 밖에서 계산)만 준비해서 넘긴다.
+# v5.144(사용자 지시): base 조건("거래대금 상위100")이 실제로는
+# get_universe("kr")(시총상위 위주로 채워짐, 91% 시총폴백 확인) 내
+# 상위100이었음이 밝혀져 캐비어트 추가 — 재측정 전까지 z=4.28을 확정된
+# 채택 근거로 인용하지 않는다. docs/kr_jongga_betting_backtest.md 상단
+# 경고 배너와 동일 문구.
 JONGGA_BACKTEST_NOTE = ("이 조건 과거 평균 익일갭 +1.22% (n=276, 비용차감후, "
-                          "왕복0.3% 가정) — z=4.28 (docs/kr_jongga_betting_backtest.md)")
+                          "왕복0.3% 가정) — z=4.28 (docs/kr_jongga_betting_backtest.md) "
+                          "⚠️ base 조건 재정의 확인 중(2026-09-01) — z=4.28은 시총상위 "
+                          "유니버스 내 거래대금 기준, 재측정 대기")
+JONGGA_SELL_RULE = "익일 시초가~9:05 전량 매도"
 JONGGA_SELL_RULE = "익일 시초가~9:05 전량 매도"
 
 
