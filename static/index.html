@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.151</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.152</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3657,8 +3657,6 @@ function posCard(p) {
     ? `<span class="badge" title="${p.rs_approx ? '유니버스 캐시가 아직 안 따뜻해서 근사치(참고용)' : '실제 백분위 RS'}">RS ${p.rs}${p.rs_approx ? '≈' : ''}</span>` : '';
   const frozenBadge = p.price_frozen
     ? `<span class="badge" style="background:#3a2a2a;color:#ff9b9b" title="${(p.price_frozen_reasons||[]).join(', ')}">🧊가격고정의심</span>` : '';
-  const rsiBadge = (p.market === 'KR' && p.rsi != null && p.rsi < 50)
-    ? `<span class="badge" style="background:#3a3020;color:var(--amber)" title="RSI ${p.rsi} — 되돌림 계열 KR 조건에서 사후 EV가 낮게 나온 구간(측정 근거 있음)">RSI&lt;50</span>` : '';
   const unresolvedNote = p.unresolved
     ? `<div style="font-size:11px;color:var(--muted)">⚠️ 앱 유니버스 밖(또는 가격조회 실패) — RS·손절제안 등 스캐너 결합 정보 없음</div>` : '';
 
@@ -3687,7 +3685,7 @@ function posCard(p) {
       <span>R진행률 ${rProgress}</span>
       <span>손절선까지 ${distStop}</span>
     </div>
-    <div style="display:flex;gap:5px;flex-wrap:wrap">${rsBadge}${tabBadges}${frozenBadge}${rsiBadge}</div>
+    <div style="display:flex;gap:5px;flex-wrap:wrap">${rsBadge}${tabBadges}${frozenBadge}</div>
   </div>`;
 }
 

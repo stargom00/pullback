@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.152 [정정] 라벨-의미 불일치 감사(docs/label_semantics_audit_2026-09-02.md,
+        사용자 지시) 후속 — 높음 심각도 6건 중 1·2순위 조치.
+        (1) CLAUDE.md:83 "imminent/breakout/boxbreak rs_min=85" 문구가
+        실제 코드값(BREAKOUT_CONFIG/BOXBREAK_CONFIG rs_min=75,
+        IMMINENT_CONFIG rs_min=80, v5.61 이후 v5.69/v5.70에서 탭별
+        재조정된 뒤 미갱신)과 어긋나 있던 것을 정정. (2) `static/index.html`
+        포지션 탭의 `RSI<50` 배지 제거 — GUIDE.md 변경이력상 KR RSI
+        기반 규칙은 90개 체크포인트 재검증에서 부호까지 역전해 백엔드
+        배지는 이미 v5.135에서 제거됐는데, 이 프론트 사본만 남아 철회된
+        결론을 "측정 근거 있음"이라 계속 주장하고 있었음(실보유 종목
+        화면에 뜨는 문구라 심각도 높음으로 분류). 3순위(종가베팅 수치
+        6곳 구조 개선)는 제안 대기, 4순위(vol_high 개명)는 파급범위
+        보고 대기 — 아직 미착수.
 v5.151 [정정] `_dedup_today_decision()` 정렬 기준 수정(사용자 지시,
         v5.150 직후 후속). v5.150은 소스 신뢰도만으로 정렬해서 소스
         신뢰도가 높으면 near(🟡)가 immediate(🔴)를 이길 수 있었다 —
@@ -4199,7 +4212,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.151"
+VERSION = "v5.152"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
