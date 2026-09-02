@@ -4,6 +4,7 @@ kr_universe_v6_*.json
 datacache_*.pkl
 .env
 scripts/measurements/*.results.json
+scripts/measurements/_eps_cache_*/
 money_flow_data/
 jongga_forward.json
 theme_map.json
