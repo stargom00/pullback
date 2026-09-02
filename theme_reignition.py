@@ -119,7 +119,13 @@ def check_confirm(df) -> dict | None:
     v5.130: 실행 정보(카드 표시용) 필드 추가 — current_price/distance_pct/
     atr_stop/risk_pct/target_2r. `stop`(20일 저가, 포워드 트래킹용 확인진입
     손절 — 백테스트와 동일 정의, 절대 변경 금지)과 `atr_stop`(표시 전용
-    참고 손절 = pivot - ATR×1.5)은 서로 다른 개념이니 혼동 주의."""
+    참고 손절 = pivot - ATR×1.5)은 서로 다른 개념이니 혼동 주의.
+
+    v5.155: `atr_pct`(ATR/현재가, scanner.py badge_fields/_rr_block과 동일
+    정의) 추가 — "오늘의 결정" 카드의 손절폭 적정성 배지(risk_pct vs
+    ATR×1.5, v4.67 원칙)가 confirmed 케이스(구조적 20일저가 stop이라
+    atr_stop과 무관하게 risk_pct가 커질 수 있음)에서 이 값을 쓴다.
+    atr14는 이미 계산 중이던 값이라 노출만 추가, 새 계산 없음."""
     n = len(df)
     if n < PIVOT_LOOKBACK + CONFIRM_VOL_AVG_WINDOW + 1:
         return None
@@ -133,6 +139,7 @@ def check_confirm(df) -> dict | None:
 
     current_price = float(close.iloc[-1])
     atr14 = scanner.atr(high, low, close, 14)
+    atr_pct = (atr14 / current_price * 100) if current_price > 0 else None
     atr_stop = pivot - atr14 * EXEC_ATR_STOP_MULT
     risk_pct = (pivot - atr_stop) / pivot * 100 if pivot > 0 else None
     target_2r = pivot + 2 * (pivot - atr_stop) if atr_stop < pivot else None
@@ -143,5 +150,6 @@ def check_confirm(df) -> dict | None:
             "current_price": current_price,
             "distance_pct": round(distance_pct, 2) if distance_pct is not None else None,
             "atr_stop": round(atr_stop, 2),
+            "atr_pct": round(atr_pct, 2) if atr_pct is not None else None,
             "risk_pct": round(risk_pct, 2) if risk_pct is not None else None,
             "target_2r": round(target_2r, 2) if target_2r is not None else None}

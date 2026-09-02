@@ -5,6 +5,40 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.155 [기능개선] "오늘의 결정" 카드에 손절폭 판정 배지 추가(사용자
+        지시). 배경: 🟠이미 돌파 항목은 피벗보다 위라 손절이 그만큼
+        벌어지는데(8월 확인 사례) 카드엔 손절가만 있고 판정이 없어
+        매번 직접 계산해야 했음.
+        [조사] 4개 소스(재점화/종가베팅/pending_watch/imminent) 중
+        imminent만 risk_pct/atr_pct를 이미 보유(analyze_imminent()의
+        _rr_block 통과) — pass-through만. pending_watch는 계산 가능
+        하지만 rule 있는 탭(돌파임박/눌림목)만 OHLCV df를 조회해서
+        나머지 탭은 원천적으로 못 구했음 — df 조회를 전 pending
+        레코드로 확장(캐시 전용, 새 fetch 없음). 재점화는 atr14를
+        내부에서 계산하고도 반환 안 함 — 특히 confirmed(즉시행동)
+        케이스는 stop이 구조적 20일저가라 atr_stop과 무관하게 벌어질
+        수 있어 배경 사례와 정확히 일치. 종가베팅은 stop 자체가 없어
+        (T+1 시가매도 전략) 배지 대상 아님 — 구조적 제외, 코드 변경 없음.
+        [판정] 기존 v4.67 원칙(risk_pct > ATR×1.5 → 부적격) 재사용 —
+        새 임계값 발명 안 함. **단, 기존 `riskPctMiniHtml()`의 ATR
+        무효시 고정%(KR12/US8) 폴백 컨벤션은 이 카드에 안 씀**(사용자
+        판단: v4.67 자체가 그 고정% 방식의 구조적 결함 — ANAB ATR7.7%/
+        손절6.8%가 고정5%에 걸려 부적격 오판 — 때문에 도입됐는데,
+        진입판단 최종 출력층에서 그 결함을 되살리면 안 됨. "틀린
+        초록불이 틀린 회색보다 위험"). ATR 미확보 시 손절%는 그대로
+        보여주되 회색 중립 + 툴팁("ATR 데이터가 없어 손절폭 적정성을
+        판정하지 못했습니다. 직접 확인하세요.")으로 "판정 안 됨"을
+        명시 — 조용히 통과 안 시킴.
+        [구현] theme_reignition.check_confirm()에 atr_pct 반환 추가
+        (atr14 노출만, 새 계산 없음) → rec["exec"]/rec["confirm"] 양쪽에
+        전달. get_calendar() 4개 소스 전부에 atr_pct 부착. 프론트:
+        `ATR_STOP_MULT=1.5` 상수 신설(riskPctMiniHtml의 매직넘버 1.5를
+        여기서 참조하도록 리팩터, 동작 변경 없음 — Node vm 회귀
+        테스트로 기존 4개 케이스 동일 출력 확인) + 신규
+        `todayDecisionRiskBadge(item)`가 이 상수를 공유. 합성
+        데이터(ANAB형/이미돌파형/ATR없음/종가베팅) 4케이스로 정상·
+        경고·판정불가·배지없음 4상태 전부 실제 렌더링 확인 완료 —
+        상세는 아래 "검증" 단락.
 v5.154 [정정] 라벨-의미 불일치 감사 후속 — 4순위(사용자 승인 후 진행,
         파급범위 조사 결과는 docs/label_semantics_audit_2026-09-02.md
         "4순위 파급범위 조사" 절). `vol_high`(scanner.py analyze() 반환
@@ -4241,7 +4275,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.154"
+VERSION = "v5.155"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -5423,10 +5457,15 @@ async def _refresh_reignition_watch(bundle: dict):
                         "pivot": res["pivot"], "current_price": res["current_price"],
                         "distance_pct": res["distance_pct"], "atr_stop": res["atr_stop"],
                         "risk_pct": res["risk_pct"], "target_2r": res["target_2r"],
+                        "atr_pct": res.get("atr_pct"),  # v5.155: 오늘의 결정 손절폭 배지용
                     }
                     if res["confirmed"]:
                         rec["status"] = "confirmed"
-                        rec["confirm"] = {"date": today, "pivot": res["pivot"], "stop": res["stop"]}
+                        # v5.155: atr_pct도 같이 기록 — confirm의 stop은 구조적
+                        # 20일저가라 atr_stop과 무관하게 risk_pct가 벌어질 수
+                        # 있어(오늘의 결정 배지 배경 사례), 그 판정에 필요.
+                        rec["confirm"] = {"date": today, "pivot": res["pivot"], "stop": res["stop"],
+                                           "atr_pct": res.get("atr_pct")}
                         rec["forward"] = {"opened_at": today, "entry": res["pivot"], "stop": res["stop"],
                                           "bars_held": 0, "r_progress": 0.0,
                                           "resolved": False, "resolved_r": None, "resolved_reason": None}
@@ -9712,6 +9751,10 @@ async def get_calendar():
                 "ticker": it["ticker"], "name": it["name"], "market": "KR", "mode": "reignition",
                 "entry": pivot, "stop": stop, "target_2r": target_2r,
                 "close": _calendar_current_price(it["ticker"]) or pivot, "pivot": pivot,
+                # v5.155: 손절폭 배지용 — confirm의 stop은 구조적 20일저가라
+                # atr_stop과 무관하게 벌어질 수 있음(배경 사례, "🟠이미 돌파"
+                # 항목이 피벗보다 위라 손절이 그만큼 넓어짐).
+                "atr_pct": c.get("atr_pct"),
                 "reason": f"재점화 확인진입({it['theme']} D0리더) — 검증 EV +0.755R, "
                           "대조군 대비 유의(z≥1.96) · docs/kr_theme_leader_reignition.md",
             })
@@ -9725,6 +9768,7 @@ async def get_calendar():
                     "current_price": ex["current_price"], "pivot": ex["pivot"], "dist_pct": dist,
                     "entry_if_triggered": ex["pivot"], "stop_if_triggered": ex["atr_stop"],
                     "close": ex["current_price"], "stop": ex["atr_stop"],
+                    "atr_pct": ex.get("atr_pct"),  # v5.155: 손절폭 배지용
                     "reason": f"재점화 창 내({it['theme']}) 피벗까지 {dist:+.1f}% — "
                               "돌파+거래량1.5배 확인 시 진입(EV +0.755R)",
                 })
@@ -9785,9 +9829,22 @@ async def get_calendar():
         rule = CONFIRM_RULE_BY_TAB.get(tab)
         confirmed = False
         close = None
-        df = None
+        # v5.155: ATR은 rule 유무와 무관하게 시도(손절폭 배지용) — 캐시
+        # 전용 조회(_calendar_ticker_df, 새 fetch 없음)라 rule 없는 탭
+        # (돌파/박스돌파 등) pending 레코드도 캐시에 있으면 판정 가능해짐.
+        # 기존엔 rule 있는 탭만 df를 가져와서 그 외 탭은 ATR을 원천적으로
+        # 못 구했다. 캐시 미스면 atr_pct=None → 카드에서 "판정불가"로 표시
+        # (조용히 통과 안 시킴, 사용자 지시).
+        df = _calendar_ticker_df(ticker)
+        atr_pct = None
+        if df is not None and len(df) >= 15:
+            try:
+                atr_val = scanner_mod.atr(df["High"], df["Low"], df["Close"])
+                last_close = float(df["Close"].iloc[-1])
+                atr_pct = round(atr_val / last_close * 100, 2) if last_close > 0 else None
+            except Exception:
+                atr_pct = None
         if rule:
-            df = _calendar_ticker_df(ticker)
             confirmed, close, vol_mult = _pending_watch_confirm_check(df, pivot_f)
         if close is None:
             close = _calendar_current_price(ticker)
@@ -9816,7 +9873,7 @@ async def get_calendar():
                 "ticker": ticker, "name": r.get("name") or ticker, "market": market,
                 "mode": r.get("mode_raw") or None, "sector": r.get("sector"),
                 "entry": pivot_f, "stop": stop_f, "target_2r": target_2r,
-                "close": close, "pivot": pivot_f,
+                "close": close, "pivot": pivot_f, "atr_pct": atr_pct,
                 "reason": f"{tab} {rule}",
             })
         elif dist_pct <= 2:
@@ -9832,7 +9889,7 @@ async def get_calendar():
                 "mode": r.get("mode_raw") or None, "sector": r.get("sector"),
                 "current_price": close, "pivot": pivot_f, "dist_pct": dist_pct,
                 "entry_if_triggered": pivot_f, "stop_if_triggered": stop_f,
-                "close": close, "stop": stop_f,
+                "close": close, "stop": stop_f, "atr_pct": atr_pct,
                 "reason": reason,
             })
             pending_near += 1
@@ -9880,6 +9937,10 @@ async def get_calendar():
             "current_price": close, "pivot": pivot, "dist_pct": round((pivot - close) / pivot * 100, 2),
             "entry_if_triggered": pivot, "stop_if_triggered": h.get("stop"),
             "close": close, "stop": h.get("stop"),
+            # v5.155: 손절폭 배지용 — analyze_imminent()가 이미 계산해둔 값
+            # 그대로 pass-through(badge_fields/_rr_block, scanner.py) — 새
+            # 계산 없음.
+            "atr_pct": h.get("atr_pct"),
             "snapshot_date": snap_date, "snapshot_stale": bool(snap_date) and snap_date != today,
             "reason": "돌파임박 상위 후보 — 참고(확인진입 전환 시 안C 규칙 적용)",
         })

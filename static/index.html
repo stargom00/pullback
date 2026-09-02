@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.154</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.155</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -1254,6 +1254,11 @@ function entrySigMini(s) {
   const icon = sig.level === 'ok' ? '🟢' : sig.level === 'warn' ? '🟡' : '🔴';
   return { icon, title: `진입 신호등: ${sig.label}` };
 }
+// v4.67 원칙(손절폭 넓음 판정 = risk_pct > ATR×1.5) 의 배수 — riskPctMiniHtml
+// 과 todayDecisionRiskBadge()가 이 값 하나를 공유한다(v5.155, 라벨-의미
+// 감사 후속: 매직넘버 이중관리 방지 — CLAUDE.md "CONFIG 값 동기화" 원칙을
+// 프론트 상수에도 적용).
+const ATR_STOP_MULT = 1.5;
 function riskPctMiniHtml(s) {
   if (s.risk_pct == null) return '<span class="cc-risk mono">-</span>';
   // ATR×1.5 상대기준(요청 그대로) — ATR 무효(<1%)일 때만 고정 US8%/KR12%로 폴백
@@ -1265,8 +1270,13 @@ function riskPctMiniHtml(s) {
   // 값이 아니라 옆에 붙어있던 entrySigMini() 아이콘(진입 신호등, 완전히
   // 다른 지표)이 압축돼서 잘못 보인 것 — 원인은 아이콘 쪽(entrySigMini
   // 3단계 복원 + collapsedRowHtml에서 리스크 필드와 물리적으로 분리)이었음.
+  // v5.155: 이 함수(기존 스캐너 카드 전용)는 ATR 무효 시 고정%로 폴백하는
+  // 기존 컨벤션을 그대로 유지 — "오늘의 결정"은 폴백 없이 판정불가로
+  // 따로 처리(todayDecisionRiskBadge, 사용자 지시: v4.67이 고정%의
+  // 구조적 결함을 이유로 도입됐는데 최종 출력층에서 그 결함을 되살릴
+  // 수 없음). 두 함수 다 ATR_STOP_MULT 상수는 공유.
   const ok = (s.atr_pct != null && s.atr_pct >= 1)
-    ? s.risk_pct <= s.atr_pct * 1.5
+    ? s.risk_pct <= s.atr_pct * ATR_STOP_MULT
     : s.risk_pct <= (s.market === 'KR' ? 12 : 8);
   // v5.77: 채도 낮춘 파스텔톤(눈 피로 감소) — 기존 vivid var(--green)/#fbbf24 대체.
   return `<span class="cc-risk mono" style="color:${ok ? '#8fd6ac' : '#f0c479'}">${s.risk_pct}%</span>`;
@@ -3338,6 +3348,29 @@ function toggleTodayDecisionWaiting() {
   const el = document.getElementById('tdWaitingDetail');
   if (el) el.style.display = _tdWaitingOpen ? '' : 'none';
 }
+// v5.155(사용자 지시) — "오늘의 결정" 전용 손절폭 배지. v4.67 원칙
+// (risk_pct > ATR×ATR_STOP_MULT면 부적격) 그대로, 단 riskPctMiniHtml과
+// 달리 ATR 무효 시 고정%(12/8)로 폴백하지 않는다 — v4.67은 정확히 그
+// 고정% 방식의 구조적 결함(ANAB: ATR7.7%인데 손절6.8%로 충분히 좁았는데
+// 고정5% 기준에 걸려 부적격 오판) 때문에 도입됐다. "오늘의 결정"은 진입
+// 판단 최종 출력층이라 여기서 그 결함을 되살리면 안 된다는 게 사용자
+// 판단 — ATR 미확보 시 판정 자체를 안 하고 회색 중립으로 표시, 손절폭
+// %는 그대로 보여준다("조용히 통과"가 아니라 "판정 못 함"을 명시).
+function todayDecisionRiskBadge(item) {
+  const entry = item.entry ?? item.pivot ?? item.current_price;
+  const stop = item.stop ?? item.stop_if_triggered;
+  if (entry == null || stop == null || entry <= stop) return '';
+  const riskPct = Math.round((entry - stop) / entry * 1000) / 10;
+  if (item.atr_pct != null && item.atr_pct >= 1) {
+    const limit = Math.round(item.atr_pct * ATR_STOP_MULT * 10) / 10;
+    const ok = riskPct <= limit;
+    const color = ok ? '#8fd6ac' : '#f0c479';
+    const warnPrefix = ok ? '' : '⚠️';
+    return ` <span class="mono" style="color:${color}" title="ATR ${item.atr_pct}% × ${ATR_STOP_MULT} = ${limit}% 기준">${warnPrefix}(-${riskPct}%)</span>`;
+  }
+  const unknownTitle = 'ATR 데이터가 없어 손절폭 적정성을 판정하지 못했습니다.\n직접 확인하세요.';
+  return ` <span class="mono" style="color:var(--muted)" title="${unknownTitle}">(-${riskPct}%)</span>`;
+}
 function renderTodayDecisionHtml(td) {
   if (!td) return '';
   const mktOf = item => (item.market || '').toUpperCase() === 'KR' || /\.(KS|KQ)$/.test(item.ticker || '') ? 'KR' : 'US';
@@ -3364,7 +3397,7 @@ function renderTodayDecisionHtml(td) {
     const mkt = mktOf(item);
     const qty = (item.entry != null && item.stop != null) ? calcShares(item.entry, item.stop, mkt) : null;
     const stopStr = item.stop != null
-      ? `${fmtPrice(item.stop, mkt)}${qty ? ` (-${qty.riskPct}%)` : ''}`
+      ? `${fmtPrice(item.stop, mkt)}${todayDecisionRiskBadge(item)}`
       : '없음(오버나이트 단발)';
     const qtyStr = qty ? `${qty.shares.toLocaleString()}주`
       : item.stop == null ? '금액 기준 직접 판단' : 'R설정 필요';
@@ -3391,7 +3424,7 @@ function renderTodayDecisionHtml(td) {
     const dist = item.dist_pct;
     const distStr = dist == null ? '-' : dist <= 0 ? `돌파 +${Math.abs(dist)}%` : `-${dist}%`;
     const descParts = [item.reason, `뚫으면 진입 ${fmtPrice(item.entry_if_triggered, mkt)}`];
-    if (item.stop_if_triggered != null) descParts.push(`손절 ${fmtPrice(item.stop_if_triggered, mkt)}`);
+    if (item.stop_if_triggered != null) descParts.push(`손절 ${fmtPrice(item.stop_if_triggered, mkt)}${todayDecisionRiskBadge(item)}`);
     // v5.147(사용자 지시): 캐시가 아직 오늘 것으로 안 갱신됐으면(어제 장마감
     // 스냅샷이 그대로 노출 중) 오늘 장중 데이터로 오해하지 않도록 경고.
     if (item.snapshot_stale && item.snapshot_date) descParts.push(`⚠️ ${item.snapshot_date.slice(5)} 스냅샷(장중 갱신 전)`);
