@@ -5,6 +5,24 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.150 [버그수정] "오늘의 결정" 소스간 티커 중복 제거(사용자 지시). 배경:
+        골프존홀딩스(121440.KQ)가 같은 피벗인데 현재가·손절이 다른 카드
+        2장으로 동시에 노출된 실사고 — 재점화/종가베팅/pending_watch/
+        imminent 4개 소스가 서로를 모른 채 각자 append만 해서, 같은
+        티커가 두 소스 조건을 동시에 만족하면(수동 등록 종목이 마침
+        imminent 상위5에도 들면) 두 소스가 각자 다른 캐시(_data_cache vs
+        _cache["kr:imminent"], 갱신 주기가 다름)와 다른 손절 정의
+        (_registration_day_low vs analyze_imminent 구조적stop)를 써서
+        서로 다른 숫자가 나갔다. `_dedup_today_decision()` 신설 — 소스별
+        신뢰도 우선순위(reignition>pending_watch>jongga>imminent, imminent
+        은 스스로 "참고"라 표기하고 pending_watch는 등록일저가손절까지
+        확정된 더 검증된 형태라 버려도 정보 손실 없음)로 같은 티커면 1건만
+        남긴다. immediate/near 리스트 구분과 무관하게 전체를 대상으로
+        묶어서, 한쪽엔 immediate 다른 쪽엔 near로 들어오는 조합(소스
+        신뢰도가 급/근접 구분보다 우선)도 처리 — 유닛 테스트로 3가지
+        시나리오(같은 리스트 내 중복/리스트 간 중복/중복 없음) 확인.
+        버려진 항목은 `print(f"[decision] {ticker} 중복 제거: ...")`로
+        로그 남김(조용히 사라지면 나중에 헤매게 됨, 사용자 지시).
 v5.149 [부분교체] 종가베팅 turnover_rank 계산에 v2 유니버스 부분 적용
         (사용자 지시). 배경: 2026-09-01 재측정(z=3.54, n=292)으로 채택
         유지가 확정됐지만 운영은 여전히 `fetch_top_value()`(91% 시총
@@ -4167,7 +4185,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.149"
+VERSION = "v5.150"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -9410,6 +9428,48 @@ def _registration_day_low(df, reg_date: str):
     return None
 
 
+# v5.150(사용자 지시): "오늘의 결정" 4개 소스(재점화/종가베팅/pending_
+# watch/imminent)가 서로를 모른 채 각자 append만 해서, 같은 티커가 두
+# 소스 조건을 동시에 만족하면(예: 수동 등록한 종목이 마침 imminent 상위5
+# 에도 들면) 서로 다른 close/stop으로 카드 두 장이 뜰 수 있었다(실사고:
+# 121440.KQ, pending_watch·imminent 양쪽 다 근접(🟡)으로 들어와 현재가·
+# 손절이 서로 달랐음 — 두 소스가 각자 다른 캐시(_data_cache vs
+# _cache["kr:imminent"])에서 다른 시점 값을 읽은 결과, "손절 정의"도
+# 서로 다름: pending_watch는 _registration_day_low, imminent은
+# analyze_imminent()의 구조적 stop). 소스별 신뢰도 우선순위로 하나만
+# 남긴다 — imminent은 스스로 "참고"라 표기하고(아래 reason 문구), 그보다
+# 검증도가 낮으므로 같은 티커면 버려도 정보 손실 없음.
+_DECISION_SOURCE_PRIORITY = {"reignition": 0, "pending_watch": 1, "jongga": 2, "imminent": 3}
+
+
+def _dedup_today_decision(immediate: list, near: list) -> tuple[list, list]:
+    """티커별로 가장 신뢰도 높은 소스 하나만 남긴다 — immediate/near 리스트
+    구분과 무관하게 전체를 대상으로 묶는다(같은 티커가 한쪽엔 immediate,
+    다른 쪽엔 near로 들어오는 조합도 처리 — 우선순위가 낮은 소스가 설령
+    immediate에 있어도 우선순위 높은 소스가 near에 있으면 그쪽이 이긴다,
+    소스 신뢰도가 급/근접 구분보다 우선이라는 사용자 지시). 버려진 항목은
+    로그로 남김 — 조용히 사라지면 나중에 "왜 이 카드가 안 보이지"로 헤매게
+    된다."""
+    tagged = [("immediate", d) for d in immediate] + [("near", d) for d in near]
+    by_ticker: dict[str, list] = {}
+    for list_name, d in tagged:
+        by_ticker.setdefault(d["ticker"], []).append((list_name, d))
+
+    kept_immediate, kept_near = [], []
+    for ticker, entries in by_ticker.items():
+        if len(entries) == 1:
+            list_name, d = entries[0]
+            (kept_immediate if list_name == "immediate" else kept_near).append(d)
+            continue
+        entries.sort(key=lambda e: _DECISION_SOURCE_PRIORITY.get(e[1]["source"], 99))
+        winner_list, winner = entries[0]
+        (kept_immediate if winner_list == "immediate" else kept_near).append(winner)
+        for _, dropped in entries[1:]:
+            print(f"[decision] {ticker} 중복 제거: {dropped['source']} 버림 "
+                  f"({winner['source']} 채택)")
+    return kept_immediate, kept_near
+
+
 @app.get("/api/calendar")
 async def get_calendar():
     """캘린더 탭 — 로그인 후 기본 화면(v5.108). v5.110(사용자 지시)에서
@@ -9755,6 +9815,7 @@ async def get_calendar():
         })
     waiting["imminent"] = max(0, len(imminent_hits) - IMMINENT_TOP_N)
 
+    immediate, near = _dedup_today_decision(immediate, near)
     immediate.sort(key=lambda x: x["source"] != "reignition")   # 재점화 우선(가장 강한 근거)
     near.sort(key=lambda x: x.get("dist_pct", 999))
     today_decision = {
