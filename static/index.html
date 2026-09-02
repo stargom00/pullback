@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.157</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.158</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3364,23 +3364,37 @@ function toggleTodayDecisionWaiting() {
 // 판단 최종 출력층이라 여기서 그 결함을 되살리면 안 된다는 게 사용자
 // 판단 — ATR 미확보 시 판정 자체를 안 하고 회색 중립으로 표시, 손절폭
 // %는 그대로 보여준다("조용히 통과"가 아니라 "판정 못 함"을 명시).
+// v5.158(사용자 지시, 버그수정): near/crossed 아이템은 "entry" 필드가 아예
+// 없다(백엔드가 entry_if_triggered로만 내려줌, get_calendar 참고) — 기존
+// entry ?? pivot ?? current_price 체인이 이론상 pivot에서 걸려야 정상인데
+// 실사용에서 배지가 통째로 안 뜨는 게 관측됨(원인 미확정, 배포/캐시
+// 가능성 포함). entry_if_triggered를 fallback에 명시적으로 추가해 pivot에
+// 의존하지 않고도 바로 해석되게 함 — _decisionHitShape()가 이미 pivot ??
+// entry_if_triggered 순서로 쓰는 선례와 일관.
+let _tdBadgeStats = null;
 function todayDecisionRiskBadge(item) {
-  const entry = item.entry ?? item.pivot ?? item.current_price;
+  const entry = item.entry ?? item.entry_if_triggered ?? item.pivot ?? item.current_price;
   const stop = item.stop ?? item.stop_if_triggered;
-  if (entry == null || stop == null || entry <= stop) return '';
+  if (entry == null || stop == null || entry <= stop) {
+    if (_tdBadgeStats) _tdBadgeStats.none++;
+    return '';
+  }
   const riskPct = Math.round((entry - stop) / entry * 1000) / 10;
   if (item.atr_pct != null && item.atr_pct >= 1) {
     const limit = Math.round(item.atr_pct * ATR_STOP_MULT * 10) / 10;
     const ok = riskPct <= limit;
     const color = ok ? '#8fd6ac' : '#f0c479';
     const warnPrefix = ok ? '' : '⚠️';
+    if (_tdBadgeStats) _tdBadgeStats[ok ? 'green' : 'orange']++;
     return ` <span class="mono" style="color:${color}" title="ATR ${item.atr_pct}% × ${ATR_STOP_MULT} = ${limit}% 기준">${warnPrefix}(-${riskPct}%)</span>`;
   }
+  if (_tdBadgeStats) _tdBadgeStats.gray++;
   const unknownTitle = 'ATR 데이터가 없어 손절폭 적정성을 판정하지 못했습니다.\n직접 확인하세요.';
   return ` <span class="mono" style="color:var(--muted)" title="${unknownTitle}">(-${riskPct}%)</span>`;
 }
 function renderTodayDecisionHtml(td) {
   if (!td) return '';
+  _tdBadgeStats = { green: 0, orange: 0, gray: 0, none: 0 };
   const mktOf = item => (item.market || '').toUpperCase() === 'KR' || /\.(KS|KQ)$/.test(item.ticker || '') ? 'KR' : 'US';
   const actions = (item, showWatch) => {
     _todayDecisionMap[item.key] = item;
@@ -3447,6 +3461,14 @@ function renderTodayDecisionHtml(td) {
   const nearCrossed = (td.near || []).filter(item => (item.dist_pct ?? 1) <= 0);
   const nearHtml = nearBelow.map(renderNearRow).join('');
   const crossedHtml = nearCrossed.map(renderNearRow).join('');
+
+  // v5.158: 배지 판정 결과 집계 로그 — "조용히 안 뜬다"를 콘솔에서 바로
+  // 확인 가능하게(사용자 지시, entry undefined로 배지 전체가 안 뜨던
+  // 사고 재발 시 즉시 알아채기 위함).
+  {
+    const s = _tdBadgeStats, total = s.green + s.orange + s.gray + s.none;
+    console.log(`[오늘의결정] 손절폭 배지 ${total}건 중 초록 ${s.green} · 주황 ${s.orange} · 회색(판정불가) ${s.gray} · 미표시 ${s.none}`);
+  }
 
   const waiting = td.waiting || {};
   const waitingParts = Object.entries(waiting).filter(([, n]) => n > 0)

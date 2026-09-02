@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.158 [버그수정] "오늘의 결정" 카드 손절폭 배지(todayDecisionRiskBadge,
+        static/index.html)가 near/crossed(🟡/🟠) 아이템 전부에서 안 뜨던
+        문제 — 콘솔 확인 결과 해당 아이템의 `entry` 필드가 undefined였음
+        (get_calendar()가 이 부류엔 `entry`가 아니라 `entry_if_triggered`로
+        내려줌, immediate만 `entry` 보유). 기존 폴백체인
+        `entry ?? pivot ?? current_price`는 이론상 `pivot`에서 걸려야
+        했지만(모든 소스가 pivot도 같이 내려줌) 실사용에서 배지가 통째로
+        비어 있었음 — 원인 완전 특정은 못 했으나(배포/캐시 가능성 포함),
+        `entry_if_triggered`를 폴백에 명시적으로 추가해 pivot 경유 없이도
+        바로 해석되도록 방어적으로 수정(`_decisionHitShape()`가 이미
+        pivot ?? entry_if_triggered 순서를 쓰는 선례와 일관). 재발 감지용
+        콘솔 로그(초록/주황/회색/미표시 건수 집계)도 추가.
 v5.157 [기능개선] "오늘의 결정" 카드 포지션 요약 칩(static/index.html:3513,
         `096530.KQ -1.24R | 손절까지 이미 이탈(1.71%)` 형태)이 v5.156에서
         백엔드(`get_calendar()`의 `positions_summary.items.name`)까지
@@ -4314,7 +4326,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.157"
+VERSION = "v5.158"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
