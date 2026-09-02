@@ -5,6 +5,20 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.151 [정정] `_dedup_today_decision()` 정렬 기준 수정(사용자 지시,
+        v5.150 직후 후속). v5.150은 소스 신뢰도만으로 정렬해서 소스
+        신뢰도가 높으면 near(🟡)가 immediate(🔴)를 이길 수 있었다 —
+        "긴급도(immediate/near)와 신뢰도(소스 우선순위)는 다른 축이고
+        긴급도가 먼저다. immediate는 지금 행동할 자리라 near로 밀리면
+        진입 기회를 놓친다"는 지적으로 2단계 정렬로 교체: 1차 긴급도
+        (immediate가 항상 near를 이김), 2차(같은 긴급도 안에서만) 소스
+        신뢰도. `_URGENCY_PRIORITY` 신설, 정렬 키를
+        `(urgency, source_priority)` 튜플로 변경. 로그 문구도 어느 축으로
+        이겼는지 명시하도록 갱신
+        (`"{소스}({긴급도}) 버림 → {소스}({긴급도}) 채택 (긴급도 우선|소스
+        우선순위)"`). 3가지 시나리오(같은 근접끼리 소스우선순위/급이 다른
+        경우 긴급도우선/중복없음) 재테스트 완료 — pending_watch-immediate가
+        reignition-near를 이기도록 역전 확인.
 v5.150 [버그수정] "오늘의 결정" 소스간 티커 중복 제거(사용자 지시). 배경:
         골프존홀딩스(121440.KQ)가 같은 피벗인데 현재가·손절이 다른 카드
         2장으로 동시에 노출된 실사고 — 재점화/종가베팅/pending_watch/
@@ -4185,7 +4199,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.150"
+VERSION = "v5.151"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -9436,20 +9450,26 @@ def _registration_day_low(df, reg_date: str):
 # 손절이 서로 달랐음 — 두 소스가 각자 다른 캐시(_data_cache vs
 # _cache["kr:imminent"])에서 다른 시점 값을 읽은 결과, "손절 정의"도
 # 서로 다름: pending_watch는 _registration_day_low, imminent은
-# analyze_imminent()의 구조적 stop). 소스별 신뢰도 우선순위로 하나만
-# 남긴다 — imminent은 스스로 "참고"라 표기하고(아래 reason 문구), 그보다
-# 검증도가 낮으므로 같은 티커면 버려도 정보 손실 없음.
+# analyze_imminent()의 구조적 stop).
+#
+# v5.150 후속(사용자 지시): 긴급도(immediate/near)와 신뢰도(소스 우선순위)는
+# 다른 축이고 긴급도가 먼저다 — immediate에 있다는 건 "지금 행동할 자리"
+# 라는 뜻이라, 신뢰도 낮은 소스라도 near로 밀리면 진입 기회를 놓친다.
+# 그래서 2단계 정렬: 1차 긴급도(immediate < near), 2차 같은 긴급도 안에서만
+# 소스 신뢰도(reignition>pending_watch>jongga>imminent — imminent은 스스로
+# "참고"라 표기하고, pending_watch는 등록일저가손절까지 확정된 더 검증된
+# 형태라 같은 긴급도면 버려도 정보 손실 없음).
+_URGENCY_PRIORITY = {"immediate": 0, "near": 1}
 _DECISION_SOURCE_PRIORITY = {"reignition": 0, "pending_watch": 1, "jongga": 2, "imminent": 3}
 
 
 def _dedup_today_decision(immediate: list, near: list) -> tuple[list, list]:
-    """티커별로 가장 신뢰도 높은 소스 하나만 남긴다 — immediate/near 리스트
-    구분과 무관하게 전체를 대상으로 묶는다(같은 티커가 한쪽엔 immediate,
-    다른 쪽엔 near로 들어오는 조합도 처리 — 우선순위가 낮은 소스가 설령
-    immediate에 있어도 우선순위 높은 소스가 near에 있으면 그쪽이 이긴다,
-    소스 신뢰도가 급/근접 구분보다 우선이라는 사용자 지시). 버려진 항목은
-    로그로 남김 — 조용히 사라지면 나중에 "왜 이 카드가 안 보이지"로 헤매게
-    된다."""
+    """티커별로 1건만 남긴다 — 1차 긴급도(immediate가 항상 near를 이김),
+    2차(같은 긴급도 안에서만) 소스 신뢰도. immediate/near 리스트 구분과
+    무관하게 전체를 대상으로 티커를 묶는다(같은 티커가 한쪽엔 immediate,
+    다른 쪽엔 near로 들어오는 조합도 처리). 버려진 항목은 어느 축으로
+    졌는지까지 로그로 남김 — 조용히 사라지면 나중에 "왜 이 카드가
+    안 보이지"로 헤매게 된다."""
     tagged = [("immediate", d) for d in immediate] + [("near", d) for d in near]
     by_ticker: dict[str, list] = {}
     for list_name, d in tagged:
@@ -9461,12 +9481,14 @@ def _dedup_today_decision(immediate: list, near: list) -> tuple[list, list]:
             list_name, d = entries[0]
             (kept_immediate if list_name == "immediate" else kept_near).append(d)
             continue
-        entries.sort(key=lambda e: _DECISION_SOURCE_PRIORITY.get(e[1]["source"], 99))
+        entries.sort(key=lambda e: (_URGENCY_PRIORITY.get(e[0], 99),
+                                     _DECISION_SOURCE_PRIORITY.get(e[1]["source"], 99)))
         winner_list, winner = entries[0]
         (kept_immediate if winner_list == "immediate" else kept_near).append(winner)
-        for _, dropped in entries[1:]:
-            print(f"[decision] {ticker} 중복 제거: {dropped['source']} 버림 "
-                  f"({winner['source']} 채택)")
+        for dropped_list, dropped in entries[1:]:
+            reason = "긴급도 우선" if dropped_list != winner_list else "소스 우선순위"
+            print(f"[decision] {ticker} 중복 제거: {dropped['source']}({dropped_list}) 버림 "
+                  f"→ {winner['source']}({winner_list}) 채택 ({reason})")
     return kept_immediate, kept_near
 
 
