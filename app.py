@@ -5,6 +5,17 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.157 [기능개선] "오늘의 결정" 카드 포지션 요약 칩(static/index.html:3513,
+        `096530.KQ -1.24R | 손절까지 이미 이탈(1.71%)` 형태)이 v5.156에서
+        백엔드(`get_calendar()`의 `positions_summary.items.name`)까지
+        내려주기 시작한 KR 종목명을 안 쓰고 여전히 `it.ticker`만
+        렌더링하던 누락 수정(v5.156 changelog에 "3번은 별도 세션이
+        static/index.html 작업 중이라 보류"로 남겨뒀던 부분) — `it.name ||
+        it.ticker`로 변경, US는 name이 null이라 자동으로 티커 유지.
+v5.156-누락보충 dfafec0(같은 날 커밋, changelog 기재 누락)이 종가베팅
+        세션 배너에 `turnover_rank_source`(거래대금 순위 산정 v1/v2)
+        표시를 추가했었음 — 기능 자체는 이미 배포돼있었고 여기 기록만
+        보충.
 v5.156 [기능개선] 포지션 KR 종목명 폴백(사용자 지시 1·2번, 3번은 별도
         세션이 static/index.html 작업 중이라 보류). 배경: 포지션 칩에
         국장 종목을 티커(096530.KQ)가 아니라 회사명(씨젠)으로 보여달라는
@@ -4303,7 +4314,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.156"
+VERSION = "v5.157"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
