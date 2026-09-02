@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.153 [정정] 라벨-의미 불일치 감사 후속 — 3순위(종가베팅 수치 6곳
+        단일소스화, 사용자 승인 제안대로 구현). `JONGGA_BACKTEST_NOTE`
+        하드코딩 사본 4곳(카드 툴팁, 포워드성적 하단 2곳, 탭설명)을
+        서버 값 참조 또는 숫자 제거+문서링크로 정리 — `/api/jongga/
+        forward` 응답에 `backtest_note` 필드 신규 추가, 프론트는 이제
+        숫자를 재복사하지 않고 이 필드를 툴팁으로 표시. 코드 주석 2곳도
+        갱신. GUIDE.md:324 "근거" 문단은 구조적 단일화가 불가능한
+        서술 문서라 z=3.54/n=292/+0.80%(2026-09-01 재검증치)로 직접
+        갱신, 구수치는 참고용으로 병기. CLAUDE.md에 "백테스트 수치
+        갱신 절차"(① 서버 상수 수정 ② grep으로 잔존 하드코딩 확인
+        ③ 참조 전환 또는 직접 갱신) 신설 — 다음 세션이 재측정 후
+        바로 실행할 수 있게 구체적 명령까지 명시(사용자 지시).
 v5.152 [정정] 라벨-의미 불일치 감사(docs/label_semantics_audit_2026-09-02.md,
         사용자 지시) 후속 — 높음 심각도 6건 중 1·2순위 조치.
         (1) CLAUDE.md:83 "imminent/breakout/boxbreak rs_min=85" 문구가
@@ -4212,7 +4224,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.152"
+VERSION = "v5.153"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -8609,12 +8621,18 @@ async def jongga_candidates():
 
 @app.get("/api/jongga/forward")
 async def jongga_forward():
-    """🇰🇷 종가베팅 포워드 트래킹 누적 통계(v5.98, 사용자 지시) — 백테스트
-    (+1.22%, n=276, z=4.28)와 실전 결과를 계속 대조하기 위한 엔드포인트.
+    """🇰🇷 종가베팅 포워드 트래킹 누적 통계(v5.98, 사용자 지시) — 백테스트와
+    실전 결과를 계속 대조하기 위한 엔드포인트. 백테스트 수치는 여기 문서화
+    하지 않는다 — 응답의 `backtest_note`(JONGGA_BACKTEST_NOTE 그대로)가
+    유일한 소스, 재측정 때마다 이 문서 주석을 따로 갱신해야 하는 사본을
+    안 만든다(v5.153, 라벨-의미 감사 후속 — 이 수치가 static/index.html
+    5곳에 하드코딩 사본으로 흩어져 있던 것을 정리하며 이 docstring도
+    같이 정리, docs/label_semantics_audit_2026-09-02.md).
     스냅샷가 기준/확정종가 기준을 분리 계산(모듈 상단 _resolve_jongga_gaps
     docstring 참고 — 실전 진입가는 그 사이 어딘가라 어느 한쪽만 쓰면 왜곡)."""
     today = datetime.now(KST).strftime("%Y-%m-%d")
-    return JSONResponse(_clean_nan({**_jongga_forward_stats(), "trading_day": is_trading_day("kr", today)}))
+    return JSONResponse(_clean_nan({**_jongga_forward_stats(), "backtest_note": JONGGA_BACKTEST_NOTE,
+                                      "trading_day": is_trading_day("kr", today)}))
 
 
 def _kr_turnover_rank_map(kr_data: dict) -> dict:

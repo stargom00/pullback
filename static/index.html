@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.152</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.153</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -1395,13 +1395,15 @@ function jonggaCard(s) {
       <div>✓ 거래량 20일평균 2배+ — <b>${s.vol_mult}×</b></div>
       <div>✓ 20일선 위 · 52주고점 -15%이내 — <b>20일선 ${fmtPrice(s.ma20, s.market)} · 고점대비 ${s.off_high_pct}%</b></div>
     </div>
-    <div class="sig-note" style="margin-top:8px;opacity:.85" title="사전 등록 백테스트(2026-08-29) — 조합A 채택, base 대비 z=4.28">📊 ${s.backtest_note || ''}</div>
+    <div class="sig-note" style="margin-top:8px;opacity:.85">📊 ${s.backtest_note || ''}</div>
     <div class="surge-warn" style="margin-top:8px">🕐 매도 규칙(고정): <b>${s.sell_rule || '익일 시초가~9:05 전량 매도'}</b> — 보유 연장·물타기 없음.</div>
     ${s.ticker ? `<button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button>` : ''}
     </div>
   </div>`;
 }
-// v5.98: 종가베팅 포워드 트래킹 — 백테스트(+1.22%, n=276, z=4.28)와 실전
+// v5.98: 종가베팅 포워드 트래킹 — 백테스트(app.py JONGGA_BACKTEST_NOTE,
+// 수치는 재측정마다 바뀌므로 여기 하드코딩하지 않음 — v5.153에서 API가
+// 내려주는 값으로 통일, docs/label_semantics_audit_2026-09-02.md)와 실전
 // 결과를 계속 대조(사용자 지시). /api/jongga/forward를 탭 진입 시 별도로
 // 불러온다(카드 스캔과 다른 엔드포인트라 load()의 일반 흐름 밖에서 처리).
 async function loadJonggaForwardStats() {
@@ -1420,14 +1422,15 @@ function jonggaForwardFooterHtml() {
   const snap = s.snapshot_basis || {}, close_ = s.close_basis || {};
   const total = s.total_resolved || 0;
   const fmtGap = v => v == null ? '-' : `${v >= 0 ? '+' : ''}${v}%`;
+  const btTitle = (s.backtest_note || '').replace(/"/g, '&quot;');
   if (total < 30) {
     return `<div class="jongga-forward-box">
-      <div class="jongga-forward-title">📈 포워드 성적 — 표본 축적 중 (누적 ${total}건 · 평균갭 ${fmtGap(snap.mean_gap_pct)} · 백테스트 +1.22%)</div>
+      <div class="jongga-forward-title">📈 포워드 성적 — 표본 축적 중 (누적 ${total}건 · 평균갭 ${fmtGap(snap.mean_gap_pct)} · <span title="${btTitle}">백테스트 대비</span>)</div>
       <div class="jongga-forward-sub">30건이 모이면 신뢰도 있는 비교가 가능해요 — 스냅샷기준 ${fmtGap(snap.mean_gap_pct)}(n=${snap.n||0}) · 종가기준 ${fmtGap(close_.mean_gap_pct)}(n=${close_.n||0})</div>
     </div>`;
   }
   return `<div class="jongga-forward-box">
-    <div class="jongga-forward-title">📈 포워드 성적 — 누적 ${total}건 · 평균갭 ${fmtGap(snap.mean_gap_pct)} (백테스트 +1.22%)</div>
+    <div class="jongga-forward-title">📈 포워드 성적 — 누적 ${total}건 · 평균갭 ${fmtGap(snap.mean_gap_pct)} (<span title="${btTitle}">백테스트 대비</span>)</div>
     <div class="jongga-forward-sub">스냅샷 기준(14:40 가격 매수 가정): 평균갭 ${fmtGap(snap.mean_gap_pct)} · 갭업률 ${snap.up_rate ?? '-'}% (n=${snap.n||0})</div>
     <div class="jongga-forward-sub">종가 기준(확정 종가 매수 가정): 평균갭 ${fmtGap(close_.mean_gap_pct)} · 갭업률 ${close_.up_rate ?? '-'}% (n=${close_.n||0})</div>
     <div class="jongga-forward-sub" style="opacity:.65">실전 진입가는 이 둘 사이 어딘가 — 두 기준 다 참고할 것. 근거: docs/kr_jongga_betting_backtest.md</div>
@@ -2197,7 +2200,7 @@ const DESC = {
   eod: '📋 코스피/코스닥 마감 정리 · 상한가 종목 + 거래대금 상위(네이버 순위 기준) + 섹터 로테이션(상승률/거래대금 상위 섹터)',
   positions: '💼 토스 잔고 × 스캐너 결합 — 수량·평단은 맥 로컬 sync_toss.py가 30분마다 동기화(장중), 현재가·손익은 항상 실시간. 손절가를 입력하면 R진행률·손절거리·열린리스크가 계산되고 해당 종목의 열린 저널 기록에도 반영됨.',
   breakdown: '🩸 Stage 4 숏 셋업 · 역배열(20<60<200)+200일선 하락+지지 이탈+하락 거래량+RS 약세 · ⚠️ 숏은 손실 무한·숏스퀴즈·급반등 위험, 한국은 개인 공매도 제약 · 미국 종목 위주',
-  jongga: '🇰🇷 종가베팅 · T일 종가매수→T+1일 시가매도 단기 오버나이트 · 거래대금 상위100 · +3%↑ 짧은윗꼬리 양봉 · 거래량 20일평균 2배+ · 20일선 위·52주고점-15%이내 · 사전 등록 백테스트 채택(z=4.28, docs/kr_jongga_betting_backtest.md)'
+  jongga: '🇰🇷 종가베팅 · T일 종가매수→T+1일 시가매도 단기 오버나이트 · 거래대금 상위100 · +3%↑ 짧은윗꼬리 양봉 · 거래량 20일평균 2배+ · 20일선 위·52주고점-15%이내 · 사전 등록 백테스트 채택(수치는 docs/kr_jongga_betting_backtest.md 참고 — 재측정마다 바뀌어 여기 고정 수치를 안 둠)'
 };
 
 // v5.56: 필터/정렬 버튼 표시 여부 — renderCards()가 안 도는 뷰(인버스/섹터/
@@ -3323,7 +3326,8 @@ const GATE_LABEL = { confirmed: '확인된 상승', pressure: '조정 압박', c
 
 // ── v5.136: 🎯 오늘의 결정 — 사용자 지시. 스캐너가 '조건에 걸린 종목'까지만
 // 알려주고 '오늘 무엇을 얼마에 사고 어디서 자를지'가 없다는 핵심 결함 대응.
-// 검증된 진입 규칙(재점화 확인 +0.755R · 종가베팅 +1.22%,n=276 · 돌파임박
+// 검증된 진입 규칙(재점화 확인 +0.755R · 종가베팅(수치는 app.py
+// JONGGA_BACKTEST_NOTE 참고 — 재측정마다 바뀌어 여기 고정 안 함) · 돌파임박
 // 안C 0.796R,n=701 · 눌림목 안C' 0.923R,n=261)을 오늘 충족한 것만 🔴,
 // 그 외 근접은 🟡, 나머지는 개수만 ⚪ — /api/calendar의 today_decision을
 // 그대로 렌더(집계는 서버에서 끝, 여기선 표시+액션 버튼만).
