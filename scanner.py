@@ -1582,7 +1582,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
     # 손절폭(현재가→손절)이 ATR의 1.5배 미만이면 노이즈에 털릴 위험
     stop_dist_pct = (close - stop) / close * 100 if close > 0 else 0.0
     atr_tight = stop_dist_pct < atr_pct * 1.5  # 손절이 변동성 대비 너무 타이트
-    vol_high = atr_pct >= 7.0                  # 고변동 종목(하루 7%+ 변동)
+    atr_pct_high = atr_pct >= 7.0               # 고변동 종목(하루 7%+ 변동) — v5.154: vol_high에서 개명(거래량 아니라 ATR%, 라벨-의미 감사)
 
     # ── v4.48 게이트: 리스크 기하 + 후기 스테이지 ──
     rrb = _rr_block(pivot, stop, h, lo, c,
@@ -1650,7 +1650,7 @@ def analyze(df: pd.DataFrame, rs_rank: int | None = None, rs_mom: int | None = N
         "ud": _ud50,
         "pivot_dist_pct": round(pivot_dist_pct, 2),
         "atr_pct": atr_pct,
-        "vol_high": vol_high,
+        "atr_pct_high": atr_pct_high,
         "atr_tight": atr_tight,
         **rrb,
         "late_flags": _ls["late_flags"], "late_level": _ls["late_level"],

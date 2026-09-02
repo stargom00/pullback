@@ -5,6 +5,21 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.154 [정정] 라벨-의미 불일치 감사 후속 — 4순위(사용자 승인 후 진행,
+        파급범위 조사 결과는 docs/label_semantics_audit_2026-09-02.md
+        "4순위 파급범위 조사" 절). `vol_high`(scanner.py analyze() 반환
+        필드)를 `atr_pct_high`로 개명 — 이름은 거래량을 암시하지만
+        실제로는 ATR%(변동성) >= 7.0이라 같은 파일의 진짜 거래량
+        필드(vol_dry/vol_ratio/vol_up)와 이름이 충돌했음. 소비처는
+        static/index.html의 entrySignal() 한 곳뿐(atr_tight 경고를
+        띄울지 결정하는 1차 게이트, 화면에 직접 라벨로는 안 뜸) —
+        JSON 키까지 바꾸는 변경이라 scanner.py(정의+반환dict)·
+        static/index.html(소비처)·app.py 주석 2곳·CLAUDE.md(알려진
+        설계 갭 항목) 총 6곳을 한 커밋으로 동시 반영(부분 반영 시
+        신호등의 ATR 경고 체크가 조용히 꺼지는 회귀 위험이 있어
+        반드시 번들). 개명 후 grep 확인 — 기능 코드 기준 잔존 0건
+        (남은 문자열은 배포 무관 좀비 index.html과 의도적 이력
+        breadcrumb뿐).
 v5.153 [정정] 라벨-의미 불일치 감사 후속 — 3순위(종가베팅 수치 6곳
         단일소스화, 사용자 승인 제안대로 구현). `JONGGA_BACKTEST_NOTE`
         하드코딩 사본 4곳(카드 툴팁, 포워드성적 하단 2곳, 탭설명)을
@@ -28,7 +43,7 @@ v5.152 [정정] 라벨-의미 불일치 감사(docs/label_semantics_audit_2026-0
         배지는 이미 v5.135에서 제거됐는데, 이 프론트 사본만 남아 철회된
         결론을 "측정 근거 있음"이라 계속 주장하고 있었음(실보유 종목
         화면에 뜨는 문구라 심각도 높음으로 분류). 3순위(종가베팅 수치
-        6곳 구조 개선)는 제안 대기, 4순위(vol_high 개명)는 파급범위
+        6곳 구조 개선)는 제안 대기, 4순위(ATR% 변동성 필드 개명)는 파급범위
         보고 대기 — 아직 미착수.
 v5.151 [정정] `_dedup_today_decision()` 정렬 기준 수정(사용자 지시,
         v5.150 직후 후속). v5.150은 소스 신뢰도만으로 정렬해서 소스
@@ -2227,7 +2242,8 @@ v5.37 [버그수정] analyze_pattern(패턴 탭)에 is_kr 파라미터가 아예
         없이 자동으로 뜸.
         [실측] 수정 전후 패턴 탭 히트 건수·등급분포 거의 동일(badge_fields
         는 필터가 아니라 필드 추가라 정상) — 급등매집 0/6/57→0/6/57 등급
-        분포 불변. `vol_high`(ATR 변동성 체크)는 badge_fields에 없는
+        분포 불변. `atr_pct_high`(ATR 변동성 체크, v5.154 이전 이름
+        `vol_high`)는 badge_fields에 없는
         analyze() 전용 필드라 이번 수정으로도 여전히 안 채워짐(0건,
         신호등 6번째 체크는 패턴 탭에서 계속 스킵 — 별도 결정 필요시
         후속 작업).
@@ -3628,7 +3644,8 @@ v4.37.7 [신규] 변동성(ATR%) 경고 — 반복 손절 방지 (미너비니: 
         [배경] 고변동 종목(티에스이 ATR 12%)을 타이트한 손절로 진입하면
                하루 정상 변동(노이즈)에 털리고, 추세는 맞아서 손절 후 급등이
                반복됨. 변동성을 모르고 진입한 게 반복 손절의 핵심 원인.
-        [추가] analyze에 atr_pct(ATR/현재가%), vol_high(ATR 7%+),
+        [추가] analyze에 atr_pct(ATR/현재가%), atr_pct_high(ATR 7%+, v5.154 이전 이름
+        vol_high — 거래량 아니라 ATR%라 개명, 라벨-의미 감사),
                atr_tight(손절폭 < ATR×1.5) 계산.
         [표시] 고변동 종목에 경고:
                - 손절이 변동성 대비 타이트하면 🔴 'ATR n% — 손절 대비 큼
@@ -4224,7 +4241,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.153"
+VERSION = "v5.154"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
