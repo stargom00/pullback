@@ -5,6 +5,34 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.156 [기능개선] 포지션 KR 종목명 폴백(사용자 지시 1·2번, 3번은 별도
+        세션이 static/index.html 작업 중이라 보류). 배경: 포지션 칩에
+        국장 종목을 티커(096530.KQ)가 아니라 회사명(씨젠)으로 보여달라는
+        요청 — 조사 결과 이름 소스가 이미 둘 있었음: ① `universe.
+        get_universe("kr")`(스캐너 카드가 쓰는 것과 동일, 정적
+        KR_UNIVERSE+동적 거래대금 캐시) ② `positions.json`의 `name`
+        필드(sync_toss.py가 Toss API 응답에서 그대로 가져온 것, 더
+        직접적인 1차 소스). `/api/positions`의 `_one()`(`app.py`)에서
+        Toss name이 비어있으면 ①로 폴백, 그래도 없으면 티커+로그
+        (`print(f"[positions] {ticker} 이름 매핑 없음 — 티커로 표시")`).
+        **콜드 캐시 안전장치**: `get_universe("kr")`을 무조건 호출하면
+        동적 유니버스가 콜드(재배포 직후 등)일 때 내부에서
+        `naver_kr.fetch_top_value()`가 실제 네트워크 조회(최대 25페이지×
+        2시장)를 걸어 포지션 로드가 수십 초 붙잡힐 수 있었음 — 이 앱
+        전체가 지키는 원칙(`_fetch_market_data`의 wait_for_fresh=False류:
+        콜드면 안 기다리고 있는 것만 쓴다)과 어긋나 판단(사용자 지시:
+        "조용히 티커 폴백하고 로그만 남기는 게 맞는지 판단해서 보고").
+        그래서 동적 유니버스가 이미 따뜻한지부터 순수 메모리 체크(네트워크
+        없음, `universe._KR_DYNAMIC_CACHE`/`_kr_cache_slot()`)로 확인 후,
+        따뜻하면 `get_universe`(정적+동적) 사용, 콜드면 네트워크 없는
+        정적 `KR_UNIVERSE`만 폴백 — 재배포 직후 잠깐은 동적 전용 종목명이
+        안 잡힐 수 있지만(즉시 티커+로그), 스케줄러가 몇 분 안에 채우면
+        다음 로드부턴 정상 해석. US는 Toss name 없어도 티커로만 폴백
+        (매핑 시도·로그 없음 — 원래도 티커 표시 목표라 불필요). `get_
+        calendar()`의 `positions_summary.items`에도 `name`(KR만, US는
+        None) 추가 — 프론트가 `it.name || it.ticker`만 하면 US는 자동
+        티커 유지(3번, 미착수). 로컬에서 콜드/웜 양쪽 시나리오, Toss명
+        있음/없음/유니버스도 없음 조합 전부 테스트 확인.
 v5.155 [기능개선] "오늘의 결정" 카드에 손절폭 판정 배지 추가(사용자
         지시). 배경: 🟠이미 돌파 항목은 피벗보다 위라 손절이 그만큼
         벌어지는데(8월 확인 사례) 카드엔 손절가만 있고 판정이 없어
@@ -4275,7 +4303,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.155"
+VERSION = "v5.156"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -9623,6 +9651,12 @@ async def get_calendar():
             if plist:
                 items = [{
                     "ticker": p.get("ticker"),
+                    # v5.152(사용자 지시): KR만 종목명 실어보냄(US는 티커가
+                    # 더 익숙하다는 사용자 판단 — 프론트가 `it.name ||
+                    # it.ticker`만 하면 US는 자동으로 티커 유지, market
+                    # 분기를 프론트에 둘 필요 없음). name은 /api/positions가
+                    # 이미 Toss명/유니버스 폴백까지 해결해서 내려준 값 그대로.
+                    "name": p.get("name") if p.get("market") == "KR" else None,
                     "r_progress": p.get("r_progress"),
                     # v5.111: 프론트 미니카드 칩("NVDA +2.16R | 손절까지 -4.9%")에
                     # 표시할 실제 % 값 — near_stop 불리언만으론 숫자를 못 그림.
@@ -10751,11 +10785,42 @@ async def get_positions():
     rs_ranks = bundle["rs_ranks"] if bundle else {}
     rs_moms = bundle["rs_moms"] if bundle else {}
 
+    # v5.152(사용자 지시): Toss가 name을 안 준 KR 종목은 스캐너 유니버스
+    # 이름으로 폴백. get_universe("kr")을 무조건 쓰면 안 되는 이유 —
+    # 동적 유니버스가 콜드(재배포 직후 등)면 내부에서 naver_kr.
+    # fetch_top_value()가 실제 네트워크 조회(최대 25페이지×2시장)를
+    # 걸어서 포지션 로드가 수십 초 붙잡힐 수 있다 — 이 앱 전체가 지키는
+    # 원칙(`_fetch_market_data`의 wait_for_fresh=False류: 콜드면 안
+    # 기다리고 있는 것만 쓴다)과 어긋남. 그래서 동적 유니버스가 이미
+    # 따뜻한지부터 확인(네트워크 없는 순수 메모리 체크)하고, 따뜻하면
+    # get_universe(정적+동적 병합) 사용, 콜드면 네트워크가 전혀 없는
+    # 정적 KR_UNIVERSE만 폴백 — 재배포 직후 잠깐은 동적 전용 종목명이
+    # 안 잡힐 수 있지만(즉시 티커로 폴백+로그), 스케줄러가 몇 분 안에
+    # 동적 캐시를 채우면 다음 로드부턴 정상 해석된다.
+    import universe as _universe_mod
+    try:
+        _kr_dynamic_warm = (_universe_mod._KR_DYNAMIC_CACHE.get("slotkey")
+                             == _universe_mod._kr_cache_slot())
+    except Exception:
+        _kr_dynamic_warm = False
+    kr_name_map = get_universe("kr") if _kr_dynamic_warm else dict(_universe_mod.KR_UNIVERSE)
+
     def _one(p):
         ticker = p["ticker"]
+        # display_name(아래 for문의 루프 변수 `name`과 겹치면 안 돼서 별도
+        # 이름 사용 — _POSITION_MODE_CHECKS 순회가 `name`을 덮어씀).
+        display_name = p.get("name")
+        if not display_name:
+            if ticker.endswith((".KS", ".KQ")):
+                display_name = kr_name_map.get(ticker)
+                if not display_name:
+                    print(f"[positions] {ticker} 이름 매핑 없음 — 티커로 표시")
+                    display_name = ticker
+            else:
+                display_name = ticker   # US는 Toss name 없어도 폴백만(원래도 티커 표시라 매핑 불필요)
         df = _fetch(ticker)
         if df is None or df.empty:
-            return {**p, "price": None, "unresolved": True}
+            return {**p, "name": display_name, "price": None, "unresolved": True}
         is_kr = ticker.endswith((".KS", ".KQ"))
         h, lo, c, v = df["High"], df["Low"], df["Close"], df["Volume"]
         close = float(c.iloc[-1])
@@ -10815,7 +10880,7 @@ async def get_positions():
                     open_risk = round(qty * (avg_price - stop), 2)
 
         return {
-            **p, "price": round(close, 2), "market_value": round(market_value, 2),
+            **p, "name": display_name, "price": round(close, 2), "market_value": round(market_value, 2),
             "cost_basis": round(cost_basis, 2), "pnl": round(pnl, 2),
             "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
             "stop": stop, "stop_suggested": stop_suggested,
