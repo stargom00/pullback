@@ -561,7 +561,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.158</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.159</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -5319,7 +5319,7 @@ function renderClosedSummary(stats) {
       <div class="statcard">
         <div class="statcard-t">✔ 종료 요약 (전체 ${stats.total}건)</div>
         <div class="statcard-v">
-          승률 ${stats.winRate == null ? '–' : stats.winRate + '%'} (${stats.wins}승/${stats.withPnlCount}건)
+          <span title="청산가만 있으면 포함(손절 미기록 종료건도 집계) — 원시 등락률이 양수인 비율. 상단 추세추종/단타 카드의 승률(R+)과 표본이 다를 수 있음(그쪽은 손절가 기록건만).">승률(청산가+)</span> ${stats.winRate == null ? '–' : stats.winRate + '%'} (${stats.wins}승/${stats.withPnlCount}건)
           · 평균 ${rr(stats.avgR)} <span style="opacity:.6;font-size:11px">(R기록 ${stats.withRCount}건)</span>
           · 총 손익 ${rr(stats.totalR)}
         </div>
@@ -5348,7 +5348,7 @@ function renderClosedMonths(rows) {
       <tr onclick="toggleClosedMonth('${m}')" style="cursor:pointer;background:var(--surface)">
         <td colspan="8" style="padding:9px 12px;font-weight:700">
           ${open ? '▾' : '▸'} ${m === '기타' ? '날짜 미상' : m}
-          <span style="font-weight:400;color:var(--muted);font-size:12px">— ${rowsM.length}건 · 승률 ${st.winRate == null ? '–' : st.winRate + '%'} · 평균 ${st.avgR == null ? '–' : (st.avgR > 0 ? '+' : '') + st.avgR.toFixed(2) + 'R'}</span>
+          <span style="font-weight:400;color:var(--muted);font-size:12px">— ${rowsM.length}건 · <span title="청산가만 있으면 포함(손절 미기록 종료건도 집계) — 원시 등락률이 양수인 비율.">승률(청산가+)</span> ${st.winRate == null ? '–' : st.winRate + '%'} (n=${st.withPnlCount}) · 평균 ${st.avgR == null ? '–' : (st.avgR > 0 ? '+' : '') + st.avgR.toFixed(2) + 'R'}</span>
         </td>
       </tr>`;
     const body = open
@@ -5469,6 +5469,7 @@ function renderJournal() {
       <button class="exp" onclick="openRSettings()" style="margin-left:auto">⚙️ R 설정</button></div>`;
 
   wrap.innerHTML = `
+    <div style="font-size:11px;color:var(--muted);margin-bottom:6px">신호 추적 기록 — 실제 체결 아님, 계좌 성과는 포지션 탭 참조</div>
     ${riskbar}
     <div class="jrnl-tools">
       <button class="exp" onclick="refreshPrices()" style="background:#1e3a4a;border-color:#2d6a8c;color:#9fd4ff">🔄 현재가 갱신</button>
@@ -5483,7 +5484,7 @@ function renderJournal() {
     <div class="jrnl-stats">
       <div class="statcard">
         <div class="statcard-t">📈 추세추종</div>
-        <div class="statcard-v">진입 ${trend.enteredCount} · 대기 ${trend.pendingCount} · 종료 ${trend.closedCount} · 승률 ${trend.winRate}${trend.winRate!=='–'?'%':''} · 평균 ${trend.avgR}R${(() => { const imp = getJournal().filter(x => x.exit_reason === '충동').length; return imp ? ` · <span style="color:#ff6b6b;font-weight:700">충동 ${imp}</span>` : ''; })()}</div>
+        <div class="statcard-v">진입 ${trend.enteredCount} · 대기 ${trend.pendingCount} · 종료 ${trend.closedCount} · <span title="손절가가 기록된 종료건 기준 — R배수가 양수인 비율. 손절 미기록 종료건은 제외(청산가 기준 승률과 표본이 다를 수 있음, '종료' 탭 참고).">승률(R+)</span> ${trend.winRate}${trend.winRate!=='–'?'%':''} <span style="font-size:11px;color:var(--muted)">(n=${trend.closedCount})</span> · 평균 ${trend.avgR}R${(() => { const imp = getJournal().filter(x => x.exit_reason === '충동').length; return imp ? ` · <span style="color:#ff6b6b;font-weight:700">충동 ${imp}</span>` : ''; })()}</div>
       </div>
       <div class="statcard">
         <div class="statcard-t">👁 관찰</div>
@@ -5491,7 +5492,7 @@ function renderJournal() {
       </div>
       <div class="statcard">
         <div class="statcard-t">⚡ 단타</div>
-        <div class="statcard-v">총 ${scalp.total} · 종료 ${scalp.closedCount} · 승률 ${scalp.winRate}${scalp.winRate!=='–'?'%':''} · 평균 ${scalp.avgR}R</div>
+        <div class="statcard-v">총 ${scalp.total} · 종료 ${scalp.closedCount} · <span title="손절가가 기록된 종료건 기준 — R배수가 양수인 비율. 손절 미기록 종료건은 제외(청산가 기준 승률과 표본이 다를 수 있음, '종료' 탭 참고).">승률(R+)</span> ${scalp.winRate}${scalp.winRate!=='–'?'%':''} <span style="font-size:11px;color:var(--muted)">(n=${scalp.closedCount})</span> · 평균 ${scalp.avgR}R</div>
       </div>
     </div>
     ${renderJCal(all)}
