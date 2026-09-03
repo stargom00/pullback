@@ -5,6 +5,16 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.161 [정정] 라벨-의미 감사 중간 심각도 5순위(마지막, 사용자 지시) —
+        `entrySignal()`(static/index.html) 6번 체크 로컬 주석이 "탭별
+        측정 대상이 아니었던 항목 — 모든 탭에서 그대로 판정 반영"이라
+        했으나 부정확했음. `atr_pct_high`/`atr_tight`는 `analyze()`
+        (눌림목)에서만 채워지고 breakout/imminent/pattern 히트엔 필드
+        자체가 없어(undefined) 이 체크는 실제로 눌림목 탭에서만
+        발동한다(CLAUDE.md "알려진 설계 갭"에 이미 기록된 사실, 주석만
+        거기 안 맞았음). 사용자 비노출 내부 주석이라 순수 주석 정정 —
+        동작 변경 없음. 이걸로 라벨-의미 감사(docs/label_semantics_audit_
+        2026-09-02.md) 중간 심각도 5건 전부 처리 완료.
 v5.160 [정정] 라벨-의미 감사 중간 심각도 4순위(사용자 지시) — 대장관찰
         탭 "🔁 재점화 대기 N개" 헤더가 status=confirmed(이미 진입조건
         충족, 각 행에서는 🔁로 별도 표시됨)까지 "대기" 건수에 합산하고
@@ -4357,7 +4367,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.160"
+VERSION = "v5.161"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
