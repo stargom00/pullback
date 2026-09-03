@@ -384,6 +384,30 @@ def welch_zscore(sample_a: pd.Series, sample_b: pd.Series):
     return z, abs(z) >= 1.96
 
 
+# ── 8) 단일 표본 EV의 유의성(귀무가설: EV=0) ────────────────────────────
+# ev_gap_zscore는 "두 그룹 격차"용이라, "이 표본의 EV가 그냥 0(우연)과
+# 다른가"를 묻는 단일표본 검정엔 못 쓴다(비교 대상 그룹이 없음). 2026-09-04
+# 장기박스(250봉) 비중복 히트 EV 측정에서 처음 필요해져 여기로 승격
+# (README "하네스에 없는 새 로직이 필요하면 하네스를 확장" 원칙) — -1R/0R/
+# +2R 이산분포의 분산 공식(E[R^2]=1*stop_rate+4*target_rate)은
+# ev_gap_zscore와 동일, 비교 대상만 0으로 고정.
+def one_sample_zscore(ev: dict):
+    """ev_summary() 결과 하나의 EV가 0과 유의하게 다른지. 반환: (z,
+    significant:bool) — 계산 불가시 (None, False). 양측 95% 기준
+    (|z|>=1.96)으로 유의성 판정 — 방향(양/음)은 호출부가 z 부호로 직접 판단."""
+    n = ev.get("nv") or 0
+    stop_r, target_r, e = ev.get("stop_rate"), ev.get("target_rate"), ev.get("ev_R")
+    if not n or stop_r is None or target_r is None or e is None:
+        return None, False
+    e2 = 1 * stop_r + 4 * target_r
+    var = max(e2 - e ** 2, 0)
+    se = (var / n) ** 0.5
+    if se == 0:
+        return None, False
+    z = e / se
+    return z, abs(z) >= 1.96
+
+
 def hypergeom_overlap_pvalue(overlap: int, s_total: int, k: int = 3):
     """무작위로 독립적인 두 top-k 선택이 overlap개 이상 겹칠 확률(단측
     초과확률, 우연 기준선). 초기하분포: 모집단 s_total, "성공"집합 크기
