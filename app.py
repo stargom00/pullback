@@ -5,6 +5,25 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.165 [UI] static/index.html 탭 재배치(사용자 지시) — ① 메인 탭 순서를
+        캘린더·눌림목·돌파임박·박스돌파·돌파·추세전환·종가베팅·마감정리·
+        포지션·내 일지·⋯실험으로 정리, 슈퍼대장/대장관찰/섹터/돈의흐름/
+        인버스/붕괴는 ⋯실험 드롭다운으로 이동(기능 유지, 위치만 변경).
+        ② 탭 이름의 🇺🇸/🇰🇷 이모지·★ 표시·탭↔시장 자동연동(구
+        TAB_MARKET_LABEL/KR_RECOMMENDED_MODES/US_RECOMMENDED_MODES,
+        docs/kr_us_strategy_map.md z=4.88 채택분) 전부 제거 — 2026-09-04
+        KR 확인진입 5탭 재검증(scripts/measurements/2026-09-04_confirm_
+        entry_grid_search_5tabs.py)에서 KR·US 양쪽 유효 확인, 시장
+        구분이 아니라 확인진입 여부가 핵심이라는 결론. ③ 시간대별 기본
+        시장 필터 신설(timeBasedDefaultMarket) — 평일 KR 장중(KST
+        09:00~15:30) 기본 한국, 평일 US 장중(ET 09:30~16:00) 기본 미국,
+        그 외 전체. 사용자가 시장 버튼을 수동 클릭하면 그 세션(새로고침
+        전까지) 동안 자동판정을 덮어쓰지 않음(userMarketOverride). ④ 5탭
+        (눌림목/돌파임박/박스돌파/돌파/추세전환) 공통 확인진입 안내 배너
+        신설(CONFIRM_ENTRY_MODES) — "확인진입 원칙 — 종가>피벗 & 거래량
+        1.5배+ 확인 후 진입. 즉시진입 EV ~0, 확인진입 EV +0.6~1.0R
+        (2026-09-04 KR/US 재검증)". app.py 무수정, static/index.html만
+        변경.
 v5.162 [UI] 슈퍼대장 필터 EV 90개 체크포인트 재검증(2026-09-03,
         scripts/measurements/2026-09-03_super_filter_ev_90cp_revalidation.py)
         결과 채택 철회 반영 — GUIDE.md "👑 슈퍼대장 활용법" 우선순위1을
@@ -4387,7 +4406,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.164"
+VERSION = "v5.165"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

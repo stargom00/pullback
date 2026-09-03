@@ -277,10 +277,6 @@ tr.editing{background:rgba(242,179,61,.06)}
    신호. 대조군 대비 선별력이 없다고 실측 확인된 탭이라 danger(빨강) 톤으로
    구분 — docs/all_tabs_common_yardstick_investigation.md 근거. */
 .exp-tag.danger{background:rgba(255,107,107,.25);color:#ff9b9b}
-/* v5.91: 시장별 전략 지도(KR/US) 권장 탭 표시 — "한국"/"미국" 시장 필터
-   선택 시에만 해당 계열 탭에 붙는 별. 탭 접근은 절대 막지 않음(표시만),
-   docs/kr_us_strategy_map.md 사전 등록 검정(z=4.88) 근거. */
-.tab-rec{font-size:10px;color:#fbbf24;margin-left:3px;vertical-align:middle}
 .surge-warn{background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.3);
   border-radius:8px;padding:8px 11px;font-size:11px;color:#c084fc;margin-top:8px;line-height:1.5}
 /* v5.66: 손절폭 배지/필터가 "타이트=고품질"로 오독되는 걸 막는 안내줄.
@@ -559,37 +555,28 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.164</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
-    <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.165</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <div class="app-tagline">확인진입 원칙 — 종가&gt;피벗 &amp; 거래량 1.5배+ 확인 후 진입</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
-    <!-- v5.92: 시장별 전략 지도(docs/kr_us_strategy_map.md, 사전 등록 검정
-         z=4.88) 반영 — 🇺🇸/🇰🇷 라벨 탭 클릭 시 시장 필터 자동 연동
-         (updateModeRecommendations 아래쪽 mode 클릭 핸들러 참고).
-         v5.101: 그룹 내 탭 순서 = 측정 EV 순(사용자 지시) — 🇺🇸 슈퍼대장
-         (0.346R) → 돌파임박(0.232R) → 눌림목(0.206R), 🇰🇷 박스돌파
-         (0.431R) → 돌파(0.368R) → 추세전환(0.326R) → 종가베팅(오버나이트
-         갭 전략이라 R계열과 비교 불가 — 계열 맨 뒤 고정). -->
     <!-- v5.108: 캘린더 탭 신설 + 로그인 후 기본 화면으로(사용자 지시) —
-         탭 줄 맨 앞에 위치, active/기본 mode도 이쪽으로 이동. -->
+         탭 줄 맨 앞에 위치, active/기본 mode도 이쪽으로 이동.
+         v5.165: 🇺🇸/🇰🇷 라벨·★ 표시·탭↔시장 자동연동(TAB_MARKET_LABEL) 전부
+         제거(사용자 지시) — 2026-09-04 KR 확인진입 5탭 재검증에서 KR·US
+         양쪽 유효 확인, 시장 구분이 아니라 확인진입 여부가 핵심이라는
+         결론. 메인 탭 순서 = 캘린더·눌림목·돌파임박·박스돌파·돌파·
+         추세전환·종가베팅·마감정리·포지션·내 일지·⋯실험. 슈퍼대장/
+         대장관찰/섹터/돈의흐름/인버스/붕괴는 ⋯실험 드롭다운으로 이동
+         (기능 유지, 위치만 변경). -->
     <button class="tab active" data-mode="calendar">📅 캘린더</button>
     <span class="tab-group-sep"></span>
-    <button class="tab" data-mode="super">🇺🇸슈퍼대장</button>
-    <button class="tab" data-mode="imminent">🇺🇸돌파임박</button>
-    <button class="tab" data-mode="pullback">🇺🇸눌림목</button>
-    <span class="tab-group-sep"></span>
-    <button class="tab" data-mode="boxbreak">🇰🇷박스돌파</button>
-    <button class="tab" data-mode="breakout">🇰🇷돌파</button>
-    <button class="tab" data-mode="turnaround">🇰🇷추세전환</button>
-    <button class="tab" data-mode="jongga" title="T일 종가매수→T+1일 시가매도, 단기 오버나이트 전략(v5.97)">🇰🇷종가베팅</button>
-    <span class="tab-group-sep"></span>
-    <button class="tab" data-mode="leader">대장관찰</button>
-    <button class="tab" data-mode="sectors">📊 섹터</button>
-    <button class="tab" data-mode="moneyflow">💰 돈의흐름<span class="mf-unread-dot" id="moneyflowUnreadDot" style="display:none"> ●</span></button>
-    <span class="tab-group-sep"></span>
-    <button class="tab tab-exp" data-mode="inverse">🔻인버스<span class="exp-tag">하락</span></button>
-    <button class="tab tab-exp" data-mode="breakdown">🩸붕괴<span class="exp-tag">숏</span></button>
+    <button class="tab" data-mode="pullback">눌림목</button>
+    <button class="tab" data-mode="imminent">돌파임박</button>
+    <button class="tab" data-mode="boxbreak">박스돌파</button>
+    <button class="tab" data-mode="breakout">돌파</button>
+    <button class="tab" data-mode="turnaround">추세전환</button>
+    <button class="tab" data-mode="jongga" title="T일 종가매수→T+1일 시가매도, 단기 오버나이트 전략(v5.97)">종가베팅</button>
     <span class="tab-group-sep"></span>
     <button class="tab" data-mode="eod">📋 마감정리</button>
     <button class="tab" data-mode="positions">💼 포지션</button>
@@ -597,6 +584,14 @@ tr.editing{background:rgba(242,179,61,.06)}
     <span class="tab-group-sep"></span>
     <button class="tab" id="expTabsToggle" type="button">⋯ 실험</button>
     <span id="expTabsGroup" style="display:none">
+      <!-- v5.165: 슈퍼대장/대장관찰/섹터/돈의흐름/인버스/붕괴 — 메인 탭 재배치로
+           이쪽에 이동(기능 유지, 위치만 변경, 사용자 지시). -->
+      <button class="tab" data-mode="super">슈퍼대장</button>
+      <button class="tab" data-mode="leader">대장관찰</button>
+      <button class="tab" data-mode="sectors">📊 섹터</button>
+      <button class="tab" data-mode="moneyflow">💰 돈의흐름<span class="mf-unread-dot" id="moneyflowUnreadDot" style="display:none"> ●</span></button>
+      <button class="tab tab-exp" data-mode="inverse">🔻인버스<span class="exp-tag">하락</span></button>
+      <button class="tab tab-exp" data-mode="breakdown">🩸붕괴<span class="exp-tag">숏</span></button>
       <!-- v5.50: 패턴/Stage2 — 전체 유니버스 실측(시점매칭 대조군 대비)에서
            선별력 없음/역선택 확인 → "검증실패" 라벨.
            docs/all_tabs_common_yardstick_investigation.md 참고. -->
@@ -608,7 +603,7 @@ tr.editing{background:rgba(242,179,61,.06)}
            (-3.92~+3.59pp) 진입 신호로 확정하긴 이르므로 danger(빨강)는 빼되
            "실험" 탭들과 같은 참고용 취급 유지. -->
       <button class="tab tab-exp" data-mode="stage2">📐Stage2<span class="exp-tag">참고</span></button>
-      <button class="tab" data-mode="ibd9">🇺🇸IBD9</button>
+      <button class="tab" data-mode="ibd9">IBD9</button>
       <button class="tab tab-exp" data-mode="strong_pivot">강한피벗<span class="exp-tag">실험</span></button>
       <button class="tab" data-mode="earnings">💰실적우수</button>
       <button class="tab tab-exp" data-mode="surge">⚡급등<span class="exp-tag">실험</span></button>
@@ -632,7 +627,10 @@ tr.editing{background:rgba(242,179,61,.06)}
   <button class="refresh" id="refresh">다시 스캔</button>
 </header>
 
-<div class="stopwidth-warn" id="marketMismatchBanner" style="display:none"></div>
+<!-- v5.165: 5탭(눌림목/돌파임박/박스돌파/돌파/추세전환) 공통 확인진입 안내
+     — 예전엔 돌파임박에만 카드 배지로 있던 걸 탭 상단 배너로 통일(사용자
+     지시). CONFIRM_ENTRY_MODES/renderCards() 참고. -->
+<div class="stopwidth-warn" id="confirmEntryBanner" style="display:none">확인진입 원칙 — 종가 &gt; 피벗 &amp; 거래량 1.5배+ 확인 후 진입. 즉시진입 EV ~0, 확인진입 EV +0.6~1.0R (2026-09-04 KR/US 재검증)</div>
 <div class="stopwidth-warn" id="stopWidthWarnBanner" style="display:none"></div>
 <div class="jongga-safety-banner" id="jonggaSafetyBanner" style="display:none">⚠️ 단기 오버나이트 전략 — 소액 고정 비중, 익일 아침 무조건 정리. 갭하락 리스크 있음(백테스트 평균이며 개별 결과 아님).</div>
 <div class="stopwidth-warn" id="jonggaSessionBanner" style="display:none"></div>
@@ -1019,6 +1017,11 @@ const RISK_TIER_MODES = new Set(['pullback', 'turnaround', 'breakout', 'boxbreak
 // signal_high가 없어 null로 저장돼 조용히 no-op이 되므로 RISK_TIER_MODES와
 // 같은 패턴으로 Set을 명시.
 const TRIGGER_WATCH_MODES = new Set(['imminent', 'pullback']);
+// v5.165: 확인진입(종가>피벗 & 거래량1.5배+ 확인 후 진입) 안내 배너 노출 대상
+// 5탭 — 2026-09-04 KR 확인진입 재검증(scripts/measurements/2026-09-04_
+// confirm_entry_grid_search_5tabs.py)에서 즉시진입 EV~0, 확인진입 EV
+// +0.6~1.0R 확인. 예전엔 돌파임박 카드에만 있던 안내를 5탭 공통 배너로 통일.
+const CONFIRM_ENTRY_MODES = new Set(['pullback', 'imminent', 'boxbreak', 'breakout', 'turnaround']);
 let riskTierFilter = new Set();   // 선택된 tier key들 (비어있으면 필터 없음)
 // v5.56: 탭별 필터 유효성 전수조사 결과 반영. 필드가 없는 탭에서 필터를
 // 걸면 "아무 일도 안 함"이 아니라 조건에 따라 결과가 다름 — RISK_TIER_MODES
@@ -2780,18 +2783,11 @@ function renderCards() {
   // 시장 필터 (클라이언트에서 거름 — 재스캔 없음)
   if (market === 'kr') list = list.filter(h => h.market === 'KR');
   else if (market === 'us') list = list.filter(h => h.market === 'US');
-  // v5.92: 시장별 전략 지도 불일치 안내 — 🇰🇷/🇺🇸 라벨 탭인데(TAB_MARKET_LABEL)
-  // 사용자가 수동으로 반대 시장으로 바꾼 경우에만 표시(진입 차단 아님, 참고용).
-  // market==='all'은 불일치로 안 침 — 두 시장 다 보는 중립 상태라 경고할 근거가 없음.
-  const mismatchBar = document.getElementById('marketMismatchBanner');
-  if (mismatchBar) {
-    const tabMkt = TAB_MARKET_LABEL[mode];
-    const mismatch = tabMkt && market !== 'all' && market !== tabMkt;
-    mismatchBar.style.display = mismatch ? '' : 'none';
-    if (mismatch) {
-      mismatchBar.innerHTML = `⚠️ 이 계열은 ${market === 'kr' ? '한국' : '미국'}에서 검증되지 않음 — 전략 지도 참고 (docs/kr_us_strategy_map.md, z=4.88)`;
-    }
-  }
+  // v5.165: 5탭(눌림목/돌파임박/박스돌파/돌파/추세전환) 확인진입 안내 배너 —
+  // 예전엔 돌파임박 카드 배지로만 있던 걸 5탭 공통 탭 상단 배너로 통일
+  // (2026-09-04 KR/US 재검증, 사용자 지시).
+  const confirmBar = document.getElementById('confirmEntryBanner');
+  if (confirmBar) confirmBar.style.display = CONFIRM_ENTRY_MODES.has(mode) ? '' : 'none';
   // v5.97: 종가베팅 탭 — 고정 안전 배너 + 시간대별 세션 상태 배너(사용자
   // 지시 4·8번). lastScanMeta는 load()가 채워줌(hits 밖의 session_state 등).
   const jSafety = document.getElementById('jonggaSafetyBanner');
@@ -3117,11 +3113,7 @@ async function runMoneyflowNow() {
   }
 }
 function onEnterMoneyflowTab() {
-  if (market === 'all') {
-    market = 'kr';
-    document.querySelectorAll('[data-market]').forEach(x => x.classList.toggle('active', x.dataset.market === 'kr'));
-    updateModeRecommendations();
-  }
+  if (market === 'all') setMarket('kr');
   loadMoneyflowDate(null);
   populateThemeLifecycleSelect();
 }
@@ -3793,39 +3785,29 @@ async function savePositionStop(ticker, value, inputEl) {
   }
 }
 
-// v5.91: 시장별 전략 지도(KR/US) 권장 탭 — docs/kr_us_strategy_map.md 사전
-// 등록 검정(z=4.88) 채택 결과. 탭 접근은 안 막고 ★ 표시만 붙인다.
-const KR_RECOMMENDED_MODES = ['breakout', 'boxbreak', 'turnaround'];
-const US_RECOMMENDED_MODES = ['pullback', 'super', 'imminent'];
-// v5.92: 🇰🇷/🇺🇸 라벨 탭 → 시장 필터 자동 연동에 재사용(같은 근거 매핑).
-const TAB_MARKET_LABEL = {};
-KR_RECOMMENDED_MODES.forEach(m => { TAB_MARKET_LABEL[m] = 'kr'; });
-US_RECOMMENDED_MODES.forEach(m => { TAB_MARKET_LABEL[m] = 'us'; });
+// v5.165: 시장별 전략 지도(KR/US 권장 탭 ★ 표시 + 탭↔시장 자동연동)
+// 전체 제거(사용자 지시) — 2026-09-04 KR 확인진입 5탭 재검증에서 KR·US
+// 양쪽 유효 확인, 시장 구분이 아니라 확인진입 여부가 핵심이라는 결론.
 function setMarket(newMarket) {
   market = newMarket;
   document.querySelectorAll('[data-market]').forEach(x => x.classList.toggle('active', x.dataset.market === newMarket));
-  updateModeRecommendations();
 }
-function updateModeRecommendations() {
-  document.querySelectorAll('[data-mode]').forEach(t => {
-    const existing = t.querySelector('.tab-rec');
-    if (existing) existing.remove();
-  });
-  const recModes = market === 'kr' ? KR_RECOMMENDED_MODES : market === 'us' ? US_RECOMMENDED_MODES : [];
-  if (!recModes.length) return;
-  recModes.forEach(m => {
-    const btn = document.querySelector(`[data-mode="${m}"]`);
-    if (!btn) return;
-    const star = document.createElement('span');
-    star.className = 'tab-rec';
-    star.title = market === 'kr'
-      ? '시장별 전략 지도 권장 — KR 돌파 계열(돌파/박스돌파/추세전환) EV 0.372R vs 되돌림 계열 0.089R (z=4.88). docs/kr_us_strategy_map.md'
-      : '시장별 전략 지도 참고 — US는 눌림목·돌파임박 개별 탭이 유의하게 좋음(z≥1.96). docs/kr_us_strategy_map.md';
-    star.textContent = '★';
-    btn.appendChild(star);
-  });
+// v5.165: 시간대별 기본 시장 필터 — KR 장중(평일 KST 09:00~15:30)엔 한국,
+// US 장중(평일 ET 09:30~16:00)엔 미국, 그 외엔 전체. 사용자가 시장 버튼을
+// 수동 클릭하면 userMarketOverride=true가 되어 이 세션(새로고침 전까지,
+// expTabsExpanded와 같은 패턴) 동안 자동판정을 더 이상 덮어쓰지 않는다.
+let userMarketOverride = false;
+function timeBasedDefaultMarket() {
+  const kst = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+  const kstMin = kst.getHours() * 60 + kst.getMinutes();
+  if (kst.getDay() >= 1 && kst.getDay() <= 5 && kstMin >= 9 * 60 && kstMin <= 15 * 60 + 30) return 'kr';
+  const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const etMin = et.getHours() * 60 + et.getMinutes();
+  if (et.getDay() >= 1 && et.getDay() <= 5 && etMin >= 9 * 60 + 30 && etMin <= 16 * 60) return 'us';
+  return 'all';
 }
 document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('click', () => {
+  userMarketOverride = true;
   setMarket(t.dataset.market);
   if (mode === 'moneyflow') { loadMoneyflowDate(null); } else { renderCards(); }  // 재스캔 없이 화면만 다시 그림 (lastHits는 전체 보유)
 }));
@@ -3872,25 +3854,12 @@ document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click'
   document.querySelectorAll('[data-mode]').forEach(x => x.classList.remove('active'));
   t.classList.add('active');
   mode = t.dataset.mode;
-  // v5.92: 🇰🇷/🇺🇸 라벨 탭 클릭 시 시장 필터 자동 연동(사용자 지시) — 수동으로
-  // 다시 다른 시장을 고를 수는 있고, 그러면 renderCards()의 marketMismatchBanner가
-  // 안내한다(강제 아님, 표시만).
-  if (TAB_MARKET_LABEL[mode]) {
-    setMarket(TAB_MARKET_LABEL[mode]);
-  } else {
-    // v5.92: 섹터/마감정리/인버스 등은 renderCards()를 안 거쳐서 배너가
-    // 안 지워질 수 있음 — 탭 전환 시점에 바로 정리.
-    const mb = document.getElementById('marketMismatchBanner');
-    if (mb) mb.style.display = 'none';
-    // v5.97: 종가베팅은 KR 전용이지만 z=4.88 전략지도(TAB_MARKET_LABEL)와는
-    // 별개 측정이라 그 맵엔 안 넣음(마켓 불일치 배너 문구가 안 맞을 것) —
-    // 시장 동기화만 별도로.
-    if (mode === 'jongga') { setMarket('kr'); loadJonggaForwardStats(); }
-    // v5.125: 대장관찰 탭 진입 시 🔁 재점화 대기 섹션 데이터 로드(KR 전용
-    // 데이터라 이 탭 자체의 시장 필터는 안 건드림 — 미국 대장후보도 계속
-    // 그대로 보이게).
-    if (mode === 'leader') { loadReignitionWatch(); }
-  }
+  // 종가베팅은 KR 전용 데이터라 시장 필터를 강제 동기화.
+  if (mode === 'jongga') { setMarket('kr'); loadJonggaForwardStats(); }
+  // v5.125: 대장관찰 탭 진입 시 🔁 재점화 대기 섹션 데이터 로드(KR 전용
+  // 데이터라 이 탭 자체의 시장 필터는 안 건드림 — 미국 대장후보도 계속
+  // 그대로 보이게).
+  if (mode === 'leader') { loadReignitionWatch(); }
   applyTabViewState();
 }));
 
@@ -6273,11 +6242,9 @@ async function loadIndices() {
 loadIndices();
 setInterval(loadIndices, 300000);   // 5분마다 갱신 (레짐 포함)
 
-// v5.108 [버그수정]: v5.92의 탭↔시장 자동연동(TAB_MARKET_LABEL)이 탭 클릭
-// 핸들러에만 있고 초기 로드 경로엔 없었음 — 기본 탭이 🇺🇸/🇰🇷 라벨 탭일 때
-// market 기본값은 'all'이라 첫 로드에 다른 시장 종목이 그대로 섞여 나오던
-// 버그. applyTabViewState() 전에 현재 mode 기준으로 한 번 동기화.
-if (TAB_MARKET_LABEL[mode]) setMarket(TAB_MARKET_LABEL[mode]);
+// v5.165: 시간대별 기본 시장 필터 적용 — KR 장중이면 한국, US 장중이면
+// 미국, 그 외엔 전체(userMarketOverride 없을 때만, 즉 항상 첫 로드 시점).
+if (!userMarketOverride) setMarket(timeBasedDefaultMarket());
 loadJournalFromServer();   // 서버에서 일지 로드 + 구 localStorage 이전
 loadRSettings();           // R 시스템 설정 로드 (v4.47)
 loadGateSuggest();         // 시장 게이트 자동 제안 (v4.50)
