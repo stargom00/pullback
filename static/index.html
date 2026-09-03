@@ -53,12 +53,10 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .tab{border:none;background:none;color:var(--muted);font:inherit;font-size:13px;
   padding:6px 14px;border-radius:6px;cursor:pointer}
 .tab.active{background:var(--surface2);color:var(--text);font-weight:500}
-/* v5.66: 슈퍼대장 필터 — 실측 EV 0.266R로 눌림목 필터 중 가장 효과적인데
-   다른 버튼과 톤이 같아 묻혀 있었음(사용자 지적). 금색 톤으로 상시 구분,
-   켜졌을 때 더 진하게 — docs/pullback_stop_width_and_entry_timing.md 참고. */
-#superOnlyToggle{border:1px solid rgba(250,204,21,.35);color:#facc15;font-weight:600}
-#superOnlyToggle:hover{background:rgba(250,204,21,.1)}
-#superOnlyToggle.active{background:rgba(250,204,21,.2);color:#fde68a;border-color:#facc15}
+/* v5.66 금색 강조를 v5.162에서 제거 — EV 개선 근거가 재검증(2026-09-03,
+   90개 체크포인트)으로 철회됐다(docs/kr_us_strategy_map.md "재검증
+   결과 — 우선순위6"). 다른 좁히기 토글(💎/🧲)과 동일하게 기본 .tab
+   스타일만 씀 — 특별 강조는 근거가 있을 때만. */
 .tab:focus-visible,button:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
 /* v5.92: 탭 메뉴 전면 개편 — 계열 구분 얇은 세로선 + "⋯ 실험" 접기 그룹. */
 .tab-group-sep{width:1px;align-self:stretch;background:var(--line);margin:2px 3px;flex-shrink:0}
@@ -385,15 +383,15 @@ tr.editing{background:rgba(242,179,61,.06)}
 @media (max-width:800px){.grid{grid-template-columns:repeat(2, minmax(260px,1fr))}}
 
 /* v5.77: 기본 테두리를 무채색 진회색으로(배경보다 살짝 밝은 정도) — 강조색은
-   진짜 특별한 카드(fired·fav·super-hl)에만 남겨서 의미가 흐려지지 않게. */
+   진짜 특별한 카드(fired·fav)에만 남겨서 의미가 흐려지지 않게. super-hl(👑
+   슈퍼대장 전용 테두리 강조)은 v5.162에서 제거 — "소속=우위"라는 근거가
+   재검증(2026-09-03)으로 철회됐다(docs/kr_us_strategy_map.md "재검증
+   결과 — 우선순위6"). 카드 배지(👑 아이콘)는 소속 여부 정보로만 유지. */
 .card{background:var(--surface);border:1px solid #33363d;border-radius:12px;
   padding:16px;display:flex;flex-direction:column;gap:12px}
 .card:hover{border-color:#454852}
 .card.fired{border-color:rgba(242,179,61,.55)}
 .card.fav{border-color:rgba(245,196,81,.5);box-shadow:0 0 0 1px rgba(245,196,81,.25)}
-/* v5.77: 👑 슈퍼대장 전용 강조 — fav(즐겨찾기, 사용자가 직접 표시)와 구분되게
-   글로우 없이 테두리만. */
-.card.super-hl{border-color:rgba(250,204,21,.55)}
 .fav-btn{background:none;border:none;cursor:pointer;font-size:20px;line-height:1;
   color:var(--muted);padding:0;margin-top:1px;transition:color .15s;flex-shrink:0}
 .fav-btn:hover{color:#f5c451}
@@ -561,7 +559,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.161</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.162</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">국장은 돌파 · 미장은 눌림 — 시장별 검증 전략</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -628,7 +626,7 @@ tr.editing{background:rgba(242,179,61,.06)}
     </div>
     <button class="tab" id="bearOkToggle" title="약세장 적격(💎)만 표시 — 탄탄한베이스 + RS90+ + 손절폭적정, 3조건 전부 충족. 게이트 🟡🔴일 때 125개 후보에서 옥석을 가리는 필터. 대부분 걸러져서 몇 개만 남는 게 정상.">💎 적격만</button>
     <button class="tab" id="accumSortToggle" title="🧲 매집흔적 점수(A-B-C 패턴 전용, 보조 지표) 높은 순 정렬 — 판정 불가(데이터 부족) 종목은 맨 뒤로">🧲 매집순</button>
-    <button class="tab" id="superOnlyToggle" style="display:none" title="슈퍼대장(RS95+ · 3개월 모멘텀15%+) 소속 종목만 — 신호등 🟢(RS≥90)의 부분집합이라 더 엄격한 별도 필터. 실측: 전체 EV 0.151R → 슈퍼대장 소속만 0.266R (docs/all_tabs_common_yardstick_investigation.md)">👑 슈퍼대장만</button>
+    <button class="tab" id="superOnlyToggle" style="display:none" title="슈퍼대장(RS95+ · 3개월 모멘텀15%+) 소속 종목만 — 신호등 🟢(RS≥90)의 부분집합인 더 엄격한 좁히기 필터(참고용). ⚠️ 2026-09-03 재검증: EV 개선 근거 철회 — 90개 창 소속 -0.020R vs 비소속 +0.049R(z=-1.57, 비유의). 진입 우위 근거 아님(docs/kr_us_strategy_map.md 재검증 결과 우선순위6)">👑 슈퍼대장만</button>
     <button class="tab" id="hiddenToggle" style="display:none" title="숨긴 종목 — 클릭하면 목록에서 바로 복구할 수 있어요 (90일 지나면 자동으로 다시 보임)">🙈 숨김 <span id="hiddenCount">0</span></button>
   </div>
   <button class="refresh" id="refresh">다시 스캔</button>
@@ -1587,7 +1585,7 @@ function breakdownCard(s) {
   const chgSign = s.change_pct >= 0 ? '+' : '';
   const fav = favorites.includes((s.ticker || '').toUpperCase());
   const krWarn = s.market === 'KR';
-  return `<div class="card${s.triggered ? ' fired' : ''}${fav ? ' fav' : ''}${s.is_super ? ' super-hl' : ''}">
+  return `<div class="card${s.triggered ? ' fired' : ''}${fav ? ' fav' : ''}">
     ${collapsedRowHtml(s)}
     <div class="card-expanded">
     <div class="card-top">
@@ -1719,7 +1717,7 @@ function card(s) {
   const chgCls = s.change_pct >= 0 ? 'up' : 'down';
   const chgSign = s.change_pct >= 0 ? '+' : '';
   const fav = favorites.includes((s.ticker || '').toUpperCase());
-  return `<div class="card${s.triggered ? ' fired' : ''}${fav ? ' fav' : ''}${s.is_super ? ' super-hl' : ''}">
+  return `<div class="card${s.triggered ? ' fired' : ''}${fav ? ' fav' : ''}">
     ${collapsedRowHtml(s)}
     <div class="card-expanded">
     <div class="card-top">
@@ -2209,7 +2207,7 @@ const DESC = {
   pullback: '우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+',
   turnaround: '⭐첫 번째 베이스 집중 · 추세 전환 직후(역배열→정배열) · 바닥 6개월 이내 + 조정 1회↓(1차 베이스) · 200일선 바닥 상향전환 · 돌파일 거래량 1.5배↑ · RS 개선 중',
   leader: 'RS 88+ · 신고가 8% 이내 · 아직 눌림 전 — 지금은 못 사도 눌림 오면 1순위',
-  super: 'RS 95+ — 지금 시장에서 가장 강한 종목들 (위치 불문). 상태 라벨로 담을곳/대기 판단 · 활용: ①눌림목 [👑]필터(주력) ②👁관찰 등록 후 눌림목 전환 대기 ③직접 진입 시 포지션 절반 (ATR×2 손절, 가이드 참고)',
+  super: '⚠️ 2026-09-03 재검증: 슈퍼대장 필터의 EV 개선 근거 철회(90개 창 소속 -0.020R vs 비소속 +0.049R, z=-1.57 비유의 — docs/kr_us_strategy_map.md 참고). 이 탭은 RS95+·모멘텀 조건을 만족하는 종목 목록으로만 참고할 것 — 진입 우위 근거 아님. · RS 95+ — 지금 시장에서 가장 강한 종목들 (위치 불문). 상태 라벨로 담을곳/대기 판단 · 활용: ①눌림목에서 참고 표시(진입 근거 아님) ②👁관찰 등록 후 눌림목 전환 대기 ③직접 진입 시 포지션 절반 (ATR×2 손절, 가이드 참고 — 이 수치는 원본 스크립트 소실로 별도 재현 미검증)',
   stage2: '📐 미너비니 Stage2 트렌드 템플릿(한국 전용) · 유동성(20일 평균 거래대금 20억+) → RS 3M·6M·12M 가중 백분위 70+ → 현재가>50MA>150MA>200MA(200MA 1개월↑) + 52주저점×1.30↑ + 52주고점×0.75↑(-25%이내) → 거래량수축+MA(5/10/20)수렴 필터 → A/B 티어링(A=고점-10%이내). 0개인 날은 필터 문제가 아니라 시장이 약하다는 신호',
   ibd9: '🇺🇸 IBD 9조건 스크린(미국 전용) · 가격$5+ · 50일평균거래량50만주+ · 50일평균거래대금$500만+ · 3개월수익률30%+ · 21일ATR4%+ · 베타1+ · 시총$2억+ · A/D등급 A/B(⚠️ IBD 원본 아닌 U/D Volume Ratio 근사) · 펀드보유수는 무료데이터 한계로 기관보유비율로 대체(참고용)',
   strong_pivot: '⚠️ 실험 탭 · 돌파임박(피벗 형성 중) ∩ (Stage2 통과 OR IBD9 통과) · Stage2=한국전용, IBD9=미국전용이라 시장별로 자연히 갈림 · 게이트는 OR(둘 중 하나만 통과해도 인정, 0개 방지) · 배지로 어느 풀을 통과했는지 표시',

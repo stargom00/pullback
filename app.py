@@ -5,6 +5,26 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.162 [UI] 슈퍼대장 필터 EV 90개 체크포인트 재검증(2026-09-03,
+        scripts/measurements/2026-09-03_super_filter_ev_90cp_revalidation.py)
+        결과 채택 철회 반영 — GUIDE.md "👑 슈퍼대장 활용법" 우선순위1을
+        철회로 전면 수정(90창 소속 -0.020R vs 비소속 +0.049R, z=-1.57
+        비유의, 20창도 애초에 z=0.06으로 무의미했음 명시). UI 3곳 동반
+        수정(사용자 지시 — "코드는 고쳤는데 문구가 남는" 사고 방지):
+        (a) 눌림목 탭 [👑 슈퍼대장만] 토글의 금색 강조 CSS 제거(다른
+        좁히기 토글 💎/🧲와 동일하게 중립화) + title에서 옛 EV 인용
+        제거하고 철회 사실 명시, (b) 슈퍼대장 탭 설명(DESC.super) 상단에
+        철회 경고 추가 + "①눌림목 [👑]필터(주력)" 문구를 "①참고 표시(진입
+        근거 아님)"로 수정(탭 자체는 유지 — RS95+·모멘텀 종목 목록으로서의
+        가치는 별개, 이 필터가 EV를 올린다는 근거만 철회된 것), (c) 카드의
+        👑 배지는 아이콘(소속 정보)만 유지하고 .super-hl 테두리 강조
+        CSS는 제거(fired·fav와 동급 "특별 카드" 취급 근거 상실).
+        is_super 필드가 표시 외에 정렬·필터 로직에 숨어 있는지 전수
+        확인(app.py/static/index.html grep) — 눌림목 탭 필터 토글의
+        명시적 사용자 선택(list.filter) 외 정렬 가점·게이트 경로 없음
+        확인, 추가 제거 대상 없음. scanner.py/app.py 판정 로직 무변경
+        (필터가 게이트가 아니라 UI 토글이라 원복할 CONFIG 자체가 없음).
+        상세: docs/kr_us_strategy_map.md "재검증 결과 — 우선순위6".
 v5.161 [정정] 라벨-의미 감사 중간 심각도 5순위(마지막, 사용자 지시) —
         `entrySignal()`(static/index.html) 6번 체크 로컬 주석이 "탭별
         측정 대상이 아니었던 항목 — 모든 탭에서 그대로 판정 반영"이라
@@ -4367,7 +4387,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.161"
+VERSION = "v5.162"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
