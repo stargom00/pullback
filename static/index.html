@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.166</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.167</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">확인진입 원칙 — 종가&gt;피벗 &amp; 거래량 1.5배+ 확인 후 진입</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -627,9 +627,10 @@ tr.editing{background:rgba(242,179,61,.06)}
   <button class="refresh" id="refresh">다시 스캔</button>
 </header>
 
-<!-- v5.165: 5탭(눌림목/돌파임박/박스돌파/돌파/추세전환) 공통 확인진입 안내
-     — 예전엔 돌파임박에만 카드 배지로 있던 걸 탭 상단 배너로 통일(사용자
-     지시). CONFIRM_ENTRY_MODES/renderCards() 참고. -->
+<!-- v5.167: 확인진입 안내 배너 — 프로덕션 채택 규칙이 있는 눌림목/돌파임박
+     2탭만(CONFIRM_ENTRY_MODES). 박스돌파/돌파/추세전환은 검증 대기라
+     제외(app.py CONFIRM_RULE_BY_TAB 주석 참고) — 검증 끝나면 확장.
+     CONFIRM_ENTRY_MODES/renderCards() 참고. -->
 <div class="stopwidth-warn" id="confirmEntryBanner" style="display:none">확인진입 원칙 — 종가 &gt; 피벗 &amp; 거래량 1.5배+ 확인 후 진입. 즉시진입 EV ~0, 확인진입 EV +0.6~1.0R (2026-09-04 KR/US 재검증)</div>
 <div class="stopwidth-warn" id="stopWidthWarnBanner" style="display:none"></div>
 <div class="jongga-safety-banner" id="jonggaSafetyBanner" style="display:none">⚠️ 단기 오버나이트 전략 — 소액 고정 비중, 익일 아침 무조건 정리. 갭하락 리스크 있음(백테스트 평균이며 개별 결과 아님).</div>
@@ -1017,11 +1018,13 @@ const RISK_TIER_MODES = new Set(['pullback', 'turnaround', 'breakout', 'boxbreak
 // signal_high가 없어 null로 저장돼 조용히 no-op이 되므로 RISK_TIER_MODES와
 // 같은 패턴으로 Set을 명시.
 const TRIGGER_WATCH_MODES = new Set(['imminent', 'pullback']);
-// v5.165: 확인진입(종가>피벗 & 거래량1.5배+ 확인 후 진입) 안내 배너 노출 대상
-// 5탭 — 2026-09-04 KR 확인진입 재검증(scripts/measurements/2026-09-04_
-// confirm_entry_grid_search_5tabs.py)에서 즉시진입 EV~0, 확인진입 EV
-// +0.6~1.0R 확인. 예전엔 돌파임박 카드에만 있던 안내를 5탭 공통 배너로 통일.
-const CONFIRM_ENTRY_MODES = new Set(['pullback', 'imminent', 'boxbreak', 'breakout', 'turnaround']);
+// v5.167: 확인진입(종가>피벗 & 거래량1.5배+ 확인 후 진입) 안내 배너 노출 대상.
+// 눌림목/돌파임박 2탭만 — 프로덕션 채택 규칙(app.py CONFIRM_RULE_BY_TAB)이
+// 있는 탭. 박스돌파/돌파/추세전환은 90cp z=6~7는 통과했으나 슬리피지·
+// dedup z·손절 스냅샷 불일치 검증이 아직 안 끝나 보류 중(app.py
+// CONFIRM_RULE_BY_TAB 바로 위 주석 참고) — 검증 끝나면 그때 확장
+// (사용자 지시, v5.165에서 5탭으로 넣었던 걸 되돌림).
+const CONFIRM_ENTRY_MODES = new Set(['pullback', 'imminent']);
 let riskTierFilter = new Set();   // 선택된 tier key들 (비어있으면 필터 없음)
 // v5.56: 탭별 필터 유효성 전수조사 결과 반영. 필드가 없는 탭에서 필터를
 // 걸면 "아무 일도 안 함"이 아니라 조건에 따라 결과가 다름 — RISK_TIER_MODES
@@ -2783,9 +2786,8 @@ function renderCards() {
   // 시장 필터 (클라이언트에서 거름 — 재스캔 없음)
   if (market === 'kr') list = list.filter(h => h.market === 'KR');
   else if (market === 'us') list = list.filter(h => h.market === 'US');
-  // v5.165: 5탭(눌림목/돌파임박/박스돌파/돌파/추세전환) 확인진입 안내 배너 —
-  // 예전엔 돌파임박 카드 배지로만 있던 걸 5탭 공통 탭 상단 배너로 통일
-  // (2026-09-04 KR/US 재검증, 사용자 지시).
+  // v5.167: 확인진입 안내 배너 — 프로덕션 채택 규칙이 있는 눌림목/돌파임박
+  // 2탭만(CONFIRM_ENTRY_MODES 참고, 박스돌파/돌파/추세전환은 검증 대기).
   const confirmBar = document.getElementById('confirmEntryBanner');
   if (confirmBar) confirmBar.style.display = CONFIRM_ENTRY_MODES.has(mode) ? '' : 'none';
   // v5.97: 종가베팅 탭 — 고정 안전 배너 + 시간대별 세션 상태 배너(사용자

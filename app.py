@@ -5,6 +5,12 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.167 [보류] CONFIRM_RULE_BY_TAB의 박스돌파/돌파/추세전환 3탭 프로덕션
+        채택(v5.166)을 보류로 되돌림 — ③④ 검증(슬리피지/dedup z/손절
+        스냅샷 불일치) 끝날 때까지 app.py 채택성 변경 금지(2026-09-04
+        사용자 지시, CLAUDE.md 임시 제약 섹션). 이유는 CONFIRM_RULE_BY_TAB
+        바로 위 코드 주석 참고. static/index.html 확인진입 배너도 눌림목/
+        돌파임박 2탭으로 축소(사용자 지시).
 v5.166 [기능] item3(b)(c) 마무리 — ① 시장 필터 애매 구간(예: 평일
         15:30~22:30 KST) 기본값을 "전체"에서 "마지막에 쓰던 필터
         유지"로 변경(localStorage MARKET_FILTER_KEY, 첫 방문 시에만
@@ -4419,7 +4425,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.166"
+VERSION = "v5.167"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -10034,24 +10040,12 @@ async def get_calendar():
     # z=22.0→34.7) 채택. 손절은 신호일저가(등록일 저가로 근사,
     # `_registration_day_low()`)가 구조적stop보다 32% 높은 EV(1.062 vs
     # 0.802R)라 신규 캡처 비용 감수하고 채택.
-    # v5.166: 박스돌파/돌파/추세전환 3탭 추가 — 2026-09-04 KR 확인진입
-    # 5탭 재검증(scripts/measurements/2026-09-04_kr_confirm_entry_all_
-    # tabs_90cp.py)에서 정의 대조 완료: 컨펌 조건(종가>피벗+거래량1.5배,
-    # 3거래일내)은 5개 탭 전부 동일 함수 재사용이라 원천적으로 같고,
-    # stop 정의도 이 3탭은 "stop_key=structural stop"(각 analyze_*()
-    # 자체 손절 그대로, 변형 없음) — 이미 채택된 눌림목("안C'")과 완전히
-    # 같은 방식(눌림목도 structural stop 그대로 씀). 돌파임박만 유일하게
-    # 등록일저가로 stop을 바꾼 예외라 3탭과 무관. z=6.07~7.57, 시기
-    # 반분(초/후반) 전부 EV≥+0.15R 재현 — 사전 등록 채택 기준 충족.
-    # 인용 EV는 KR 단독(이번 측정이 KR 사전등록·판정 대상, US는 비교용
-    # 곁들임이라 판정 미통과) — 눌림목/돌파임박 두 기존 항목은 결합
-    # 시장 수치라 표기 관례가 다름(과거 별도 측정, 이번에 안 건드림).
+    # 박스돌파/돌파/추세전환: 90cp z=6~7 통과했으나 슬리피지·dedup z·
+    # 손절 스냅샷 불일치(①-b) 검증 대기. _checks 결과 후 재판정.
+    # 2026-09-04
     CONFIRM_RULE_BY_TAB = {
         "돌파임박": "안C 확인진입(종가기준+등록일저가손절) — EV 1.062R(n=2610, 90개 창 z=34.7) · docs/imminent_stop_entry_investigation.md",
         "눌림목": "안C' 확인진입 — EV 0.849R(n=1283, 90개 창 z=18.5) · docs/pullback_stop_width_and_entry_timing.md",
-        "박스돌파": "확인진입(종가기준, 구조적 stop 그대로) — KR EV 0.597R(n=367, 90개 창 z=6.07) · docs/kr_us_strategy_map.md \"KR 확인진입 5탭 재검증\" 절",
-        "돌파": "확인진입(종가기준, 구조적 stop 그대로) — KR EV 0.639R(n=438, 90개 창 z=6.91) · docs/kr_us_strategy_map.md \"KR 확인진입 5탭 재검증\" 절",
-        "추세전환": "확인진입(종가기준, 구조적 stop 그대로) — KR EV 0.604R(n=402, 90개 창 z=7.57) · docs/kr_us_strategy_map.md \"KR 확인진입 5탭 재검증\" 절",
     }
     pending_near, pending_far = 0, 0
     for r in journal:
