@@ -4387,7 +4387,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.163"
+VERSION = "v5.164"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -8326,15 +8326,15 @@ async def market_gate():
     cache_dirty = False
     for code, reg in zip(codes, regs):
         if isinstance(reg, BaseException) or not reg:
-            # v5.163: 실패 — 직전 성공 판정(24시간 이내)이 있으면 그대로 유지,
-            # 없거나 너무 오래됐으면 보수적으로 correction 폴백.
+            # v5.163/v5.164: 실패 — 직전 성공 판정(TTL=72h 이내, 주말 커버용)이
+            # 있으면 그대로 유지, 없거나 너무 오래됐으면 보수적으로 correction 폴백.
             cached = _index_last_good.get(code)
             age = (now_ts - cached["ts"]) if cached else None
             if cached and age <= INDEX_GATE_STALE_TTL_SEC:
                 out_idx[code] = {**cached["data"], "stale": True, "stale_age_sec": round(age)}
             else:
                 hrs = round(age / 3600, 1) if age is not None else None
-                why = (f"{hrs}시간째 조회 실패 — 직전 판정 신뢰 기간(24h) 초과, 보수적 처리"
+                why = (f"{hrs}시간째 조회 실패 — 직전 판정 신뢰 기간(72h) 초과, 보수적 처리"
                        if hrs is not None else "조회 실패 (직전 판정 기록 없음)")
                 out_idx[code] = {
                     "label": INDEX_SPEC[code]["label"], "gate": "correction", "why": why,
@@ -9347,12 +9347,16 @@ RSETTINGS_DEFAULT = {
 # 원상복구 → 시장엔 아무 변화가 없는데 얼마냐봇에 🔴/🟢 알림이 연달아 감.
 # [수정] 지수별 마지막 성공 판정을 캐시(저널과 같은 영구 볼륨에 파일 저장 —
 # 재배포로 리셋되면 배포 직후 매번 같은 문제가 재발하므로 메모리만으론 부족)
-# 해 뒀다가, 실패 시 24시간 이내면 그 값을 stale=True로 대신 쓴다. 24시간을
+# 해 뒀다가, 실패 시 TTL 이내면 그 값을 stale=True로 대신 쓴다. TTL을
 # 넘도록 계속 실패하면 그건 "일시 오류"로 보기 어려우니 correction으로
 # 폴백하되 why에 몇 시간째 실패 중인지 명시(무한정 stale 유지는 거짓 🟢을
 # 만들 수 있어 거짓 🔴보다 위험 — 상한을 반드시 둠).
+# v5.164: TTL 24h→72h — 금요일 마감 후 조회 실패가 월요일 아침까지(주말
+# 포함 최대 약 60h) 이어져도 직전 판정을 유지해야 해서 24h로는 주말을 못
+# 넘겼다. 3일(72h) 연속 실패는 주말로 설명이 안 되니 그때는 correction
+# 폴백이 맞다 — 72h를 상한으로 둠.
 INDEX_GATE_CACHE_PATH = os.path.join(os.path.dirname(JOURNAL_PATH), "index_gate_cache.json")
-INDEX_GATE_STALE_TTL_SEC = 24 * 3600
+INDEX_GATE_STALE_TTL_SEC = 72 * 3600
 
 
 def _load_index_gate_cache() -> dict:
