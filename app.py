@@ -5,6 +5,17 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.160 [정정] 라벨-의미 감사 중간 심각도 4순위(사용자 지시) — 대장관찰
+        탭 "🔁 재점화 대기 N개" 헤더가 status=confirmed(이미 진입조건
+        충족, 각 행에서는 🔁로 별도 표시됨)까지 "대기" 건수에 합산하고
+        아이콘도 confirmed 전용 🔁를 그대로 써서 이중으로 어긋나 있었음
+        (`_reignition_watchlist_view()` 자체 docstring: "status=watching/
+        confirmed만 노출"). static/index.html `reignitionWatchSectionHtml()`
+        에서 확인진입/대기를 분리 집계해 "🔁 확인진입 N건 · ⏳ 대기 M건"
+        으로 표시(확인진입 0건이면 "⏳ 대기 M건"만) — 개별 행의 기존
+        아이콘 규칙과 일치시킴. 목록 내부 표시(각 행)는 이미 정확했어서
+        무변경, 헤더 집계만 수정. Node vm으로 혼합/전체watching 2케이스
+        렌더링 확인.
 v5.159 [정정] 라벨-의미 감사 중간 심각도 1순위(사용자 지시) — 저널
         "승률"이 서로 다른 두 정의(journalStats: 손절가 기록된 종료건만
         분모로 R배수 양수 비율 / closedTabStats: 청산가만 있으면 분모
@@ -4346,7 +4357,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.159"
+VERSION = "v5.160"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
