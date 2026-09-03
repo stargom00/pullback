@@ -418,12 +418,12 @@ def gate_suggest(dist, ftd: dict, above_ma60: bool) -> tuple[str, str]:
             if d >= 6:
                 return "correction", f"FTD 후 회복했으나 분산일 재차 {d}개 — 신규 매도 압력"
             if d >= 4:
-                return "pressure", f"FTD 후 회복 · 분산일 {d}개 누적 — A급만"
+                return "pressure", f"FTD 후 회복 · 분산일 {d}개 누적 — 리스크 상한 적용"
             return "confirmed", f"FTD 후 회복 완료 · 분산일 {d}개"
         if d >= 5:
             return "correction", f"FTD({ago}일 전) 후 분산일 {d}개 — 랠리 실패 조짐"
         if d >= 3:
-            return "pressure", f"FTD({ago}일 전) 후 분산일 {d}개 — A급만 1.5R"
+            return "pressure", f"FTD({ago}일 전) 후 분산일 {d}개 — 리스크 상한 적용"
         return "confirmed", (f"FTD 확인 ({ago}일 전) · 분산일 {d}개 — "
                              f"시험 매수 0.5R 1~2건부터")
 

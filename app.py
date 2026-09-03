@@ -4387,7 +4387,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.162"
+VERSION = "v5.163"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -8321,12 +8321,30 @@ async def market_gate():
         loop.run_in_executor(_executor, _index_regime, c) for c in codes
     ], return_exceptions=True)
 
+    now_ts = time.time()
     out_idx = {}
+    cache_dirty = False
     for code, reg in zip(codes, regs):
         if isinstance(reg, BaseException) or not reg:
-            out_idx[code] = None
+            # v5.163: 실패 — 직전 성공 판정(24시간 이내)이 있으면 그대로 유지,
+            # 없거나 너무 오래됐으면 보수적으로 correction 폴백.
+            cached = _index_last_good.get(code)
+            age = (now_ts - cached["ts"]) if cached else None
+            if cached and age <= INDEX_GATE_STALE_TTL_SEC:
+                out_idx[code] = {**cached["data"], "stale": True, "stale_age_sec": round(age)}
+            else:
+                hrs = round(age / 3600, 1) if age is not None else None
+                why = (f"{hrs}시간째 조회 실패 — 직전 판정 신뢰 기간(24h) 초과, 보수적 처리"
+                       if hrs is not None else "조회 실패 (직전 판정 기록 없음)")
+                out_idx[code] = {
+                    "label": INDEX_SPEC[code]["label"], "gate": "correction", "why": why,
+                    "dist_days": None, "dist_raw": None, "dist_expired": None,
+                    "dist_pre_ftd": None, "vol_source": None, "ftd": False,
+                    "ftd_days_ago": None, "rally_day": 0, "in_correction": False,
+                    "recovered": False, "drawdown_pct": 0.0, "above_ma60": None,
+                }
             continue
-        out_idx[code] = {
+        data = {
             "label": INDEX_SPEC[code]["label"],
             "gate": reg.get("gate_suggest"), "why": reg.get("gate_why"),
             "dist_days": reg.get("dist_days"), "dist_raw": reg.get("dist_raw"),
@@ -8337,6 +8355,12 @@ async def market_gate():
             "recovered": reg.get("recovered"), "drawdown_pct": reg.get("drawdown_pct"),
             "above_ma60": reg.get("above_ma60"),
         }
+        out_idx[code] = data
+        _index_last_good[code] = {"data": data, "ts": now_ts}
+        cache_dirty = True
+
+    if cache_dirty:
+        _save_index_gate_cache(_index_last_good)
 
     if not any(out_idx.values()):
         return JSONResponse({"ok": False, "error": "전 지수 조회 실패"}, status_code=503)
@@ -8345,8 +8369,18 @@ async def market_gate():
         v = out_idx.get(code)
         return v.get("gate") if v else None
 
-    gate_kr = _worst_gate([g("KOSPI"), g("KOSDAQ")])
-    gate_us = _worst_gate([g("^GSPC"), g("^IXIC")])
+    def _group_gate(group_codes):
+        # v5.163: 같은 그룹에 방금 성공한(=stale 아닌) 값이 하나라도 있으면
+        # stale(직전 판정 유지) 값은 후보에서 뺀다 — 부분 실패에서 오래된
+        # 값이 방금 조회한 값을 덮어쓰지 않게. 그룹 전체가 stale/실패일 때만
+        # stale 후보를 쓴다.
+        live = [g(c) for c in group_codes if out_idx.get(c) and not out_idx[c].get("stale")]
+        if live:
+            return _worst_gate(live)
+        return _worst_gate([g(c) for c in group_codes])
+
+    gate_kr = _group_gate(["KOSPI", "KOSDAQ"])
+    gate_us = _group_gate(["^GSPC", "^IXIC"])
     suggest = _worst_gate([gate_kr, gate_us])
 
     why = ""
@@ -9306,6 +9340,43 @@ RSETTINGS_DEFAULT = {
     "dist_days": 0,        # 분산일 카운트 (수동 입력, 게이트 판단 참고용)
     "usd_krw": 1400.0,     # 환율 (US 종목 사이즈 계산용, 수동 갱신)
 }
+
+# ── v5.163: 지수 조회 실패 시 직전 판정 유지 (게이트 오발 방지) ──────────
+# [사고] ^GSPC/^IXIC 일시 조회 실패 → _worst_gate가 빈 후보를 무조건
+# "correction"으로 취급 → 미국 게이트 🔴로 급락 → 다음 폴링에 조회 성공하며
+# 원상복구 → 시장엔 아무 변화가 없는데 얼마냐봇에 🔴/🟢 알림이 연달아 감.
+# [수정] 지수별 마지막 성공 판정을 캐시(저널과 같은 영구 볼륨에 파일 저장 —
+# 재배포로 리셋되면 배포 직후 매번 같은 문제가 재발하므로 메모리만으론 부족)
+# 해 뒀다가, 실패 시 24시간 이내면 그 값을 stale=True로 대신 쓴다. 24시간을
+# 넘도록 계속 실패하면 그건 "일시 오류"로 보기 어려우니 correction으로
+# 폴백하되 why에 몇 시간째 실패 중인지 명시(무한정 stale 유지는 거짓 🟢을
+# 만들 수 있어 거짓 🔴보다 위험 — 상한을 반드시 둠).
+INDEX_GATE_CACHE_PATH = os.path.join(os.path.dirname(JOURNAL_PATH), "index_gate_cache.json")
+INDEX_GATE_STALE_TTL_SEC = 24 * 3600
+
+
+def _load_index_gate_cache() -> dict:
+    if os.path.exists(INDEX_GATE_CACHE_PATH):
+        try:
+            with open(INDEX_GATE_CACHE_PATH, encoding="utf-8") as f:
+                data = _json.load(f)
+                return data if isinstance(data, dict) else {}
+        except (ValueError, OSError):
+            return {}
+    return {}
+
+
+def _save_index_gate_cache(cache: dict):
+    try:
+        tmp = INDEX_GATE_CACHE_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(cache, f, ensure_ascii=False)
+        os.replace(tmp, INDEX_GATE_CACHE_PATH)
+    except OSError:
+        pass
+
+
+_index_last_good = _load_index_gate_cache()  # {code: {...out_idx[code], "ts": epoch_sec}}
 
 
 @app.get("/guide.md")
