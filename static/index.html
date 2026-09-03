@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.165</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.166</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">확인진입 원칙 — 종가&gt;피벗 &amp; 거래량 1.5배+ 확인 후 진입</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3792,11 +3792,17 @@ function setMarket(newMarket) {
   market = newMarket;
   document.querySelectorAll('[data-market]').forEach(x => x.classList.toggle('active', x.dataset.market === newMarket));
 }
-// v5.165: 시간대별 기본 시장 필터 — KR 장중(평일 KST 09:00~15:30)엔 한국,
-// US 장중(평일 ET 09:30~16:00)엔 미국, 그 외엔 전체. 사용자가 시장 버튼을
-// 수동 클릭하면 userMarketOverride=true가 되어 이 세션(새로고침 전까지,
-// expTabsExpanded와 같은 패턴) 동안 자동판정을 더 이상 덮어쓰지 않는다.
+// v5.166: 시간대별 기본 시장 필터 — KR 장중(평일 KST 09:00~15:30)엔 한국,
+// US 장중(평일 ET 09:30~16:00)엔 미국. 그 외 애매 구간(예: 15:30~22:30
+// KST — 한국장 마감 후 복기하거나 미장 준비하는 시간)엔 "마지막에 쓰던
+// 필터 유지"(사용자 지시) — 이 구간에 "전체"로 튀면 방금 보던 게
+// 사라진다는 이유. localStorage(MARKET_FILTER_KEY)에 수동 클릭마다
+// 저장, 저장된 값이 없으면(첫 방문) "전체"로 폴백.
+// 사용자가 시장 버튼을 수동 클릭하면 userMarketOverride=true가 되어 이
+// 세션(새로고침 전까지, expTabsExpanded와 같은 패턴) 동안 자동판정을
+// 더 이상 덮어쓰지 않는다.
 let userMarketOverride = false;
+const MARKET_FILTER_KEY = 'marketFilterLast';
 function timeBasedDefaultMarket() {
   const kst = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
   const kstMin = kst.getHours() * 60 + kst.getMinutes();
@@ -3804,10 +3810,11 @@ function timeBasedDefaultMarket() {
   const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
   const etMin = et.getHours() * 60 + et.getMinutes();
   if (et.getDay() >= 1 && et.getDay() <= 5 && etMin >= 9 * 60 + 30 && etMin <= 16 * 60) return 'us';
-  return 'all';
+  return localStorage.getItem(MARKET_FILTER_KEY) || 'all';
 }
 document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('click', () => {
   userMarketOverride = true;
+  localStorage.setItem(MARKET_FILTER_KEY, t.dataset.market);
   setMarket(t.dataset.market);
   if (mode === 'moneyflow') { loadMoneyflowDate(null); } else { renderCards(); }  // 재스캔 없이 화면만 다시 그림 (lastHits는 전체 보유)
 }));
