@@ -5,6 +5,38 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.173 [기능] 5탭 히트 자동 감시(auto_watch) 신설(사용자 지시). 현재:
+        사용자가 ⚡감시를 눌러야 확인진입 추적이 시작돼, 탭을 안 보면
+        🔴즉시행동이 계속 비어 있던 문제 대응. 재점화 워치리스트
+        (_load_reignition_watch/_refresh_reignition_watch)와 완전히 같은
+        패턴: journal_user.json과 별도 파일(`auto_watch.json`)에 저장,
+        `_warm_market()` 장마감 후 분기(KR/US 각자)에서 하루 1회 자동
+        등록·확인·만료. **journal과 분리한 이유**: `updateTracking()`이
+        status=='pending' 레코드를 전부 "현재가≥진입가"만으로(거래량
+        확인 없이) 자동 'entered' 전환하는데, 하루 176~423건(2026-09-04
+        실측)을 journal pending에 직접 넣으면 이 로직에 걸려 대량의
+        미확인 트레이드가 R 통계에 오염된다 — 별도 파일이면 이 경로 자체가
+        원천 차단(updateTracking은 getJournal()만 읽고 auto_watch.json을
+        읽는 코드 자체가 없음, 재확인 완료).
+        등록 조건: RS>=80 & 손절폭<=ATR%×1.5(2026-09-04 격자탐색+확인율
+        실측 근거, 최근 20거래일 확인🔴 도달 일평균 13.05건으로 사전
+        등록 기준 ≤20건 통과). 확인 기준선(signal_high)·손절은 새로
+        계산하지 않고 `_record_signal_snapshot()`가 (ticker,tab) 최초감지
+        시점에 이미 영구 기록해둔 값을 그대로 재사용(같은 에피소드는
+        재등록 안 함, signal_date로 판정). 확인/만료는 `_pending_watch_
+        confirm_check()`(v5.169 vol_mult_required 인자) 재사용, 신호일
+        기준 거래일 3일 경과 시 자동 만료(bar 위치차로 카운트 —
+        `_record_signal_snapshot`의 gap 판정과 동일 기법). boxbreak을
+        `_warm_market()` EOD 워밍 목록에 추가(기존엔 빠져 있어 그 탭을
+        아무도 안 열면 스냅샷이 안 남았음).
+        `get_calendar()`: 오늘 확인된 것만 🔴(reignition과 동일 관례,
+        watching 중인 나머지는 "waiting.auto_watch" 개수만 — 목록 자체는
+        안 자르되(사용자 지시: "상한 없음, 정렬로 해결") 화면엔 확인된
+        것만 보여 폭발 문제 없음). 🔴 정렬을 (reignition 최우선) →
+        강한확인 → 손절폭 좁은순 → RS 높은순으로 확장(`_immediate_sort_key`,
+        `_DECISION_SOURCE_PRIORITY`에 auto_watch=4 추가). `static/index.html`
+        에 🤖(자동)/👤(수동) 배지 + 대기 라벨 추가.
+        상세: `docs/kr_us_strategy_map.md`(격자탐색/확인율 실측 절).
 v5.172 [문서] 동결 해제 5단계(마지막) — GUIDE.md 갱신(사용자 지시).
         "🇰🇷 국장" 체크리스트에 거래량배수가 탭마다 다름(돌파만 3.0배)과
         "종가위치는 도움 안 됨, 거래량배수만 진짜 레버" 격자탐색 결론
@@ -4475,7 +4507,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.172"
+VERSION = "v5.173"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6734,7 +6766,11 @@ async def _warm_market(market: str):
             return
         try:
             bundle = await _fetch_market_data(market, wait_for_fresh=True)
-            for mode in ("imminent", "pullback", "turnaround", "breakout"):
+            # v5.173: boxbreak을 EOD 워밍 대상에 추가 — auto_watch가 5탭
+            # 전부(GATE_MODE_LABELS)의 신호 스냅샷/히트를 매일 필요로 하는데
+            # boxbreak만 빠져 있으면(기존) 그 탭을 그날 아무도 안 열어야만
+            # 콜드 상태로 남아 자동 감시 등록이 누락된다.
+            for mode in ("imminent", "pullback", "turnaround", "breakout", "boxbreak"):
                 res = await run_scan(market, mode)
                 res["daykey"] = daykey
                 _cache[f"{market}:{mode}"] = res
@@ -6776,6 +6812,13 @@ async def _warm_market(market: str):
                     await _refresh_reignition_watch(bundle)
                 except Exception as e2:
                     print(f"[reignition] EOD 갱신 실패: {e2}")
+            # v5.173: 5탭 자동 감시(auto_watch) — reignition과 달리 KR
+            # 전용이 아니라 이 시장(KR이면 KR, US면 US) 자체 EOD마다 갱신.
+            # CONFIRM_RULE_BY_TAB이 KR/US 공통 규칙이라 US도 대상.
+            try:
+                await _refresh_auto_watch(bundle, market, daykey)
+            except Exception as e2:
+                print(f"[auto_watch] EOD 갱신 실패: {e2}")
         except Exception as e:
             print(f"[scheduler] warm {market} failed: {e}")
         # v5.147(사용자 지시, 비용 절감): 돈의흐름 자동실행을 여기(매일
@@ -9568,6 +9611,142 @@ def _record_signal_snapshot(ticker: str, tab: str, df, pivot, stop) -> bool:
     return False
 
 
+# v5.173: 5탭 히트 자동 감시 등록(auto_watch) — 사용자 지시. 재점화
+# 워치리스트(_load_reignition_watch/_refresh_reignition_watch, 위 5579~5702행)
+# 와 완전히 같은 패턴 재사용: journal_user.json과 **별도 파일**에 저장,
+# 스케줄러가 하루 1회 자동 채우고 자동 만료. 이렇게 분리하는 이유(CLAUDE.md
+# "대기 저널은 피벗 도달 시 자동 진입 전환" 원칙과 정면 충돌 방지):
+# `updateTracking()`(static/index.html)은 journal의 status=='pending' 레코드를
+# 전부 "현재가≥진입가"만으로(거래량 확인 없이) 자동 'entered' 전환한다 —
+# 자동 등록 후보(하루 176~423건, 2026-09-04 실측)를 journal pending에 직접
+# 넣으면 이 로직에 걸려 대량의 미확인 트레이드가 R 통계에 오염된다. 별도
+# 파일에 두면 이 경로 자체가 원천 차단됨(updateTracking은 getJournal()만
+# 읽음, auto_watch.json을 읽는 코드 자체가 없음).
+AUTO_WATCH_PATH = _resolve_persistent_path("auto_watch.json")
+AUTO_WATCH_RS_MIN = 80             # 격자탐색 필터(2026-09-04 실측 근거)
+AUTO_WATCH_MAX_STOP_ATR_MULT = 1.5  # 손절폭 ≤ ATR×1.5
+AUTO_WATCH_CONFIRM_WINDOW_DAYS = 3  # 신호일 다음 최대 3거래일(안C 정의와 동일)
+
+
+def _load_auto_watch() -> dict:
+    if os.path.exists(AUTO_WATCH_PATH):
+        try:
+            with open(AUTO_WATCH_PATH, encoding="utf-8") as f:
+                data = _json.load(f)
+                return data if isinstance(data, dict) else {}
+        except (ValueError, OSError):
+            return {}
+    return {}
+
+
+def _save_auto_watch(data: dict):
+    try:
+        tmp = AUTO_WATCH_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, AUTO_WATCH_PATH)
+    except OSError:
+        pass
+
+
+_auto_watch = _load_auto_watch()  # {"ticker|tab": {...}} — journal과 별도 저장소(위 설명 참고)
+
+
+async def _refresh_auto_watch(bundle: dict, market: str, daykey: str):
+    """일 1회(_warm_market의 장마감 후 분기, KR/US 각자 자기 EOD에)
+    호출 — 신규 후보 등록 + 확인/만료 판정을 한 번에 처리. reignition과
+    같은 패턴: 이미 워밍된 bundle/스캔캐시만 읽고 새 fetch 없음. daykey는
+    호출부가 이미 계산해둔 `_market_session_key(market)` 값 그대로 받아
+    재계산 안 함 — get_calendar()의 `today`와 항상 같은 값이 되도록
+    보장(둘 다 같은 함수의 같은 시점 산출물이라 자정 부근 경계 불일치
+    걱정 없음).
+
+    등록 조건(2026-09-04 격자탐색+확인율 실측 근거,
+    docs/kr_us_strategy_map.md 관련 절): RS>=80 & 손절폭<=ATR%×1.5.
+    확인 기준선(signal_high)·손절(stop, 돌파임박만 signal_low)은
+    `_record_signal_snapshot()`가 이미 (ticker,tab) 최초감지 시점에
+    영구 기록해둔 값을 그대로 가져다 쓴다(재계산·재정의 안 함 — 이
+    스냅샷이 바로 CONFIRM_RULE_BY_TAB 확인진입 EV가 실제로 측정한
+    그 정의). 같은 에피소드(signal_date 불변)는 재등록하지 않는다."""
+    data = bundle.get("data") or {}
+
+    # ── ① 신규 등록: RS80+ & 손절<=ATR×1.5 통과한 히트, 스냅샷 있는 것만 ──
+    for mode, tab in GATE_MODE_LABELS.items():
+        cached = _cache.get(f"{market}:{mode}")
+        if not cached:
+            continue
+        for h in cached.get("hits", []):
+            ticker = h.get("ticker")
+            if not ticker:
+                continue
+            rs = h.get("rs")
+            risk_pct = h.get("risk_pct")
+            atr_pct = h.get("atr_pct")
+            if rs is None or rs < AUTO_WATCH_RS_MIN:
+                continue
+            if atr_pct is None or atr_pct < 1 or risk_pct is None or risk_pct > atr_pct * AUTO_WATCH_MAX_STOP_ATR_MULT:
+                continue
+            snap = get_signal_snapshot(ticker, tab)
+            if snap is None:
+                continue   # 스냅샷 미기록(극초기) — 다음 스캔에서 재시도
+            key = f"{ticker}|{tab}"
+            existing = _auto_watch.get(key)
+            if existing is not None and existing.get("signal_date") == snap.get("signal_date"):
+                continue   # 같은 에피소드 — watching/confirmed/expired 무관 재등록 안 함
+            _auto_watch[key] = {
+                "ticker": ticker, "tab": tab, "name": h.get("name") or ticker,
+                "market": h.get("market") or ("KR" if market == "kr" else "US"),
+                "sector": h.get("sector"),
+                "status": "watching",
+                "signal_date": snap["signal_date"], "stop": snap["stop"], "pivot": snap["pivot"],
+                "signal_high": snap["signal_high"], "signal_low": snap.get("signal_low"),
+                "rs": rs, "risk_pct": risk_pct, "atr_pct": atr_pct,
+                "registered_at": daykey,
+                "confirmed_at": None, "confirm_close": None, "confirm_stop": None,
+                "strong_confirm": False, "expired_at": None,
+            }
+
+    # ── ② 확인/만료 판정: watching 전부, 신호일 기준 거래일 카운트(bar 위치차 —
+    #    _record_signal_snapshot의 gap 판정과 동일 기법) ──
+    import pandas as pd
+    for key, rec in _auto_watch.items():
+        if rec.get("status") != "watching":
+            continue
+        if rec.get("market") != ("KR" if market == "kr" else "US"):
+            continue
+        df = data.get(rec["ticker"])
+        if df is None or df.empty:
+            continue
+        try:
+            sig_ts = pd.Timestamp(rec["signal_date"])
+            if sig_ts not in df.index:
+                continue
+            days_since = (len(df) - 1) - df.index.get_loc(sig_ts)
+        except Exception:
+            continue
+        if days_since < 1:
+            continue   # 신호 당일은 확인 판정 대상 아님(다음 거래일부터)
+        vol_mult_req = CONFIRM_VOL_MULT_BY_TAB.get(rec["tab"], 1.5)
+        confirmed, close, vol_mult = _pending_watch_confirm_check(
+            df, rec["signal_high"], vol_mult_required=vol_mult_req)
+        if confirmed:
+            rec["status"] = "confirmed"
+            rec["confirmed_at"] = daykey
+            rec["confirm_close"] = close
+            rec["strong_confirm"] = rec["tab"] == "눌림목" and vol_mult is not None and vol_mult >= 2.0
+            # 돌파임박은 프로덕션 정의(CONFIRM_RULE_BY_TAB)와 동일하게
+            # 손절을 신호일저가로 재정의 — 나머지 4탭은 구조적 stop 그대로.
+            if rec["tab"] == "돌파임박" and rec.get("signal_low") is not None and rec["signal_low"] < rec["signal_high"]:
+                rec["confirm_stop"] = rec["signal_low"]
+            else:
+                rec["confirm_stop"] = rec["stop"]
+        elif days_since >= AUTO_WATCH_CONFIRM_WINDOW_DAYS:
+            rec["status"] = "expired"
+            rec["expired_at"] = daykey
+
+    _save_auto_watch(_auto_watch)
+
+
 @app.get("/guide.md")
 async def guide_md():
     """활용 가이드 원문 (v5.47) — /guide 페이지가 fetch해서 렌더."""
@@ -9932,8 +10111,11 @@ def _registration_day_low(df, reg_date: str):
 # 소스 신뢰도(reignition>pending_watch>jongga>imminent — imminent은 스스로
 # "참고"라 표기하고, pending_watch는 등록일저가손절까지 확정된 더 검증된
 # 형태라 같은 긴급도면 버려도 정보 손실 없음).
+# v5.173: auto_watch(자동 감시)를 맨 뒤에 추가 — 사용자가 직접 고른
+# pending_watch보다 신뢰도를 낮게 둔다(자동 등록은 필터만 걸었을 뿐 사람이
+# 확인한 게 아님). 같은 티커가 수동/자동 둘 다로 뜨면 수동이 이긴다.
 _URGENCY_PRIORITY = {"immediate": 0, "near": 1}
-_DECISION_SOURCE_PRIORITY = {"reignition": 0, "pending_watch": 1, "jongga": 2, "imminent": 3}
+_DECISION_SOURCE_PRIORITY = {"reignition": 0, "pending_watch": 1, "jongga": 2, "imminent": 3, "auto_watch": 4}
 
 
 def _dedup_today_decision(immediate: list, near: list) -> tuple[list, list]:
@@ -10361,8 +10543,51 @@ async def get_calendar():
         })
     waiting["imminent"] = max(0, len(imminent_hits) - IMMINENT_TOP_N)
 
+    # ④ 5탭 자동 감시(auto_watch, v5.173) — journal과 완전 분리된 별도
+    # 저장소(_refresh_auto_watch가 매일 채움). 오늘 확인(confirmed)된 것만
+    # 🔴에 올리고(reignition과 동일 관례 — confirmed_at==오늘인 것만, 다음날
+    # 부터는 안 뜸), watching 중인 나머지는 개수만("대기" 섹션, 목록 노출 안
+    # 함 — 사용자 지시: "상한 없음, 정렬로 해결"이라 원본 후보 자체는 안
+    # 자르지만 화면엔 확인된 것만 보이므로 폭발 문제가 없음).
+    auto_watch_waiting = 0
+    for key, rec in _auto_watch.items():
+        if rec.get("status") == "confirmed" and rec.get("confirmed_at") == today:
+            entry = rec.get("signal_high")
+            stop = rec.get("confirm_stop") or rec.get("stop")
+            if not entry or not stop or entry <= stop:
+                continue
+            target_2r = round(entry + 2 * (entry - stop), 2)
+            rule_text = CONFIRM_RULE_BY_TAB.get(rec["tab"], "")
+            immediate.append({
+                "source": "auto_watch", "key": f"auto_watch:{key}",
+                "ticker": rec["ticker"], "name": rec.get("name") or rec["ticker"],
+                "market": rec.get("market"), "mode": None, "sector": rec.get("sector"),
+                "entry": entry, "stop": stop, "target_2r": target_2r,
+                "close": entry, "pivot": entry, "atr_pct": rec.get("atr_pct"),
+                "rs": rec.get("rs"), "strong_confirm": rec.get("strong_confirm", False),
+                "reason": f"{rec['tab']} 🤖자동감시 {rule_text}",
+            })
+        elif rec.get("status") == "watching":
+            auto_watch_waiting += 1
+    waiting["auto_watch"] = auto_watch_waiting
+
     immediate, near = _dedup_today_decision(immediate, near)
-    immediate.sort(key=lambda x: x["source"] != "reignition")   # 재점화 우선(가장 강한 근거)
+
+    def _immediate_sort_key(item):
+        # v5.173(사용자 지시): 🔴 안에서 ①강한확인 ②손절폭 좁은순 ③RS
+        # 높은순 — reignition만 그 위 최우선 티어(기존 관례 유지). risk_pct는
+        # 저장된 필드가 아니라 entry/stop에서 그때그때 계산(todayDecisionRiskBadge
+        # 프론트 계산과 동일 공식) — 소스마다 다른 스키마를 하나로 다룸.
+        entry, stop = item.get("entry"), item.get("stop")
+        risk_pct = (entry - stop) / entry * 100 if entry and stop and entry > stop else None
+        rs = item.get("rs")
+        return (
+            item["source"] != "reignition",
+            not item.get("strong_confirm", False),
+            risk_pct if risk_pct is not None else 999.0,
+            -(rs if rs is not None else -1),
+        )
+    immediate.sort(key=_immediate_sort_key)
     near.sort(key=lambda x: x.get("dist_pct", 999))
     today_decision = {
         "immediate": immediate, "near": near, "waiting": waiting,
