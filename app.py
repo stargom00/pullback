@@ -5,6 +5,14 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.171 [UI] 동결 해제 4단계 — static/index.html 확인진입 안내 배너를
+        5탭(눌림목/돌파임박/박스돌파/돌파/추세전환) 전부로 복원(사용자
+        지시). v5.167(377f473)에서 ①②③④ 검증 대기로 눌림목/돌파임박
+        2탭만 남겼던 걸, 검증 통과(docs "후속 확인 ①②③④") 후 v5.165
+        원안대로 되돌림 — `CONFIRM_ENTRY_MODES` Set + 배너 문구(거래량
+        1.5배+, 돌파는 3.0배+ 명시) + 관련 주석 2곳 갱신. 배너
+        노출여부만 결정하는 UI 상수라 서버 판정 로직(app.py
+        CONFIRM_RULE_BY_TAB/CONFIRM_VOL_MULT_BY_TAB)과 별개.
 v5.170 [기능] 동결 해제 3단계 — 눌림목 "강한확인" 배지(사용자 지시).
         격자탐색에서 눌림목 vol_mult 2.0배는 EV 개선(0.798→1.000R,
         z=3.11)이 유의했지만 확인율이 12.8%→7.5%로 줄어 "히트당 총
@@ -4458,7 +4466,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.170"
+VERSION = "v5.171"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
