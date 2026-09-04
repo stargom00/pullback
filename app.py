@@ -10485,6 +10485,8 @@ async def get_calendar():
                 atr_pct = round(atr_val / last_close * 100, 2) if last_close > 0 else None
             except Exception:
                 atr_pct = None
+        snap_bv = None
+        vol_mult_req = None
         if rule:
             vol_mult_req = CONFIRM_VOL_MULT_BY_TAB.get(tab, 1.5)
             snap_bv = get_signal_snapshot(ticker, tab)
@@ -10538,21 +10540,56 @@ async def get_calendar():
                 "reason": f"{tab} {rule}" + (" · 🔥강한확인(거래량 2배+)" if strong_confirm else ""),
             })
         elif dist_pct <= 2:
-            if dist_pct <= 0:
+            # v5.176(사용자 지시): KR 확인대기 UI — 이미 피벗 돌파(dist_pct<=0)
+            # 했는데 확인규칙(rule)이 있는 탭에서 거래량 미충족인 KR 종목은
+            # "뚫으면 진입 X · 손절 Y"(entry_if_triggered/stop_if_triggered)를
+            # 감춘다 — 이미 돌파해서 "뚫으면"이 아니라 확인 대기 중이라는
+            # 서로 다른 상태를 같은 문구로 보여주면 오해(진입가가 확정된
+            # 것처럼 보임) 소지가 있다는 지적. 대신 신호 스냅샷의 signal_date
+            # 로 확인 대기 거래일수를 세어(_refresh_auto_watch와 동일 기법)
+            # AUTO_WATCH_CONFIRM_WINDOW_DAYS(3거래일, 안C 정의와 동일) 초과면
+            # "만료"로 표시. 규칙이 없는 탭(rule=None)이나 US는 기존 그대로
+            # (entry_if_triggered/stop_if_triggered 유지, 사용자 지시:
+            # "US는 기존 동작 유지").
+            confirm_wait_kr = rule is not None and market == "KR" and dist_pct <= 0
+            confirm_expired = False
+            days_since_signal = None
+            if confirm_wait_kr and snap_bv and snap_bv.get("signal_date") and df is not None:
+                try:
+                    import pandas as pd
+                    sig_ts = pd.Timestamp(snap_bv["signal_date"])
+                    if sig_ts in df.index:
+                        days_since_signal = (len(df) - 1) - df.index.get_loc(sig_ts)
+                except Exception:
+                    days_since_signal = None
+                if days_since_signal is not None and days_since_signal >= AUTO_WATCH_CONFIRM_WINDOW_DAYS:
+                    confirm_expired = True
+            if confirm_expired:
+                reason = f"{tab} 확인 대기 만료({AUTO_WATCH_CONFIRM_WINDOW_DAYS}거래일 내 거래량 {vol_mult_req}배 미충족)"
+            elif dist_pct <= 0:
                 # 피벗은 넘었는데(종가>피벗) 거래량 확인 요건 미충족, 또는
                 # 확인 규칙 자체가 없는 탭 — 근접(🟡)으로만, EV 인용 없이.
                 reason = f"{tab or '감시'} 피벗 돌파" + (" — 거래량 확인 대기" if rule else " — 확인규칙 미검증, 사용자 판단")
             else:
                 reason = f"{tab or '감시'} 피벗까지 {dist_pct:.1f}%"
-            near.append({
+            item = {
                 "source": "pending_watch", "key": f"pending:{r.get('id')}",
                 "ticker": ticker, "name": r.get("name") or ticker, "market": market,
                 "mode": r.get("mode_raw") or None, "sector": r.get("sector"),
                 "current_price": close, "pivot": pivot_f, "dist_pct": dist_pct,
-                "entry_if_triggered": pivot_f, "stop_if_triggered": stop_f,
                 "close": close, "stop": stop_f, "atr_pct": atr_pct,
                 "reason": reason,
-            })
+            }
+            if confirm_wait_kr:
+                item["confirm_pending"] = not confirm_expired
+                item["confirm_expired"] = confirm_expired
+                item["vol_mult_required"] = vol_mult_req
+                # 진입가/손절 미표시(확인 전 오해 방지) — entry_if_triggered/
+                # stop_if_triggered를 아예 넣지 않는다.
+            else:
+                item["entry_if_triggered"] = pivot_f
+                item["stop_if_triggered"] = stop_f
+            near.append(item)
             pending_near += 1
         else:
             pending_far += 1
@@ -10637,7 +10674,45 @@ async def get_calendar():
                 "reason": f"{rec['tab']} 🤖자동감시 {rule_text}",
             })
         elif rec.get("status") == "watching":
-            auto_watch_waiting += 1
+            # v5.176(사용자 지시): KR 확인대기 UI를 auto_watch 풀에도 —
+            # 이미 피벗(signal_high) 돌파했는데 거래량 미충족인 종목을
+            # "⏳ 확인 대기" 근접 카드로 노출(기존엔 개수만 집계, 개별 종목
+            # 안 보였음). US는 손대지 않음(사용자 지시). near 카드로 노출된
+            # 건은 pending_watch의 pending_far/near 구분과 같은 원칙으로
+            # waiting 집계(⚪ 대기 N건)에서 뺀다 — 이미 카드로 보이는데
+            # 숫자로도 또 잡히면 중복 표시.
+            promoted_to_near = False
+            if rec.get("market") == "KR":
+                pivot = rec.get("signal_high")
+                close = _calendar_current_price(rec["ticker"])
+                if pivot and close is not None and close > pivot:
+                    promoted_to_near = True
+                    near.append({
+                        "source": "auto_watch", "key": f"auto_watch_wait:{key}",
+                        "ticker": rec["ticker"], "name": rec.get("name") or rec["ticker"],
+                        "market": "KR", "mode": None, "sector": rec.get("sector"),
+                        "current_price": close, "pivot": pivot, "stop": rec.get("stop"),
+                        "dist_pct": round((pivot - close) / pivot * 100, 2),
+                        "confirm_pending": True, "confirm_expired": False,
+                        "vol_mult_required": CONFIRM_VOL_MULT_BY_TAB.get(rec["tab"], 1.5),
+                        "atr_pct": rec.get("atr_pct"),
+                        "reason": f"{rec['tab']} 피벗 돌파 — 거래량 확인 대기",
+                    })
+            if not promoted_to_near:
+                auto_watch_waiting += 1
+        elif rec.get("status") == "expired" and rec.get("expired_at") == today and rec.get("market") == "KR":
+            # confirmed_at==today와 같은 관례 — 방금 만료된 것만 하루 노출.
+            pivot = rec.get("signal_high")
+            close = _calendar_current_price(rec["ticker"]) or pivot
+            near.append({
+                "source": "auto_watch", "key": f"auto_watch_expired:{key}",
+                "ticker": rec["ticker"], "name": rec.get("name") or rec["ticker"],
+                "market": "KR", "mode": None, "sector": rec.get("sector"),
+                "current_price": close, "pivot": pivot, "stop": rec.get("stop"),
+                "dist_pct": round((pivot - close) / pivot * 100, 2) if pivot else None,
+                "confirm_pending": False, "confirm_expired": True,
+                "reason": f"{rec['tab']} 확인 대기 만료({AUTO_WATCH_CONFIRM_WINDOW_DAYS}거래일 내 거래량 미충족)",
+            })
     waiting["auto_watch"] = auto_watch_waiting
 
     immediate, near = _dedup_today_decision(immediate, near)

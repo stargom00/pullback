@@ -3473,8 +3473,20 @@ function renderTodayDecisionHtml(td) {
     const mkt = mktOf(item);
     const dist = item.dist_pct;
     const distStr = dist == null ? '-' : dist <= 0 ? `돌파 +${Math.abs(dist)}%` : `-${dist}%`;
-    const descParts = [item.reason, `뚫으면 진입 ${fmtPrice(item.entry_if_triggered, mkt)}`];
-    if (item.stop_if_triggered != null) descParts.push(`손절 ${fmtPrice(item.stop_if_triggered, mkt)}${todayDecisionRiskBadge(item)}`);
+    const descParts = [item.reason];
+    // v5.176(사용자 지시): KR 확인대기 — 피벗은 이미 돌파했지만 거래량
+    // 확인이 안 끝난(또는 끝내 실패한) 항목은 "뚫으면 진입 X"라고 쓰면
+    // 안 뚫린 다른 근접 카드와 같은 문구가 돼서 이미 확정된 진입가처럼
+    // 오해될 수 있다는 지적 — 진입가/손절 대신 대기/만료 상태와 확인
+    // 기준(거래량 배수)만 보여준다.
+    if (item.confirm_expired) {
+      descParts.push('⌛ 확인 대기 만료');
+    } else if (item.confirm_pending) {
+      descParts.push(`⏳ 확인 대기 (거래량 ${item.vol_mult_required}배 필요)`);
+    } else {
+      descParts.push(`뚫으면 진입 ${fmtPrice(item.entry_if_triggered, mkt)}`);
+      if (item.stop_if_triggered != null) descParts.push(`손절 ${fmtPrice(item.stop_if_triggered, mkt)}${todayDecisionRiskBadge(item)}`);
+    }
     // v5.147(사용자 지시): 캐시가 아직 오늘 것으로 안 갱신됐으면(어제 장마감
     // 스냅샷이 그대로 노출 중) 오늘 장중 데이터로 오해하지 않도록 경고.
     if (item.snapshot_stale && item.snapshot_date) descParts.push(`⚠️ ${item.snapshot_date.slice(5)} 스냅샷(장중 갱신 전)`);
