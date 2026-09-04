@@ -6290,6 +6290,7 @@ async def run_scan(market: str, mode: str) -> dict:
     supports_intraday = mode in ("pullback", "turnaround", "imminent", "boxbreak", "breakout", "breakdown", "pattern", "super")  # is_kr 인자를 받는 모드
     alerts = load_alerts()
     hits = []
+    snapshot_dirty = False   # v5.168: 신호 스냅샷 변경 시에만 스캔 끝에 한 번 저장
     # 진단용 시장별 카운터
     diag = {"kr_universe": 0, "us_universe": 0, "kr_fetched": 0, "us_fetched": 0,
             "kr_hits": 0, "us_hits": 0}
@@ -6343,12 +6344,24 @@ async def run_scan(market: str, mode: str) -> dict:
         if mode == "pullback":
             result["is_super"] = analyze_super(df, rs_rank=rs_ranks.get(t),
                                                rs_mom=rs_moms.get(t), is_kr=is_kr) is not None
+        # v5.168: 신호 스냅샷 — (ticker, tab) 최초감지 시 stop/pivot/signal_high/
+        # signal_low를 영구 저장(docs/signal_snapshot_design_2026-09-04.md).
+        # 돌파임박은 손절을 signal_low로 재정의(analyze_imminent()의 stop이
+        # 아님 — CONFIRM_RULE_BY_TAB 원 정의와 동일), 나머지 4탭은
+        # result["stop"](=analyze()가 반환한 구조적 stop) 그대로.
+        if mode in GATE_MODE_LABELS:
+            snap_stop = float(df["Low"].iloc[-1]) if mode == "imminent" else result.get("stop")
+            if _record_signal_snapshot(t, GATE_MODE_LABELS[mode], df, result.get("pivot"), snap_stop):
+                snapshot_dirty = True
         hits.append({"ticker": t, "name": universe[t], "market": mkt,
                      "sector": _sector_of(t), "alert": alert_kind,
                      "climax": cw["climax"], "climax_reasons": cw["reasons"],
                      "climax_level": cw["level"], **result})
         if is_kr: diag["kr_hits"] += 1
         else: diag["us_hits"] += 1
+
+    if mode in GATE_MODE_LABELS and snapshot_dirty:
+        _save_signal_snapshots(_signal_snapshots)
 
     hits.sort(key=lambda x: (x.get("triggered", False), x.get("setup_score") or x["score"]),
               reverse=True)
@@ -8064,8 +8077,7 @@ async def debug_ticker(ticker: str):
     # 실제 447.88) 통과한 게이트를 탈락 사유로 잘못 지목하는 사고가 났음.
     # 지금은 각 모드가 실제로 도는 게이트 순서를 _trace_*로 그대로 재현해
     # '어디서 True/False로 return None 됐는지'를 직접 갖고 온다.
-    _mode_labels = {"pullback": "눌림목", "turnaround": "추세전환", "breakout": "돌파",
-                    "boxbreak": "박스돌파", "imminent": "돌파임박"}
+    _mode_labels = GATE_MODE_LABELS  # v5.168: 신호 스냅샷과 동일 딕셔너리 재사용(사본 금지)
     reasons = []
     gate_trace_payload = {}
     real_pivots = {}
@@ -9469,6 +9481,91 @@ def _save_index_gate_cache(cache: dict):
 
 
 _index_last_good = _load_index_gate_cache()  # {code: {...out_idx[code], "ts": epoch_sec}}
+
+
+# ══════════════════════════════════════════════════════════════════
+# v5.168 신호 스냅샷 — (ticker, tab) 최초감지 시점의 stop/pivot/signal_high/
+# signal_low를 영구 저장한다. docs/signal_snapshot_design_2026-09-04.md
+# 참고(설계 문서 스키마엔 signal_high가 없었으나, 이후 사용자 지시로
+# 확인진입 판정에 필요해 추가됨). run_scan()의 게이트형 5탭 히트 적재
+# 시점에만 기록 — "최초감지"를 지키기 위해 이미 기록이 있고 아래 리셋
+# 조건에 해당하지 않으면 last_seen_date만 갱신하고 나머지는 안 바꾼다.
+# ══════════════════════════════════════════════════════════════════
+GATE_MODE_LABELS = {"pullback": "눌림목", "turnaround": "추세전환", "breakout": "돌파",
+                     "boxbreak": "박스돌파", "imminent": "돌파임박"}
+SIGNAL_SNAPSHOT_PATH = os.path.join(os.path.dirname(JOURNAL_PATH), "signal_snapshot_cache.json")
+SIGNAL_SNAPSHOT_RESET_GAP_DAYS = 5      # (a) 거래일 기준 이 이상 연속 부재 후 재등장 → 리셋
+SIGNAL_SNAPSHOT_RESET_PIVOT_PCT = 0.03  # (b) 새 pivot이 저장분 대비 이 비율 이상 변동 → 리셋
+
+
+def _load_signal_snapshots() -> dict:
+    if os.path.exists(SIGNAL_SNAPSHOT_PATH):
+        try:
+            with open(SIGNAL_SNAPSHOT_PATH, encoding="utf-8") as f:
+                data = _json.load(f)
+                return data if isinstance(data, dict) else {}
+        except (ValueError, OSError):
+            return {}
+    return {}
+
+
+def _save_signal_snapshots(cache: dict):
+    try:
+        tmp = SIGNAL_SNAPSHOT_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(cache, f, ensure_ascii=False)
+        os.replace(tmp, SIGNAL_SNAPSHOT_PATH)
+    except OSError:
+        pass
+
+
+_signal_snapshots = _load_signal_snapshots()  # {"ticker|tab": {signal_date, stop, pivot, signal_high, signal_low, last_seen_date}}
+
+
+def get_signal_snapshot(ticker: str, tab: str) -> dict | None:
+    return _signal_snapshots.get(f"{ticker}|{tab}")
+
+
+def _record_signal_snapshot(ticker: str, tab: str, df, pivot, stop) -> bool:
+    """run_scan()의 게이트형 히트 적재 지점에서만 호출. in-memory 갱신만
+    하고 디스크 저장은 안 함(호출부가 스캔 1회당 한 번만 모아 저장) —
+    반환값이 True면 실제로 뭔가 바뀌었다는 뜻(호출부가 이걸로 저장 여부
+    결정)."""
+    if not pivot or not stop or df is None or len(df) == 0:
+        return False
+    key = f"{ticker}|{tab}"
+    today_str = str(df.index[-1].date())
+    prev = _signal_snapshots.get(key)
+    reset = prev is None
+    if prev is not None:
+        gap = None
+        try:
+            import pandas as pd
+            last_seen = pd.Timestamp(prev.get("last_seen_date"))
+            if last_seen in df.index:
+                gap = (len(df) - 1) - df.index.get_loc(last_seen)
+        except Exception:
+            gap = None
+        if gap is None or gap >= SIGNAL_SNAPSHOT_RESET_GAP_DAYS:
+            reset = True
+        else:
+            prev_pivot = prev.get("pivot")
+            if prev_pivot and abs(float(pivot) - prev_pivot) / prev_pivot >= SIGNAL_SNAPSHOT_RESET_PIVOT_PCT:
+                reset = True
+    if reset:
+        _signal_snapshots[key] = {
+            "signal_date": today_str,
+            "stop": round(float(stop), 4),
+            "pivot": round(float(pivot), 4),
+            "signal_high": round(float(df["High"].iloc[-1]), 4),
+            "signal_low": round(float(df["Low"].iloc[-1]), 4),
+            "last_seen_date": today_str,
+        }
+        return True
+    if prev.get("last_seen_date") != today_str:
+        prev["last_seen_date"] = today_str
+        return True
+    return False
 
 
 @app.get("/guide.md")
