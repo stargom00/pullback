@@ -5,6 +5,22 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.175 [기능] auto_watch 등록 필터를 게이트→배지로 전환(사용자 지시 —
+        등록 조건 감사). 감사 결과: a) 확인 판정은 여전히
+        `_pending_watch_confirm_check()`, b) 🤖 항목의 진입가(signal_high)/
+        손절(stop)은 여전히 `_record_signal_snapshot()` 스냅샷 값 — 둘 다
+        설계대로 확인됨. 다만 v5.173의 등록 조건(RS>=80 & 손절폭<=ATR×1.5)이
+        "관찰 등록"용 필터치고는 너무 좁아(5탭 히트 중 일부만 auto_watch에
+        들어감 — "상한 없음, 정렬로 해결" 원래 설계 의도와 불일치) 등록
+        게이트 역할을 없애고 "강한 셋업" 배지·정렬 우선순위로만 쓰도록
+        옮겼다. 필터 정의(RS>=80, 손절<=ATR×1.5) 자체는 그대로,
+        `_is_auto_watch_strong_setup()` 신설(등록 루프·표시 루프가 같은
+        정의 공유). `_refresh_auto_watch()` 등록 루프에서 RS/손절 조건
+        `continue` 2건 삭제 — 이제 5탭 히트 전부(스냅샷 있는 것만) 등록.
+        `get_calendar()` 🔴 표시 루프에 `strong_setup` 필드 추가, 정렬
+        키에 티어 삽입(강한확인 다음, 손절폭순 전). `static/index.html`
+        `renderTodayDecisionHtml()`에 💪강한셋업 배지 추가, 🤖 툴팁의
+        "RS80+ & 손절≤ATR×1.5" 문구(이제 등록 조건 아님) 정정.
 v5.174 [정리] 신호 스냅샷 설계(docs/signal_snapshot_design_2026-09-04.md)
         항목4·5 마무리(사용자 지시 — "다음 세션마다 같은 경고가 반복된다"
         는 지적으로 미커밋 상태를 끝까지 완성). 다른 세션이 시작만 해두고
@@ -4522,7 +4538,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.174"
+VERSION = "v5.175"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -9638,9 +9654,27 @@ def _record_signal_snapshot(ticker: str, tab: str, df, pivot, stop) -> bool:
 # 파일에 두면 이 경로 자체가 원천 차단됨(updateTracking은 getJournal()만
 # 읽음, auto_watch.json을 읽는 코드 자체가 없음).
 AUTO_WATCH_PATH = _resolve_persistent_path("auto_watch.json")
-AUTO_WATCH_RS_MIN = 80             # 격자탐색 필터(2026-09-04 실측 근거)
-AUTO_WATCH_MAX_STOP_ATR_MULT = 1.5  # 손절폭 ≤ ATR×1.5
+# v5.175(사용자 지시 — 게이트→배지 전환) 이 둘은 원래 "등록 조건"(통과 못하면
+# auto_watch에 아예 안 들어감)이었으나, 등록 풀을 5탭 히트 전부로 넓히면서
+# 역할을 "강한 셋업" 배지·정렬 기준으로 바꿨다 — 값 자체(RS>=80, 손절<=ATR×1.5,
+# 2026-09-04 격자탐색+확인율 실측 근거)는 그대로, 게이트가 아니라는 점만 다름.
+# 실제 판정은 get_calendar()의 auto_watch 표시 루프에서 매번 계산(저장 안 함).
+AUTO_WATCH_RS_MIN = 80              # "강한 셋업" 배지 기준 — RS>=80
+AUTO_WATCH_MAX_STOP_ATR_MULT = 1.5  # "강한 셋업" 배지 기준 — 손절폭 <= ATR×1.5
 AUTO_WATCH_CONFIRM_WINDOW_DAYS = 3  # 신호일 다음 최대 3거래일(안C 정의와 동일)
+
+
+def _is_auto_watch_strong_setup(rs, risk_pct, atr_pct) -> bool:
+    """v5.175 — 원래 auto_watch 등록 게이트였던 조건(RS>=80 & 손절폭<=ATR×1.5)을
+    그대로 재사용해 "강한 셋업" 여부만 계산한다. 값을 저장하지 않고 표시
+    시점마다(get_calendar) 다시 계산 — 정의가 이 함수 한 곳에만 있게 해서
+    AUTO_WATCH_RS_MIN/AUTO_WATCH_MAX_STOP_ATR_MULT를 나중에 조정해도 등록
+    루프와 표시 루프가 어긋날 일이 없다."""
+    if rs is None or rs < AUTO_WATCH_RS_MIN:
+        return False
+    if atr_pct is None or atr_pct < 1 or risk_pct is None or risk_pct > atr_pct * AUTO_WATCH_MAX_STOP_ATR_MULT:
+        return False
+    return True
 
 
 def _load_auto_watch() -> dict:
@@ -9676,16 +9710,20 @@ async def _refresh_auto_watch(bundle: dict, market: str, daykey: str):
     보장(둘 다 같은 함수의 같은 시점 산출물이라 자정 부근 경계 불일치
     걱정 없음).
 
-    등록 조건(2026-09-04 격자탐색+확인율 실측 근거,
-    docs/kr_us_strategy_map.md 관련 절): RS>=80 & 손절폭<=ATR%×1.5.
-    확인 기준선(signal_high)·손절(stop, 돌파임박만 signal_low)은
-    `_record_signal_snapshot()`가 이미 (ticker,tab) 최초감지 시점에
-    영구 기록해둔 값을 그대로 가져다 쓴다(재계산·재정의 안 함 — 이
-    스냅샷이 바로 CONFIRM_RULE_BY_TAB 확인진입 EV가 실제로 측정한
-    그 정의). 같은 에피소드(signal_date 불변)는 재등록하지 않는다."""
+    등록 대상(v5.175, 사용자 지시 — 게이트→배지 전환): 5탭 히트 전부,
+    스냅샷이 있는 것만(RS/손절폭 필터는 더 이상 등록을 막지 않음 — "강한
+    셋업" 배지·정렬 기준으로만 쓰임, get_calendar() 표시 루프 참고). 원래
+    이 필터(RS>=80 & 손절폭<=ATR%×1.5, 2026-09-04 격자탐색+확인율 실측
+    근거)가 등록 자체를 막고 있었던 걸, 등록 조건 감사 중 발견해 역할을
+    옮겼다(docs/kr_us_strategy_map.md 관련 절). 확인 기준선(signal_high)·
+    손절(stop, 돌파임박만 signal_low)은 `_record_signal_snapshot()`가
+    이미 (ticker,tab) 최초감지 시점에 영구 기록해둔 값을 그대로 가져다
+    쓴다(재계산·재정의 안 함 — 이 스냅샷이 바로 CONFIRM_RULE_BY_TAB
+    확인진입 EV가 실제로 측정한 그 정의). 같은 에피소드(signal_date
+    불변)는 재등록하지 않는다."""
     data = bundle.get("data") or {}
 
-    # ── ① 신규 등록: RS80+ & 손절<=ATR×1.5 통과한 히트, 스냅샷 있는 것만 ──
+    # ── ① 신규 등록: 5탭 히트 전부, 스냅샷 있는 것만(필터 없음 — 위 docstring 참고) ──
     for mode, tab in GATE_MODE_LABELS.items():
         cached = _cache.get(f"{market}:{mode}")
         if not cached:
@@ -9697,10 +9735,6 @@ async def _refresh_auto_watch(bundle: dict, market: str, daykey: str):
             rs = h.get("rs")
             risk_pct = h.get("risk_pct")
             atr_pct = h.get("atr_pct")
-            if rs is None or rs < AUTO_WATCH_RS_MIN:
-                continue
-            if atr_pct is None or atr_pct < 1 or risk_pct is None or risk_pct > atr_pct * AUTO_WATCH_MAX_STOP_ATR_MULT:
-                continue
             snap = get_signal_snapshot(ticker, tab)
             if snap is None:
                 continue   # 스냅샷 미기록(극초기) — 다음 스캔에서 재시도
@@ -10560,6 +10594,10 @@ async def get_calendar():
                 continue
             target_2r = round(entry + 2 * (entry - stop), 2)
             rule_text = CONFIRM_RULE_BY_TAB.get(rec["tab"], "")
+            # v5.175(사용자 지시 — 게이트→배지 전환) 원래 등록 게이트였던
+            # RS>=80 & 손절<=ATR×1.5를 여기서 표시용 "강한 셋업" 배지로 계산
+            # (_is_auto_watch_strong_setup — 정의는 등록 루프와 동일 함수 공유).
+            strong_setup = _is_auto_watch_strong_setup(rec.get("rs"), rec.get("risk_pct"), rec.get("atr_pct"))
             immediate.append({
                 "source": "auto_watch", "key": f"auto_watch:{key}",
                 "ticker": rec["ticker"], "name": rec.get("name") or rec["ticker"],
@@ -10567,6 +10605,7 @@ async def get_calendar():
                 "entry": entry, "stop": stop, "target_2r": target_2r,
                 "close": entry, "pivot": entry, "atr_pct": rec.get("atr_pct"),
                 "rs": rec.get("rs"), "strong_confirm": rec.get("strong_confirm", False),
+                "strong_setup": strong_setup,
                 "reason": f"{rec['tab']} 🤖자동감시 {rule_text}",
             })
         elif rec.get("status") == "watching":
@@ -10580,12 +10619,15 @@ async def get_calendar():
         # 높은순 — reignition만 그 위 최우선 티어(기존 관례 유지). risk_pct는
         # 저장된 필드가 아니라 entry/stop에서 그때그때 계산(todayDecisionRiskBadge
         # 프론트 계산과 동일 공식) — 소스마다 다른 스키마를 하나로 다룸.
+        # v5.175(사용자 지시 — 게이트→배지 전환) ②로 "강한 셋업"(원래 auto_watch
+        # 등록 게이트였던 RS/손절 필터) 티어 추가 — 강한확인 다음, 손절폭 정렬 전.
         entry, stop = item.get("entry"), item.get("stop")
         risk_pct = (entry - stop) / entry * 100 if entry and stop and entry > stop else None
         rs = item.get("rs")
         return (
             item["source"] != "reignition",
             not item.get("strong_confirm", False),
+            not item.get("strong_setup", False),
             risk_pct if risk_pct is not None else 999.0,
             -(rs if rs is not None else -1),
         )
