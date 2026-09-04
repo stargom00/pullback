@@ -104,7 +104,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
 import harness
 from scanner import (analyze, CONFIG, analyze_imminent, IMMINENT_CONFIG,
                       analyze_breakout, BREAKOUT_CONFIG, analyze_boxbreak, BOXBREAK_CONFIG,
-                      analyze_turnaround, TURN_CONFIG)
+                      analyze_turnaround, TURN_CONFIG, nonzero_vol_mean)
 
 OFFSETS = harness.checkpoints(60, 950, 10)   # 90개 — README 규칙9 표준
 VOL_MULTS = [1.0, 1.3, 1.5, 2.0, 3.0]
@@ -169,7 +169,9 @@ def collect_hits(data, bench):
                 signal_high = float(hist["High"].iloc[-1])
                 if signal_high <= 0:
                     continue
-                trailing50_vol = float(hist["Volume"].iloc[-50:].mean())
+                # v5.176(사용자 지시): 프로덕션 base_vol50과 정의 통일 —
+                # nonzero_vol_mean(거래정지일 제외). 고정 방식은 그대로.
+                trailing50_vol = float(nonzero_vol_mean(hist["Volume"].iloc[-50:]))
                 hits[tab].append({
                     "ticker": t, "off": off, "is_kr": ikr,
                     "signal_high": signal_high, "stop": stop,

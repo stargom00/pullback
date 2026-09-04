@@ -81,6 +81,7 @@ from scanner import (
     analyze_boxbreak, BOXBREAK_CONFIG,
     analyze_breakout, BREAKOUT_CONFIG,
     analyze_turnaround, TURN_CONFIG,
+    nonzero_vol_mean,
 )
 
 OFFSETS = harness.checkpoints(60, 950, 10)   # 90개 — 규칙9 표준
@@ -128,7 +129,10 @@ def collect_hits(data, bench):
             future = harness.future_after(data[t], off)
             signal_high = float(hist["High"].iloc[-1])
             signal_low = float(hist["Low"].iloc[-1])
-            trailing50_vol = float(hist["Volume"].iloc[-50:].mean())
+            # v5.176(사용자 지시): 프로덕션 base_vol50과 정의 통일 —
+            # nonzero_vol_mean(거래정지일 제외). 고정 방식(신호일에 확정,
+            # k=1..3 재사용)은 그대로.
+            trailing50_vol = float(nonzero_vol_mean(hist["Volume"].iloc[-50:]))
 
             for name, spec in TABS.items():
                 try:
@@ -305,6 +309,9 @@ def run(data, bench, out_path=None):
 if __name__ == "__main__":
     data, kr_u, us_u = harness.fetch_universe_data(kr_days=1900, us_period="5y", validate_offsets=OFFSETS)
     bench = harness.fetch_kr_benchmarks()
+    # v5.176(사용자 지시): trailing50_vol을 nonzero_vol_mean으로 교체한
+    # 재측정 — 접미사 _basevol_nonzero로 구분해 기존 결과 파일과 나란히
+    # 비교(사전등록: KR 안C EV ±0.05R, 확인율 ±2pp 이내 → 통과).
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "2026-09-04_kr_confirm_entry_all_tabs_90cp.results.json")
+                        "2026-09-04_kr_confirm_entry_all_tabs_90cp_basevol_nonzero.results.json")
     run(data, bench, out_path=out)
