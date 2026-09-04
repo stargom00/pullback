@@ -5,6 +5,17 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.168 [기능] 동결 해제(사용자 지시, ①②③④ 검증 통과 + 스냅샷 설계
+        완료 — CLAUDE.md "🛑 임시 제약" 해제) 1단계 — CONFIRM_RULE_BY_TAB에
+        박스돌파/돌파/추세전환 3탭 복원(v5.167에서 보류했던 v5.166
+        확장을 재적용). `2026-09-04_kr_confirm_entry_all_tabs_90cp_
+        checks.py`로 슬리피지(0/0.3/0.5%)·종목dedup·손절스냅샷·레이스
+        시작일 4항목 전부 확인 완료(슬리피지 0.5%에서도 EV 유지, dedup
+        후에도 z 전부 ≫1.96) — docs/kr_us_strategy_map.md "후속 확인
+        ①②③④" 절. 정의는 v5.166(9d49057)과 동일(종가기준 확인+구조적
+        stop 그대로, 함수 변경 없음) — 이번 커밋은 CONFIRM_RULE_BY_TAB
+        딕셔너리 복원만, `_pending_watch_confirm_check()` 로직 자체는
+        무변경(돌파 탭 vol_mult=3.0 전용화는 다음 단계 v5.169에서).
 v5.167 [보류] CONFIRM_RULE_BY_TAB의 박스돌파/돌파/추세전환 3탭 프로덕션
         채택(v5.166)을 보류로 되돌림 — ③④ 검증(슬리피지/dedup z/손절
         스냅샷 불일치) 끝날 때까지 app.py 채택성 변경 금지(2026-09-04
@@ -4425,7 +4436,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.167"
+VERSION = "v5.168"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -10027,10 +10038,10 @@ async def get_calendar():
                           f"매도: {JONGGA_SELL_RULE}",
             })
 
-    # ③ 감시(pending) 확인진입 — 돌파임박(안C)/눌림목(안C')만 검증된
-    #    확인규칙 존재. 그 외 탭은 피벗교차만으론 🔴 인용 근거가 없어
-    #    🟡(확인규칙 미검증)로 낮춤 — "검증된 규칙 충족만 🔴" 원칙(사용자
-    #    지시).
+    # ③ 감시(pending) 확인진입 — 5탭(눌림목/돌파임박/박스돌파/돌파/
+    #    추세전환) 전부 검증된 확인규칙 존재(v5.168, 아래 참고). 그 외
+    #    탭(확인규칙 자체가 없는 탭)만 피벗교차 🟡(확인규칙 미검증)로
+    #    낮춤 — "검증된 규칙 충족만 🔴" 원칙(사용자 지시).
     # v5.138: v5.137에서 "재검증 대기"로 강등했던 두 EV — 우선순위5
     # 90개 체크포인트 재검증 완료(REAFFIRMED, 유일한 생존 사례).
     # docs/kr_us_strategy_map.md "재검증 결과 — 우선순위5" 참고.
@@ -10040,12 +10051,22 @@ async def get_calendar():
     # z=22.0→34.7) 채택. 손절은 신호일저가(등록일 저가로 근사,
     # `_registration_day_low()`)가 구조적stop보다 32% 높은 EV(1.062 vs
     # 0.802R)라 신규 캡처 비용 감수하고 채택.
-    # 박스돌파/돌파/추세전환: 90cp z=6~7 통과했으나 슬리피지·dedup z·
-    # 손절 스냅샷 불일치(①-b) 검증 대기. _checks 결과 후 재판정.
-    # 2026-09-04
+    # v5.166(9d49057)에서 박스돌파/돌파/추세전환 3탭을 처음 추가했다가,
+    # ①②③④(슬리피지·dedup·손절스냅샷·레이스시작일) 검증이 안 끝난
+    # 상태로 프로덕션에 나갔음을 사용자가 지적해 v5.167(377f473)에서
+    # 일시 보류·원복 — CLAUDE.md "🛑 임시 제약" 동결 계기가 된 사건.
+    # v5.168(2026-09-04, 동결 해제): `2026-09-04_kr_confirm_entry_all_
+    # tabs_90cp_checks.py`로 ①②③④ 전부 확인 완료(슬리피지 0.5%까지도
+    # EV 유지, dedup 후에도 z 전부 ≫1.96, 손절 스냅샷·레이스 시작일
+    # 문제 없음) — docs/kr_us_strategy_map.md "후속 확인 ①②③④" 절.
+    # 이번엔 검증을 마친 뒤에 다시 추가 — 9d49057과 동일 정의(종가기준
+    # 확인+구조적stop 그대로)로 복원.
     CONFIRM_RULE_BY_TAB = {
         "돌파임박": "안C 확인진입(종가기준+등록일저가손절) — EV 1.062R(n=2610, 90개 창 z=34.7) · docs/imminent_stop_entry_investigation.md",
         "눌림목": "안C' 확인진입 — EV 0.849R(n=1283, 90개 창 z=18.5) · docs/pullback_stop_width_and_entry_timing.md",
+        "박스돌파": "확인진입(종가기준, 구조적 stop 그대로) — KR EV 0.597R(n=367, 90개 창 z=6.07) · docs/kr_us_strategy_map.md \"KR 확인진입 5탭 재검증\" 절",
+        "돌파": "확인진입(종가기준, 구조적 stop 그대로) — KR EV 0.639R(n=438, 90개 창 z=6.91) · docs/kr_us_strategy_map.md \"KR 확인진입 5탭 재검증\" 절",
+        "추세전환": "확인진입(종가기준, 구조적 stop 그대로) — KR EV 0.604R(n=402, 90개 창 z=7.57) · docs/kr_us_strategy_map.md \"KR 확인진입 5탭 재검증\" 절",
     }
     pending_near, pending_far = 0, 0
     for r in journal:
