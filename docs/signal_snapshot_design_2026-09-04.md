@@ -155,3 +155,18 @@ if confirmed and tab == "돌파임박":
 4. 스냅샷 스토어 크기 관리(오래된 (ticker,tab) 항목 정리 — `/data`
    볼륨은 5GB 중 2.4% 사용 확인됨(`docs/data_volume_cleanup_design.md`)이라
    당장 급하지 않음, 정책만 비워둠).
+
+## 진행 로그 (2026-09-04, 구현 세션)
+
+- **[1] snapshot-store 완료(커밋 c008a67).** `app.py`에 `GATE_MODE_LABELS`/
+  `SIGNAL_SNAPSHOT_PATH`/`_load_signal_snapshots`/`_save_signal_snapshots`/
+  `get_signal_snapshot`/`_record_signal_snapshot` 신설, `run_scan()`의
+  게이트형 5탭 히트 적재 지점(hits.append 직전)에서 호출. 스키마에
+  `signal_high` 추가(설계 문서 작성 시점엔 없었음, 3절 확인조건 판정에
+  필요해 사용자 지시로 추가). 디스크 저장은 스캔 1회당 최대 1번(루프
+  중엔 in-memory만 갱신, `snapshot_dirty` 플래그로 변경 있을 때만 저장) —
+  수백 개 히트마다 파일 쓰기가 나가는 걸 방지. `debug_ticker()`의 기존
+  `_mode_labels` 리터럴 사본은 `GATE_MODE_LABELS` 참조로 교체(CLAUDE.md
+  리터럴 사본 금지 원칙). 격리 테스트(최초기록/연속재등장 미갱신/동일일
+  재스캔 no-op/5거래일 갭 리셋/pivot 3%+ 리셋/pivot 3%미만 무리셋) 전부
+  통과 확인.
