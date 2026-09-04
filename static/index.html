@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.177</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.178</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">확인진입 원칙 — 종가&gt;피벗 &amp; 거래량 1.5배+ 확인 후 진입</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3439,8 +3439,11 @@ function renderTodayDecisionHtml(td) {
     // v5.170(사용자 지시): 눌림목 확인 거래량이 2배+(vol_mult 격자탐색
     // 채택분, EV 0.798→1.000R)면 순수 표시용 배지만 — 게이트·정렬 변경
     // 없음(docs/kr_us_strategy_map.md "확인조건 격자탐색" 절 "결정" 참고).
+    // v5.178(사용자 지시 — [A]): 이 배지가 인용하던 EV(0.798→1.000R)는
+    // 피벗진입 가정 격자탐색 결과라 철회됨 — 배지 자체(확인 거래량
+    // 2배+라는 표시)는 유지하되 툴팁에서 EV 근거 제거.
     const strongBadge = item.strong_confirm
-      ? ` <span title="확인 거래량이 2배+ — 격자탐색 채택 문턱(EV 0.798→1.000R, z=3.11), 진입 근거는 아니고 우선순위 참고만" style="color:#ff9b3f;font-weight:700">🔥강한확인</span>`
+      ? ` <span title="확인 거래량이 2배+ — 표시 전용, 진입 근거 아님(격자탐색 EV 근거는 피벗진입 가정으로 측정돼 2026-09-04 철회)" style="color:#ff9b3f;font-weight:700">🔥강한확인</span>`
       : '';
     // v5.175(사용자 지시 — 게이트→배지 전환): RS>=80 & 손절≤ATR×1.5는
     // v5.173에선 auto_watch 등록 자체를 막는 게이트였으나, 감사 결과
@@ -3463,10 +3466,20 @@ function renderTodayDecisionHtml(td) {
     const pivotGapLine = (item.pivot != null && item.entry != null && item.pivot !== item.entry)
       ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">피벗 ${fmtPrice(item.pivot, mkt)} / 진입 ${fmtPrice(item.entry, mkt)}</div>`
       : '';
+    // v5.178(사용자 지시 — [A] 프로덕션 정정): 5탭 확인진입(pending_watch/
+    // auto_watch)의 EV 근거(피벗진입 가정)가 철회됐다 — "확인됨"이라는
+    // 사실(거래량 동반 확인 규율) 자체는 여전히 유효한 정보지만, 카드
+    // 톤이 "진입하세요"로 읽히면 안 된다는 지적. 재점화(reignition,
+    // buy-stop이라 실행 가능)·종가베팅(jongga, 별도 검증)은 이 정정
+    // 대상이 아니라 소스로 분기.
+    const verdictBadge = (item.source === 'pending_watch' || item.source === 'auto_watch')
+      ? `<div style="font-size:11px;color:#ffb27a;font-weight:700;margin-top:2px">확인됨 · 근거 재검증 중</div>`
+      : '';
     return cardShell('#6b2b2b', '#2a1414', `
       <div><b>${nameLink(item)}</b> <span class="mkt">${mkt}</span>${sourceBadge}${strongBadge}${strongSetupBadge}</div>
       <div style="font-size:15px;font-weight:700;margin-top:4px">${fmtPrice(item.entry, mkt)} → ${stopStr}</div>
       ${pivotGapLine}
+      ${verdictBadge}
       <div style="font-size:11px;color:var(--muted);margin-top:4px;${descClamp}">${descParts.join(' · ')}</div>
       ${actions(item, false)}
     `);
