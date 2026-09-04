@@ -165,7 +165,17 @@ def find_confirm_close(h, k_max=CONFIRM_K_MAX):
     거래량 트레일링50평균의 1.5배 이상. 2026-09-01 스크립트의
     find_confirm_close()와 동일 로직(재구현 아님, 그대로 복붙 — 이
     파일만 있는 신규 탭 확장이라 import로 공유하기보다 독립 스크립트
-    원칙 유지, README 규칙2)."""
+    원칙 유지, README 규칙2).
+
+    v5.176(사용자 지시 — 박스돌파 확인율 변화 원인조사 후속): base_vol이
+    0(nonzero_vol_mean이 50봉 창 전체 거래정지일 때 반환하는 값)이면
+    `CONFIRM_VOL_MULT * 0 = 0`이 되어 `vv >= 0`이 항상 참이 되므로
+    거래량 조건이 무력화된다 — production(`_pending_watch_confirm_check`)
+    은 `avg_vol > 0` 가드가 있는데 이 스크립트엔 없었다(발견 당시엔
+    실제 영향 0건 확인 — `2026-09-04_boxbreak_basevol_diagnostic.py`
+    로 박스돌파 KR 1077건 중 base_vol<=0 케이스 0건, 다른 탭도 유동성
+    필터를 거치므로 사실상 발생 불가에 가까움). 재발 방지 차원에서
+    production과 동일한 가드를 추가."""
     global _lookahead_checks
     fut = h["future"]
     trigger = h["signal_high"]
@@ -182,7 +192,7 @@ def find_confirm_close(h, k_max=CONFIRM_K_MAX):
         _lookahead_checks += 1
         c = float(fut["Close"].iloc[k - 1])
         vv = float(fut["Volume"].iloc[k - 1])
-        if c > trigger and vv >= CONFIRM_VOL_MULT * base_vol:
+        if c > trigger and base_vol > 0 and vv >= CONFIRM_VOL_MULT * base_vol:
             return k, trigger
     return None
 

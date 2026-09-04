@@ -5,6 +5,30 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.176 [수정] KR 확인대기 UI + base_vol50 정의 통일(사용자 지시).
+        (1) 확인대기 UI: KR 5탭(pending_watch 저널 + auto_watch 풀)
+        중 피벗은 돌파했지만 거래량 확인 전인 종목은 진입가/손절을
+        감추고 "⏳ 확인 대기"(+거래량 배수 기준)로 표시, 확인 대기
+        3거래일(AUTO_WATCH_CONFIRM_WINDOW_DAYS) 초과분은 "⌛ 확인 대기
+        만료"로 전환 — "뚫으면 진입 X"가 이미 돌파한 종목에 확정된
+        진입가처럼 오해될 수 있다는 지적. auto_watch "watching" 상태도
+        개별 종목 근접 카드로 처음 노출(기존엔 개수만 집계). US는
+        기존 동작 유지.
+        (2) base_vol50 정의 통일: production(`_pending_watch_confirm_
+        check`)이 확인 판정마다 거래량 트레일링50평균을 매일 재계산해
+        측정 스크립트(신호일 고정)와 실제로 달랐던 것 발견 — "신호일
+        포함 직전 50봉 nonzero_vol_mean, 신호일 고정"으로 통일(신호
+        스냅샷에 `base_vol50` 필드 신설). 재측정 결과 박스돌파/추세전환
+        KR EV가 사전등록 허용폭(±0.05R)을 넘겨(0.597→0.704R,
+        0.604→0.535R) 원인 조사 — 코드 diff는 의도한 한 줄뿐, 측정
+        스크립트의 `find_confirm_close()`에 `base_vol>0` 가드 누락(실제
+        영향 0건, 재발방지로 추가)까지 확인했지만 실제 원인은 정의
+        변경이 아니라 서로 다른 시각에 독립 실행된 두 fetch 사이의
+        자연 드리프트(controlled 동일fetch 재현에서 flip 0건으로 증명)
+        — docs/kr_us_strategy_map.md "⑤ base_vol50 정의 통일" 절.
+        신규 수치를 공식으로 채택해 CONFIRM_RULE_BY_TAB·GUIDE.md 갱신.
+        CLAUDE.md "🛑 임시 제약" 동결 배너 제거(해제 조건 충족, 사용자
+        직접 지시).
 v5.175 [기능] auto_watch 등록 필터를 게이트→배지로 전환(사용자 지시 —
         등록 조건 감사). 감사 결과: a) 확인 판정은 여전히
         `_pending_watch_confirm_check()`, b) 🤖 항목의 진입가(signal_high)/
@@ -4538,7 +4562,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.175"
+VERSION = "v5.176"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -10450,9 +10474,9 @@ async def get_calendar():
     CONFIRM_RULE_BY_TAB = {
         "돌파임박": "안C 확인진입(종가기준+등록일저가손절) — EV 1.062R(n=2610, 90개 창 z=34.7) · docs/imminent_stop_entry_investigation.md",
         "눌림목": "안C' 확인진입 — EV 0.849R(n=1283, 90개 창 z=18.5) · docs/pullback_stop_width_and_entry_timing.md",
-        "박스돌파": "확인진입(종가기준, 구조적 stop 그대로) — KR EV 0.597R(n=367, 90개 창 z=6.07) · docs/kr_us_strategy_map.md \"KR 확인진입 5탭 재검증\" 절",
+        "박스돌파": "확인진입(종가기준, 구조적 stop 그대로) — KR EV 0.704R(n=388, 90개 창 z=6.72, base_vol50 정의 통일 후 공식수치) · docs/kr_us_strategy_map.md \"⑤ base_vol50 정의 통일\" 절",
         "돌파": "확인진입(종가기준+거래량 3.0배, 구조적 stop 그대로) — KR EV 0.975R(n=242, vol1.5배 대비 gap+0.334R z=3.45, 시기반분 재현) · docs/kr_us_strategy_map.md \"확인조건 격자탐색\" 절",
-        "추세전환": "확인진입(종가기준, 구조적 stop 그대로) — KR EV 0.604R(n=402, 90개 창 z=7.57) · docs/kr_us_strategy_map.md \"KR 확인진입 5탭 재검증\" 절",
+        "추세전환": "확인진입(종가기준, 구조적 stop 그대로) — KR EV 0.535R(n=381, 90개 창 z=6.43, base_vol50 정의 통일 후 공식수치) · docs/kr_us_strategy_map.md \"⑤ base_vol50 정의 통일\" 절",
     }
     pending_near, pending_far = 0, 0
     for r in journal:
