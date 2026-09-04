@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.169</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.170</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">확인진입 원칙 — 종가&gt;피벗 &amp; 거래량 1.5배+ 확인 후 진입</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3435,8 +3435,14 @@ function renderTodayDecisionHtml(td) {
     // v5.147(사용자 지시): 종가베팅 탭의 📸 스냅샷 배너와 같은 정보를 카드에도.
     if (item.snapshot_date) descParts.push(`📸 ${item.snapshot_date.slice(5)} 종가 기준`);
     descParts.push(item.reason);
+    // v5.170(사용자 지시): 눌림목 확인 거래량이 2배+(vol_mult 격자탐색
+    // 채택분, EV 0.798→1.000R)면 순수 표시용 배지만 — 게이트·정렬 변경
+    // 없음(docs/kr_us_strategy_map.md "확인조건 격자탐색" 절 "결정" 참고).
+    const strongBadge = item.strong_confirm
+      ? ` <span title="확인 거래량이 2배+ — 격자탐색 채택 문턱(EV 0.798→1.000R, z=3.11), 진입 근거는 아니고 우선순위 참고만" style="color:#ff9b3f;font-weight:700">🔥강한확인</span>`
+      : '';
     return cardShell('#6b2b2b', '#2a1414', `
-      <div><b>${nameLink(item)}</b> <span class="mkt">${mkt}</span></div>
+      <div><b>${nameLink(item)}</b> <span class="mkt">${mkt}</span>${strongBadge}</div>
       <div style="font-size:15px;font-weight:700;margin-top:4px">${fmtPrice(item.entry, mkt)} → ${stopStr}</div>
       <div style="font-size:11px;color:var(--muted);margin-top:4px;${descClamp}">${descParts.join(' · ')}</div>
       ${actions(item, false)}

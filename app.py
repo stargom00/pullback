@@ -5,6 +5,16 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.170 [기능] 동결 해제 3단계 — 눌림목 "강한확인" 배지(사용자 지시).
+        격자탐색에서 눌림목 vol_mult 2.0배는 EV 개선(0.798→1.000R,
+        z=3.11)이 유의했지만 확인율이 12.8%→7.5%로 줄어 "히트당 총
+        기대R"이 -26.1%(docs "구현 전 확인" 절) — 눌림목은 주력
+        진입탭이라 총 기회 감소가 실익보다 크다고 판단해 게이트는
+        1.5배 그대로 두고, 이미 확인된 건 중 실제 달성 거래량배수
+        (`_pending_watch_confirm_check()`가 항상 반환하는 vol_mult)가
+        2.0배 이상이면 `strong_confirm` 플래그만 얹었다 — 진입 여부·
+        정렬 무변경, 순수 표시 정보. `static/index.html`
+        `renderTodayDecisionHtml()`에 🔥강한확인 배지 렌더링 추가.
 v5.169 [기능] 동결 해제 2단계 — 돌파 탭 확인진입 거래량배수를 3.0배로
         전용화(사용자 지시). `_pending_watch_confirm_check()`에
         `vol_mult_required` 인자 추가(기본 1.5배 유지, 함수 시그니처만
@@ -4448,7 +4458,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.169"
+VERSION = "v5.170"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -10150,13 +10160,22 @@ async def get_calendar():
         dist_pct = round((pivot_f - close) / pivot_f * 100, 2)
         if rule and confirmed:
             target_2r = round(pivot_f + 2 * (pivot_f - stop_f), 2) if stop_f and pivot_f > stop_f else None
+            # v5.170(사용자 지시): 눌림목은 vol_mult 2.0배 자체를 게이트로
+            # 올리지 않는다(격자탐색에서 EV 0.798→1.000R·z=3.11로 유의했지만
+            # 확인율이 12.8%→7.5%로 줄어 "히트당 총 기대R"이 -26% — 주력
+            # 진입탭이라 총 기회 감소가 실익보다 크다는 판단, docs
+            # "확인조건 격자탐색" 절 "결정" 참고). 대신 이미 1.5배로 확인된
+            # 건 중 실제 달성 배수(vol_mult, 항상 반환됨)가 2.0배 이상이면
+            # 순수 표시용 플래그만 얹는다 — 진입 여부·정렬에 영향 없음.
+            strong_confirm = tab == "눌림목" and vol_mult is not None and vol_mult >= 2.0
             immediate.append({
                 "source": "pending_watch", "key": f"pending:{r.get('id')}",
                 "ticker": ticker, "name": r.get("name") or ticker, "market": market,
                 "mode": r.get("mode_raw") or None, "sector": r.get("sector"),
                 "entry": pivot_f, "stop": stop_f, "target_2r": target_2r,
                 "close": close, "pivot": pivot_f, "atr_pct": atr_pct,
-                "reason": f"{tab} {rule}",
+                "strong_confirm": strong_confirm,
+                "reason": f"{tab} {rule}" + (" · 🔥강한확인(거래량 2배+)" if strong_confirm else ""),
             })
         elif dist_pct <= 2:
             if dist_pct <= 0:
