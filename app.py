@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.169 [기능] 동결 해제 2단계 — 돌파 탭 확인진입 거래량배수를 3.0배로
+        전용화(사용자 지시). `_pending_watch_confirm_check()`에
+        `vol_mult_required` 인자 추가(기본 1.5배 유지, 함수 시그니처만
+        확장 — 다른 탭 동작 무변화) + `CONFIRM_VOL_MULT_BY_TAB`
+        신설(`{"돌파": 3.0}`). 근거:
+        `2026-09-04_confirm_entry_grid_search_5tabs.py` 격자탐색 —
+        margin(종가위치)은 EV에 도움 안 됨, vol_mult만 진짜 레버였고
+        돌파는 1.5→3.0배에서 gap+0.334R(z=3.45)로 시기반분까지 재현.
+        CONFIRM_RULE_BY_TAB 돌파 항목 인용 EV도 KR 0.975R(vol3.0)로
+        갱신(직전 v5.168 복원분 0.639R은 vol1.5 시절 값). 확인율은
+        33%→12%로 줄지만(트레이드오프는 docs "구현 전 확인" 절 참고)
+        돌파는 주력 진입탭이 아니라 자본 병목 우선 판단으로 채택.
 v5.168 [기능] 동결 해제(사용자 지시, ①②③④ 검증 통과 + 스냅샷 설계
         완료 — CLAUDE.md "🛑 임시 제약" 해제) 1단계 — CONFIRM_RULE_BY_TAB에
         박스돌파/돌파/추세전환 3탭 복원(v5.167에서 보류했던 v5.166
@@ -4436,7 +4448,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.168"
+VERSION = "v5.169"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -9718,20 +9730,34 @@ def _calendar_ticker_df(ticker: str):
     return None
 
 
-def _pending_watch_confirm_check(df, pivot: float):
+# v5.169: 확인진입 거래량배수 격자탐색(2026-09-04,
+# `2026-09-04_confirm_entry_grid_search_5tabs.py`) 결과 — margin(종가
+# 위치)은 EV에 도움 안 됨(오히려 소폭 하락), vol_mult만 단조적으로
+# EV를 올리는 진짜 레버였다. 돌파 탭은 1.5→3.0배로 올려도 시기반분
+# 재현까지 통과(EV 0.543→0.877R, KR 0.639→0.975R)해 채택 — 나머지
+# 탭은 1.5배 유지(눌림목은 확인율 붕괴로 미채택, 대신 2.0배는 배지로만
+# 노출 — 아래 strong_confirm 플래그). docs/kr_us_strategy_map.md
+# "확인조건 격자탐색" 절 "결정" 참고.
+CONFIRM_VOL_MULT_BY_TAB = {"돌파": 3.0}   # 미지정 탭은 기본 1.5배
+
+
+def _pending_watch_confirm_check(df, pivot: float, vol_mult_required: float = 1.5):
     """대기(pending) 감시 종목의 표준 확인진입 판정 — "종가가 피벗(신호일
-    고가 레벨) 초과 + 거래량 트레일링 50일 평균의 1.5배 이상". 원래는
+    고가 레벨) 초과 + 거래량 트레일링 50일 평균의 vol_mult_required배
+    이상"(기본 1.5배, 탭별 예외는 `CONFIRM_VOL_MULT_BY_TAB` 참고). 원래는
     눌림목 안C'의 정의를 그대로 가져와 두 탭에 공용 적용한 것이었는데,
     2026-09-01 90개 체크포인트 요인분해 재측정(사용자 지시)에서 돌파임박도
     종가기준이 원 정의(고가기준+신호일저가손절, EV 0.658R,z=22.0)보다
     오히려 더 강한 신호로 확인됨(종가기준+신호일저가손절 EV 1.062R,
     z=34.7 / 종가기준+구조적stop EV 0.802R,z=24.7 — 셋 다 유의하지만
-    종가기준 쪽이 최고). 따라서 이 확인조건(종가기준)은 두 탭 다 그대로
+    종가기준 쪽이 최고). 따라서 이 확인조건(종가기준)은 전 탭 그대로
     유지 — 손절 정의만 탭별로 다름(아래 호출부에서 돌파임박은
     `_registration_day_low()`로 재정의, 눌림목은 안 건드림).
     scanner.nonzero_vol_mean()으로 거래정지 희석 방지(v5.129)까지 그대로
     재사용. 반환: (confirmed, close, vol_mult) 또는 데이터 부족시
-    (False, None, None)."""
+    (False, None, None) — vol_mult는 실제 달성한 배수(요구치 충족 여부와
+    무관하게 항상 반환, 호출부가 "강한확인" 같은 상위 문턱 판정에 재사용
+    가능하도록)."""
     if df is None or len(df) < 51 or not pivot or pivot <= 0:
         return False, None, None
     close_s, vol_s = df["Close"], df["Volume"]
@@ -9739,7 +9765,7 @@ def _pending_watch_confirm_check(df, pivot: float):
     avg_vol = scanner_mod.nonzero_vol_mean(vol_s.iloc[-51:-1])
     today_vol = float(vol_s.iloc[-1])
     vol_mult = round(today_vol / avg_vol, 2) if avg_vol > 0 else 0.0
-    confirmed = today_close > pivot and avg_vol > 0 and today_vol >= 1.5 * avg_vol
+    confirmed = today_close > pivot and avg_vol > 0 and today_vol >= vol_mult_required * avg_vol
     return confirmed, round(today_close, 2), vol_mult
 
 
@@ -10065,7 +10091,7 @@ async def get_calendar():
         "돌파임박": "안C 확인진입(종가기준+등록일저가손절) — EV 1.062R(n=2610, 90개 창 z=34.7) · docs/imminent_stop_entry_investigation.md",
         "눌림목": "안C' 확인진입 — EV 0.849R(n=1283, 90개 창 z=18.5) · docs/pullback_stop_width_and_entry_timing.md",
         "박스돌파": "확인진입(종가기준, 구조적 stop 그대로) — KR EV 0.597R(n=367, 90개 창 z=6.07) · docs/kr_us_strategy_map.md \"KR 확인진입 5탭 재검증\" 절",
-        "돌파": "확인진입(종가기준, 구조적 stop 그대로) — KR EV 0.639R(n=438, 90개 창 z=6.91) · docs/kr_us_strategy_map.md \"KR 확인진입 5탭 재검증\" 절",
+        "돌파": "확인진입(종가기준+거래량 3.0배, 구조적 stop 그대로) — KR EV 0.975R(n=242, vol1.5배 대비 gap+0.334R z=3.45, 시기반분 재현) · docs/kr_us_strategy_map.md \"확인조건 격자탐색\" 절",
         "추세전환": "확인진입(종가기준, 구조적 stop 그대로) — KR EV 0.604R(n=402, 90개 창 z=7.57) · docs/kr_us_strategy_map.md \"KR 확인진입 5탭 재검증\" 절",
     }
     pending_near, pending_far = 0, 0
@@ -10100,7 +10126,8 @@ async def get_calendar():
             except Exception:
                 atr_pct = None
         if rule:
-            confirmed, close, vol_mult = _pending_watch_confirm_check(df, pivot_f)
+            vol_mult_req = CONFIRM_VOL_MULT_BY_TAB.get(tab, 1.5)
+            confirmed, close, vol_mult = _pending_watch_confirm_check(df, pivot_f, vol_mult_required=vol_mult_req)
         if close is None:
             close = _calendar_current_price(ticker)
         if close is None:
