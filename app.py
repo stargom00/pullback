@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.177 [수정] 확인 카드 진입가를 피벗→확인일 종가로 변경(사용자 지시 —
+        [A] 즉시). pending_watch/auto_watch 확인(🔴) 카드의 `entry`가
+        지금까지 피벗(신호일 고가, 백테스트의 "지정가 체결" 가정)이었던
+        것을 확인일 실제 종가(`_pending_watch_confirm_check`가 이미
+        반환하던 close / auto_watch의 `confirm_close`, 둘 다 재계산 아닌
+        기존 값 재사용)로 교체 — 화면 진입가가 실제로 살 수 있는 가격을
+        가리키도록. 손절은 스냅샷 값 불변, 목표(2R)·사이즈는 새 진입가
+        기준으로 자동 재계산(진입-손절 리스크폭이 커진 만큼 반영).
+        `static/index.html`에 피벗/진입 갭이 보이도록 "피벗 X / 진입 Y"
+        보조줄 추가(피벗≠진입일 때만). `CONFIRM_RULE_BY_TAB`의 EV 문구는
+        여전히 피벗-진입 가정 측정값이라 "[피벗 진입 기준, 종가 진입
+        재측정 중]" 임시 표기 추가 — 종가기준 재측정(entry_close 접미사
+        스크립트, 진행 중) 완료 후 교체 예정.
 v5.176 [수정] KR 확인대기 UI + base_vol50 정의 통일(사용자 지시).
         (1) 확인대기 UI: KR 5탭(pending_watch 저널 + auto_watch 풀)
         중 피벗은 돌파했지만 거래량 확인 전인 종목은 진입가/손절을
@@ -4562,7 +4575,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.176"
+VERSION = "v5.177"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -10471,12 +10484,19 @@ async def get_calendar():
     # 문제 없음) — docs/kr_us_strategy_map.md "후속 확인 ①②③④" 절.
     # 이번엔 검증을 마친 뒤에 다시 추가 — 9d49057과 동일 정의(종가기준
     # 확인+구조적stop 그대로)로 복원.
+    # v5.177(사용자 지시 — [A] 즉시): 위 EV 수치는 전부 "피벗(신호일고가)
+    # 지정가 체결" 가정으로 측정됐는데, "오늘의 결정" 확인 카드의 진입가는
+    # 이번 버전부터 확인일 실제 종가로 바뀌었다(같은 세션, 아래 카드
+    # 렌더링 참고) — 측정 가정과 화면 표시가 정의상 어긋난 과도기라
+    # 임시 표기를 붙인다. `_entry_close` 접미사 재측정([B], 진행 중)이
+    # 끝나면 이 표기를 실제 종가기준 EV로 교체.
+    _EV_ENTRY_CAVEAT = " [피벗 진입 기준, 종가 진입 재측정 중]"
     CONFIRM_RULE_BY_TAB = {
-        "돌파임박": "안C 확인진입(종가기준+등록일저가손절) — EV 1.062R(n=2610, 90개 창 z=34.7) · docs/imminent_stop_entry_investigation.md",
-        "눌림목": "안C' 확인진입 — EV 0.849R(n=1283, 90개 창 z=18.5) · docs/pullback_stop_width_and_entry_timing.md",
-        "박스돌파": "확인진입(종가기준, 구조적 stop 그대로) — KR EV 0.704R(n=388, 90개 창 z=6.72, base_vol50 정의 통일 후 공식수치) · docs/kr_us_strategy_map.md \"⑤ base_vol50 정의 통일\" 절",
-        "돌파": "확인진입(종가기준+거래량 3.0배, 구조적 stop 그대로) — KR EV 0.975R(n=242, vol1.5배 대비 gap+0.334R z=3.45, 시기반분 재현) · docs/kr_us_strategy_map.md \"확인조건 격자탐색\" 절",
-        "추세전환": "확인진입(종가기준, 구조적 stop 그대로) — KR EV 0.535R(n=381, 90개 창 z=6.43, base_vol50 정의 통일 후 공식수치) · docs/kr_us_strategy_map.md \"⑤ base_vol50 정의 통일\" 절",
+        "돌파임박": "안C 확인진입(종가기준+등록일저가손절) — EV 1.062R(n=2610, 90개 창 z=34.7)" + _EV_ENTRY_CAVEAT + " · docs/imminent_stop_entry_investigation.md",
+        "눌림목": "안C' 확인진입 — EV 0.849R(n=1283, 90개 창 z=18.5)" + _EV_ENTRY_CAVEAT + " · docs/pullback_stop_width_and_entry_timing.md",
+        "박스돌파": "확인진입(종가기준, 구조적 stop 그대로) — KR EV 0.704R(n=388, 90개 창 z=6.72, base_vol50 정의 통일 후 공식수치)" + _EV_ENTRY_CAVEAT + " · docs/kr_us_strategy_map.md \"⑤ base_vol50 정의 통일\" 절",
+        "돌파": "확인진입(종가기준+거래량 3.0배, 구조적 stop 그대로) — KR EV 0.975R(n=242, vol1.5배 대비 gap+0.334R z=3.45, 시기반분 재현)" + _EV_ENTRY_CAVEAT + " · docs/kr_us_strategy_map.md \"확인조건 격자탐색\" 절",
+        "추세전환": "확인진입(종가기준, 구조적 stop 그대로) — KR EV 0.535R(n=381, 90개 창 z=6.43, base_vol50 정의 통일 후 공식수치)" + _EV_ENTRY_CAVEAT + " · docs/kr_us_strategy_map.md \"⑤ base_vol50 정의 통일\" 절",
     }
     pending_near, pending_far = 0, 0
     for r in journal:
@@ -10545,7 +10565,17 @@ async def get_calendar():
                 confirmed = False
         dist_pct = round((pivot_f - close) / pivot_f * 100, 2)
         if rule and confirmed:
-            target_2r = round(pivot_f + 2 * (pivot_f - stop_f), 2) if stop_f and pivot_f > stop_f else None
+            # v5.177(사용자 지시 — [A] 즉시 UI 수정): 확인된 카드의 진입가를
+            # 피벗(신호일 고가 레벨, 백테스트의 "지정가 체결" 가정)에서
+            # 확인일 실제 종가로 변경 — 화면에 뜨는 진입가가 실제로 살 수
+            # 있는 가격이어야 한다는 지적. 손절은 스냅샷 값 그대로(불변),
+            # 목표/사이즈는 종가 기준으로 재계산(리스크폭이 커진 만큼 자동
+            # 반영). 피벗은 "pivot" 필드로 별도 유지해 카드에 갭 크기를
+            # 같이 보여준다. CONFIRM_RULE_BY_TAB의 EV 수치는 여전히
+            # 피벗-진입 가정으로 측정된 값이라 이 변경과 불일치가 생기는데,
+            # 종가-진입 재측정([B], 사용자 지시)이 끝날 때까지는 EV 문구에
+            # 임시 표기로 알린다.
+            target_2r = round(close + 2 * (close - stop_f), 2) if stop_f and close > stop_f else None
             # v5.170(사용자 지시): 눌림목은 vol_mult 2.0배 자체를 게이트로
             # 올리지 않는다(격자탐색에서 EV 0.798→1.000R·z=3.11로 유의했지만
             # 확인율이 12.8%→7.5%로 줄어 "히트당 총 기대R"이 -26% — 주력
@@ -10558,7 +10588,7 @@ async def get_calendar():
                 "source": "pending_watch", "key": f"pending:{r.get('id')}",
                 "ticker": ticker, "name": r.get("name") or ticker, "market": market,
                 "mode": r.get("mode_raw") or None, "sector": r.get("sector"),
-                "entry": pivot_f, "stop": stop_f, "target_2r": target_2r,
+                "entry": close, "stop": stop_f, "target_2r": target_2r,
                 "close": close, "pivot": pivot_f, "atr_pct": atr_pct,
                 "strong_confirm": strong_confirm,
                 "reason": f"{tab} {rule}" + (" · 🔥강한확인(거래량 2배+)" if strong_confirm else ""),
@@ -10677,7 +10707,12 @@ async def get_calendar():
     auto_watch_waiting = 0
     for key, rec in _auto_watch.items():
         if rec.get("status") == "confirmed" and rec.get("confirmed_at") == today:
-            entry = rec.get("signal_high")
+            pivot = rec.get("signal_high")
+            # v5.177(사용자 지시 — [A] 즉시 UI 수정): 진입가를 피벗에서
+            # 확인일 실제 종가(`confirm_close`, `_refresh_auto_watch`가
+            # 확인 시점에 이미 기록해둔 값 — 재계산 아님)로 변경. pivot_watch
+            # 쪽과 동일 원칙, 상세 사유는 그쪽 주석 참고.
+            entry = rec.get("confirm_close") or pivot
             stop = rec.get("confirm_stop") or rec.get("stop")
             if not entry or not stop or entry <= stop:
                 continue
@@ -10692,7 +10727,7 @@ async def get_calendar():
                 "ticker": rec["ticker"], "name": rec.get("name") or rec["ticker"],
                 "market": rec.get("market"), "mode": None, "sector": rec.get("sector"),
                 "entry": entry, "stop": stop, "target_2r": target_2r,
-                "close": entry, "pivot": entry, "atr_pct": rec.get("atr_pct"),
+                "close": entry, "pivot": pivot, "atr_pct": rec.get("atr_pct"),
                 "rs": rec.get("rs"), "strong_confirm": rec.get("strong_confirm", False),
                 "strong_setup": strong_setup,
                 "reason": f"{rec['tab']} 🤖자동감시 {rule_text}",
