@@ -5,6 +5,21 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.174 [정리] 신호 스냅샷 설계(docs/signal_snapshot_design_2026-09-04.md)
+        항목4·5 마무리(사용자 지시 — "다음 세션마다 같은 경고가 반복된다"
+        는 지적으로 미커밋 상태를 끝까지 완성). 다른 세션이 시작만 해두고
+        미커밋으로 남겨뒀던 작업(watch_quick()의 stop을 신호 스냅샷에서
+        채우는 부분)을 이어받아 완성: ① 프론트 `pivotChoiceEnterNow()`/
+        `pivotChoiceCustomWait()`/`decisionQuickWatch()`(마지막 것은 설계
+        문서 원 목록엔 없었지만 같은 등록 경로라 함께)에서 `stop: s.stop`
+        제거 — `quickWatch()`는 이미 완료 상태였음. `reignitionQuickWatch()`
+        는 설계대로 미변경(재점화는 스냅샷 대상 탭 아님). ② `get_calendar()`
+        돌파임박 확인 판정의 `_registration_day_low(df, r.get("date"))`
+        (등록 클릭 시점 근사, 늦게 등록하면 신호일과 어긋남)를
+        `get_signal_snapshot(ticker,"돌파임박").get("signal_low")`(최초감지일
+        저가, 재계산 없음)로 교체 — watch_quick()이 stop을 채우는 소스와
+        통일. 유일한 호출부였던 `_registration_day_low()` 함수 삭제.
+        상세 경위는 설계 문서 "진행 로그 [2][3]" 절.
 v5.173 [기능] 5탭 히트 자동 감시(auto_watch) 신설(사용자 지시). 현재:
         사용자가 ⚡감시를 눌러야 확인진입 추적이 시작돼, 탭을 안 보면
         🔴즉시행동이 계속 비어 있던 문제 대응. 재점화 워치리스트
@@ -4507,7 +4522,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.173"
+VERSION = "v5.174"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -10055,7 +10070,8 @@ def _pending_watch_confirm_check(df, pivot: float, vol_mult_required: float = 1.
     z=34.7 / 종가기준+구조적stop EV 0.802R,z=24.7 — 셋 다 유의하지만
     종가기준 쪽이 최고). 따라서 이 확인조건(종가기준)은 전 탭 그대로
     유지 — 손절 정의만 탭별로 다름(아래 호출부에서 돌파임박은
-    `_registration_day_low()`로 재정의, 눌림목은 안 건드림).
+    신호 스냅샷의 `signal_low`로 재정의, 눌림목은 안 건드림 — v5.174,
+    `_registration_day_low()` 폐기 후 `get_signal_snapshot()`으로 대체).
     scanner.nonzero_vol_mean()으로 거래정지 희석 방지(v5.129)까지 그대로
     재사용. 반환: (confirmed, close, vol_mult) 또는 데이터 부족시
     (False, None, None) — vol_mult는 실제 달성한 배수(요구치 충족 여부와
@@ -10072,28 +10088,6 @@ def _pending_watch_confirm_check(df, pivot: float, vol_mult_required: float = 1.
     return confirmed, round(today_close, 2), vol_mult
 
 
-def _registration_day_low(df, reg_date: str):
-    """감시 등록일(=근사 신호일, v5.44 "등록일 고가"와 같은 관례 — 신호
-    최초감지일이 아니라 사용자가 관찰/감시 등록한 날짜) 저가 조회 —
-    돌파임박 확인진입(안C 계열) 손절 재정의용. 2026-09-01 재측정에서
-    "종가기준확인+신호일저가손절"(EV 1.062R,z=34.7)이 "종가기준확인+
-    구조적stop"(EV 0.802R,z=24.7)보다 32% 더 높은 EV로 채택 — 둘 다
-    유의하지만 신호일저가 쪽이 명확히 우세해 신규 인프라(이 함수) 비용을
-    감수. 등록일이 df 인덱스에 없으면(주말 수동등록 등 예외) None —
-    호출부는 None이면 원 정의 충족 실패로 처리(구조적 stop으로 조용히
-    폴백하지 않음 — "검증된 규칙 충족만 🔴" 원칙)."""
-    if df is None or not reg_date:
-        return None
-    try:
-        import pandas as pd
-        ts = pd.Timestamp(reg_date)
-        if ts in df.index:
-            return round(float(df.loc[ts, "Low"]), 2)
-    except Exception:
-        pass
-    return None
-
-
 # v5.150(사용자 지시): "오늘의 결정" 4개 소스(재점화/종가베팅/pending_
 # watch/imminent)가 서로를 모른 채 각자 append만 해서, 같은 티커가 두
 # 소스 조건을 동시에 만족하면(예: 수동 등록한 종목이 마침 imminent 상위5
@@ -10101,8 +10095,9 @@ def _registration_day_low(df, reg_date: str):
 # 121440.KQ, pending_watch·imminent 양쪽 다 근접(🟡)으로 들어와 현재가·
 # 손절이 서로 달랐음 — 두 소스가 각자 다른 캐시(_data_cache vs
 # _cache["kr:imminent"])에서 다른 시점 값을 읽은 결과, "손절 정의"도
-# 서로 다름: pending_watch는 _registration_day_low, imminent은
-# analyze_imminent()의 구조적 stop).
+# 서로 다름: pending_watch(돌파임박)는 신호 스냅샷의 signal_low(v5.174
+# 이전엔 _registration_day_low), imminent은 analyze_imminent()의
+# 구조적 stop).
 #
 # v5.150 후속(사용자 지시): 긴급도(immediate/near)와 신뢰도(소스 우선순위)는
 # 다른 축이고 긴급도가 먼저다 — immediate에 있다는 건 "지금 행동할 자리"
@@ -10443,12 +10438,19 @@ async def get_calendar():
             stop_f = float(stop_f) if stop_f is not None else None
         except (TypeError, ValueError):
             stop_f = None
-        # v5.141: 돌파임박 손절 재정의(등록일 저가) — 2026-09-01 재측정
-        # 근거는 위 CONFIRM_RULE_BY_TAB 주석 참고. 등록일 데이터를 못
-        # 구하면(주말 수동등록 등) 검증된 정의를 충족 못 한 것이므로
+        # v5.141: 돌파임박 손절 재정의(신호일 저가) — 2026-09-01 재측정
+        # 근거는 위 CONFIRM_RULE_BY_TAB 주석 참고. 확인된 정의를 못 채우면
         # 확인 자체를 취소(구조적 stop으로 조용히 대체하지 않음).
+        # v5.174(사용자 지시, docs/signal_snapshot_design_2026-09-04.md
+        # 항목5 완성): `_registration_day_low(df, r.get("date"))`(등록일=
+        # 클릭 시점 근사, 등록이 늦으면 신호일과 어긋남)를 신호 스냅샷의
+        # `signal_low`(=최초감지일 저가, 재계산 안 됨)로 교체 — watch_quick()
+        # 이 이미 stop을 이 스냅샷에서 채우는 것과 같은 소스로 통일.
+        # 스냅샷이 없으면(스캔이 이 (ticker,돌파임박)을 아직 못 잡은 극초기
+        # 케이스) 검증된 정의를 못 채운 것이므로 기존과 동일하게 확인 취소.
         if confirmed and tab == "돌파임박":
-            reg_low = _registration_day_low(df, r.get("date"))
+            snap = get_signal_snapshot(ticker, "돌파임박")
+            reg_low = snap.get("signal_low") if snap else None
             if reg_low is not None and reg_low < pivot_f:
                 stop_f = reg_low
             else:
@@ -10961,6 +10963,18 @@ async def watch_quick(request: Request):
         }, status_code=409)
 
     watch_kind = body.get("watch_kind") or None
+    tab = body.get("tab") or "돌파임박"
+    # v5.168: stop/신호일을 클라이언트가 보낸 값이 아니라 서버 신호 스냅샷
+    # (run_scan()이 최초감지 시 기록)에서 채운다 — 등록이 신호 당일보다
+    # 늦으면 캐시 재계산으로 stop/pivot이 달라져 측정 EV의 손절 분모와
+    # 어긋나던 문제 수정(docs/signal_snapshot_design_2026-09-04.md).
+    # 스냅샷이 없으면(스캔이 아직 이 (ticker,tab)을 못 잡은 극초기 케이스,
+    # 게이트형 5탭이 아닌 경로 등) body 값으로 폴백 + 로그 경고(하위호환).
+    snap = None if is_observe else get_signal_snapshot(ticker, tab)
+    if snap:
+        stop = snap.get("stop")
+    elif not is_observe:
+        print(f"[watch_quick] 신호 스냅샷 없음({ticker}|{tab}) — body stop으로 폴백")
     j = load_journal()
     if is_observe:
         for r in j:
@@ -10982,16 +10996,20 @@ async def watch_quick(request: Request):
         entry_val = pivot   # 대기 항목만 entry=피벗 관례, 관찰은 없음
 
     import time as _t
+    # v5.168: pending(대기) 등록만 신호일로 date를 채운다 — entered_now는
+    # 실제 진입일이 등록일 자체라 기존대로 유지, is_observe는 스냅샷 대상 아님.
+    reg_date = datetime.now(KST).strftime("%Y-%m-%d")
+    rec_date = snap["signal_date"] if (snap and not entered_now) else reg_date
     rec = {
         "id": int(_t.time() * 1000),
-        "date": datetime.now(KST).strftime("%Y-%m-%d"),
+        "date": rec_date,
         "ticker": ticker,
         "name": body.get("name") or ticker,
         "market": body.get("market") or ("KR" if ticker[:1].isdigit() else "US"),
         "status": "watch" if is_observe else ("entered" if entered_now else "pending"),
         "category": category,
         "cat": category,
-        "tab": body.get("tab") or "돌파임박",
+        "tab": tab,
         "signal": "",
         "pivot": pivot,
         "entry": entry_val,

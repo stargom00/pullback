@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.173</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.174</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">확인진입 원칙 — 종가&gt;피벗 &amp; 거래량 1.5배+ 확인 후 진입</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -4748,7 +4748,7 @@ async function quickWatch(btn, ticker) {
   }
   await _quickWatchRequest(s, btn, {
     ticker: s.ticker, name: s.name, market: s.market,
-    pivot: s.pivot, stop: s.stop, tab: modeTab(s.mode), score: s.score,
+    pivot: s.pivot, tab: modeTab(s.mode), score: s.score,
     reg_price: s.close,
   });
 }
@@ -4803,9 +4803,12 @@ async function pivotChoiceEnterNow() {
   const { s, btn } = ctx;
   closePivotChoiceModal(false);
   _pivotChoiceCtx = null;
+  // v5.174(docs/signal_snapshot_design_2026-09-04.md 항목4): stop은 더 이상
+  // 클라이언트가 안 보냄 — 서버가 신호 스냅샷(등록 시점 클릭 타이밍과
+  // 무관한 최초감지일 값)에서 채운다. quickWatch()와 통일.
   await _quickWatchRequest(s, btn, {
     ticker: s.ticker, name: s.name, market: s.market,
-    pivot: s.pivot, stop: s.stop, tab: modeTab(s.mode), score: s.score,
+    pivot: s.pivot, tab: modeTab(s.mode), score: s.score,
     reg_price: s.close, force_status: 'entered', entry_override: s.close,
   });
 }
@@ -4819,9 +4822,11 @@ async function pivotChoiceCustomWait() {
   }
   closePivotChoiceModal(false);
   _pivotChoiceCtx = null;
+  // v5.174: stop 제거 — pivotChoiceEnterNow()와 동일 이유(서버가 신호
+  // 스냅샷에서 채움).
   await _quickWatchRequest(s, btn, {
     ticker: s.ticker, name: s.name, market: s.market,
-    pivot: custom, stop: s.stop, tab: modeTab(s.mode), score: s.score,
+    pivot: custom, tab: modeTab(s.mode), score: s.score,
     reg_price: s.close,
   });
 }
@@ -4929,9 +4934,13 @@ async function decisionQuickWatch(btn, key) {
   if (!item) return;
   const s = _decisionHitShape(item);
   if (!s.pivot) { btn.textContent = '피벗없음'; return; }
+  // v5.174: stop 제거 — quickWatch()/pivotChoice*()와 같은 이유(서버가
+  // 신호 스냅샷에서 채움). 이 경로는 설계문서(signal_snapshot_design_
+  // 2026-09-04)에 나열된 3곳 목록엔 없었지만 같은 게이트형 5탭 대상
+  // 등록 경로라 빠뜨리면 여기만 구식 stop을 계속 보내게 됨.
   await _quickWatchRequest(s, btn, {
     ticker: s.ticker, name: s.name, market: s.market,
-    pivot: s.pivot, stop: s.stop, tab: modeTab(s.mode), score: null,
+    pivot: s.pivot, tab: modeTab(s.mode), score: null,
     reg_price: s.close,
   });
 }

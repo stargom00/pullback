@@ -149,12 +149,21 @@ if confirmed and tab == "돌파임박":
 
 ## 6. 남은 미결 사항 (다음 설계 세션)
 
-1. 거래일 간격(3절 (a))을 셀 캘린더 함수 확정.
-2. 스냅샷 미존재 시 quickWatch 폴백 정책(4절).
-3. 기존 pending 레코드 마이그레이션 여부.
+1. ~~거래일 간격(3절 (a))을 셀 캘린더 함수 확정.~~ **해결(진행 로그 [1]
+   참고)** — `_record_signal_snapshot()`가 캘린더 함수 없이 `df.index.
+   get_loc()` 기반 bar 위치차로 해결. 같은 기법을 auto_watch(v5.173,
+   별도 기능)의 3거래일 만료 판정에도 재사용.
+2. ~~스냅샷 미존재 시 quickWatch 폴백 정책(4절).~~ **결정 완료(진행
+   로그 [2] 참고)** — "body.stop 폴백 허용 + 로그 경고"로 결정(등록
+   거부는 채택 안 함, UX 마찰이 스냅샷 인프라 자체 도입 취지(v4.64
+   "마찰 제거")와 충돌한다고 판단).
+3. 기존 pending 레코드 마이그레이션 여부 — **미결 유지.** 스냅샷 도입
+   이전에 등록된 pending 레코드는 구식 stop 값을 그대로 갖고 있고,
+   이번 구현에서도 소급 갱신 로직은 안 넣음(신규 등록분부터만 스냅샷
+   적용). 필요성 판단은 실사용 확인 후로 미룸.
 4. 스냅샷 스토어 크기 관리(오래된 (ticker,tab) 항목 정리 — `/data`
    볼륨은 5GB 중 2.4% 사용 확인됨(`docs/data_volume_cleanup_design.md`)이라
-   당장 급하지 않음, 정책만 비워둠).
+   당장 급하지 않음, 정책만 비워둠) — **미결 유지.**
 
 ## 진행 로그 (2026-09-04, 구현 세션)
 
@@ -170,3 +179,35 @@ if confirmed and tab == "돌파임박":
   리터럴 사본 금지 원칙). 격리 테스트(최초기록/연속재등장 미갱신/동일일
   재스캔 no-op/5거래일 갭 리셋/pivot 3%+ 리셋/pivot 3%미만 무리셋) 전부
   통과 확인.
+
+- **[2] 항목4(quickWatch 변경) 완료(2026-09-04, 별도 세션이 마무리 —
+  당시 미커밋 상태로 남아 있던 걸 이어받아 완성).** 서버(`watch_quick()`,
+  `app.py`): `tab`을 받아 `get_signal_snapshot(ticker, tab)` 조회 →
+  스냅샷 있으면 `stop`을 그 값으로 덮어씀, 없으면(is_observe 제외)
+  body.stop 폴백 + `print()` 경고 로그(위 6절 미결②의 결정). pending
+  레코드의 `date`도 같이 스냅샷의 `signal_date`로 채움(entered_now는
+  실제 등록일 유지 — 설계 문서 작성 시점엔 없던 확장, "stop만"이 아니라
+  "date까지" 스냅샷 기준으로 통일한 게 더 일관적이라 판단).
+  프론트(`static/index.html`): `quickWatch()`(4741행)에서 이미
+  `stop: s.stop` 제거 완료 상태였고, 이번에 `pivotChoiceEnterNow()`
+  (4801행)·`pivotChoiceCustomWait()`(4812행)·`decisionQuickWatch()`
+  (4932행, 설계 문서 원 목록엔 없었지만 같은 게이트형 5탭 등록 경로라
+  함께 제거 — "🎯 오늘의 결정" 🟡근접 카드의 ⚡감시 버튼이 씀)까지
+  전부 통일. `reignitionQuickWatch()`(1487행)는 설계대로 미변경(재점화는
+  `GATE_MODE_LABELS`에 없는 탭이라 스냅샷 대상 아님 — 서버가 자동으로
+  body.stop 폴백 경로를 타므로 그대로 정상 동작).
+
+- **[3] 항목5(`_registration_day_low` 교체) 완료(2026-09-04).**
+  `get_calendar()`의 돌파임박 확인 판정(`if confirmed and tab ==
+  "돌파임박":`)에서 `_registration_day_low(df, r.get("date"))` 호출을
+  `get_signal_snapshot(ticker, "돌파임박").get("signal_low")`로 교체
+  (설계 문서 원안은 필드명을 `low`로 적었으나, 실제 스키마는 진행
+  로그[1]에서 `signal_low`로 확정됨 — 그 이름 그대로 사용). 유일한
+  호출부였던 `_registration_day_low()` 함수 자체는 삭제(설계 문서
+  5절 "교체 후 삭제 대상" 그대로 실행). 관련 라이브 코드 주석(
+  `_pending_watch_confirm_check` 독스트링, v5.150 소스 정합성 주석)도
+  갱신 — `[변경 이력]`의 과거(v5.141 등) 항목은 그 시점 기록이라 그대로
+  둠(히스토리 수정 안 함).
+
+**설계 문서 상태: 항목1~5 전부 구현 완료.** 6절 미결 사항 중 ①②는
+해결, ③④만 남음(급하지 않음, 위 참고).
