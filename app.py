@@ -9627,12 +9627,23 @@ def _record_signal_snapshot(ticker: str, tab: str, df, pivot, stop) -> bool:
             if prev_pivot and abs(float(pivot) - prev_pivot) / prev_pivot >= SIGNAL_SNAPSHOT_RESET_PIVOT_PCT:
                 reset = True
     if reset:
+        # v5.176(사용자 지시): base_vol50 = 신호일 포함 직전 50봉의
+        # scanner.nonzero_vol_mean, 신호일에 고정 — 측정 스크립트
+        # (find_confirm_close) 정의와 통일. 데이터 부족(<50봉)이면 None
+        # 저장, _pending_watch_confirm_check가 구방식으로 폴백.
+        base_vol50 = None
+        if len(df) >= 50:
+            try:
+                base_vol50 = round(float(scanner_mod.nonzero_vol_mean(df["Volume"].iloc[-50:])), 2)
+            except Exception:
+                base_vol50 = None
         _signal_snapshots[key] = {
             "signal_date": today_str,
             "stop": round(float(stop), 4),
             "pivot": round(float(pivot), 4),
             "signal_high": round(float(df["High"].iloc[-1]), 4),
             "signal_low": round(float(df["Low"].iloc[-1]), 4),
+            "base_vol50": base_vol50,
             "last_seen_date": today_str,
         }
         return True
@@ -9749,6 +9760,7 @@ async def _refresh_auto_watch(bundle: dict, market: str, daykey: str):
                 "status": "watching",
                 "signal_date": snap["signal_date"], "stop": snap["stop"], "pivot": snap["pivot"],
                 "signal_high": snap["signal_high"], "signal_low": snap.get("signal_low"),
+                "base_vol50": snap.get("base_vol50"),
                 "rs": rs, "risk_pct": risk_pct, "atr_pct": atr_pct,
                 "registered_at": daykey,
                 "confirmed_at": None, "confirm_close": None, "confirm_stop": None,
@@ -9777,7 +9789,7 @@ async def _refresh_auto_watch(bundle: dict, market: str, daykey: str):
             continue   # 신호 당일은 확인 판정 대상 아님(다음 거래일부터)
         vol_mult_req = CONFIRM_VOL_MULT_BY_TAB.get(rec["tab"], 1.5)
         confirmed, close, vol_mult = _pending_watch_confirm_check(
-            df, rec["signal_high"], vol_mult_required=vol_mult_req)
+            df, rec["signal_high"], vol_mult_required=vol_mult_req, base_vol50=rec.get("base_vol50"))
         if confirmed:
             rec["status"] = "confirmed"
             rec["confirmed_at"] = daykey
@@ -10093,10 +10105,10 @@ def _calendar_ticker_df(ticker: str):
 CONFIRM_VOL_MULT_BY_TAB = {"돌파": 3.0}   # 미지정 탭은 기본 1.5배
 
 
-def _pending_watch_confirm_check(df, pivot: float, vol_mult_required: float = 1.5):
+def _pending_watch_confirm_check(df, pivot: float, vol_mult_required: float = 1.5, base_vol50: float | None = None):
     """대기(pending) 감시 종목의 표준 확인진입 판정 — "종가가 피벗(신호일
-    고가 레벨) 초과 + 거래량 트레일링 50일 평균의 vol_mult_required배
-    이상"(기본 1.5배, 탭별 예외는 `CONFIRM_VOL_MULT_BY_TAB` 참고). 원래는
+    고가 레벨) 초과 + 거래량이 base_vol50의 vol_mult_required배 이상"
+    (기본 1.5배, 탭별 예외는 `CONFIRM_VOL_MULT_BY_TAB` 참고). 원래는
     눌림목 안C'의 정의를 그대로 가져와 두 탭에 공용 적용한 것이었는데,
     2026-09-01 90개 체크포인트 요인분해 재측정(사용자 지시)에서 돌파임박도
     종가기준이 원 정의(고가기준+신호일저가손절, EV 0.658R,z=22.0)보다
@@ -10106,8 +10118,17 @@ def _pending_watch_confirm_check(df, pivot: float, vol_mult_required: float = 1.
     유지 — 손절 정의만 탭별로 다름(아래 호출부에서 돌파임박은
     신호 스냅샷의 `signal_low`로 재정의, 눌림목은 안 건드림 — v5.174,
     `_registration_day_low()` 폐기 후 `get_signal_snapshot()`으로 대체).
-    scanner.nonzero_vol_mean()으로 거래정지 희석 방지(v5.129)까지 그대로
-    재사용. 반환: (confirmed, close, vol_mult) 또는 데이터 부족시
+
+    v5.176(사용자 지시): base_vol50 정의를 측정 스크립트(find_confirm_close)
+    와 통일 — "신호일 포함 직전 50봉의 scanner.nonzero_vol_mean, 신호일에
+    고정". 예전엔 이 함수가 호출될 때마다(`_refresh_auto_watch`가 매일
+    호출) `vol_s.iloc[-51:-1]`를 그날그날 다시 계산해서, 신호+1일 확인은
+    측정과 같은 창이지만 신호+2/3일 확인은 창이 하루씩 밀려 측정과 다른
+    값이 나왔다(diff로 발견, 사용자 지시로 통일). 호출부가
+    `get_signal_snapshot()`의 `base_vol50`을 넘기면 그 고정값을 그대로
+    쓰고, 재계산하지 않는다 — base_vol50이 없는(v5.176 이전 구 스냅샷)
+    경우만 예전 방식(호출 시점 매일 재계산)으로 폴백 + 경고 로그.
+    반환: (confirmed, close, vol_mult) 또는 데이터 부족시
     (False, None, None) — vol_mult는 실제 달성한 배수(요구치 충족 여부와
     무관하게 항상 반환, 호출부가 "강한확인" 같은 상위 문턱 판정에 재사용
     가능하도록)."""
@@ -10115,8 +10136,12 @@ def _pending_watch_confirm_check(df, pivot: float, vol_mult_required: float = 1.
         return False, None, None
     close_s, vol_s = df["Close"], df["Volume"]
     today_close = float(close_s.iloc[-1])
-    avg_vol = scanner_mod.nonzero_vol_mean(vol_s.iloc[-51:-1])
     today_vol = float(vol_s.iloc[-1])
+    if base_vol50 is not None and base_vol50 > 0:
+        avg_vol = base_vol50
+    else:
+        avg_vol = scanner_mod.nonzero_vol_mean(vol_s.iloc[-51:-1])
+        print("⚠️ _pending_watch_confirm_check: base_vol50 스냅샷 없음(구 레코드) — 매일 재계산 방식으로 폴백")
     vol_mult = round(today_vol / avg_vol, 2) if avg_vol > 0 else 0.0
     confirmed = today_close > pivot and avg_vol > 0 and today_vol >= vol_mult_required * avg_vol
     return confirmed, round(today_close, 2), vol_mult
@@ -10462,7 +10487,10 @@ async def get_calendar():
                 atr_pct = None
         if rule:
             vol_mult_req = CONFIRM_VOL_MULT_BY_TAB.get(tab, 1.5)
-            confirmed, close, vol_mult = _pending_watch_confirm_check(df, pivot_f, vol_mult_required=vol_mult_req)
+            snap_bv = get_signal_snapshot(ticker, tab)
+            confirmed, close, vol_mult = _pending_watch_confirm_check(
+                df, pivot_f, vol_mult_required=vol_mult_req,
+                base_vol50=snap_bv.get("base_vol50") if snap_bv else None)
         if close is None:
             close = _calendar_current_price(ticker)
         if close is None:
