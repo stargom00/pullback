@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.180</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.181</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3422,7 +3422,19 @@ function renderTodayDecisionHtml(td) {
     `<div style="border:1px solid ${borderCol};background:${bgCol};border-radius:8px;padding:10px 12px;
       display:flex;flex-direction:column;min-height:148px">${inner}</div>`;
 
-  const immediateHtml = (td.immediate || []).map(item => {
+  // v5.181(사용자 지시 — [5]): entrySignal 'ok'(🟢 진입 양호, 종목 단위
+  // 6항목 체크)는 필터가 아니라 🔴 안에서의 정렬 우선순위 + 배지로만 쓴다
+  // (US 눌림목 한정 — market-wide 지수 게이트와는 다른 개념, 그건 US
+  // 눌림목에 한해 EV와 역방향이라 필터로 안 씀). Array.sort는 안정
+  // 정렬(stable)이라 이 비교자는 ok 항목을 앞으로 당기고 나머지는 백엔드가
+  // 이미 정렬해둔(손절폭 좁은순) 순서를 그대로 보존한다.
+  const immediateOrdered = (td.immediate || []).slice().sort((a, b) => {
+    const aOk = (a.source === 'us_pullback' && entrySignal(a).level === 'ok') ? 0 : 1;
+    const bOk = (b.source === 'us_pullback' && entrySignal(b).level === 'ok') ? 0 : 1;
+    return aOk - bOk;
+  });
+  const ENTRY_METHOD_LABEL = { '종가진입': '📈종가진입', 'buy-stop': '🎯buy-stop', '즉시': '⚡즉시' };
+  const immediateHtml = immediateOrdered.map(item => {
     const mkt = mktOf(item);
     // v5.175(사용자 지시 — 게이트→배지 전환): RS>=80 & 손절≤ATR×1.5는
     // v5.173에선 auto_watch 등록 자체를 막는 게이트였으나, 감사 결과
@@ -3433,6 +3445,11 @@ function renderTodayDecisionHtml(td) {
     const strongSetupBadge = item.strong_setup
       ? ` <span title="강한 셋업 — RS 80+ & 손절폭 ATR×1.5 이하(2026-09-04 격자탐색+확인율 실측 근거), 진입 근거는 아니고 우선순위 참고만" style="color:#4fc3f7;font-weight:700">💪강한셋업</span>`
       : '';
+    // v5.181(사용자 지시): US 눌림목 카드에 entrySignal 배지 — 필터 아님,
+    // 정렬 우선(위 immediateOrdered)과 참고 표시만.
+    const entrySigBadge = item.source === 'us_pullback'
+      ? (() => { const sig = entrySignal(item); return ` <span title="개별 신호등(진입 게이트 아님, 정렬 참고만) — ${sig.label}" style="color:${sig.level === 'ok' ? '#7fe0a7' : sig.level === 'warn' ? '#e6aa28' : '#FF5A6E'};font-weight:700">${sig.label}</span>`; })()
+      : '';
     // v5.173(사용자 지시): 자동 감시(auto_watch, 5탭 히트 전부를 시스템이
     // 알아서 등록·확인, v5.175부터 RS/손절 필터 없음)는 🤖, 사용자가 직접
     // ⚡감시로 등록한 pending_watch는 👤 — 재점화·종가베팅·돌파임박참고는
@@ -3440,16 +3457,24 @@ function renderTodayDecisionHtml(td) {
     const sourceBadge = item.source === 'auto_watch' ? ' <span title="시스템이 자동으로 등록·확인한 감시(5탭 히트 전부, 강한 셋업 여부는 별도 배지)">🤖</span>'
       : item.source === 'pending_watch' ? ' <span title="직접 등록한 감시">👤</span>'
       : '';
-    const nameLine = `<div><b>${nameLink(item)}</b> <span class="mkt">${mkt}</span>${sourceBadge}${strongSetupBadge}</div>`;
-    // v5.180(사용자 지시 — 버킷 재정의): verdict==='watch_interest' 항목은
-    // 이제 백엔드가 immediate에 아예 안 담는다(interest 버킷으로 분리,
-    // 아래 interestHtml 참고) — immediate는 항상 entry_candidate만.
-    const qty = (item.entry != null && item.stop != null) ? calcShares(item.entry, item.stop, mkt) : null;
+    // v5.181(사용자 지시): 진입법 라벨(종가진입/buy-stop/즉시) 명시 — 4종
+    // 검증된 진입이 한 버킷에 섞이면서 방식이 서로 다르다는 걸 카드에서
+    // 바로 구분 가능하게.
+    const methodBadge = ENTRY_METHOD_LABEL[item.entry_method]
+      ? ` <span style="color:#8fb3ff;font-weight:700">${ENTRY_METHOD_LABEL[item.entry_method]}</span>`
+      : '';
+    const nameLine = `<div><b>${nameLink(item)}</b> <span class="mkt">${mkt}</span>${sourceBadge}${methodBadge}${entrySigBadge}${strongSetupBadge}</div>`;
+    // v5.181(사용자 지시 — [5] 공통 사이즈): 4종 검증된 진입의 손절폭
+    // 정의가 서로 달라(종가베팅은 손절 자체가 없음) 실제 stop 기준
+    // 사이즈를 쓰면 종목마다 리스크 배분이 들쭉날쭉해진다 — 게이트
+    // 하드캡(KR12%/US8%) 기준 공통 계산으로 통일(calcSharesGateCap).
+    // 카드에 뜨는 손절가(stopStr)는 각 방식의 실제 정의 그대로 유지 —
+    // 사이즈 계산 기준만 분리된 것.
+    const qty = calcSharesGateCap(item.entry, mkt);
     const stopStr = item.stop != null
       ? `${fmtPrice(item.stop, mkt)}${todayDecisionRiskBadge(item)}`
-      : '없음(오버나이트 단발)';
-    const qtyStr = qty ? `${qty.shares.toLocaleString()}주`
-      : item.stop == null ? '금액 기준 직접 판단' : 'R설정 필요';
+      : '없음(시간 청산 — 탭 규칙)';
+    const qtyStr = qty ? `${qty.shares.toLocaleString()}주(게이트 상한 ${qty.riskPct}% 기준)` : 'R설정 필요';
     const descParts = [];
     if (item.target_2r != null) descParts.push(`2R목표 ${fmtPrice(item.target_2r, mkt)}`);
     descParts.push(`수량 ${qtyStr}`);
@@ -3462,14 +3487,10 @@ function renderTodayDecisionHtml(td) {
     const pivotGapLine = (item.pivot != null && item.entry != null && item.pivot !== item.entry)
       ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">피벗 ${fmtPrice(item.pivot, mkt)} / 진입 ${fmtPrice(item.entry, mkt)}</div>`
       : '';
-    const verdictBadge = item.verdict === 'entry_candidate'
-      ? `<div style="font-size:11px;color:#7fe0a7;font-weight:700;margin-top:2px">✅ 진입 후보</div>`
-      : '';
     return cardShell('#6b2b2b', '#2a1414', `
       ${nameLine}
       <div style="font-size:15px;font-weight:700;margin-top:4px">${fmtPrice(item.entry, mkt)} → ${stopStr}</div>
       ${pivotGapLine}
-      ${verdictBadge}
       <div style="font-size:11px;color:var(--muted);margin-top:4px;${descClamp}">${descParts.join(' · ')}</div>
       ${actions(item, false)}
     `);
@@ -4050,6 +4071,31 @@ function calcShares(entry, stop, market) {
     rKrw: Math.round(rKrw),
     posKrw: Math.round(shares * entry * fx),
     riskPct: Math.round((entry - stop) / entry * 1000) / 10,
+    reduced: consecLosses() >= 3,
+  };
+}
+
+// v5.181(사용자 지시 — "🎯 오늘의 결정" 🔴 검증된 진입 4종 공통 사이즈):
+// 각 방식의 실제 손절폭(재점화 20일저가/돌파임박 신호일저가/US눌림목
+// 구조적stop/종가베팅은 손절 자체가 없음)이 서로 달라 그대로 쓰면 같은
+// 버킷 안에서 사이즈 기준이 들쭉날쭉해진다(종가베팅은 stop=null이라
+// calcShares가 아예 null 반환) — 게이트 하드캡(KR 12%/US 8%, CLAUDE.md
+// "리스크 하드게이트")을 리스크 분모로 공통 사용해 4종 전부 같은 기준으로
+// 사이즈를 낸다. 카드에 표시되는 실제 손절가는 그대로(각자 정의 유지),
+// 사이즈 계산만 이 공통 기준으로 분리.
+function calcSharesGateCap(entry, market) {
+  if (!entry) return null;
+  const rKrw = oneRKrw();
+  if (!rKrw) return null;
+  const capPct = market === 'KR' ? 0.12 : 0.08;
+  const fx = market === 'KR' ? 1 : (rSettings.usd_krw || 1400);
+  const perShareKrw = entry * capPct * fx;
+  const shares = Math.floor(rKrw / perShareKrw);
+  return {
+    shares,
+    rKrw: Math.round(rKrw),
+    posKrw: Math.round(shares * entry * fx),
+    riskPct: Math.round(capPct * 1000) / 10,
     reduced: consecLosses() >= 3,
   };
 }

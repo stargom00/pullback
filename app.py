@@ -5,6 +5,27 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.181 [기능] "🔴 즉시 행동"에 검증된 진입 4종 통합(사용자 지시 — [5]).
+        지금까지 🔴엔 돌파임박 KR 종가확인만 실질적으로 떴는데(reignition/
+        jongga는 이미 immediate에 있었지만 그날 해당 없으면 안 보였을
+        뿐), 나머지 검증된 진입법도 명시적으로 정리해 같은 버킷에
+        묶었다: (a) 종가베팅 — 진입가=종가, 손절=탭 규칙(시간 청산),
+        근거 z=3.54 전면화. (b) 재점화 — "재점화일 고가 X에 buy-stop
+        주문 걸 것(아직 체결 전)"으로 문구 명시(기존엔 이미 체결된
+        것처럼 읽혔음), 근거 0.755R. (c) US 눌림목 즉시진입 — 신규
+        추가, EV +0.206R(z=2.95, US 단독). 시장 지수 게이트(🟢🟡🔴)는
+        US 눌림목에 한해 EV와 역방향(z=-3.15, docs/pullback_ev_kr_us_
+        regime_investigation.md)이라 필터로 안 씀(사용자 확인 후 결정)
+        — 개별 종목 entrySignal(6항목 체크리스트)만 정렬 우선순위+배지로
+        사용, 필터 아님. 4종 전부 `entry_method`(종가진입/buy-stop/즉시)
+        배지 표시. 사이즈는 방식별 손절폭이 제각각(종가베팅은 손절
+        자체가 없음)이라 게이트 하드캡(KR12%/US8%) 기준 공통 계산으로
+        통일(`calcSharesGateCap`, static/index.html) — 카드에 뜨는 실제
+        손절가는 각 방식 정의 그대로. 정렬은 손절폭 좁은순 하나로 단순화
+        (기존 reignition최우선/강한셋업 티어 제거). **정직성 가드**:
+        `verdict!='entry_candidate'`인 항목은 `immediate`에 남아있으면
+        안 되므로 `_dedup_today_decision` 호출 직전에 강제로 `interest`
+        로 내리는 방어 코드 추가(정상 동작 시 아무것도 안 걸려야 함).
 v5.180 [정정] "오늘의 결정" 버킷 재정의(사용자 지시 — 스샷 기준 3개
         불일치 수정). (1) verdict==watch_interest 항목이 "🔴 즉시
         행동"에 섞여 있던 버그 수정 — immediate/near와 나란한 3번째
@@ -4624,7 +4645,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.180"
+VERSION = "v5.181"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -10469,6 +10490,11 @@ async def get_calendar():
             c = it["confirm"]
             pivot, stop = c["pivot"], c["stop"]
             target_2r = round(pivot + 2 * (pivot - stop), 2) if pivot > stop else None
+            # v5.181(사용자 지시 — [5] 검증된 진입 4종 통합): buy-stop은
+            # "체결 완료된 진입"이 아니라 "그 가격에 도달하면 즉시 사겠다는
+            # 주문"이다 — 오늘 확인됐다는 건 그 주문을 걸어야 할 대상으로
+            # 확정됐다는 뜻이지, 이미 체결됐다는 뜻이 아니다. 문구를 "주문
+            # 걸 것"으로 명시(entry_method="buy-stop").
             immediate.append({
                 "source": "reignition", "key": f"reignition:{it['ticker']}",
                 "ticker": it["ticker"], "name": it["name"], "market": "KR", "mode": "reignition",
@@ -10478,7 +10504,9 @@ async def get_calendar():
                 # atr_stop과 무관하게 벌어질 수 있음(배경 사례, "🟠이미 돌파"
                 # 항목이 피벗보다 위라 손절이 그만큼 넓어짐).
                 "atr_pct": c.get("atr_pct"),
-                "reason": f"재점화 확인진입({it['theme']} D0리더) — 검증 EV +0.755R, "
+                "verdict": "entry_candidate", "entry_method": "buy-stop",
+                "reason": f"재점화({it['theme']} D0리더) — 재점화일 고가 {pivot}에 buy-stop 주문 걸 것"
+                          f"(아직 체결 전) · 손절 {stop}(구조적 20일저가) · 검증 EV +0.755R, "
                           "대조군 대비 유의(z≥1.96) · docs/kr_theme_leader_reignition.md",
             })
         elif it["status"] == "watching":
@@ -10515,8 +10543,40 @@ async def get_calendar():
                 # 있어 "오늘" 고정이지만, 표시 자체가 없다는 지적(9/1 종가인데
                 # 오늘 장중으로 오해 가능)에 대응해 항상 명시한다.
                 "snapshot_date": jongga_cached.get("snapshot_date"),
-                "reason": f"종가베팅(거래대금 {h.get('turnover_rank','?')}위) — {JONGGA_BACKTEST_NOTE} · "
+                # v5.181(사용자 지시 — [5]): 손절이 가격이 아니라 시간(탭
+                # 규칙)이라 stop=None 그대로 — JONGGA_SELL_RULE이 그 규칙.
+                "verdict": "entry_candidate", "entry_method": "종가진입",
+                "reason": f"종가베팅(거래대금 {h.get('turnover_rank','?')}위) — 진입가=종가, "
+                          f"손절=탭 규칙({JONGGA_SELL_RULE}), 근거 z=3.54(n=292) · {JONGGA_BACKTEST_NOTE} · "
                           f"매도: {JONGGA_SELL_RULE}",
+            })
+
+    # ②-b US 눌림목 즉시진입(사용자 지시 — [5], 게이트 필터 없음: 시장
+    # 지수 게이트(🟢🟡🔴)는 US 눌림목에 한해 오히려 역방향(z=-3.15, 🔴
+    # 구간 히트가 🟢보다 EV 4배 가까이 높음, docs/pullback_ev_kr_us_
+    # regime_investigation.md) — 이 필터를 걸면 더 나쁜 서브셋을 "검증된
+    # 진입"으로 올리게 돼 전체 히트를 그대로 쓴다. 개별 신호등(entrySignal,
+    # 종목 단위 6항목 체크)은 게이트가 아니라 정렬 우선순위 + 배지로만
+    # 프론트에서 사용(사용자 지시). US 눌림목 단독 즉시진입 EV +0.206R
+    # (z=2.95, docs/pullback_ev_kr_us_regime_investigation.md) — KR과
+    # 달리 US 눌림목은 확인 대기 없이 즉시진입 자체가 검증된 유일한 탭.
+    us_pullback_cached = _cache.get("us:pullback")
+    if us_pullback_cached:
+        for h in us_pullback_cached.get("hits", []):
+            close_ = h.get("close")
+            stop_ = h.get("stop")
+            if not close_ or not stop_ or close_ <= stop_:
+                continue
+            target_2r = round(close_ + 2 * (close_ - stop_), 2)
+            immediate.append({
+                **h,  # entrySignal() 등 프론트 판정에 필요한 원 스캔 필드 유지
+                "source": "us_pullback", "key": f"us_pullback:{h['ticker']}",
+                "market": "US", "mode": "pullback",
+                "entry": close_, "stop": stop_, "target_2r": target_2r,
+                "close": close_, "pivot": h.get("pivot"),
+                "verdict": "entry_candidate", "entry_method": "즉시",
+                "reason": "눌림목 즉시진입 — US 단독 EV +0.206R(z=2.95) · "
+                          "docs/pullback_ev_kr_us_regime_investigation.md",
             })
 
     # ③ 감시(pending) 확인진입 — 5탭(눌림목/돌파임박/박스돌파/돌파/
@@ -10645,7 +10705,7 @@ async def get_calendar():
                     "mode": r.get("mode_raw") or None, "sector": r.get("sector"),
                     "entry": close, "stop": stop_f, "target_2r": target_2r,
                     "close": close, "pivot": pivot_f, "atr_pct": atr_pct,
-                    "verdict": "entry_candidate",
+                    "verdict": "entry_candidate", "entry_method": "종가진입",
                     "reason": f"{tab} 진입 후보 (종가진입 0.157R z=2.37, 한계) · docs/confirm_entry_lookahead_2026-09-04.md",
                 })
             else:
@@ -10832,7 +10892,7 @@ async def get_calendar():
                     "entry": entry, "stop": stop, "target_2r": target_2r,
                     "close": entry, "pivot": pivot, "atr_pct": rec.get("atr_pct"),
                     "rs": rec.get("rs"),
-                    "verdict": "entry_candidate",
+                    "verdict": "entry_candidate", "entry_method": "종가진입",
                     "strong_setup": strong_setup,
                     "reason": "돌파임박 진입 후보 (종가진입 0.157R z=2.37, 한계) · docs/confirm_entry_lookahead_2026-09-04.md",
                 })
@@ -10888,28 +10948,36 @@ async def get_calendar():
             })
     waiting["auto_watch"] = auto_watch_waiting
 
+    # v5.181(사용자 지시 — [5] 정직성 가드): 검증된 진입은 4종뿐(종가베팅/
+    # 재점화 buy-stop/돌파임박 KR 종가진입/US 눌림목 즉시진입) — 이 넷은
+    # 전부 위에서 명시적으로 "verdict": "entry_candidate"를 채운다. 다른
+    # 코드 경로가 실수로 verdict 없이(또는 다른 값으로) immediate에
+    # append하면 여기서 강제로 interest로 내린다 — 방어적 가드라 정상
+    # 동작 시엔 아무것도 안 걸려야 한다(걸리면 그 자체가 버그 신호).
+    _immediate_raw, immediate = immediate, []
+    for _item in _immediate_raw:
+        if _item.get("verdict") == "entry_candidate":
+            immediate.append(_item)
+        else:
+            print(f"[decision] 정직성 가드: {_item.get('source')}:{_item.get('ticker')} "
+                  f"verdict={_item.get('verdict')!r} — 🔴 자격 없음, 🔎 관심으로 강등")
+            _item.setdefault("tab", _item.get("mode") or "")
+            _item.setdefault("confirmed_at", today)
+            interest.append(_item)
+
     immediate, interest, near = _dedup_today_decision(immediate, interest, near)
 
     def _immediate_sort_key(item):
-        # v5.173(사용자 지시): 🔴 안에서 ①손절폭 좁은순 ②RS 높은순 —
-        # reignition만 그 위 최우선 티어(기존 관례 유지). risk_pct는 저장된
-        # 필드가 아니라 entry/stop에서 그때그때 계산(todayDecisionRiskBadge
-        # 프론트 계산과 동일 공식) — 소스마다 다른 스키마를 하나로 다룸.
-        # v5.175(사용자 지시 — 게이트→배지 전환) "강한 셋업"(원래 auto_watch
-        # 등록 게이트였던 RS/손절 필터) 티어 추가 — 손절폭 정렬 전.
-        # v5.180(사용자 지시 — 버킷 재정의): immediate는 이제 verdict==
-        # entry_candidate만 들어온다(watch_interest는 interest 버킷으로
-        # 분리) — strong_confirm/verdict 정렬 티어 전부 제거, 순수하게
-        # 손절폭·RS만 남김.
+        # v5.181(사용자 지시 — [5] "🔴 정렬: 손절폭 좁은 순"): 4종 검증된
+        # 진입법이 한 버킷에 섞이면서 이전의 소스별 우선 티어(reignition
+        # 최우선/강한셋업 등)를 걷어내고 손절폭 하나로 단순화했다 —
+        # risk_pct는 저장된 필드가 아니라 entry/stop에서 그때그때 계산
+        # (todayDecisionRiskBadge 프론트 계산과 동일 공식). 손절이 가격이
+        # 아니라 시간인 종가베팅(stop=None)은 999.0 폴백으로 자연스럽게
+        # 맨 뒤로 밀린다 — 별도 예외 처리 불필요.
         entry, stop = item.get("entry"), item.get("stop")
         risk_pct = (entry - stop) / entry * 100 if entry and stop and entry > stop else None
-        rs = item.get("rs")
-        return (
-            item["source"] != "reignition",
-            not item.get("strong_setup", False),
-            risk_pct if risk_pct is not None else 999.0,
-            -(rs if rs is not None else -1),
-        )
+        return risk_pct if risk_pct is not None else 999.0
     immediate.sort(key=_immediate_sort_key)
     # v5.180: interest는 확인일(오늘 고정, confirmed_at) 다음 티커명순 —
     # 전부 "오늘 확인된" 항목이라 시간순 의미가 없어 이름으로만 안정 정렬.
