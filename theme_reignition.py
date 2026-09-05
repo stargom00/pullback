@@ -38,6 +38,14 @@ import theme_lifecycle as tl
 
 WATCH_WINDOW_START = 30      # 거래일 — 백테스트(2026-08-31_kr_theme_leader_reignition.py)와 동일
 WATCH_WINDOW_END = 180       # 거래일 — 위와 동일
+# v5.190(사용자 지시 — [7] 재점화 감시 만료, 긴급): D0+30~180 창 자체의
+# 만료(위 두 상수)와는 별개로, "피벗을 한 번 건드렸는데 거래량이 안 붙어
+# 확인에 실패한 시도"가 무기한 ⏳감시로 남는 버그 — 이 창은 그런 개별
+# 시도 하나를 얼마나 기다릴지를 정한다. 백테스트 confirm_entry_race()의
+# CONFIRM_BARS(2026-08-31_kr_theme_leader_reignition.py L62, =3, "재점화일
+# 다음 최대 3거래일")와 동일값 — auto_watch의 AUTO_WATCH_CONFIRM_WINDOW_DAYS
+# (app.py, 안C 정의와 동일 3)와도 같은 패턴.
+REIGNITE_CONFIRM_WINDOW_DAYS = 3
 # compute_theme_series(window=...)에 넘길 값 — 창 끝(180거래일 전)의
 # D0까지 사이클 탐지가 커버해야 하므로 WATCH_WINDOW_END보다 넉넉히 크게.
 LOOKBACK_WINDOW = WATCH_WINDOW_END + tl.BASELINE_WINDOW + 20
@@ -125,7 +133,13 @@ def check_confirm(df) -> dict | None:
     정의) 추가 — "오늘의 결정" 카드의 손절폭 적정성 배지(risk_pct vs
     ATR×1.5, v4.67 원칙)가 confirmed 케이스(구조적 20일저가 stop이라
     atr_stop과 무관하게 risk_pct가 커질 수 있음)에서 이 값을 쓴다.
-    atr14는 이미 계산 중이던 값이라 노출만 추가, 새 계산 없음."""
+    atr14는 이미 계산 중이던 값이라 노출만 추가, 새 계산 없음.
+
+    v5.190(사용자 지시): `touched`(거래량 조건 무관, 오늘 고가가 피벗 이상만
+    본 것 — REIGNITE_CONFIRM_WINDOW_DAYS 만료 판정용)과 `vol_mult`(오늘
+    거래량/트레일링50일평균, "🔎 관심(재량)" 체크리스트에 실측값 병기용)
+    추가. 둘 다 이미 계산 중이던 today_vol/avg_vol/today_high/pivot에서
+    파생 — 새 계산 없음."""
     n = len(df)
     if n < PIVOT_LOOKBACK + CONFIRM_VOL_AVG_WINDOW + 1:
         return None
@@ -135,7 +149,9 @@ def check_confirm(df) -> dict | None:
     avg_vol = scanner.nonzero_vol_mean(vol.iloc[-(CONFIRM_VOL_AVG_WINDOW + 1):-1])  # 거래정지일 제외 v5.129
     today_high = float(high.iloc[-1])
     today_vol = float(vol.iloc[-1])
-    confirmed = today_high >= pivot and avg_vol > 0 and today_vol >= CONFIRM_VOL_MULT * avg_vol
+    touched = today_high >= pivot
+    vol_mult = (today_vol / avg_vol) if avg_vol > 0 else None
+    confirmed = touched and avg_vol > 0 and today_vol >= CONFIRM_VOL_MULT * avg_vol
 
     current_price = float(close.iloc[-1])
     atr14 = scanner.atr(high, low, close, 14)
@@ -146,6 +162,7 @@ def check_confirm(df) -> dict | None:
     distance_pct = (pivot - current_price) / current_price * 100 if current_price > 0 else None
 
     return {"pivot": pivot, "stop": stop, "confirmed": bool(confirmed),
+            "touched": bool(touched), "vol_mult": round(vol_mult, 2) if vol_mult is not None else None,
             "compression": compression_ref(df),
             "current_price": current_price,
             "distance_pct": round(distance_pct, 2) if distance_pct is not None else None,
@@ -153,3 +170,20 @@ def check_confirm(df) -> dict | None:
             "atr_pct": round(atr_pct, 2) if atr_pct is not None else None,
             "risk_pct": round(risk_pct, 2) if risk_pct is not None else None,
             "target_2r": round(target_2r, 2) if target_2r is not None else None}
+
+
+def find_first_pivot_touch(df, start_pos: int) -> int | None:
+    """v5.190(사용자 지시 — [7] 재점화 감시 만료): start_pos(포함)부터
+    마지막 봉까지, 최초로 표준 피벗(직전 20거래일 고가) 이상을 찍은 날의
+    위치. 거래량 조건은 안 봄 — "시도"(터치) 자체만 판정, check_confirm()
+    과 동일한 피벗 정의를 과거 시점에 재적용한다(기존 fetch 재사용, 새
+    fetch 없음). 기존 watching 레코드에 pivot_touch_date가 아직 없을 때
+    소급 계산하는 용도."""
+    n = len(df)
+    high = df["High"]
+    start_pos = max(start_pos, PIVOT_LOOKBACK)
+    for i in range(start_pos, n):
+        pivot_i = float(high.iloc[i - PIVOT_LOOKBACK:i].max())
+        if float(high.iloc[i]) >= pivot_i:
+            return i
+    return None

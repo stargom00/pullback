@@ -5,6 +5,45 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.190 [정정+기능] 재점화 등급 조정 + 감시 만료 버그 수정(사용자 지시,
+        커밋명 reignition-downgrade — 사용자가 v5.189로 지시했으나 그
+        번호는 바로 위 커밋이 이미 씀, v5.190으로 정정).
+        [1][2][3] 재점화 확인진입을 🔴(자동 진입 후보)에서 🔎 관심(재량)
+        으로 하향 — 확인진입 EV(+0.755R)의 표본이 n=53(README 규칙9
+        "체크포인트 90개 이상" 미달)이고 시기반분 재현검증도 안 된 상태
+        (docs/kr_theme_leader_reignition.md 상단에 캐비어트 추가).
+        get_calendar()가 이제 재점화 확인분을 immediate가 아니라
+        interest에 넣는다 — buy-stop가/손절은 그대로 참고 표시하되
+        target_2r(사이즈)는 안 보여줌, 라벨은 "🔎 관심(재량) — 근거
+        n=53, 재현 미검증 · 재량 판단"(interest_label 필드, interestHtml
+        템플릿이 커스텀 라벨을 지원하도록 확장). "🎯 오늘의 결정" 툴팁도
+        4종→3종 + 재점화 관심(재량) 별도 줄. 눌림목 탭 "🔥 재점화" 박스
+        (v5.188)에도 같은 라벨.
+        [5] 확인진입 EV(n=53)를 시기반분해서 방향만 보는 "값싼 체크"는
+        재fetch 없이는 불가 — 원측정(2026-08-31)이 개별 이벤트를 날짜와
+        함께 저장하지 않았고(집계치만 /tmp에, 그마저 휘발), 커밋된 후속
+        결과 파일(2026-09-01_reignition_confirm_close_vs_high.results.json)
+        도 집계치뿐이라 시기별로 쪼갤 수 없음 — 스킵, 사용자에게 보고.
+        [6] 재점화 🔎 카드·눌림목 재점화 박스에 재량 체크리스트 ⓘ 툴팁
+        (테마생존/재점화일캔들/조정폭/손절거리/게이트 5항목) — 항목별
+        실측값(거래량비/조정폭/손절%) 병기. theme_reignition.check_confirm()
+        에 vol_mult·touched 필드, _refresh_reignition_watch()에
+        decline_from_peak_pct(고점 대비 조정폭, d0~어제 최고가 기준)
+        계산 추가 — 새 fetch 없음, 이미 받아온 df 재사용.
+        [7, 긴급] 재점화 감시 만료 버그: D0+30~180거래일 "창" 만료
+        (theme_reignition.WATCH_WINDOW_END)와 별개로, "피벗을 건드렸는데
+        거래량이 안 붙어 확인 실패한 개별 시도"에는 만료가 아예 없어서
+        몇 달 전에 끝난 시도가 창이 끝날 때까지 계속 ⏳감시로 남는 버그
+        (2025-12 시도가 2026-09에도 감시 중이던 사례). `pivot_touch_date`
+        (피벗 최초 터치일)를 추적해 REIGNITE_CONFIRM_WINDOW_DAYS(=3,
+        백테스트 confirm_entry_race의 CONFIRM_BARS와 동일값)를 넘기면
+        만료(`expire_reason="pivot_touch_timeout"`) — 기존 레코드는
+        pivot_touch_date가 없으면 이미 받아온 df로 과거를 한 번 스캔해
+        소급 계산(`theme_reignition.find_first_pivot_touch()`, 새 fetch
+        없음). 이미 confirmed된 레코드도 레코드당 1회 사후 점검해 새
+        규칙 기준으론 터치 후 창을 넘겨 나온 확인이 있으면 로그로 보고
+        (상태는 안 바꿈 — 진행 중인 포워드 추적 소급 삭제 안 함). 눌림목
+        탭 재점화 박스는 만료분을 기본 접어서 보여줌(펼치기 토글).
 v5.189 [로그] "오늘의 결정" 🔴 즉시 행동 건수 EOD 로그(사용자 지시).
         표시 없음, 집계만 — 일주일 뒤 하루 평균 몇 건 뜨는지 보려는
         용도. `_warm_market()`의 market별 EOD 분기(jongga/reignition/
@@ -4804,7 +4843,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.189"
+VERSION = "v5.190"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -5949,13 +5988,35 @@ def _reignition_compute_candidates(bundle: dict) -> list:
 
 async def _refresh_reignition_watch(bundle: dict):
     """일 1회(_warm_market의 KR 장마감 후 분기에서 호출) — 창 진입/이탈
-    갱신, 확인진입 체크, 포워드 R 갱신까지 한 번에 처리."""
+    갱신, 확인진입 체크, 포워드 R 갱신까지 한 번에 처리.
+
+    v5.190(사용자 지시 — [7] 재점화 감시 만료, 긴급): 기존엔 D0+30~180
+    거래일 "창" 자체가 끝나야만(theme_reignition.WATCH_WINDOW_END) 만료됐다
+    — "피벗은 건드렸는데 거래량이 안 붙어 확인 실패한 개별 시도"에는 만료가
+    없어서, 시도 자체는 몇 달 전에 끝났는데 레코드는 창이 끝날 때까지
+    (최대 180거래일) ⏳감시로 계속 남는 버그가 있었다(2025-12 시도가
+    2026-09에도 감시 중이던 사례). `pivot_touch_date`(피벗을 처음 건드린
+    날)를 추적해 REIGNITE_CONFIRM_WINDOW_DAYS(=3, 백테스트 confirm_entry_
+    race의 CONFIRM_BARS와 동일) 안에 확인이 안 나오면 그 시도를 만료시킨다
+    — 창(180거래일) 만료와는 별개 규칙, 어느 쪽이든 먼저 걸리면 만료."""
     loop = asyncio.get_event_loop()
     candidates = await loop.run_in_executor(_executor, _reignition_compute_candidates, bundle)
     store = _load_reignition_watch()
     today = datetime.now(KST).strftime("%Y-%m-%d")
     data = bundle["data"]
     current_keys = set()
+    import pandas as pd
+
+    def _peak_decline_pct(df, d0_pos: int, pivot: float):
+        """v5.190: d0_pos~어제(오늘 제외, pivot/stop과 동일 관례)까지의
+        고점 대비 pivot이 몇 % 눌렸는지 — "재량 체크리스트" 항목3(조정폭)
+        실측값. 새 fetch 없음, 이미 받아온 df 재사용."""
+        if d0_pos >= len(df) - 1 or pivot is None or pivot <= 0:
+            return None
+        peak = float(df["High"].iloc[d0_pos:-1].max())
+        if peak <= 0:
+            return None
+        return round((peak - pivot) / peak * 100, 2)
 
     for c in candidates:
         key = f"{c['theme']}|{c['ticker']}|{c['d0_date']}"
@@ -5964,7 +6025,7 @@ async def _refresh_reignition_watch(bundle: dict):
         if rec is None:
             rec = {"theme": c["theme"], "ticker": c["ticker"], "name": c["name"],
                    "d0_date": c["d0_date"], "first_seen": today, "status": "watching",
-                   "compression": None, "confirm": None, "forward": None}
+                   "compression": None, "confirm": None, "forward": None, "pivot_touch_date": None}
             store[key] = rec
         rec["days_since_d0"] = c["days_since_d0"]
         rec["window_days_left"] = c["window_days_left"]
@@ -5980,6 +6041,11 @@ async def _refresh_reignition_watch(bundle: dict):
                     print(f"[reignition] {c['ticker']} 확인진입 체크 실패: {e}")
                 if res:
                     rec["compression"] = res["compression"]
+                    try:
+                        d0_pos = df.index.get_loc(pd.Timestamp(rec["d0_date"]))
+                        decline_pct = _peak_decline_pct(df, d0_pos, res["pivot"])
+                    except Exception:
+                        d0_pos, decline_pct = None, None
                     # v5.130: 실행 정보(피벗/현재가/거리%/참고손절/리스크%/2R목표) —
                     # UI 카드 표시용, 매일 갱신(장중 라이브 아님, EOD 확정치).
                     rec["exec"] = {
@@ -5987,6 +6053,8 @@ async def _refresh_reignition_watch(bundle: dict):
                         "distance_pct": res["distance_pct"], "atr_stop": res["atr_stop"],
                         "risk_pct": res["risk_pct"], "target_2r": res["target_2r"],
                         "atr_pct": res.get("atr_pct"),  # v5.155: 오늘의 결정 손절폭 배지용
+                        "vol_mult": res.get("vol_mult"),  # v5.190: 재량 체크리스트 실측값
+                        "decline_from_peak_pct": decline_pct,  # v5.190: 재량 체크리스트 실측값
                     }
                     if res["confirmed"]:
                         rec["status"] = "confirmed"
@@ -6000,16 +6068,68 @@ async def _refresh_reignition_watch(bundle: dict):
                         # 20일저가라 atr_stop과 무관하게 risk_pct가 벌어질 수
                         # 있어(오늘의 결정 배지 배경 사례), 그 판정에 필요.
                         rec["confirm"] = {"date": confirm_bar_date, "pivot": res["pivot"], "stop": res["stop"],
-                                           "atr_pct": res.get("atr_pct")}
+                                           "atr_pct": res.get("atr_pct"), "vol_mult": res.get("vol_mult"),
+                                           "decline_from_peak_pct": decline_pct}
                         rec["forward"] = {"opened_at": confirm_bar_date, "entry": res["pivot"], "stop": res["stop"],
                                           "bars_held": 0, "r_progress": 0.0,
                                           "resolved": False, "resolved_r": None, "resolved_reason": None}
+                    else:
+                        # v5.190([7]): 피벗 터치 추적 — 오늘 처음 터치했으면
+                        # 오늘 날짜로 고정, 기존 레코드에 아직 없으면(이 필드
+                        # 신설 이전 레코드) 과거를 한 번 스캔해 소급 채운다.
+                        if res.get("touched") and not rec.get("pivot_touch_date"):
+                            rec["pivot_touch_date"] = str(df.index[-1].date())
+                        elif not rec.get("pivot_touch_date") and d0_pos is not None:
+                            try:
+                                touch_pos = theme_reignition.find_first_pivot_touch(
+                                    df, d0_pos + theme_reignition.WATCH_WINDOW_START)
+                                if touch_pos is not None:
+                                    rec["pivot_touch_date"] = str(df.index[touch_pos].date())
+                            except Exception:
+                                pass
+                        touch_date = rec.get("pivot_touch_date")
+                        if touch_date:
+                            try:
+                                touch_pos = df.index.get_loc(pd.Timestamp(touch_date))
+                                days_since_touch = (len(df) - 1) - touch_pos
+                                if days_since_touch >= theme_reignition.REIGNITE_CONFIRM_WINDOW_DAYS:
+                                    rec["status"] = "expired"
+                                    rec["expired_at"] = str(df.index[-1].date())
+                                    rec["expire_reason"] = "pivot_touch_timeout"
+                                    print(f"[reignition] {c['ticker']} 만료 — 터치일 {touch_date}부터 "
+                                          f"{days_since_touch}거래일째 미확인(거래량 미충족)")
+                            except Exception:
+                                pass
 
     # ── 창 만료(180거래일 초과) 또는 테마 매핑 자체가 사라짐 — 자동 해제 ──
     for key, rec in store.items():
         if rec.get("status") == "watching" and key not in current_keys:
             rec["status"] = "expired"
             rec["expired_at"] = today
+            rec.setdefault("expire_reason", "window_180d")
+
+    # ── v5.190([7] 진단, 레코드당 1회): 이미 confirmed된 레코드가 새
+    #    만료규칙(REIGNITE_CONFIRM_WINDOW_DAYS) 기준으론 터치 후 그 창을
+    #    넘겨서 나온 확인이었는지 점검 — 로그만(상태 변경 안 함, 이미 진행
+    #    중인 포워드 추적을 소급으로 지우지 않는다). "과거 가짜 🔴 여부" 보고용.
+    for key, rec in store.items():
+        if rec.get("status") != "confirmed" or not rec.get("confirm") or rec.get("touch_check_done"):
+            continue
+        rec["touch_check_done"] = True
+        df = data.get(rec["ticker"])
+        if df is None or df.empty:
+            continue
+        try:
+            d0_pos = df.index.get_loc(pd.Timestamp(rec["d0_date"]))
+            touch_pos = theme_reignition.find_first_pivot_touch(
+                df, d0_pos + theme_reignition.WATCH_WINDOW_START)
+            confirm_pos = df.index.get_loc(pd.Timestamp(rec["confirm"]["date"]))
+            if touch_pos is not None and confirm_pos - touch_pos > theme_reignition.REIGNITE_CONFIRM_WINDOW_DAYS:
+                print(f"[reignition] ⚠️ 과거 확인 재검토: {rec['ticker']} 확인일 {rec['confirm']['date']}이 "
+                      f"터치일 {str(df.index[touch_pos].date())}로부터 {confirm_pos - touch_pos}거래일 뒤 — "
+                      "새 만료규칙 기준으론 이미 만료됐어야 할 시도에서 나온 확인(과거 가짜 🔴 후보, 재검토 필요)")
+        except Exception:
+            continue
 
     # ── 확인진입 이후 포워드 R 갱신(손절 이탈 또는 60봉 상한 시 확정) ──
     for key, rec in store.items():
@@ -7317,9 +7437,11 @@ DECISION_LOG_PATH = _resolve_persistent_path("decision_log.json")  # v5.189 "오
 # v5.189(사용자 지시): "🔴 즉시 행동"이 실제로 하루 몇 건 뜨는지 화면 없이
 # 로그만 쌓는다(일주일치 모아 "하루 평균 몇 건" 파악용). immediate 항목의
 # "source"는 정직성 가드(get_calendar())가 verdict==entry_candidate만
-# 통과시킨 뒤에도 그대로 남아있는 필드라 탭 이름 매핑에 그대로 쓴다 —
-# 4종 각각 정확히 하나의 (탭,시장) 조합에만 대응(auto_watch/pending_watch
-# 둘 다 "돌파임박 KR 종가진입"의 서로 다른 소스 파이프라인일 뿐 같은 탭).
+# 통과시킨 뒤에도 그대로 남아있는 필드라 탭 이름 매핑에 그대로 쓴다.
+# v5.190 후속(재점화 등급 조정): 재점화는 🔴에서 🔎 관심(재량)으로
+# 내려가 더 이상 immediate에 안 들어온다 — 이 매핑엔 안 남기되(들어올 수
+# 없는 source라 죽은 코드), 혹시 남아있는 옛 캐시/경로가 있어도 "재점화"로
+# 라벨링되도록 매핑 자체는 유지해 조용히 "기타"로 새지 않게 방어.
 _DECISION_TAB_BY_SOURCE = {
     "reignition": "재점화", "jongga": "종가베팅", "us_pullback": "눌림목",
     "pending_watch": "돌파임박", "auto_watch": "돌파임박",
@@ -10920,25 +11042,26 @@ async def get_calendar():
         if it["status"] == "confirmed" and (it.get("confirm") or {}).get("date") == today:
             c = it["confirm"]
             pivot, stop = c["pivot"], c["stop"]
-            target_2r = round(pivot + 2 * (pivot - stop), 2) if pivot > stop else None
-            # v5.181(사용자 지시 — [5] 검증된 진입 4종 통합): buy-stop은
-            # "체결 완료된 진입"이 아니라 "그 가격에 도달하면 즉시 사겠다는
-            # 주문"이다 — 오늘 확인됐다는 건 그 주문을 걸어야 할 대상으로
-            # 확정됐다는 뜻이지, 이미 체결됐다는 뜻이 아니다. 문구를 "주문
-            # 걸 것"으로 명시(entry_method="buy-stop").
-            immediate.append({
+            risk_pct = round((pivot - stop) / pivot * 100, 2) if pivot and stop and pivot > stop else None
+            # v5.190(사용자 지시 — 재점화 등급 조정): 확인진입 EV(+0.755R)의
+            # 표본이 n=53뿐이고(90 미만, README 규칙9 미달) 시기반분
+            # 재현검증도 안 된 상태(docs/kr_theme_leader_reignition.md 상단
+            # 캐비어트) — 🔴(자동 진입 후보)에서 🔎 관심(재량)으로 하향.
+            # buy-stop 가격·손절은 참고로 그대로 보여주되 사이즈(target_2r)는
+            # 표시 안 함 — 체결 여부는 아래 재량 체크리스트(interest_label/
+            # discretion_checklist, static/index.html interestHtml)로
+            # 사람이 직접 판단.
+            interest.append({
                 "source": "reignition", "key": f"reignition:{it['ticker']}",
-                "ticker": it["ticker"], "name": it["name"], "market": "KR", "mode": "reignition",
-                "entry": pivot, "stop": stop, "target_2r": target_2r,
-                "close": _calendar_current_price(it["ticker"]) or pivot, "pivot": pivot,
-                # v5.155: 손절폭 배지용 — confirm의 stop은 구조적 20일저가라
-                # atr_stop과 무관하게 벌어질 수 있음(배경 사례, "🟠이미 돌파"
-                # 항목이 피벗보다 위라 손절이 그만큼 넓어짐).
-                "atr_pct": c.get("atr_pct"),
-                "verdict": "entry_candidate", "entry_method": "buy-stop",
-                "reason": f"재점화({it['theme']} D0리더) — 재점화일 고가 {pivot}에 buy-stop 주문 걸 것"
-                          f"(아직 체결 전) · 손절 {stop}(구조적 20일저가) · 검증 EV +0.755R, "
-                          "대조군 대비 유의(z≥1.96) · docs/kr_theme_leader_reignition.md",
+                "ticker": it["ticker"], "name": it["name"], "market": "KR", "tab": "재점화",
+                "confirmed_at": c["date"], "close": _calendar_current_price(it["ticker"]) or pivot,
+                "pivot": pivot, "stop": stop, "atr_pct": c.get("atr_pct"),
+                "vol_mult": c.get("vol_mult"), "decline_from_peak_pct": c.get("decline_from_peak_pct"),
+                "risk_pct": risk_pct,
+                "interest_label": "🔎 관심(재량) — 근거 n=53, 재현 미검증 · 재량 판단",
+                "reason": f"재점화({it['theme']} D0리더) — 재점화일 고가 {pivot}에 buy-stop 참고가(재량 판단) "
+                          f"· 손절 {stop}(구조적 20일저가) · 근거 n=53, 시기반분 재현 미검증(Rule 9 미달) "
+                          "· docs/kr_theme_leader_reignition.md",
             })
         elif it["status"] == "watching":
             dist = (it.get("exec") or {}).get("distance_pct")
@@ -11410,12 +11533,17 @@ async def get_calendar():
             })
     waiting["auto_watch"] = auto_watch_waiting
 
-    # v5.181(사용자 지시 — [5] 정직성 가드): 검증된 진입은 4종뿐(종가베팅/
-    # 재점화 buy-stop/돌파임박 KR 종가진입/US 눌림목 즉시진입) — 이 넷은
-    # 전부 위에서 명시적으로 "verdict": "entry_candidate"를 채운다. 다른
-    # 코드 경로가 실수로 verdict 없이(또는 다른 값으로) immediate에
-    # append하면 여기서 강제로 interest로 내린다 — 방어적 가드라 정상
-    # 동작 시엔 아무것도 안 걸려야 한다(걸리면 그 자체가 버그 신호).
+    # v5.181(사용자 지시 — [5] 정직성 가드): 검증된 진입은 종가베팅/
+    # 돌파임박 KR 종가진입/US 눌림목 즉시진입 3종뿐 — 이 셋은 전부 위에서
+    # 명시적으로 "verdict": "entry_candidate"를 채운다. 다른 코드 경로가
+    # 실수로 verdict 없이(또는 다른 값으로) immediate에 append하면 여기서
+    # 강제로 interest로 내린다 — 방어적 가드라 정상 동작 시엔 아무것도 안
+    # 걸려야 한다(걸리면 그 자체가 버그 신호).
+    # v5.190(사용자 지시 — 재점화 등급 조정): 재점화는 확인진입 EV의 표본
+    # (n=53, README 규칙9 미달)과 시기반분 미검증 때문에 애초에 verdict를
+    # 안 채우고 interest.append()로 직접 넣도록 바뀌어(위 ① 재점화 블록
+    # 참고) 4종 → 3종. 이 가드에는 안 걸리지만(이미 immediate 안 감) 원래
+    # entry_candidate였다가 빠진 유일한 사례라 남겨둠.
     _immediate_raw, immediate = immediate, []
     for _item in _immediate_raw:
         if _item.get("verdict") == "entry_candidate":
