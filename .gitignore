@@ -18,3 +18,7 @@ moneyflow_warmed_*.marker
 money_flow_report_state.json
 macro_calendar_guard_state.json
 api_call_guard_state.json
+sector_snapshot.json
+us_industry_cache.json
+us_industry_cache.lock
+us_industry_cache_build.log

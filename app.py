@@ -5,6 +5,52 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.195 [기능개선] 섹터 층 1단계(사용자 지시, 커밋명 sector-layer-v1) —
+        표시 전용, 게이트·판정 로직 무변경.
+        [1] _sector_of() 병합 순서 수정 — sectors.py의 굵은 버킷(금융/
+        바이오/소비재/지주 등, docstring이 스스로 "굵직하게만"이라 인정한
+        나머지)이면 kr_sectors_auto.py 세분류를 우선. AI 데이터센터
+        밸류체인 큐레이션 버킷(반도체 6종/데이터센터/클라우드SW/
+        사이버보안/AI로봇/2차전지/방산/조선/전력기기)은 그대로 유지 —
+        GICS 표준분류보다 오히려 더 정밀해서 덮으면 정보 손실. 실측:
+        sectors.py에 KR로 태그된 257종목 중 124개(48%) 세분류 전환
+        (예: "금융" 17개 → 은행6/증권6/손해보험3/생명보험2, "바이오" 28개
+        → 제약17/생물공학7/... — 조사 단계에서 이미 100% kr_sectors_auto에
+        존재하던 값).
+        [2] us_industry_cache.py 신규 — yfinance info['industry']로 US
+        유니버스 1회 빌드해 캐싱(us_sectors_auto 정적 데이터셋이 미국
+        금융을 전부 "금융" 한 버킷으로 뭉쳐놓는 문제 해결). 무거운 순회
+        (2000+종목×0.5s 스로틀)라 build_us_industry_cache.py로 분리해
+        nohup 백그라운드 프로세스로 실행 — app.py는 완성 파일만 읽고,
+        빌드 중/실패 시엔 기존 경로(sectors.py→us_sectors_auto)로 폴백.
+        스케줄러 루프가 30일 경과 시 자동으로 같은 스크립트를 재실행(월
+        1회 갱신), 락파일로 중복 실행 방지.
+        [3] sector_snapshot.py 신규 — 스캔이 이미 메모리에 갖고 있는
+        종목별 일봉으로(추가 fetch 0건) 섹터별(구성≥5) 동일가중 누적지수
+        (위치 기준 정렬 — 한/미 휴장일 차이로 인한 날짜조인 손실 회피),
+        20/60일 수익률, 섹터RS 백분위(60일, scanner.to_rs_rank() 재사용),
+        52주 신고가 여부, 20일신고가 비율, 50일선 위 비율, 대장3(섹터 내
+        개별 RS 상위), 종목별 섹터 내 RS 순위를 계산. /data/sector_
+        snapshot.json에 날짜 키로 일별 기록 — market 파생 통계는
+        market="all" 스캔에서만(부분 필터 뷰가 하루 기록을 덮어쓰지
+        않게), 5탭(눌림목/돌파임박/박스돌파/돌파/추세전환 — 종가베팅은
+        RS 자체가 없어 제외) 히트 수는 탭별 스캔 완료 시점마다 누적.
+        [4] 표시: 카드의 섹터 표기 옆에 "{순위}/{n} · 섹터RS {pct}" 병기
+        (5탭 전부 공통 tick 라인, static/index.html). 신호등 체크리스트의
+        "RS 84 — 주도주는 아님" 문구를 섹터 순위 있을 때 "시장 RS 84 ·
+        {섹터} 내 {순위}위"로 정정(판정 로직·70~89 임계값은 무변경, 문구만
+        — RS가 지수 대비 백분위라 섹터 자체가 약하면 그 안 1등도 시장RS는
+        70대일 수 있어 "약하다"는 인상이 오해를 줄 수 있었음). 캘린더
+        "🎯 오늘의 결정" 바로 아래 "📊 섹터 흐름" 카드 신규 — 섹터RS 상위5·
+        52주 신고가 섹터 🔥·섹터별 대장3+오늘 히트.
+        [5] 검증: app.py를 직접 import해 _sector_of() 호출로 확인 —
+        현대해상/삼성화재/DB손보(001450/000810/005830.KS) 전부 "손해보험"
+        정확히 분류. sector_snapshot.compute()를 손해보험 12종목 실데이터로
+        직접 돌려 확인 — 현대해상 "손해보험 2/12"(그날 섹터 내 RS 2위),
+        섹터RS·20/60일수익률·52주신고가비율·MA50위비율 전부 정상 계산,
+        대장3에 현대해상 포함(그날 실측 — 삼성화재/DB손보는 그날 랭킹상
+        3위 밖이라 미포함, 대장은 그날그날의 실제 RS 순위를 그대로
+        반영하는 게 의도이므로 이는 버그 아님).
 v5.194 [UI 개선] 재점화 갱신 결과 패널 가독성(사용자 지시, 커밋명
         reignition-panel-readability). 티커만으론 뭔지 바로 안 와닿는다는
         지적 — changed/touched_detail/dropped_duplicates/discretion_fail
@@ -4704,6 +4750,8 @@ import hashlib
 import hmac
 import math
 import os
+import subprocess
+import sys
 import time
 import uuid
 import json as _json
@@ -4729,22 +4777,71 @@ try:
 except Exception as _e:
     print(f"[sectors] kr_sectors_auto 미탑재 -> 자동보완 비활성: {_e}", flush=True)
     KR_SECTORS_AUTO = {}
+import sector_snapshot   # v5.195 [3]: 섹터 합성지수/RS백분위/신고가비율 등 (추가 fetch 0건)
+import us_industry_cache   # v5.195 [2]: yfinance industry US 캐시(월 1회 백그라운드 빌드)
+
+_us_industry_cache_data: dict = us_industry_cache.load_cache()
+_us_industry_cache_mtime: float = 0.0
+try:
+    _us_industry_cache_mtime = os.path.getmtime(us_industry_cache.cache_path())
+except OSError:
+    pass
+print(f"[us_industry_cache] 시작 시 로드 {len(_us_industry_cache_data)}종목", flush=True)
+
+
+# v5.195(사용자 지시 — 섹터 층 1단계 [1]): v5.18은 sectors.py 결과가
+# "기타"일 때만 자동보완(kr/us_sectors_auto)으로 폴백시켰는데, 정작
+# sectors.py에 이미 붙어있는 굵은 버킷("금융" 등)은 자동보완보다 우선순위가
+# 높아 세분류가 있어도 절대 못 쓰였다. 실측: 현재 "금융"으로 태그된 KR
+# 종목 17개(105560 KB금융, 001450 현대해상 등) 전부(17/17=100%) kr_sectors_
+# auto.py엔 이미 은행/증권/손해보험/생명보험으로 정확히 세분류돼 있었음 —
+# 즉 KRX API 없이 병합 우선순위만 고치면 바로 세분류가 된다.
+# sectors.py의 버킷은 성격이 둘로 나뉜다: (a) 이 파일 docstring이 명시한
+# "AI 데이터센터 밸류체인" 층위별 큐레이션(반도체를 연산/메모리/제조/장비/
+# 소재/설계로 쪼갠 것 등) — GICS 표준분류(kr_sectors_auto의 "반도체와
+# 반도체장비" 하나)보다 오히려 더 정밀해서 자동보완으로 덮으면 정보 손실.
+# (b) 그 외 "굵직하게만" 잡은 나머지(금융/바이오/소비재/지주 등, 이 파일
+# docstring이 스스로 인정) — 이쪽만 자동보완 세분류로 대체한다.
+_AI_CHAIN_CURATED_SECTORS = frozenset({
+    "반도체-연산", "반도체-메모리", "반도체-제조", "반도체-장비", "반도체-소재",
+    "반도체-설계", "데이터센터", "클라우드SW", "사이버보안", "AI/로봇",
+    "2차전지", "방산", "조선", "전력기기",
+})
 
 
 def _sector_of(t: str) -> str:
-    # v5.18 [기능개선] sectors.py의 SECTOR_MAP은 "AI 데이터센터 밸류체인"
-    # 테마 위주로 손으로 큐레이션한 좁은 목록이라, 그 밖의 종목은 전부
-    # "기타"로 빠지고 카드에 섹터가 아예 안 붙었음(사용자 리포트: SK하이닉스
-    # 같은 극소수만 붙고 대부분 안 붙음). 미국은 이미 us_sectors_auto로
-    # 보완돼 있었는데 한국은 보완이 없었던 게 원인 — us_sectors_auto.py와
-    # 같은 패턴으로 kr_sectors_auto.py(네이버 업종별시세 79개 분류를
-    # 시가총액 순위 페이지와 교차 매칭해 생성) 추가.
     s = get_sector(t)
+    if s in _AI_CHAIN_CURATED_SECTORS:
+        return s
+    tU = t.upper()
+    if t.endswith((".KS", ".KQ")):
+        return KR_SECTORS_AUTO.get(tU) or s
+    # v5.195 [2]: yfinance industry 캐시(us_industry_cache.py, 월 1회 백그라운드
+    # 빌드) — us_sectors_auto(정적 데이터셋)가 미국 금융을 전부 "금융" 한
+    # 버킷으로 뭉쳐놔서 은행/보험/증권 구분이 안 되는 문제의 해결책. 빌드 전
+    # 이거나 커버리지가 없는 티커는 기존 경로(sectors.py 굵은 버킷 →
+    # us_sectors_auto)로 폴백.
+    fine = _us_industry_cache_data.get(tU)
+    if fine:
+        return fine
     if s != "기타":
         return s
-    if t.endswith((".KS", ".KQ")):
-        return KR_SECTORS_AUTO.get(t.upper(), "기타")
-    return US_SECTORS_AUTO.get(t.upper(), "기타")
+    return US_SECTORS_AUTO.get(tU, "기타")
+
+
+def _sector_fields(t: str, bundle: dict) -> dict:
+    """카드에 붙일 섹터 4종 필드(v5.195 [3][4]) — bundle["sector_info"]
+    (sector_snapshot.compute() 결과, 이 bundle의 data/rs_ranks로 이미 계산돼
+    있음)에서 그대로 가져온다. 구성종목 5개 미만이거나 "기타"라 by_ticker에
+    없으면 섹터명만 _sector_of()로 채우고 순위/백분위는 None(프론트가
+    null이면 표시를 생략)."""
+    si = (bundle.get("sector_info") or {}).get("by_ticker", {}).get(t)
+    if si:
+        return {"sector": si["sector"], "sector_rank": si["rank"],
+                "sector_total": si["total"], "sector_rs_pct": si["sector_rs_pct"]}
+    return {"sector": _sector_of(t), "sector_rank": None, "sector_total": None, "sector_rs_pct": None}
+
+
 from universe import get_universe, load_alerts
 import scanner as scanner_mod
 import naver_kr
@@ -4950,7 +5047,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.194"
+VERSION = "v5.195"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -5606,6 +5703,15 @@ async def _fetch_market_data_inner(market: str, cache_key: str) -> dict:
     }
     print(f"[TIMING] {_timing}", flush=True)
 
+    # v5.195 [3]: 섹터 합성지표 — 위에서 이미 받은 data/rs_ranks 그대로 재사용
+    # (추가 fetch 0건). 이 bundle 자체의 스코프(kr/us/all 중 무엇이든) 안에서만
+    # 계산해 market 필터별 카드가 그 필터 안에서의 순위/백분위를 보게 한다.
+    try:
+        sector_info = sector_snapshot.compute(data, rs_ranks, _sector_of)
+    except Exception as e:
+        print(f"[sector_snapshot] compute 실패: {e}", flush=True)
+        sector_info = {"by_ticker": {}, "by_sector": {}}
+
     bundle = {
         "universe": universe,
         "data": data,
@@ -5614,6 +5720,7 @@ async def _fetch_market_data_inner(market: str, cache_key: str) -> dict:
         "rs_moms": rs_moms,
         "rs3_ranks": rs3_ranks,   # v5.71: 3개월 RS 백분위 (게이트 변형 E)
         "rs_deltas": rs_deltas,   # v5.71: 20거래일 전 대비 RS 랭크 변화
+        "sector_info": sector_info,   # v5.195: {by_ticker, by_sector} — 카드 표시 + 섹터 흐름 카드 원본
         "ts": time.time(),
         "daykey": daykey,
         "timing": _timing,
@@ -5622,6 +5729,13 @@ async def _fetch_market_data_inner(market: str, cache_key: str) -> dict:
     # 장 마감 후 fetch였다면 디스크에 저장 → 다음 거래일까지 재사용
     if daykey:
         _save_disk_cache(market, daykey, bundle)
+    # v5.195: 섹터 흐름 캘린더 카드의 원본 — kr/us 부분집합이 아닌 "all"
+    # 스코프에서만 그날 엔트리를 기록(부분 뷰가 하루 기록을 덮어쓰지 않게).
+    if market == "all":
+        try:
+            sector_snapshot.save_market_stats(datetime.now(KST).strftime("%Y-%m-%d"), sector_info["by_sector"])
+        except Exception as e:
+            print(f"[sector_snapshot] save_market_stats 실패: {e}", flush=True)
     return bundle
 
 
@@ -5847,7 +5961,7 @@ async def _run_scan_jongga(bundle: dict) -> dict:
             continue
         hits.append({
             "ticker": t, "name": universe.get(t, t), "market": "KR",
-            "sector": _sector_of(t), "backtest_note": JONGGA_BACKTEST_NOTE,
+            **_sector_fields(t, bundle), "backtest_note": JONGGA_BACKTEST_NOTE,
             "sell_rule": JONGGA_SELL_RULE,
             **r,
         })
@@ -6450,7 +6564,7 @@ async def _run_scan_stage2(bundle: dict) -> dict:
         pf = price_frozen_check(df["Close"], df["High"], df["Low"], df["Volume"])  # v5.90
         hits.append({
             "ticker": t, "name": universe.get(t, t), "market": "KR",
-            "sector": _sector_of(t), "alert": None,
+            **_sector_fields(t, bundle), "alert": None,
             "climax": False, "climax_reasons": [], "climax_level": None,
             "avg_value_20_eok": round(liq_value[t] / 1e8, 1),
             "price_frozen": pf["price_frozen"], "price_frozen_reasons": pf["price_frozen_reasons"],
@@ -6591,7 +6705,7 @@ async def _run_scan_strong_pivot(bundle: dict) -> dict:
         # v5.90: price_frozen은 analyze_imminent()가 이미 result에 붙여줌 — 중복 계산 안 함.
         hits.append({
             "ticker": t, "name": universe.get(t, t), "market": mkt,
-            "sector": _sector_of(t), "alert": alert_kind,
+            **_sector_fields(t, bundle), "alert": alert_kind,
             "climax": cw["climax"], "climax_reasons": cw["reasons"],
             "climax_level": cw["level"],
             **result,
@@ -6695,7 +6809,7 @@ async def _run_scan_ibd9(bundle: dict) -> dict:
         pf = price_frozen_check(data[t]["Close"], data[t]["High"], data[t]["Low"], data[t]["Volume"])  # v5.90
         hits.append({
             "ticker": t, "name": universe.get(t, t), "market": "US",
-            "sector": _sector_of(t), "alert": None,
+            **_sector_fields(t, bundle), "alert": None,
             "climax": False, "climax_reasons": [], "climax_level": None,
             "price_frozen": pf["price_frozen"], "price_frozen_reasons": pf["price_frozen_reasons"],
             **r,
@@ -6845,7 +6959,7 @@ async def _run_scan_earnings_inner(bundle: dict) -> dict:
         pf = price_frozen_check(df["Close"], df["High"], df["Low"], df["Volume"])  # v5.90
         hits.append({
             "ticker": t, "name": universe.get(t, t), "market": "KR" if is_kr else "US",
-            "sector": _sector_of(t), "alert": None,
+            **_sector_fields(t, bundle), "alert": None,
             "climax": False, "climax_reasons": [], "climax_level": None,
             "price_frozen": pf["price_frozen"], "price_frozen_reasons": pf["price_frozen_reasons"],
             "mode": "earnings",
@@ -7035,7 +7149,7 @@ async def run_scan(market: str, mode: str) -> dict:
             if _record_signal_snapshot(t, GATE_MODE_LABELS[mode], df, result.get("pivot"), snap_stop):
                 snapshot_dirty = True
         hits.append({"ticker": t, "name": universe[t], "market": mkt,
-                     "sector": _sector_of(t), "alert": alert_kind,
+                     **_sector_fields(t, bundle), "alert": alert_kind,
                      "climax": cw["climax"], "climax_reasons": cw["reasons"],
                      "climax_level": cw["level"], **result})
         if is_kr: diag["kr_hits"] += 1
@@ -7059,6 +7173,19 @@ async def run_scan(market: str, mode: str) -> dict:
     ]
 
     warn_count = sum(1 for h in hits if h.get("alert") or h.get("risk_warn"))
+
+    # v5.195 [3]: "섹터 흐름" 캘린더 카드의 "오늘 히트" — 카드 RS 옆 표시(사용자
+    # 스펙 [4] "5탭 전부")와 같은 5개 메인 탭(종가베팅은 RS 자체가 없어 제외)만
+    # 집계. market="all" 스캔에서만 기록(kr/us 필터 뷰는 부분집합이라 그날
+    # 기록을 덮어쓰면 안 됨 — sector_snapshot.save_market_stats()와 같은 원칙).
+    if market == "all" and mode in ("pullback", "imminent", "boxbreak", "breakout", "turnaround"):
+        try:
+            sector_snapshot.record_hits(
+                datetime.now(KST).strftime("%Y-%m-%d"), mode,
+                [h["ticker"] for h in hits], _sector_of,
+            )
+        except Exception as e:
+            print(f"[sector_snapshot] record_hits({mode}) 실패: {e}", flush=True)
 
     return {
         "version": VERSION,
@@ -7544,6 +7671,46 @@ async def _ensure_mcap_allowed():
         _mcap_fetch_in_progress = False
 
 
+def _reload_us_industry_cache_if_updated() -> None:
+    """빌드 서브프로세스가 파일을 새로 썼으면(mtime 증가) 메모리에 다시 로드.
+    가벼운 os.path.getmtime 비교만 하므로 스케줄러 루프(4분마다)에서 매번
+    불러도 부담 없음."""
+    global _us_industry_cache_mtime, _us_industry_cache_data
+    try:
+        m = os.path.getmtime(us_industry_cache.cache_path())
+    except OSError:
+        return
+    if m > _us_industry_cache_mtime:
+        _us_industry_cache_data = us_industry_cache.load_cache()
+        _us_industry_cache_mtime = m
+        print(f"[us_industry_cache] 메모리 갱신 — {len(_us_industry_cache_data)}종목", flush=True)
+
+
+async def _ensure_us_industry_cache_fresh() -> None:
+    """월 1회(30일 경과) US 업종 캐시 자동 재빌드 — build_us_industry_cache.py를
+    별도 프로세스로 nohup 방식(start_new_session=True) 띄운다. yfinance
+    2000+회 순회(스로틀 포함 수십 분)라 이벤트루프/스레드풀 안에서 직접
+    돌리지 않음. 빌드 중엔 메모리에 있는 기존 캐시(또는 아예 없으면
+    us_sectors_auto 폴백, _sector_of 참고)를 그대로 쓴다."""
+    _reload_us_industry_cache_if_updated()
+    if not us_industry_cache.is_stale():
+        return
+    if us_industry_cache.is_locked():
+        return  # 이미 다른 프로세스가 진행 중
+    try:
+        script = os.path.join(os.path.dirname(__file__), "build_us_industry_cache.py")
+        log_path = os.path.join(os.path.dirname(us_industry_cache.cache_path()), "us_industry_cache_build.log")
+        with open(log_path, "a") as logf:
+            subprocess.Popen(
+                [sys.executable, script],
+                stdout=logf, stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        print("[us_industry_cache] 30일 경과 — 월간 재빌드 백그라운드 시작", flush=True)
+    except Exception as e:
+        print(f"[us_industry_cache] 재빌드 트리거 실패: {e}", flush=True)
+
+
 _jongga_snapshot_date: str | None = None   # 오늘 자 종가베팅 스냅샷 실행 여부(날짜 키)
 
 
@@ -7597,6 +7764,7 @@ async def _scheduler_loop():
     while True:
         try:
             asyncio.create_task(_ensure_mcap_allowed())  # 하루 1회, 워밍과 별개로 진행
+            asyncio.create_task(_ensure_us_industry_cache_fresh())  # v5.195: 월 1회, 워밍과 별개로 진행
             for market in ("kr", "us"):
                 await _warm_market(market)
             await _maybe_run_jongga_snapshot()
@@ -11240,6 +11408,40 @@ def _dedup_today_decision(immediate: list, interest: list, near: list) -> tuple[
     return kept["immediate"], kept["interest"], kept["near"]
 
 
+def _build_sector_flow(today: str) -> dict | None:
+    """v5.195 [4]: 캘린더 "📊 섹터 흐름" 카드 원본. sector_snapshot.json의
+    오늘자 엔트리(_fetch_market_data_inner가 market="all" 스캔마다 갱신)를
+    읽어 섹터RS 상위5·52주 신고가 섹터·섹터별 대장3·오늘 히트 탭 수로 정리.
+    그날 스캔이 아직 한 번도 안 돌았으면(엔트리 없음) None → 프론트가 카드
+    자체를 생략(폴백 없이 판정불가로 두는 기존 컨벤션, index.html:1296 참고)."""
+    day = sector_snapshot.load_all().get(today)
+    if not day:
+        return None
+    uni = get_universe("all")
+    rows = []
+    for sec, rec in day.items():
+        if rec.get("sector_rs_pct") is None:
+            continue
+        rows.append({
+            "sector": sec,
+            "rs_pct": rec.get("sector_rs_pct"),
+            "ret20": rec.get("ret20"),
+            "ret60": rec.get("ret60"),
+            "n": rec.get("n"),
+            "new_high_52w": bool(rec.get("new_high_52w")),
+            "leaders": [{"ticker": tk, "name": uni.get(tk, tk)} for tk in (rec.get("leaders") or [])],
+            "hits_today": sector_snapshot.hit_tab_count(today, sec),
+        })
+    if not rows:
+        return None
+    rows.sort(key=lambda r: r["rs_pct"], reverse=True)
+    return {
+        "top_rs": rows[:5],
+        "new_high_sectors": [r["sector"] for r in rows if r["new_high_52w"]],
+        "asof": today,
+    }
+
+
 @app.get("/api/calendar")
 async def get_calendar():
     """캘린더 탭 — 로그인 후 기본 화면(v5.108). v5.110(사용자 지시)에서
@@ -12040,9 +12242,16 @@ async def get_calendar():
                 break
         market_closed = {"next_open": next_open}
 
+    sector_flow = None
+    try:
+        sector_flow = _build_sector_flow(today)
+    except Exception as e:
+        print(f"[calendar] sector_flow 조회 실패: {e}")
+
     return JSONResponse(_clean_nan({
         "today": today,
         "today_decision": today_decision,
+        "sector_flow": sector_flow,
         "dday_warnings": dday_warnings,
         "positions_summary": positions_summary,
         "action_queue": {"near_pivot": near_pivot, "jongga_today": jongga_today,

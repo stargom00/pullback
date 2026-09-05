@@ -1175,7 +1175,18 @@ function entrySignal(s) {
     // warn으로 찍히면서도 최종 판정(level)엔 전혀 반영이 안 됐음(항상
     // 'ok'로 새어나감). 직접 재현 확인(RS=75 단독 입력 → checks=[warn],
     // level='ok') 후 추가.
-    else if (s.rs >= 70) { checks.push(['warn', `RS ${s.rs} — 주도주는 아님`, 'rs_mid', rsActive, rsReason]); if (rsActive) warn++; }
+    else if (s.rs >= 70) {
+      // v5.195(사용자 지시 — 섹터 층 1단계 [4]): 판정 로직(70~89면 warn)은
+      // 그대로, 문구만 정정 — "주도주는 아님"만 보면 마치 시장 전체에서
+      // 약하다는 뜻으로 읽히는데, 실제로는 RS가 지수 대비 초과성과 백분위라
+      // 섹터 내에서는 상위일 수 있다(예: 손해보험 섹터 자체가 약해서 그
+      // 안의 1등도 시장RS는 70대). 섹터 내 순위 정보가 있으면 그걸 보여줘
+      // "시장 대비로는 평범해도 섹터 내에선 어디쯤인지"를 알 수 있게 함.
+      const rsMidTxt = (s.sector_rank != null && s.sector && s.sector !== '기타')
+        ? `시장 RS ${s.rs} · ${s.sector} 내 ${s.sector_rank}위`
+        : `RS ${s.rs} — 주도주는 아님`;
+      checks.push(['warn', rsMidTxt, 'rs_mid', rsActive, rsReason]); if (rsActive) warn++;
+    }
     else { checks.push(['danger', `RS ${s.rs} 약함`, 'rs_weak', rsActive, rsReason]); if (rsActive) danger++; }
   }
   // v5.38: 손익비 체크 제거. rr_info()의 '최소 2R 보장' 폴백 때문에
@@ -1408,7 +1419,7 @@ function jonggaCard(s) {
       <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
       <div>
         <div class="name">🌆 <a class="name-link" href="${tvUrl(s)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.name}</a><span class="mkt">${s.market}</span>${s.price_frozen ? ` <span class="merger-tag" title="가격고정(M&A/특수상황) 의심: ${(s.price_frozen_reasons||[]).join(', ')}">⚠️ 가격고정</span>` : ''}</div>
-        <div class="tick mono">${s.ticker ? `<a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a>` : ''}${s.sector && s.sector !== '기타' ? ` · ${s.sector}` : ''}</div>
+        <div class="tick mono">${s.ticker ? `<a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a>` : ''}${s.sector && s.sector !== '기타' ? ` · ${s.sector}${s.sector_rank != null && s.sector_total != null ? ` ${s.sector_rank}/${s.sector_total}` : ''}${s.sector_rs_pct != null ? ` · 섹터RS ${s.sector_rs_pct}` : ''}` : ''}</div>
       </div>
       <div style="margin-left:auto;text-align:right">
         <div class="mono" style="font-size:11px;color:var(--muted)">거래대금</div>
@@ -1842,7 +1853,7 @@ function breakdownCard(s) {
       <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
       <div>
         <div class="name">🩸 <a class="name-link" href="${tvUrl(s)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.name}</a>${s.triggered ? ' <span style="color:#ff6b6b;font-size:11px">이탈+거래량</span>' : ''}<span class="mkt">${s.market}</span></div>
-        <div class="tick mono">${s.ticker ? `<a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a>` : ''}${s.sector && s.sector !== '기타' ? ` · ${s.sector}` : ''}</div>
+        <div class="tick mono">${s.ticker ? `<a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a>` : ''}${s.sector && s.sector !== '기타' ? ` · ${s.sector}${s.sector_rank != null && s.sector_total != null ? ` ${s.sector_rank}/${s.sector_total}` : ''}${s.sector_rs_pct != null ? ` · 섹터RS ${s.sector_rs_pct}` : ''}` : ''}</div>
       </div>
       <div style="margin-left:auto;display:flex;flex-direction:column;align-items:center;gap:2px">
         ${scoreRing(s.score)}
@@ -1995,7 +2006,7 @@ function card(s) {
             return ` <span class="climax-tag danger" style="background:#2a1a0f;color:#fbbf24;border:1px solid #6b5518" title="약세장 부적격 — 미충족: ${miss.join(', ')}. ${g==='correction'?'🔴조정':'🟡압박'} 국면에선 이 3개(탄탄한베이스·RS90+·손절폭좁음)를 다 갖춘 것만 진입 권장. 하나라도 빠지면 관망.">△ 약세부적격</span>`;
           }
         })()}<span class="mkt">${s.market}</span></div>
-        <div class="tick mono">${s.ticker ? `<a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a>` : ''}${s.sector && s.sector !== '기타' ? ` · ${s.sector}` : ''}</div>
+        <div class="tick mono">${s.ticker ? `<a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a>` : ''}${s.sector && s.sector !== '기타' ? ` · ${s.sector}${s.sector_rank != null && s.sector_total != null ? ` ${s.sector_rank}/${s.sector_total}` : ''}${s.sector_rs_pct != null ? ` · 섹터RS ${s.sector_rs_pct}` : ''}` : ''}</div>
       </div>
       <div style="margin-left:auto;display:flex;flex-direction:column;align-items:center;gap:2px">
         ${scoreRing(s.score)}
@@ -3940,6 +3951,37 @@ function renderTodayDecisionHtml(td) {
   </div>`;
 }
 
+// v5.195(사용자 지시 — 섹터 층 1단계 [4]): "🎯 오늘의 결정" 바로 아래
+// "📊 섹터 흐름" 카드 — 섹터RS 상위5 · 52주 신고가 섹터 🔥 · 섹터별 대장3 +
+// 오늘 히트(5탭). 원본은 /api/calendar의 sector_flow(백엔드 sector_snapshot.py,
+// 스캔이 이미 메모리에 갖고 있던 일봉으로 계산 — 추가 fetch 0건). 그날
+// market=all 스캔이 한 번도 안 돌았으면 sector_flow가 null → 카드 자체 생략
+// (오늘의 결정과 같은 컨벤션: 폴백으로 옛날 값 억지로 채우지 않음).
+function renderSectorFlowHtml(sf) {
+  if (!sf || !sf.top_rs || !sf.top_rs.length) return '';
+  const rows = sf.top_rs.map(r => {
+    const leaders = (r.leaders || []).map(l => l.name).join(', ') || '-';
+    const hot = r.new_high_52w ? ' 🔥' : '';
+    const hits = r.hits_today ? ` · 오늘 ${r.hits_today}탭 히트` : '';
+    const ret = (r.ret20 != null && r.ret60 != null)
+      ? `<span style="color:var(--muted);font-size:11px"> (20일 ${r.ret20 >= 0 ? '+' : ''}${r.ret20}% · 60일 ${r.ret60 >= 0 ? '+' : ''}${r.ret60}%)</span>` : '';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)">
+      <div style="font-size:13px"><b>${r.sector}</b>${hot}${ret}</div>
+      <div style="text-align:right;font-size:12px;white-space:nowrap">
+        <span class="mono" style="color:var(--rs)">섹터RS ${r.rs_pct}</span>
+        <div style="color:var(--muted)">대장 ${leaders}${hits}</div>
+      </div>
+    </div>`;
+  }).join('');
+  const hotLine = (sf.new_high_sectors && sf.new_high_sectors.length)
+    ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">🔥 52주 신고가 섹터: ${sf.new_high_sectors.join(', ')}</div>` : '';
+  return `<div style="margin-top:14px">
+    <div class="mf-toolbar"><b>📊 섹터 흐름</b></div>
+    ${rows}
+    ${hotLine}
+  </div>`;
+}
+
 function renderCalendar(data) {
   const doc = document.getElementById('calendarDoc');
   const isKrTicker = t => /\.(KS|KQ)$/.test(t || '');
@@ -4078,9 +4120,11 @@ function renderCalendar(data) {
 
   _todayDecisionMap = {};
   const todayDecisionHtml = renderTodayDecisionHtml(data.today_decision);
+  const sectorFlowHtml = renderSectorFlowHtml(data.sector_flow);
 
   doc.innerHTML = `
     ${todayDecisionHtml}
+    ${sectorFlowHtml}
     ${marketClosedHtml}
     ${ddayHtml}
     ${positionsSummaryHtml}
