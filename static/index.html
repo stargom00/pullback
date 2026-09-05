@@ -1805,9 +1805,16 @@ function reignitionPullbackSectionHtml() {
     const failTag = df.fail
       ? ` <span style="color:#f87171;font-size:10px" title="${df.belowMa200 ? '종가가 200일선 아래' : ''}${df.belowMa200 && df.overDecline ? ' · ' : ''}${df.overDecline ? '고점 대비 조정폭 35% 초과' : ''}">⚠️ 재량 기준 미달</span>`
       : '';
+    // v5.196(사용자 지시 — 시나리오 카드 [3] 눌림목 탭 재점화 감시 항목):
+    // 확정 체결(confirmed)은 이미 진입 판정이 끝난 상태라 "미리 정해두는"
+    // 재량 시나리오의 대상이 아님 — watching(exec)에만 붙인다.
+    const scenarioHtml = (!confirmed && (it.exec || {}).scenario)
+      ? renderScenarioHtml(it.exec.scenario, 'KR', 'sc_reig_' + it.ticker)
+      : '';
     return `<div class="jongga-forward-sub" style="padding:3px 0;${dimStyle}">
       <div>${st.icon} <b>${nameLink}</b> <span style="opacity:.7">(${it.theme})</span> · ${priceTxt} · ${stopTxt}${checklistIcon}${failTag}</div>
       <div style="opacity:.75;font-size:10px;padding-left:20px">${reignitionStatusLine(it, confirmWindowDays)}</div>
+      ${scenarioHtml}
     </div>`;
   };
   // v5.190([7] 재점화 감시 만료): 만료분은 기본 접기 — 개수만 보이고
@@ -3738,6 +3745,51 @@ function reignitionChecklistTooltip(item) {
     '체결 시 저널 "재량"으로, 체결가 기록.';
 }
 
+// v5.196(사용자 지시 — 시나리오 카드, 표시 전용·재량 훈련용): 관심 종목의
+// 저항/지지/무효 3레벨 + 3갈래 시나리오를 접어서 보여준다. 예측 주장이
+// 아니라 "매매 전에 미리 정해두는" 사전 결정 도구 — 라벨은 항상
+// sc.label("재량 시나리오")을 그대로 노출해 판정처럼 보이지 않게 한다.
+// 카드마다 독립적으로 접고 펼 수 있게 고유 DOM id로 직접 토글한다
+// (toggleTodayDecisionWaiting()과 같은 가벼운 패턴 — 전체 재렌더 없음).
+function toggleScenarioBox(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const show = el.style.display === 'none';
+  el.style.display = show ? '' : 'none';
+  const caret = document.getElementById(id + '_caret');
+  if (caret) caret.textContent = show ? '▾' : '▸';
+}
+function renderScenarioHtml(sc, market, domId) {
+  if (!sc) return '';
+  const fp = v => v != null ? fmtPrice(v, market) : '-';
+  const lv = sc.levels, s1 = sc.scenario1, s2 = sc.scenario2, s3 = sc.scenario3;
+  const star = n => sc.favored === n ? ' <span style="color:var(--green)">★ R유리</span>' : '';
+  const hl = n => sc.highlight === n ? 'font-weight:700;color:var(--up)' : '';
+  const row1 = `<div style="${hl(1)}">${s1.label} (${s1.condition}) → 진입 ${fp(s1.entry)} · 손절 ${fp(s1.stop)} · 리스크 ${s1.risk_pct != null ? s1.risk_pct + '%' : '-'}${star(1)}</div>`;
+  const row2 = s2
+    ? `<div style="${hl(2)}">${s2.label} → 진입 ${fp(s2.entry)} · 손절 ${fp(s2.stop)} · 리스크 ${s2.risk_pct}% · R ${s2.r_multiple}${star(2)}</div>`
+    : `<div style="color:var(--muted)">② 계산 불가 — 지지/무효 없음</div>`;
+  const row3 = `<div style="color:var(--muted)">${s3.label} — ${s3.condition} → ${s3.action}</div>`;
+  return `<div class="jongga-forward-sub" style="cursor:pointer;margin-top:4px" onclick="toggleScenarioBox('${domId}')"><span id="${domId}_caret">▸</span> 시나리오 <span style="opacity:.6">(${sc.label})</span></div>
+    <div id="${domId}" style="display:none;font-size:11px;padding:4px 0 2px 14px">
+      <div style="color:var(--muted);margin-bottom:2px">저항 ${fp(lv.resistance)}(${lv.resistance_source}) · 지지 ${lv.support != null ? fp(lv.support) + '(' + lv.support_source + ')' : '없음'} · 무효 ${lv.invalidation != null ? fp(lv.invalidation) + '(' + lv.invalidation_source + ')' : '-'}</div>
+      ${row1}${row2}${row3}
+    </div>`;
+}
+
+// v5.196 [4]: 저널 메모 세 줄 프리필 — "① 저항 돌파 시 진입 / ② 지지 눌림
+// 시 진입 / ③ 무효 이탈 시 해제". 사용자가 수정·확정하는 게 훈련의 핵심이라
+// 강제 서식이 아니라 시작값일 뿐(그대로 편집 가능한 일반 textarea).
+function scenarioMemoText(sc, market) {
+  if (!sc || !sc.levels) return '';
+  const fp = v => v != null ? fmtPrice(v, market) : null;
+  const lv = sc.levels;
+  const r = fp(lv.resistance) || '저항';
+  const s = lv.support != null ? fp(lv.support) : '지지없음';
+  const i = lv.invalidation != null ? fp(lv.invalidation) : '무효기준없음';
+  return `① ${r} 돌파 시 진입 / ② ${s} 눌림 시 진입 / ③ ${i} 이탈 시 해제`;
+}
+
 function renderTodayDecisionHtml(td) {
   if (!td) return '';
   _tdBadgeStats = { green: 0, orange: 0, gray: 0, none: 0 };
@@ -3831,6 +3883,7 @@ function renderTodayDecisionHtml(td) {
       <div style="font-size:15px;font-weight:700;margin-top:4px">${fmtPrice(item.entry, mkt)} → ${stopStr}</div>
       ${pivotGapLine}
       <div style="font-size:11px;color:var(--muted);margin-top:4px;${descClamp}">${descParts.join(' · ')}</div>
+      ${item.scenario ? renderScenarioHtml(item.scenario, mkt, 'sc_td_' + item.key) : ''}
       ${actions(item, false)}
     `);
   }).join('');
@@ -3870,6 +3923,7 @@ function renderTodayDecisionHtml(td) {
       <div><b>${nameLink(item)}</b> <span class="mkt">${mkt}</span></div>
       <div style="font-size:15px;font-weight:700;margin-top:4px">${fmtPrice(item.current_price, mkt)} → ${fmtPrice(item.pivot, mkt)} <span style="font-size:12px;font-weight:400;color:var(--muted)">(${distStr})</span></div>
       <div style="font-size:11px;color:var(--muted);margin-top:4px;${descClamp}">${descParts.join(' · ')}</div>
+      ${item.scenario ? renderScenarioHtml(item.scenario, mkt, 'sc_td_' + item.key) : ''}
       ${actions(item, item.source !== 'reignition')}
     `);
   };
@@ -3898,6 +3952,7 @@ function renderTodayDecisionHtml(td) {
       <div style="font-size:15px;font-weight:700;margin-top:4px;color:var(--muted)">${item.tab || ''} · 확인일 ${item.confirmed_at || '-'} · 종가 ${fmtPrice(item.close, mkt)}</div>
       <div style="font-size:11px;color:var(--muted);margin-top:2px">피벗(기준) ${fmtPrice(item.pivot, mkt)} · 손절(기준) ${fmtPrice(item.stop, mkt)}</div>
       <div style="font-size:11px;color:#ffb27a;font-weight:700;margin-top:2px">${labelText}${checklistIcon}</div>
+      ${item.scenario ? renderScenarioHtml(item.scenario, mkt, 'sc_td_' + item.key) : ''}
       ${actions(item, false)}
     `);
   }).join('');
@@ -5406,7 +5461,10 @@ function openJournal(ticker) {
   if (elLabel) elLabel.textContent = breakoutModes.includes(s.mode)
     ? '진입 가정가 (피벗 돌파가)'
     : '진입 가정가 (현재가 근처)';
-  document.getElementById('jmNote').value = '';
+  // v5.196 [4]: 시나리오가 있으면(오늘의 결정 pending_watch/재점화 출신)
+  // 메모 칸에 세 줄 자동 프리필 — 재량 훈련 목적, 사용자가 수정/확정 가능
+  // (강제 아님, 그냥 시작값).
+  document.getElementById('jmNote').value = scenarioMemoText(s.scenario, s.market);
   const jc = document.getElementById('jmCat');
   if (jc) jc.value = modeCategory(s.mode);
   if (window._resetModalPos) window._resetModalPos();
@@ -5431,6 +5489,7 @@ function _decisionHitShape(item) {
     stop: item.stop ?? item.stop_if_triggered ?? null,
     pivot: item.pivot ?? item.entry_if_triggered ?? null,
     rs: item.rs ?? null,
+    scenario: item.scenario || null,   // v5.196 [4]: 저널 메모 프리필용
   };
 }
 function decisionOpenJournal(key) {
@@ -5608,7 +5667,7 @@ async function saveManualAdd() {
     // entry_actual 미기입 건을 매칭하면 자동채움(entry_source='toss') —
     // 기존 인프라를 그대로 재사용, 이 레코드만을 위한 별도 코드 불필요.
     entry_source: null, entry_actual: null, entry_actual_date: null,
-    sector, alert: '', note,
+    sector, alert: '', note, scenario: null,   // v5.196: 수동 추가는 스냅샷/df가 없어 시나리오 계산 대상 아님
     exit: '', result_r: '', held_days: '', review: ''
   };
   const j = getJournal(); j.unshift(rec);
@@ -5752,7 +5811,7 @@ async function saveJournal() {
     // ── R 시스템 사이즈 스냅샷 (v4.47, v5.116부터 실제 체결 수량 우선) ──
     shares: actualShares != null ? actualShares : (sized ? sized.shares : ''),
     r_value_krw: sized ? sized.rKrw : '',
-    alert: s.alert || '', note,
+    alert: s.alert || '', note, scenario: s.scenario || null,   // v5.196 [3][4]: 대기 행 시나리오 카드용
     exit: '', result_r: '', held_days: '', review: '',
     // v5.44: 돌파임박 관찰 등록 시 "확인 후 진입" 트리거 스냅샷 — 안C 조사
     // (docs/imminent_stop_entry_investigation.md 3.6) 결론 반영. 라벨은
@@ -6423,7 +6482,15 @@ function viewRow(r) {
       <span class="edit-btn" onclick="editingId=${r.id};renderJournal()" title="수정/상세">✏️</span>
       <span class="del" onclick="delJournal(${r.id})" title="삭제">✕</span>
     </td>
-  </tr>`;
+  </tr>${
+    // v5.196 [3]: "내 일지" 대기 행 전용 시나리오 토글 — pending 상태이고
+    // 저장 시점에 계산해둔 scenario가 있을 때만(⚡감시/+일지 경로, 수동
+    // 추가는 null). colspan은 위 <td> 8개(날짜·상태·종목·진입·손절·결과·
+    // 메모·액션)와 맞춤.
+    (st === 'pending' && r.scenario)
+      ? `<tr><td colspan="8" style="padding:0 8px 6px 8px;border-top:none">${renderScenarioHtml(r.scenario, r.market, 'sc_jr_' + r.id)}</td></tr>`
+      : ''
+  }`;
 }
 
 // 진입 → 종료: 청산가 입력받아 결과R 확정. 수정폼을 펼쳐서 청산가 칸에 포커스.

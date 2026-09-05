@@ -5,6 +5,41 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.196 [기능개선] 시나리오 카드(사용자 지시, 커밋명 scenario-card) —
+        표시 전용·재량 훈련용, 게이트·판정 로직 무변경, 새 지표 없음
+        (이미 계산되는 값만 조합). scenario.py 신규.
+        [1] 레벨(이미 있는 값만): 저항=신호 스냅샷 pivot(없으면 20일 고가),
+        지지=21EMA/50MA 중 현재가 아래에서 더 가까운 값(둘 다 위면 "지지
+        없음"), 무효=200MA·스냅샷 stop 중 낮은 값(둘 다 없으면 최근 60봉
+        저가). 실측(HD현대에너지솔루션 322000.KS): 저항 152,800(20일고가)
+        — 사용자가 준 예시값과 정확히 일치.
+        [2] 세 갈래: ①저항 돌파(거래량1.5배+)→진입 저항/손절 지지/리스크%,
+        ②저항 거절→지지 조정→진입 지지/손절 무효/리스크%/R=(저항−지지)÷
+        (지지−무효), ③지지 이탈→무효 터치→관심 해제. ①②리스크% 비교해
+        낮은 쪽에 ★ R유리. 현재가가 저항 -2%/지지 +2% 이내면 해당 시나리오
+        강조.
+        [3] 표시 위치 — df가 실제로 있는 경로에만 부착(스냅샷만 있고 df가
+        없는 소스는 시나리오 자체를 생략, 새 fetch 안 함): 캘린더
+        get_calendar()의 pending_watch(🔎관심/🟡근접/🟠이미돌파, df는
+        이미 캐시에서 재사용) 3곳, _refresh_reignition_watch()(일 1회
+        배치, df 있을 때 rec["exec"]에 미리 계산해 저장 — 서빙 시점엔
+        df 없이 저장분만 읽음). 카드 하단 "▸ 시나리오" 접힘 토글(기본
+        접힘, 고유 DOM id 직접 토글 — 전체 재렌더 없음). 5탭 카드엔 안 넣음
+        (이미 정보 많다는 사용자 판단).
+        [4] 저널 메모 프리필: "+ 일지" 모달의 jmNote를 시나리오 3줄
+        ("① 저항 돌파 시 진입 / ② 지지 눌림 시 진입 / ③ 무효 이탈 시
+        해제")로 자동 채움(scenarioMemoText, 편집 가능). ⚡감시(POST
+        /api/watch/quick)는 서버가 캐시된 df로 직접 계산해 저장되는
+        레코드의 note에 미리 채움(scenario.memo_text, "내 일지" 탭은
+        저장된 값만 보므로). 수동 직접 추가는 df/스냅샷 자체가 없어
+        시나리오 계산 대상 아님(빈 메모 유지, 새 fetch로 억지로 채우지
+        않음).
+        [5] 검증: app.py를 직접 import해 확인 — 322000.KS 저항 152,800
+        (20일고가) 정확히 일치. 지지/무효/R은 EMA·MA가 매일 갱신되는
+        값이라 사용자가 준 예시(135,7xx/127,xxx/R≈3.4)와 정확히 같은
+        숫자가 나오진 않음(계산 시점이 다름) — 방법론(21EMA adjust=False,
+        200MA=rolling(200).mean(), 기존 scanner.py 관례와 동일) 자체는
+        일치 확인.
 v5.195 [기능개선] 섹터 층 1단계(사용자 지시, 커밋명 sector-layer-v1) —
         표시 전용, 게이트·판정 로직 무변경.
         [1] _sector_of() 병합 순서 수정 — sectors.py의 굵은 버킷(금융/
@@ -4778,6 +4813,23 @@ except Exception as _e:
     print(f"[sectors] kr_sectors_auto 미탑재 -> 자동보완 비활성: {_e}", flush=True)
     KR_SECTORS_AUTO = {}
 import sector_snapshot   # v5.195 [3]: 섹터 합성지수/RS백분위/신고가비율 등 (추가 fetch 0건)
+import scenario   # v5.196: 시나리오 카드(저항/지지/무효 + 3갈래) — 표시 전용, 재량 훈련용
+
+
+def _scenario_for(df, snap: dict | None) -> dict | None:
+    """v5.196 [1]: 시나리오 카드 원본 — df(이미 캐시/스캔에서 받은 것)와
+    신호 스냅샷(pivot/stop)만으로 계산, 추가 fetch 없음. snap이 없으면
+    scenario.py가 자체적으로 20일고가/200MA/베이스저점으로 폴백."""
+    if df is None or len(df) < 20:
+        return None
+    try:
+        return scenario.build_scenario(
+            df["Close"], df["High"], df["Low"],
+            pivot=(snap or {}).get("pivot"), stop=(snap or {}).get("stop"),
+        )
+    except Exception as e:
+        print(f"[scenario] 계산 실패: {e}", flush=True)
+        return None
 import us_industry_cache   # v5.195 [2]: yfinance industry US 캐시(월 1회 백그라운드 빌드)
 
 _us_industry_cache_data: dict = us_industry_cache.load_cache()
@@ -5047,7 +5099,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.195"
+VERSION = "v5.196"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6318,6 +6370,10 @@ async def _refresh_reignition_watch(bundle: dict):
                         "vol_mult": res.get("vol_mult"),  # v5.190: 재량 체크리스트 실측값
                         "decline_from_peak_pct": decline_pct,  # v5.190: 재량 체크리스트 실측값
                         "below_ma200": below_ma200,  # v5.192([5]): 재량 기준 미달 배지
+                        # v5.196 [2]: 시나리오 카드 — df가 이미 여기 있을 때(일 1회
+                        # 배치) 계산해 저장. 서빙 시점(_reignition_watchlist_view)엔
+                        # df가 없으므로 여기서 미리 계산해두는 게 핵심.
+                        "scenario": _scenario_for(df, {"pivot": res["pivot"], "stop": res.get("atr_stop")}),
                     }
                     if res["confirmed"]:
                         rec["status"] = "confirmed"
@@ -11845,6 +11901,7 @@ async def get_calendar():
             else:
                 confirmed = False
         dist_pct = round((pivot_f - close) / pivot_f * 100, 2)
+        scenario_hit = _scenario_for(df, snap_bv)   # v5.196 [3]: 표시 위치 — df/스냅샷 재사용, 추가 fetch 0건
         if rule and confirmed:
             # v5.179(사용자 지시 — [프로덕션 정리] 확인 카드 최종 정리):
             # docs/confirm_entry_lookahead_2026-09-04.md 결론 — 실행 가능한
@@ -11873,7 +11930,7 @@ async def get_calendar():
                     "entry": close, "stop": stop_f, "target_2r": target_2r,
                     "close": close, "pivot": pivot_f, "atr_pct": atr_pct,
                     "verdict": "entry_candidate", "entry_method": "종가진입",
-                    "confirm_date": confirm_bar_date,
+                    "confirm_date": confirm_bar_date, "scenario": scenario_hit,
                     "reason": f"{tab} 진입 후보 (종가진입 0.157R z=2.37, 한계) · docs/confirm_entry_lookahead_2026-09-04.md",
                 })
             else:
@@ -11885,7 +11942,7 @@ async def get_calendar():
                     "source": "pending_watch", "key": f"pending:{r.get('id')}",
                     "ticker": ticker, "name": r.get("name") or ticker, "market": market,
                     "tab": tab, "confirmed_at": confirm_bar_date,
-                    "close": close, "pivot": pivot_f, "stop": stop_f,
+                    "close": close, "pivot": pivot_f, "stop": stop_f, "scenario": scenario_hit,
                     "reason": f"{tab} 관심 — 확인됐으나 진입 근거 미유의 · docs/confirm_entry_lookahead_2026-09-04.md",
                 })
         elif dist_pct <= 2:
@@ -11937,7 +11994,7 @@ async def get_calendar():
                 "ticker": ticker, "name": r.get("name") or ticker, "market": market,
                 "mode": r.get("mode_raw") or None, "sector": r.get("sector"),
                 "current_price": close, "pivot": pivot_f, "dist_pct": dist_pct,
-                "close": close, "stop": stop_f, "atr_pct": atr_pct,
+                "close": close, "stop": stop_f, "atr_pct": atr_pct, "scenario": scenario_hit,
                 "reason": reason,
             }
             if confirm_wait_kr:
@@ -12610,12 +12667,24 @@ async def watch_quick(request: Request):
     # 실제 진입일이 등록일 자체라 기존대로 유지, is_observe는 스냅샷 대상 아님.
     reg_date = datetime.now(KST).strftime("%Y-%m-%d")
     rec_date = snap["signal_date"] if (snap and not entered_now) else reg_date
+
+    # v5.196 [3][4]: ⚡감시로 만들어지는 pending 레코드도 캐시된 df(새 fetch
+    # 없음)로 시나리오를 계산해 note에 3줄 프리필 — "내 일지" 탭은 저장된
+    # 레코드만 보므로(get_calendar()의 실시간 계산을 못 봄) 여기서 한 번
+    # 계산해 박아둔다. is_observe/즉시진입은 "미리 정해두는" 대상이 아니라 제외.
+    rec_market = body.get("market") or ("KR" if ticker[:1].isdigit() else "US")
+    watch_scenario, watch_note = None, ""
+    if not is_observe and not entered_now:
+        _df_sc = _calendar_ticker_df(ticker)
+        watch_scenario = _scenario_for(_df_sc, snap)
+        watch_note = scenario.memo_text(watch_scenario, rec_market)
+
     rec = {
         "id": int(_t.time() * 1000),
         "date": rec_date,
         "ticker": ticker,
         "name": body.get("name") or ticker,
-        "market": body.get("market") or ("KR" if ticker[:1].isdigit() else "US"),
+        "market": rec_market,
         "status": "watch" if is_observe else ("entered" if entered_now else "pending"),
         "category": category,
         "cat": category,
@@ -12637,6 +12706,7 @@ async def watch_quick(request: Request):
         # (static/index.html의 확인 카드 자동승격 로직 참고).
         "entry_source": None, "entry_actual": None, "entry_actual_date": None,
         "updated_at": _now_iso(),
+        "note": watch_note, "scenario": watch_scenario,   # v5.196 [3][4]
     }
     if entered_now:
         rec["tracking"] = bool(entry_val and stop)
