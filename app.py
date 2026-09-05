@@ -5,6 +5,37 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.187 [수정] 저널 병합 가드 + 내 일지 "＋직접 추가" 강화(사용자 지시).
+        [1] 병합 가드: `POST /api/journal`(모든 setJournal() 호출의 유일한
+        저장 경로)이 그동안 받은 배열을 그대로 덮어썼다 — CLAUDE.md에
+        이미 기록된 사고(스테일 브라우저 탭 캐시가 서버의 최신 값을
+        덮어씀)의 구조적 원인. 이제 서버가 현재 파일을 다시 읽어 레코드별
+        병합: ① entry_actual/entry_actual_date/entry_source(실체결
+        3필드)는 saveEdit()이 넘기는 edit_id와 일치하는 레코드만 클라이언트
+        값을 받아들이고, 그 외(updateTracking 자동저장 포함 전부)는 서버
+        값을 무조건 유지 — 토스 자동채움 값이 스테일 자동저장에 지워지는
+        경로를 원천 차단. ② 저장 배열엔 없는데 서버엔 있는 레코드는 최근
+        5분(JOURNAL_CONCURRENT_KEEP_WINDOW_SEC) 안에 갱신됐으면 삭제로
+        보지 않고 되살린다(동시에 다른 경로가 막 추가·수정했을 가능성) —
+        그보다 오래됐으면 의도적 삭제로 보고 그대로 뺀다. ③ 레코드마다
+        updated_at 스탬프(내용이 실제로 바뀐 것만 갱신) — /api/watch/quick
+        신규 등록, positions_sync() 토스 자동채움도 같이 찍는다. 표준
+        merge 로직을 mock 데이터로 검증(토스 채움 후 스테일 자동저장이
+        와도 값 유지·명시편집은 반영·동시 신규 레코드 보존·오래된 누락은
+        삭제로 처리 4개 시나리오 전부 통과).
+        [2] 내 일지 "＋직접 추가"(기존 "➕ 수동 추가" 모달 확장): 탭
+        선택(5탭 또는 "재량") 추가 — 5탭 중 하나면 `GET /api/journal/
+        snapshot`으로 스캐너의 `_signal_snapshots`(get_signal_snapshot)를
+        조회해 피벗·손절 자동채움 시도, "재량"은 구조적으로 스냅샷이
+        없어 항상 직접 입력. 손절은 스냅샷으로 못 채우면 저장 자체를
+        막는다(대기/진입 공통, 관찰만 예외). 시장은 티커 접미사(.KS/.KQ·
+        5~6자리 숫자)로 자동 판정(라벨 "시장(자동)"). 새 레코드는
+        entry_source=None으로 시작 — 기존 토스 동기화 인프라가 그대로
+        매칭해 자동채움한다(이 레코드 전용 코드 불필요). "재량"은
+        category='재량'으로 태그해 journalStats() 집계에서 추세추종/단타와
+        자동 분리(폴백 없는 명시값이라 기존 `r.category || '추세추종'`
+        폴백 로직에 안 걸림) — 저널 화면에 🎲 재량 통계카드 + 필터 버튼 +
+        기존 레코드 재분류용 e_cat 옵션 추가.
 v5.186 [추가] 페이퍼 추적(forward 검증, 자동) + 저널 대기 만료(사용자 지시,
         원래 "v5.185"로 요청됐으나 토스 자동채움 수정이 이미 v5.185를
         선점해 v5.186으로 정정).
@@ -4750,7 +4781,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.186"
+VERSION = "v5.187"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -9086,6 +9117,12 @@ def _resolve_journal_path() -> str:
 
 JOURNAL_PATH = _resolve_journal_path()
 
+# v5.187(사용자 지시 — [1] 병합 가드): 레코드별 updated_at 스탬프에 쓰는
+# 단일 시각 소스 — save_journal()의 병합 판정과 마이그레이션 기본값 둘 다
+# 이 형식(항상 KST, isoformat)으로 통일해야 문자열/파싱 비교가 어긋나지 않는다.
+def _now_iso() -> str:
+    return datetime.now(KST).isoformat()
+
 
 def load_journal() -> list:
     """매매 일지 전체 (객체 배열).
@@ -9120,6 +9157,12 @@ def load_journal() -> list:
         if r.get("result_r") not in (None, "") and "result_source" not in r:
             r["result_source"] = "plan"
             migrated = True
+        if "updated_at" not in r:
+            # v5.187(사용자 지시 — [1] 병합 가드): 병합·동시성 보존 판정의
+            # 기준 필드라 없으면 안 된다 — 아주 오래된 값으로 채워 "최근에
+            # 안 바뀐 레코드"로 취급되게 한다(동시-보존 윈도우에 걸리지 않음).
+            r["updated_at"] = "1970-01-01T00:00:00+09:00"
+            migrated = True
     if migrated:
         try:
             _write_journal_file(data)
@@ -9131,6 +9174,21 @@ def load_journal() -> list:
 @app.get("/api/journal")
 async def get_journal():
     return JSONResponse(load_journal())
+
+
+@app.get("/api/journal/snapshot")
+async def journal_snapshot_lookup(ticker: str, tab: str):
+    """내 일지 '+직접 추가'(v5.187 사용자 지시 [2])의 손절 자동채움 —
+    스캐너가 이미 이 (ticker, tab) 조합의 게이트형 히트를 잡아
+    _signal_snapshots(get_signal_snapshot)에 pivot/stop을 남겨뒀으면 그대로
+    재사용. 없으면 ok:false — 프론트가 "스냅샷 없음, 직접 입력 필요"로
+    안내하고 손절 입력을 필수로 바꾼다. "재량" 탭은 애초에 스캐너 게이트를
+    거치지 않아 스냅샷이 있을 수 없다(정상, 항상 수동 입력)."""
+    snap = get_signal_snapshot(ticker.strip().upper(), tab)
+    if not snap:
+        return JSONResponse({"ok": False})
+    return JSONResponse({"ok": True, "pivot": snap.get("pivot"), "stop": snap.get("stop"),
+                          "signal_date": snap.get("signal_date")})
 
 
 @app.get("/api/watch/pending")
@@ -11748,6 +11806,7 @@ async def watch_quick(request: Request):
         # entered 전환될 때만 예외로 entry_source='auto_close'가 붙는다
         # (static/index.html의 확인 카드 자동승격 로직 참고).
         "entry_source": None, "entry_actual": None, "entry_actual_date": None,
+        "updated_at": _now_iso(),
     }
     if entered_now:
         rec["tracking"] = bool(entry_val and stop)
@@ -11759,17 +11818,7 @@ async def watch_quick(request: Request):
         rec["leader_snapshot_ma20_dist_pct"] = body.get("leader_snapshot_ma20_dist_pct")
     j.append(rec)
     try:
-        d = os.path.dirname(JOURNAL_PATH)
-        if os.path.exists(JOURNAL_PATH):
-            try:
-                import shutil
-                shutil.copy2(JOURNAL_PATH, JOURNAL_PATH + ".bak")
-            except OSError:
-                pass
-        tmp = JOURNAL_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            _json.dump(j, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, JOURNAL_PATH)
+        _write_journal_file(j)
     except OSError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
     return JSONResponse({"ok": True, "id": rec["id"], "pivot": pivot, "stop": stop})
@@ -11855,18 +11904,92 @@ def _write_journal_file(data: list):
     os.replace(tmp, JOURNAL_PATH)
 
 
+# v5.187(사용자 지시 — [1] 병합 가드): 이 3필드는 실제 체결 기록이라
+# 저널의 다른 필드(메모·손절 조정 등)와 성격이 다르다 — 어떤 자동저장
+# 경로도(updateTracking의 주기적 재저장 포함) 스테일 캐시가 들고 있는
+# 값으로 이걸 덮어쓰면 안 되고, 오직 saveEdit()의 명시적 편집(edit_id로
+# 표시)만 갱신할 수 있다.
+PROTECTED_JOURNAL_FIELDS = ("entry_actual", "entry_actual_date", "entry_source")
+# 서버에 있는데 이번 저장 배열엔 없는 레코드 — 삭제 의도인지, 이 저장이
+# 모르는 동시 추가/수정인지 구분할 방법이 없다(전체배열 저장 방식의 구조적
+# 한계). "최근에 갱신된 적 있으면 삭제로 보지 않는다" 휴리스틱으로 절충.
+JOURNAL_CONCURRENT_KEEP_WINDOW_SEC = 300
+
+
 @app.post("/api/journal")
 async def save_journal(request: Request):
-    """일지 전체를 통째로 저장(덮어쓰기). body = 일지 객체 배열.
-    원자적 쓰기(temp→rename) + 직전 백업으로 손상/유실 방지."""
+    """일지 저장 — v5.187(사용자 지시 [1] 병합 가드) 전에는 받은 배열을
+    그대로 덮어썼다. 그 방식이 CLAUDE.md에 이미 기록된 사고의 구조적
+    원인이었다: 브라우저 탭이 들고 있는 journalCache는 그 탭이 열려있는
+    내내 서버 재조회 없이 메모리에만 남는데, updateTracking() 자동저장이
+    주기적으로 그 스냅샷을 그대로 여기 던진다 — 그 사이 다른 경로(토스
+    동기화의 entry_actual 자동채움, /api/watch/quick의 새 레코드 추가 등)가
+    서버 쪽 저널을 이미 바꿨으면 그 변경이 스테일 캐시로 조용히 덮어써진다.
+
+    이제 서버가 현재 파일을 다시 읽어 레코드별로 병합한다:
+      1) PROTECTED_JOURNAL_FIELDS(실체결 3필드)는 이 요청이 명시적으로
+         "지금 이 id를 편집한다"고 표시한 경우(edit_id == 그 레코드 id)만
+         클라이언트 값을 받아들인다 — 그 외(자동저장 포함 전부)는 서버의
+         현재 값을 그대로 유지하고 클라이언트가 뭘 보냈든 버린다.
+      2) 서버엔 있는데 이번 배열엔 없는 레코드는 JOURNAL_CONCURRENT_KEEP_
+         WINDOW_SEC 안에 갱신된 적 있으면(동시에 다른 경로가 막 추가·
+         수정했을 가능성) 삭제로 보지 않고 결과에 되살린다. 그보다 오래된
+         값이면 사용자의 의도적 삭제(전체 삭제·개별 삭제)로 보고 그대로 뺀다.
+      3) 실제로 내용이 바뀐 레코드만 updated_at을 지금 시각으로 새로
+         찍는다 — 안 바뀐 레코드는 서버가 이미 갖고 있던 updated_at을
+         그대로 보존(그래야 2번의 "최근 갱신" 판정이 매 저장마다 전부
+         갱신되는 걸 막는다).
+
+    body: 배열(구형, 하위호환 — 이 경로는 edit_id 없이 모든 레코드를
+    "자동저장"으로 취급) 또는 {"records": [...], "edit_id": <id 또는 null>}.
+    원자적 쓰기(temp→rename) + 직전 백업으로 손상/유실 방지는 그대로."""
     body = await request.json()
-    if not isinstance(body, list):
-        return JSONResponse({"ok": False, "error": "배열 필요"}, status_code=400)
+    if isinstance(body, list):
+        incoming, edit_id = body, None
+    elif isinstance(body, dict) and isinstance(body.get("records"), list):
+        incoming, edit_id = body["records"], body.get("edit_id")
+    else:
+        return JSONResponse({"ok": False, "error": "배열 또는 {records:[...]} 필요"}, status_code=400)
+
+    current = load_journal()
+    current_by_id = {r.get("id"): r for r in current if r.get("id") is not None}
+    incoming_ids = {r.get("id") for r in incoming if r.get("id") is not None}
+    now = _now_iso()
+    now_dt = datetime.now(KST)
+
+    merged = []
+    for r in incoming:
+        rid = r.get("id")
+        srv = current_by_id.get(rid) if rid is not None else None
+        if srv is not None:
+            if rid != edit_id:
+                for f in PROTECTED_JOURNAL_FIELDS:
+                    r[f] = srv.get(f)
+            changed = any(r.get(k) != srv.get(k) for k in (r.keys() | srv.keys()) if k != "updated_at")
+            r["updated_at"] = now if changed else srv.get("updated_at", now)
+        else:
+            r["updated_at"] = now
+        merged.append(r)
+
+    revived = 0
+    for rid, srv in current_by_id.items():
+        if rid in incoming_ids:
+            continue
+        try:
+            ts = datetime.fromisoformat(srv.get("updated_at", ""))
+        except (ValueError, TypeError):
+            continue
+        if (now_dt - ts).total_seconds() < JOURNAL_CONCURRENT_KEEP_WINDOW_SEC:
+            merged.append(srv)
+            revived += 1
+    if revived:
+        print(f"[journal] 병합 가드: 저장 배열에 없던 최근 갱신 레코드 {revived}건 보존")
+
     try:
-        _write_journal_file(body)
+        _write_journal_file(merged)
     except OSError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-    return JSONResponse({"ok": True, "count": len(body), "path": JOURNAL_PATH})
+    return JSONResponse({"ok": True, "count": len(merged), "path": JOURNAL_PATH, "journal": merged})
 
 
 @app.post("/api/prices")
@@ -12063,6 +12186,10 @@ async def positions_sync(request: Request):
             r["entry_actual"] = pos["avg_price"]
             r["entry_actual_date"] = today_kst
             r["entry_source"] = "toss"
+            # v5.187(사용자 지시 — [1] 병합 가드): save_journal()의 병합·
+            # 동시성-보존 판정이 이 필드로 "방금 서버가 건드렸다"를 안다 —
+            # 안 찍으면 이 레코드가 "오래 안 바뀐 것"으로 오판될 수 있다.
+            r["updated_at"] = _now_iso()
             journal_changed = True
             print(f"[positions_sync] 토스 자동채움: {r.get('ticker')} entry_actual={pos['avg_price']}")
         if journal_changed:

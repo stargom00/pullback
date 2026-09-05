@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.186</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.187</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -788,7 +788,7 @@ tr.editing{background:rgba(242,179,61,.06)}
     <h3 class="drag-handle">➕ 수동 종목 추가 <span style="font-size:11px;color:var(--muted);font-weight:400">스캐너에 없는 종목 직접 담기</span></h3>
     <div class="sub" style="color:var(--muted);font-size:12px;margin-bottom:8px">스캐너에 없는 종목을 직접 담아요. <b>대기</b>는 피벗 돌파 알림, <b>진입</b>은 R·손절 알림, <b>관찰</b>은 통계 제외.</div>
     <div class="row">
-      <div><label>종목코드 *</label><input id="maTicker" placeholder="예: V, AAPL, 005930.KS"></div>
+      <div><label>종목코드 *</label><input id="maTicker" oninput="onMaTickerOrTabChange()" placeholder="예: V, AAPL, 005930.KS"></div>
       <div><label>종목명</label><input id="maName" placeholder="예: 비자"></div>
     </div>
     <div class="row">
@@ -799,7 +799,7 @@ tr.editing{background:rgba(242,179,61,.06)}
           <option value="watch">👁 관찰 (통계 제외)</option>
         </select>
       </div>
-      <div><label>시장</label>
+      <div><label>시장 (자동)</label>
         <select id="maMarket" style="width:100%;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:inherit">
           <option value="US">미국 (US)</option>
           <option value="KR">한국 (KR)</option>
@@ -807,12 +807,23 @@ tr.editing{background:rgba(242,179,61,.06)}
       </div>
     </div>
     <div class="row">
+      <div><label>탭 *</label>
+        <select id="maTab" onchange="onMaTickerOrTabChange()" style="width:100%;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:inherit">
+          <option value="눌림목">눌림목</option>
+          <option value="돌파">돌파</option>
+          <option value="돌파임박">돌파임박</option>
+          <option value="박스돌파">박스돌파</option>
+          <option value="추세전환">추세전환</option>
+          <option value="재량" selected>🎲 재량 (스캐너 밖 재량매매 — 통계 별도 집계)</option>
+        </select>
+      </div>
       <div><label>섹터 (선택)</label><input id="maSector" placeholder="예: 결제인프라"></div>
     </div>
     <div class="row">
       <div><label id="maPivotLabel">피벗가 (돌파 알림 기준) *</label><input id="maPivot" inputmode="decimal" placeholder="예: 337"></div>
       <div><label id="maStopLabel">손절가</label><input id="maStop" inputmode="decimal" placeholder="예: 320"></div>
     </div>
+    <div id="maSnapHint" style="font-size:11px;color:var(--muted);margin:-4px 0 8px"></div>
     <div id="maCalc" class="rcalc"></div>
     <label>메모 (한 줄)</label>
     <textarea id="maNote" placeholder="예: 역H&S 넥라인+200일선 돌파 대기"></textarea>
@@ -4320,26 +4331,40 @@ function isLeaderConversionWatch(ticker) {
 // 나가 유실이 구조적으로 불가능해진다. setJournal()이 유일한 저장 진입점 —
 // _saveJournalToServer를 직접 호출하지 말 것(큐를 건너뛰어 경쟁이 재발함).
 let _journalSaveChain = Promise.resolve();
-function setJournal(arr) {
+// v5.187(사용자 지시 — [1] 병합 가드): opts.editId — 이 저장이 saveEdit()의
+// 명시적 편집이면 그 레코드 id를 넘긴다. 서버가 이 id와 일치하는 레코드만
+// entry_actual/entry_actual_date/entry_source(실체결 3필드)를 클라이언트
+// 값으로 갱신하고, 그 외(id 생략 = 자동저장 전부)는 서버 값을 그대로
+// 지킨다 — 스테일 캐시가 토스 자동채움 등을 덮어쓰는 걸 서버가 막는다.
+function setJournal(arr, opts) {
   journalCache = arr;
-  _journalSaveChain = _journalSaveChain.catch(() => {}).then(() => _saveJournalToServer(journalCache));
+  const editId = (opts && opts.editId != null) ? opts.editId : null;
+  _journalSaveChain = _journalSaveChain.catch(() => {}).then(() => _saveJournalToServer(journalCache, true, editId));
   return _journalSaveChain;
 }
 
 // 서버 저장 (성공 확인 + 1회 재시도 + 실패 시 알림). setJournal()을 통해서만 호출됨.
-async function _saveJournalToServer(arr, _retry = true) {
+async function _saveJournalToServer(arr, _retry = true, editId = null) {
   try {
     const res = await fetch('/api/journal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(arr)
+      body: JSON.stringify(editId != null ? { records: arr, edit_id: editId } : arr)
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
+    // v5.187(사용자 지시 — [1] 병합 가드): 서버가 병합 후 실제로 저장된
+    // 배열을 돌려준다(보호 필드가 서버값으로 되돌려졌거나, 동시 갱신
+    // 레코드가 되살아났을 수 있음) — journalCache를 그 결과로 갱신해
+    // 다음 자동저장이 이미 낡은 로컬 값을 다시 밀어넣는 걸 막는다.
+    try {
+      const data = await res.json();
+      if (data && Array.isArray(data.journal)) journalCache = data.journal;
+    } catch (e) { /* 응답 파싱 실패해도 저장 자체는 성공 — 무시 */ }
     return true;
   } catch (e) {
     if (_retry) {   // 1회 재시도
       await new Promise(r => setTimeout(r, 800));
-      return _saveJournalToServer(arr, false);
+      return _saveJournalToServer(arr, false, editId);
     }
     console.error('일지 저장 실패:', e);
     if (typeof showSaveError === 'function') showSaveError();
@@ -5104,10 +5129,63 @@ function openManualAdd() {
     const el = document.getElementById(id); if (el) el.value = '';
   });
   document.getElementById('maMarket').value = 'US';
+  document.getElementById('maTab').value = '재량';
+  document.getElementById('maStatus').value = 'pending';
+  onMaStatusChange();
+  _maSnapshotFound = false;
+  const hintEl = document.getElementById('maSnapHint'); if (hintEl) hintEl.textContent = '';
   document.getElementById('manualModal').classList.add('open');
 }
 function closeManualAdd() {
   document.getElementById('manualModal').classList.remove('open');
+}
+
+// v5.187(사용자 지시 — [2] 내 일지 '+직접 추가'): 티커 접미사(.KS/.KQ)나
+// 5~6자리 숫자코드로 시장을 자동 판정 — "시장(자동)" 라벨대로 사용자가
+// 직접 고를 필요 없게(예외적으로 안 맞으면 셀렉트를 직접 바꿔도 됨,
+// saveManualAdd()의 기존 KQ/KS 자동보정이 최종 안전망).
+let _maSnapshotFound = false;
+let _maSnapTimer = null;
+function _maInferMarket(ticker) {
+  if (/\.(KS|KQ)$/i.test(ticker)) return 'KR';
+  if (/^\d{5,6}$/.test(ticker)) return 'KR';
+  return 'US';
+}
+// 탭(5탭 중 하나)을 고르면 스캐너가 이미 잡아둔 신호 스냅샷(_signal_
+// snapshots)에서 피벗·손절을 자동채움 시도 — "재량" 탭은 스캐너 게이트를
+// 안 거치므로 스냅샷이 있을 수 없어(구조적으로 항상 없음) 조회 자체를
+// 생략하고 바로 "직접 입력" 안내만 띄운다.
+function onMaTickerOrTabChange() {
+  const tickerEl = document.getElementById('maTicker');
+  const marketEl = document.getElementById('maMarket');
+  const tabEl = document.getElementById('maTab');
+  const hintEl = document.getElementById('maSnapHint');
+  const ticker = (tickerEl.value || '').trim().toUpperCase();
+  if (ticker) marketEl.value = _maInferMarket(ticker);
+  _maSnapshotFound = false;
+  if (hintEl) hintEl.textContent = '';
+  if (_maSnapTimer) clearTimeout(_maSnapTimer);
+  if (!ticker || tabEl.value === '재량') {
+    if (hintEl && tabEl.value === '재량') hintEl.textContent = '🎲 재량 — 스캐너 스냅샷 없음(구조적으로 항상 없음), 손절 직접 입력';
+    return;
+  }
+  _maSnapTimer = setTimeout(async () => {
+    try {
+      const res = await fetch(`/api/journal/snapshot?ticker=${encodeURIComponent(ticker)}&tab=${encodeURIComponent(tabEl.value)}`);
+      const j = await res.json();
+      if (j.ok) {
+        _maSnapshotFound = true;
+        const pivotEl = document.getElementById('maPivot');
+        const stopEl = document.getElementById('maStop');
+        if (pivotEl && !pivotEl.value && j.pivot != null) pivotEl.value = j.pivot;
+        if (stopEl && !stopEl.value && j.stop != null) stopEl.value = j.stop;
+        if (hintEl) hintEl.textContent = `📌 스냅샷 자동채움(신호일 ${j.signal_date || '?'}) — 필요하면 직접 수정 가능`;
+        if (typeof window._maCalcRefresh === 'function') window._maCalcRefresh();
+      } else {
+        if (hintEl) hintEl.textContent = '⚠️ 스냅샷 없음 — 손절 직접 입력 필요';
+      }
+    } catch (e) { /* 조용히 무시 — 수동 입력으로 계속 진행 가능 */ }
+  }, 400);
 }
 async function saveManualAdd() {
   let ticker = document.getElementById('maTicker').value.trim().toUpperCase();
@@ -5162,27 +5240,42 @@ async function saveManualAdd() {
     }
   }
   const stop = parseFloat(document.getElementById('maStop').value) || null;
-  // 진입 상태면 손절 필수 (R 계산·손절 알림에 필요). 관찰은 손절 없이도 됨.
-  if (isEntered && !stop) { alert('진입 종목은 손절가가 필요해요 (R 계산·손절 알림)'); return; }
+  const tab = document.getElementById('maTab').value || '재량';
+  // v5.187(사용자 지시 — [2] 손절: 스냅샷 있으면 자동, 없으면 수동 필수):
+  // 대기/진입 둘 다 손절이 있어야만 저장 — 스캐너 스냅샷으로 자동채움
+  //됐으면 이미 채워져 있을 거고, 안 됐으면(스냅샷 없거나 "재량") 여기서
+  // 막혀 사용자가 직접 입력해야 한다. 관찰만 예외(통계 제외 대상).
+  if (!isWatch && !stop) {
+    alert(_maSnapshotFound
+      ? '손절가를 확인해주세요.'
+      : '손절가가 필요해요 — 이 종목·탭 조합엔 스캐너 스냅샷이 없어 직접 입력해야 해요.');
+    return;
+  }
   // 손절 검증: 있으면 기준가보다 낮아야 함
   if (stop && stop >= pivot) { alert('손절가는 ' + (isEntered ? '진입가' : '피벗가') + '보다 낮아야 해요'); return; }
   const name = document.getElementById('maName').value.trim() || ticker;
   const sector = document.getElementById('maSector').value.trim();
   const note = document.getElementById('maNote').value.trim();
   const today = kstStr();
-  // 관찰은 category='관찰'로 표시해 통계에서 제외됨
-  const cat = status === 'watch' ? '관찰' : '';
-  const tab = status === 'watch' ? '수동관찰' : (isEntered ? '수동진입' : '수동관찰');
+  // 관찰은 category='관찰', "재량"탭은 category='재량'(통계 별도 집계),
+  // 그 외(5탭 중 하나 골라 직접 추가한 실거래)는 '추세추종'과 동일 취급.
+  const cat = status === 'watch' ? '관찰' : (tab === '재량' ? '재량' : '추세추종');
   const rec = {
     id: Date.now(), date: today, ticker, name, market,
-    cat, category: cat, tab, signal: '', pivot_type: '수동', setup_score: '',
-    rs: '', entry: pivot, stop, pivot,           // entry: 진입이면 진입가, 아니면 피벗
+    cat, category: cat, tab, signal: '직접 추가(사용자)', pivot_type: '수동', setup_score: '',
+    rs: '', entry: pivot, stop, pivot,           // entry: 진입이면 진입가, 아니면 피벗(=참고 기준가)
     risk_pct: stop ? Math.round((pivot - stop) / pivot * 1000) / 10 : '',
     sig_level: '', sig_flags: '', avwap_zone: '', rr_at_entry: '',
     tracking: true, target: stop ? Math.round((pivot + (pivot - stop) * 2) * 100) / 100 : '',
     last_price: pivot, last_checked: today, closed_reason: '',
     status,                                       // 선택한 상태 (대기/진입/관찰)
     manual: true,                                 // 수동 추가 표시
+    // v5.187(사용자 지시 — [2]): entry_source=None으로 시작 — 진입으로
+    // 추가해도 이 값은 아직 "참고 기준가"일 뿐 실제 체결이 아니다. 토스
+    // 동기화(POST /api/positions/sync)가 같은 티커의 entered 레코드 중
+    // entry_actual 미기입 건을 매칭하면 자동채움(entry_source='toss') —
+    // 기존 인프라를 그대로 재사용, 이 레코드만을 위한 별도 코드 불필요.
+    entry_source: null, entry_actual: null, entry_actual_date: null,
     sector, alert: '', note,
     exit: '', result_r: '', held_days: '', review: ''
   };
@@ -5470,7 +5563,7 @@ function flagStats(closed) {
 }
 
 let journalTab = 'entered';        // entered | pending | closed | missed — 상태별 주 탭
-let journalCatFilter = 'all';      // all | 추세추종 | 단타 | 관찰 — 탭 안에서 한 번 더 좁히는 보조 필터
+let journalCatFilter = 'all';      // all | 추세추종 | 단타 | 재량 | 관찰 — 탭 안에서 한 번 더 좁히는 보조 필터
 const closedMonthOpen = new Set(); // 펼쳐둔 종료월(YYYY-MM) — 기본은 전부 접힘
 let watchClosedOpen = false;       // v5.47: 관찰 뷰의 "종료된 관찰" 펼침 상태 — 기본 접힘
 let archivedPendingOpen = false;   // v5.186: "대기" 탭의 "관찰 종료(대기 만료)" 펼침 상태 — 기본 접힘
@@ -5661,9 +5754,14 @@ function renderJournal() {
   // 정렬: 최신순(종료 탭은 closed_date 우선, 그 외는 등록일)
   j = [...j].sort((a, b) => (b.closed_date || b.date || '').localeCompare(a.closed_date || a.date || '')
     || ((b.id || 0) - (a.id || 0)));
-  // 카테고리별 통계 (추세추종 / 단타 분리)
+  // 카테고리별 통계 (추세추종 / 단타 / 재량 분리)
   const trend = journalStats(all.filter(r => (r.category || '추세추종') === '추세추종'));
   const scalp = journalStats(all.filter(r => (r.category || '추세추종') === '단타'));
+  // v5.187(사용자 지시 — [2] "재량"은 통계 별도 분리): 스캐너 신호가
+  // 아니라 사용자 재량으로 담은 매매라 추세추종/단타 성과에 섞이면 안
+  // 된다 — category='재량' 명시 레코드만 잡으므로(기본값 폴백에 안 걸림)
+  // 위 두 줄과 자동으로 상호 배타적.
+  const discretion = journalStats(all.filter(r => r.category === '재량'));
 
   const tabCount = key => all.filter(r => stOf(r) === key && !isWatch(r)).length;
   const mainTab = (key, label) => `<button class="jrnl-tab ${(journalTab===key && journalCatFilter!=='관찰')?'on':''}" onclick="journalTab='${key}';journalCatFilter=(journalCatFilter==='관찰'?'all':journalCatFilter);renderJournal()">${label} <span style="opacity:.6;font-size:12px">${tabCount(key)}</span></button>`;
@@ -5743,6 +5841,10 @@ function renderJournal() {
         <div class="statcard-t">⚡ 단타</div>
         <div class="statcard-v">총 ${scalp.total} · 종료 ${scalp.closedCount} · ${_rStatsBadgeHtml(scalp)}</div>
       </div>
+      <div class="statcard">
+        <div class="statcard-t">🎲 재량</div>
+        <div class="statcard-v">총 ${discretion.total} · 종료 ${discretion.closedCount} · ${_rStatsBadgeHtml(discretion)}</div>
+      </div>
     </div>
     ${renderJCal(all)}
     ${renderRCurve(all)}
@@ -5752,7 +5854,7 @@ function renderJournal() {
       ${mainTab('entered','▶ 진입')} ${mainTab('pending','⏳ 대기')} ${mainTab('closed','✔ 종료')} ${mainTab('missed','✖ 무산')}
     </div>
     <div class="jrnl-filter" style="margin-top:6px">
-      ${catBtn('all','전체')} ${catBtn('추세추종','📈 추세')} ${catBtn('단타','⚡ 단타')} ${catBtn('관찰','👁 관찰')}
+      ${catBtn('all','전체')} ${catBtn('추세추종','📈 추세')} ${catBtn('단타','⚡ 단타')} ${catBtn('재량','🎲 재량')} ${catBtn('관찰','👁 관찰')}
     </div>
     ${isClosedTab ? renderClosedSummary(closedTabStats(j)) : ''}
     ${isWatchView ? renderWatchCleanupBar(all) : ''}
@@ -6249,6 +6351,7 @@ function editRow(r) {
         <select id="e_cat" class="ein" style="width:110px">
           <option value="추세추종" ${cat==='추세추종'?'selected':''}>📈 추세추종</option>
           <option value="단타" ${cat==='단타'?'selected':''}>⚡ 단타</option>
+          <option value="재량" ${cat==='재량'?'selected':''}>🎲 재량</option>
           <option value="대기" ${cat==='대기'?'selected':''}>⏳ 대기</option>
           <option value="관찰" ${cat==='관찰'?'selected':''}>👁 관찰</option>
         </select>
@@ -6303,7 +6406,7 @@ function saveEdit(id) {
   if (r.status !== 'closed') {
     if (r.category === '대기') r.status = 'pending';
     else if (r.category === '관찰') r.status = 'watch';
-    else if (r.category === '추세추종' || r.category === '단타') {
+    else if (r.category === '추세추종' || r.category === '단타' || r.category === '재량') {
       if (r.status !== 'entered') r.status = 'entered';
     }
   }
@@ -6406,7 +6509,11 @@ function saveEdit(id) {
   r.held_days = document.getElementById('e_held').value.trim();
   r.note = document.getElementById('e_note').value.trim();
   r.review = document.getElementById('e_review').value.trim();
-  setJournal(j);
+  // v5.187(사용자 지시 — [1] 병합 가드): saveEdit()은 "명시 편집"이라
+  // editId를 넘겨 서버가 이 레코드의 entry_actual 계열 3필드를 받아들이게
+  // 한다(다른 모든 자동저장 경로는 editId 없이 호출 → 서버가 그 3필드는
+  // 무조건 서버값 유지).
+  setJournal(j, { editId: id });
   editingId = null;
   renderJournal();
 }
