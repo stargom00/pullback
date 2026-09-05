@@ -5,6 +5,26 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.183 [기능] result_r 실체결 기준(사용자 지시, v5.182 후속) —
+        static/index.html 전용(이 값들은 전부 브라우저에서 계산·저장됨).
+        (1) 청산 시 result_r 계산에 entry_actual이 있으면 그걸 분모/
+        분자 기준으로 쓰고(없으면 기존대로 계획가) `result_source`
+        ('actual'|'plan')를 같이 기록 — 손절가 정확히 도달한 자동청산은
+        R=-1이 어느 entry를 쓰든 수학적으로 동일해 값은 안 바뀌지만
+        source는 남긴다. 부분익절(`savePartial`)도 동일 기준 전환,
+        partial마다 `r_source` 기록. (2) 목표가(2R)는 entered 상태에서
+        entry_actual을 저장하는 즉시 그 값 기준으로 재계산(`saveEdit`)
+        — 등록 시점에 고정돼 실체결가를 나중에 넣어도 안 바뀌던 문제
+        수정. (3) 과거 종료 기록은 값 소급 변경 없이 `load_journal()`
+        마이그레이션에서 `result_source="plan"`만 일괄 부여(entry_actual
+        도입 이전엔 전부 계획가 기준이었으므로). (4) 통계 화면(추세추종/
+        단타/종료요약 카드) — 평균R·승률을 실체결(actual) 기반 종료건만
+        으로 계산해 메인으로 보여주고, 참고가(plan) 기반은 괄호로 건수·
+        수치만 병기. 실체결 표본이 0건이면 숫자 대신 "실전 데이터
+        없음"을 명시(`_rStatsBadgeHtml`/`_rStatsFor` 신설). 신호별 성과
+        검증(signalValidation)·탭별/플래그별 세부 breakdown은 이번
+        범위 밖(기존 방식 유지) — 상단 요약 카드 2곳 + 종료 탭 요약만
+        전환.
 v5.182 [기능] 저널 실체결가 도입(사용자 지시) — 목적: 저널이 "피벗
         자동기입"이 아니라 실제 체결 기록이 되게, 그래야 실행 데이터가
         쌓인다. (1) 데이터 모델: 저널 레코드에 `entry_actual`/
@@ -4671,7 +4691,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.182"
+VERSION = "v5.183"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -9010,7 +9030,12 @@ def load_journal() -> list:
     순간 `entry_source="auto_pivot"`(entry 값이 있던 레코드만, 값 자체는
     보존·의미만 표시)으로 마이그레이션한다. 실제로 바뀐 레코드가 있을
     때만 파일에 다시 쓴다(매 호출마다 디스크에 쓰지 않음 — load_journal은
-    app.py 전역에서 아주 자주 호출된다)."""
+    app.py 전역에서 아주 자주 호출된다).
+
+    v5.183(사용자 지시 — [3] 과거 종료 기록): 이미 result_r이 기록된
+    (청산 완료) 레코드는 값을 소급 변경하지 않고 `result_source="plan"`
+    표시만 붙인다 — 전부 entry_actual 도입 이전, 계획가(entry) 기준으로
+    계산된 값이었기 때문."""
     if not os.path.exists(JOURNAL_PATH):
         return []
     try:
@@ -9027,11 +9052,14 @@ def load_journal() -> list:
             r["entry_actual"] = None
             r["entry_actual_date"] = None
             migrated = True
+        if r.get("result_r") not in (None, "") and "result_source" not in r:
+            r["result_source"] = "plan"
+            migrated = True
     if migrated:
         try:
             _write_journal_file(data)
         except OSError as e:
-            print(f"[journal] entry_source 마이그레이션 저장 실패: {e}")
+            print(f"[journal] entry_source/result_source 마이그레이션 저장 실패: {e}")
     return data
 
 

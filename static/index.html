@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.182</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.183</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -4702,6 +4702,11 @@ async function updateTracking(prefetched, prefetchedClosed) {
       r.status = 'closed';
       r.stop_touched_intraday = false;
       r.result_r = (Math.round(resultR * 100) / 100).toString();
+      // v5.183(사용자 지시 — [1]): 손절가 정확히 도달한 경우 R=-1은
+      // entry 기준과 무관하게 항상 성립(R=(stop-entry)/(entry-stop)=-1,
+      // 어느 entry를 쓰든 동일)이라 값 자체는 안 바뀌지만, 실전/참고
+      // 구분을 위해 source는 그대로 기록해둔다.
+      r.result_source = r.entry_actual != null ? 'actual' : 'plan';
       r.exit = Math.round(px * 100) / 100;
       r.closed_reason = reason;
       r.exit_reason = reason;
@@ -5370,16 +5375,47 @@ function pnlPct(r) {
   return Math.round(pct * 10) / 10;
 }
 
+// v5.183(사용자 지시 — [4] 통계 화면 분리): result_source==='actual'인
+// 종료건과 'plan'(참고가 기준 — auto_pivot/auto_close 시절 청산 또는
+// entry_actual 없이 청산된 건)인 종료건을 분리해서 평균R·승률을 각각
+// 낸다. result_source가 아예 없는(더 옛날, v5.183 이전 종료건 중 아직
+// load_journal 마이그레이션을 안 거친 극히 드문 경우) 것도 'plan'으로 묶음.
+function _rStatsFor(rows) {
+  if (!rows.length) return { n: 0, avgR: null, winRate: null };
+  const avgR = rows.reduce((a, r) => a + parseFloat(r.result_r), 0) / rows.length;
+  const winRate = Math.round(rows.filter(r => parseFloat(r.result_r) > 0).length / rows.length * 100);
+  return { n: rows.length, avgR: avgR.toFixed(2), winRate };
+}
+// v5.183(사용자 지시 — [4] 통계 화면): "실체결 기반 N건 / 참고가 기반
+// M건"을 분리 표시 — 평균R·승률은 실체결(actual) 기반만 메인으로 계산,
+// 참고가(plan) 기반은 괄호로 참고만. 실체결 표본이 0건이면 승률/평균
+// 대신 "실전 데이터 없음"을 명시(값이 없다는 사실 자체가 중요한 정보).
+function _rStatsBadgeHtml(stats) {
+  const a = stats.actualStats, p = stats.planStats;
+  const planStr = p.n
+    ? ` <span style="font-size:11px;color:var(--muted)">(참고가 기반 ${p.n}건 · 승률 ${p.winRate}% · 평균 ${p.avgR}R)</span>`
+    : '';
+  if (!a.n) {
+    return `<span style="color:var(--amber);font-weight:600" title="entry_actual(실체결가)이 기록된 종료건이 아직 없습니다 — 청산 시 실체결가를 입력해야 여기 반영됩니다">실전 데이터 없음</span>${planStr}`;
+  }
+  return `<span title="손절가가 기록된 종료건 기준 — R배수가 양수인 비율. 손절 미기록 종료건은 제외(청산가 기준 승률과 표본이 다를 수 있음, '종료' 탭 참고). entry_actual(실체결가) 기록된 종료건만 집계.">승률(R+)</span> ${a.winRate}% (n=${a.n}) · 평균 ${a.avgR}R${planStr}`;
+}
 function journalStats(list) {
   // 무산(missed) + 데이터오류(손절≥진입)는 손익통계에서 완전 제외
   const live = list.filter(r => r.status !== 'missed' && !isBrokenRow(r));
   const pendingCount = live.filter(r => r.result_r === '' && (r.status || 'entered') === 'pending').length;
   const enteredCount = live.filter(r => r.result_r === '' && (r.status || 'entered') === 'entered').length;
   const closed = live.filter(r => r.result_r !== '' && !isNaN(parseFloat(r.result_r)));
-  const avgR = closed.length ? (closed.reduce((a, r) => a + parseFloat(r.result_r), 0) / closed.length).toFixed(2) : '–';
-  const winRate = closed.length ? Math.round(closed.filter(r => parseFloat(r.result_r) > 0).length / closed.length * 100) : '–';
+  const actualRows = closed.filter(r => r.result_source === 'actual');
+  const planRows = closed.filter(r => r.result_source !== 'actual');
+  const actualStats = _rStatsFor(actualRows);
+  const planStats = _rStatsFor(planRows);
+  // 실전(actual) 표본이 있으면 그걸 메인으로, 없으면 "실전 데이터 없음".
+  const avgR = actualStats.n ? actualStats.avgR : '–';
+  const winRate = actualStats.n ? actualStats.winRate : '–';
   return { openCount: pendingCount + enteredCount, pendingCount, enteredCount,
-           closedCount: closed.length, avgR, winRate, total: live.length };
+           closedCount: closed.length, avgR, winRate, total: live.length,
+           actualStats, planStats };
 }
 
 // 신호별 성과 검증: 진입 시점 신호등/AVWAP존별 승률·평균R 집계
@@ -5448,6 +5484,12 @@ function closedTabStats(rows) {
   const withR = rows.filter(r => r.result_r !== '' && !isNaN(parseFloat(r.result_r)));
   const avgR = withR.length ? withR.reduce((s, r) => s + parseFloat(r.result_r), 0) / withR.length : null;
   const totalR = withR.length ? withR.reduce((s, r) => s + parseFloat(r.result_r), 0) : null;
+  // v5.183(사용자 지시 — [4]): 평균R을 실체결(actual)/참고가(plan) 기준으로
+  // 분리 — "종료 요약" 카드도 상단 추세추종/단타 카드와 같은 원칙 적용.
+  const withRActual = withR.filter(r => r.result_source === 'actual');
+  const withRPlan = withR.filter(r => r.result_source !== 'actual');
+  const avgRActual = withRActual.length ? withRActual.reduce((s, r) => s + parseFloat(r.result_r), 0) / withRActual.length : null;
+  const avgRPlan = withRPlan.length ? withRPlan.reduce((s, r) => s + parseFloat(r.result_r), 0) / withRPlan.length : null;
   let krPnl = 0, krN = 0, krSkip = 0, usPnl = 0, usN = 0, usSkip = 0;
   for (const r of rows) {
     const entry = parseFloat(r.entry), exit = parseFloat(r.exit), shares = parseFloat(r.shares);
@@ -5457,7 +5499,9 @@ function closedTabStats(rows) {
     if (isKr) { krPnl += pnl; krN++; } else { usPnl += pnl; usN++; }
   }
   return { total: rows.length, withPnlCount: withPnl.length, wins, winRate,
-           withRCount: withR.length, avgR, totalR, krPnl, krN, krSkip, usPnl, usN, usSkip };
+           withRCount: withR.length, avgR, totalR, krPnl, krN, krSkip, usPnl, usN, usSkip,
+           withRActualCount: withRActual.length, avgRActual,
+           withRPlanCount: withRPlan.length, avgRPlan };
 }
 
 function renderClosedSummary(stats) {
@@ -5474,7 +5518,7 @@ function renderClosedSummary(stats) {
         <div class="statcard-t">✔ 종료 요약 (전체 ${stats.total}건)</div>
         <div class="statcard-v">
           <span title="청산가만 있으면 포함(손절 미기록 종료건도 집계) — 원시 등락률이 양수인 비율. 상단 추세추종/단타 카드의 승률(R+)과 표본이 다를 수 있음(그쪽은 손절가 기록건만).">승률(청산가+)</span> ${stats.winRate == null ? '–' : stats.winRate + '%'} (${stats.wins}승/${stats.withPnlCount}건)
-          · 평균 ${rr(stats.avgR)} <span style="opacity:.6;font-size:11px">(R기록 ${stats.withRCount}건)</span>
+          · 평균 ${stats.withRActualCount ? rr(stats.avgRActual) : '<span style="color:var(--amber)">실전 데이터 없음</span>'}<span style="opacity:.6;font-size:11px">(실체결 ${stats.withRActualCount}건${stats.withRPlanCount ? ` / 참고가 ${stats.withRPlanCount}건 · ${rr(stats.avgRPlan)}` : ''})</span>
           · 총 손익 ${rr(stats.totalR)}
         </div>
         ${(krLine || usLine) ? `<div class="statcard-v" style="margin-top:4px;font-size:12px;color:var(--muted)">${[krLine, usLine].filter(Boolean).join(' · ')}</div>` : ''}
@@ -5638,7 +5682,7 @@ function renderJournal() {
     <div class="jrnl-stats">
       <div class="statcard">
         <div class="statcard-t">📈 추세추종</div>
-        <div class="statcard-v">진입 ${trend.enteredCount} · 대기 ${trend.pendingCount} · 종료 ${trend.closedCount} · <span title="손절가가 기록된 종료건 기준 — R배수가 양수인 비율. 손절 미기록 종료건은 제외(청산가 기준 승률과 표본이 다를 수 있음, '종료' 탭 참고).">승률(R+)</span> ${trend.winRate}${trend.winRate!=='–'?'%':''} <span style="font-size:11px;color:var(--muted)">(n=${trend.closedCount})</span> · 평균 ${trend.avgR}R${(() => { const imp = getJournal().filter(x => x.exit_reason === '충동').length; return imp ? ` · <span style="color:#ff6b6b;font-weight:700">충동 ${imp}</span>` : ''; })()}</div>
+        <div class="statcard-v">진입 ${trend.enteredCount} · 대기 ${trend.pendingCount} · 종료 ${trend.closedCount} · ${_rStatsBadgeHtml(trend)}${(() => { const imp = getJournal().filter(x => x.exit_reason === '충동').length; return imp ? ` · <span style="color:#ff6b6b;font-weight:700">충동 ${imp}</span>` : ''; })()}</div>
       </div>
       <div class="statcard">
         <div class="statcard-t">👁 관찰</div>
@@ -5646,7 +5690,7 @@ function renderJournal() {
       </div>
       <div class="statcard">
         <div class="statcard-t">⚡ 단타</div>
-        <div class="statcard-v">총 ${scalp.total} · 종료 ${scalp.closedCount} · <span title="손절가가 기록된 종료건 기준 — R배수가 양수인 비율. 손절 미기록 종료건은 제외(청산가 기준 승률과 표본이 다를 수 있음, '종료' 탭 참고).">승률(R+)</span> ${scalp.winRate}${scalp.winRate!=='–'?'%':''} <span style="font-size:11px;color:var(--muted)">(n=${scalp.closedCount})</span> · 평균 ${scalp.avgR}R</div>
+        <div class="statcard-v">총 ${scalp.total} · 종료 ${scalp.closedCount} · ${_rStatsBadgeHtml(scalp)}</div>
       </div>
     </div>
     ${renderJCal(all)}
@@ -6033,14 +6077,16 @@ function savePartial(id) {
   const pct = parseFloat(document.getElementById('p_pct').value);
   const price = parseFloat(document.getElementById('p_price').value);
   if (!pct || pct <= 0 || pct > 100) { alert('청산 비율을 1~100 사이로 입력하세요.'); return; }
-  const entry = parseFloat(r.entry), stop = parseFloat(r.stop);
+  // v5.183(사용자 지시 — [2] 부분익절 기준): entry_actual 있으면 그걸로.
+  const entry = r.entry_actual != null ? r.entry_actual : parseFloat(r.entry);
+  const stop = parseFloat(r.stop);
   const isShort = isShortRow(r);
   if (!price || !entry || !stop || (isShort ? stop <= entry : entry <= stop)) { alert('청산가를 입력하세요 (진입가/손절가가 있어야 R 계산 가능).'); return; }
   const prevPct = (r.partials || []).reduce((s, p) => s + p.pct, 0);
   if (prevPct + pct > 100) { alert(`이미 ${prevPct}% 청산됨 — 나머지 ${100 - prevPct}%를 넘을 수 없어요.`); return; }
   const rMult = Math.round((isShort ? (entry - price) / (stop - entry) : (price - entry) / (entry - stop)) * 100) / 100;
   r.partials = r.partials || [];
-  r.partials.push({ date: kstStr(), price, pct, r: rMult });
+  r.partials.push({ date: kstStr(), price, pct, r: rMult, r_source: r.entry_actual != null ? 'actual' : 'plan' });
   partialEditingId = null;
   setJournal(j);
   renderJournal();
@@ -6159,6 +6205,16 @@ function saveEdit(id) {
       r.entry_actual = null; r.entry_actual_date = null; r.entry_source = null;
     }
   }
+  // v5.183(사용자 지시 — [2] 목표가 즉시 갱신): entered 상태에서 실체결가가
+  // 있으면 목표가(2R)를 그 값 기준으로 재계산 — 그동안 r.target은 등록
+  // 시점(참고가 기준)에 한 번 고정된 값이라, 실체결가를 나중에 입력해도
+  // 목표가가 낡은 채로 남아있었다.
+  if (r.status === 'entered' && r.stop != null) {
+    const targetBasis = r.entry_actual != null ? r.entry_actual : r.entry;
+    if (targetBasis != null) {
+      r.target = Math.round((targetBasis + (targetBasis - r.stop) * 2) * 100) / 100;
+    }
+  }
   // 수량 사후 수정 (부분체결 정정 등) — 빈칸이면 기존 값 유지(강제로 지우지 않음).
   const qtyEl = document.getElementById('e_qty');
   if (qtyEl && qtyEl.value.trim() !== '') {
@@ -6188,14 +6244,21 @@ function saveEdit(id) {
     return;
   }
   const hasPartials = r.partials && r.partials.length;
+  // v5.183(사용자 지시 — [1] result_r 실체결 기준): entry_actual이 있으면
+  // 그걸 R 분모/분자 기준으로 쓰고 result_source='actual', 없으면 기존
+  // 대로 계획가(entry)를 쓰고 result_source='plan' — 어느 쪽으로 계산
+  //됐는지를 값 자체에 남겨야 나중에 통계에서 실전/참고를 구분할 수 있다.
+  const rEntryBasis = r.entry_actual != null ? r.entry_actual : entry;
+  const resultSource = r.entry_actual != null ? 'actual' : 'plan';
   // R은 손절 데이터가 있어야만(방향에 맞게) 계산 — 없으면 청산가·종료 상태만
   // 저장하고 R은 비워둔다(나중에 진입가 대비 손익%로는 항상 계산 가능).
-  const canComputeR = entry != null && stop != null && (isShort ? stop > entry : entry > stop);
+  const canComputeR = rEntryBasis != null && stop != null && (isShort ? stop > rEntryBasis : rEntryBasis > stop);
   if (!isNaN(exitV)) {
     r.exit = exitV;
     if (canComputeR) {
-      const finalR = isShort ? (entry - exitV) / (stop - entry) : (exitV - entry) / (entry - stop);
+      const finalR = isShort ? (rEntryBasis - exitV) / (stop - rEntryBasis) : (exitV - rEntryBasis) / (rEntryBasis - stop);
       r.result_r = (hasPartials ? blendedR(r, finalR) : Math.round(finalR * 100) / 100).toString();
+      r.result_source = resultSource;
     }
     r.tracking = false;                  // 수동 청산 → 추적 종료
     r.status = 'closed';
@@ -6205,6 +6268,7 @@ function saveEdit(id) {
   } else if (manualR) {
     const finalR = parseFloat(manualR);
     r.result_r = (hasPartials && !isNaN(finalR) ? blendedR(r, finalR) : manualR).toString();
+    r.result_source = resultSource;
     r.tracking = false;
     r.status = 'closed';
     r.exit_reason = exitReason;
