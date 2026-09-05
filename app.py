@@ -5,6 +5,32 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.182 [기능] 저널 실체결가 도입(사용자 지시) — 목적: 저널이 "피벗
+        자동기입"이 아니라 실제 체결 기록이 되게, 그래야 실행 데이터가
+        쌓인다. (1) 데이터 모델: 저널 레코드에 `entry_actual`/
+        `entry_actual_date`/`entry_source`('actual'|'toss'|'auto_pivot'
+        |'auto_close'|None) 추가. `load_journal()`이 최초 읽을 때 기존
+        레코드(entry_source 없음) 전부를 entry_source='auto_pivot'으로
+        1회 마이그레이션(entry 값 자체는 보존, 의미만 표시 — 실제 변경이
+        있을 때만 파일에 다시 씀). (2) `/api/watch/quick`의 신규 레코드는
+        전부 entry_source=None으로 시작 — entry(=pivot 또는 클릭시점가)는
+        "참고 기준가"일 뿐 체결 확정 아님. 돌파임박 KR 종가확인으로
+        pending→entered 전환될 때만(`_promoteConfirmCloseEntries()`,
+        static/index.html — get_calendar()가 이미 계산해둔 entry_
+        candidate를 프론트가 자기 journalCache를 통해 안전하게 반영,
+        백엔드 GET 경로에서 직접 쓰면 브라우저 캐시가 되돌려쓸 위험이
+        있어 피함) entry_source='auto_close'로 자동 전환. (3) 토스
+        동기화(POST /api/positions/sync)가 entered 레코드 중 entry_actual
+        미기입 + 토스 보유종목 매칭 시 토스 평단가로 채움(entry_source=
+        'toss') — 이미 actual/toss면 덮어쓰지 않음, 조회 전용 원칙 유지.
+        최초 보유일은 토스 API 응답에 날짜 필드가 없어(sync_toss.py
+        _extract_positions 참고) 정확히 못 채움 — 동기화 확인일로
+        대체하고 그 한계를 주석·UI로 명시. (4) UI: entered 행 편집창에
+        실체결가+체결일 입력칸(저장 시 entry_source='actual'), 진입가
+        칸엔 실제(actual/toss) 아니면 "(참고)" 표시, 라이브 R은
+        entry_actual 있을 때만 계산하고 없으면 "R 미산출 — 체결가 입력"
+        (참고가로 R 계산 금지). 💼 포지션 탭(/api/positions)은 원래부터
+        토스 실평단 기반이라 이번 변경과 무관(참고).
 v5.181 [기능] "🔴 즉시 행동"에 검증된 진입 4종 통합(사용자 지시 — [5]).
         지금까지 🔴엔 돌파임박 KR 종가확인만 실질적으로 떴는데(reignition/
         jongga는 이미 immediate에 있었지만 그날 해당 없으면 안 보였을
@@ -4645,7 +4671,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.181"
+VERSION = "v5.182"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -8977,15 +9003,36 @@ JOURNAL_PATH = _resolve_journal_path()
 
 
 def load_journal() -> list:
-    """매매 일지 전체 (객체 배열)."""
-    if os.path.exists(JOURNAL_PATH):
+    """매매 일지 전체 (객체 배열).
+
+    v5.182(사용자 지시 — 저널 실체결가 도입): 기존 레코드는 전부
+    `entry_source` 필드가 없다(그 개념이 생기기 전 데이터) — 처음 읽는
+    순간 `entry_source="auto_pivot"`(entry 값이 있던 레코드만, 값 자체는
+    보존·의미만 표시)으로 마이그레이션한다. 실제로 바뀐 레코드가 있을
+    때만 파일에 다시 쓴다(매 호출마다 디스크에 쓰지 않음 — load_journal은
+    app.py 전역에서 아주 자주 호출된다)."""
+    if not os.path.exists(JOURNAL_PATH):
+        return []
+    try:
+        with open(JOURNAL_PATH, encoding="utf-8") as f:
+            data = _json.load(f)
+            if not isinstance(data, list):
+                return []
+    except (ValueError, OSError):
+        return []
+    migrated = False
+    for r in data:
+        if "entry_source" not in r:
+            r["entry_source"] = "auto_pivot" if r.get("entry") is not None else None
+            r["entry_actual"] = None
+            r["entry_actual_date"] = None
+            migrated = True
+    if migrated:
         try:
-            with open(JOURNAL_PATH, encoding="utf-8") as f:
-                data = _json.load(f)
-                return data if isinstance(data, list) else []
-        except (ValueError, OSError):
-            return []
-    return []
+            _write_journal_file(data)
+        except OSError as e:
+            print(f"[journal] entry_source 마이그레이션 저장 실패: {e}")
+    return data
 
 
 @app.get("/api/journal")
@@ -11409,6 +11456,15 @@ async def watch_quick(request: Request):
         "pivot_type": "원클릭",
         "setup_score": body.get("score") or "",
         "reg_price": reg_price,   # v5.106: 등록 시점 가격 — pending 교차판정 기준
+        # v5.182(사용자 지시 — 저널 실체결가): entry(=entry_val)는 이제
+        # "참고 기준가"일 뿐 실제 체결을 뜻하지 않는다 — 이 경로(등록,
+        # entered_now 즉시진입 클릭 포함)로 생기는 레코드는 전부
+        # entry_source=None으로 시작한다. 실제 체결가는 [3]토스 자동채움
+        # 또는 [4]UI 직접입력으로만 채워지고, 그때 entry_source가
+        # 'toss'/'actual'로 바뀐다. 돌파임박 KR 종가확인으로 pending→
+        # entered 전환될 때만 예외로 entry_source='auto_close'가 붙는다
+        # (static/index.html의 확인 카드 자동승격 로직 참고).
+        "entry_source": None, "entry_actual": None, "entry_actual_date": None,
     }
     if entered_now:
         rec["tracking"] = bool(entry_val and stop)
@@ -11500,6 +11556,22 @@ def _leader_conversion_check(tickers: list, bundle: dict) -> list:
     return converted
 
 
+def _write_journal_file(data: list):
+    """원자적 쓰기(temp→rename) + 직전 백업 — POST /api/journal과 백엔드
+    자체 갱신(v5.182 마이그레이션/토스 자동채움) 둘 다 이 헬퍼를 공유해
+    같은 안전장치(백업·원자적 쓰기)를 받는다."""
+    if os.path.exists(JOURNAL_PATH):
+        try:
+            import shutil
+            shutil.copy2(JOURNAL_PATH, JOURNAL_PATH + ".bak")
+        except OSError:
+            pass
+    tmp = JOURNAL_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        _json.dump(data, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, JOURNAL_PATH)
+
+
 @app.post("/api/journal")
 async def save_journal(request: Request):
     """일지 전체를 통째로 저장(덮어쓰기). body = 일지 객체 배열.
@@ -11508,19 +11580,7 @@ async def save_journal(request: Request):
     if not isinstance(body, list):
         return JSONResponse({"ok": False, "error": "배열 필요"}, status_code=400)
     try:
-        d = os.path.dirname(JOURNAL_PATH)
-        # 직전 파일을 .bak으로 백업 (덮어쓰기 전)
-        if os.path.exists(JOURNAL_PATH):
-            try:
-                import shutil
-                shutil.copy2(JOURNAL_PATH, JOURNAL_PATH + ".bak")
-            except OSError:
-                pass
-        # 원자적 쓰기: 임시파일에 쓰고 rename (중간에 죽어도 원본 보존)
-        tmp = JOURNAL_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            _json.dump(body, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, JOURNAL_PATH)
+        _write_journal_file(body)
     except OSError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
     return JSONResponse({"ok": True, "count": len(body), "path": JOURNAL_PATH})
@@ -11687,6 +11747,40 @@ async def positions_sync(request: Request):
         _save_json_atomic(POSITIONS_PATH, data)
     except OSError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    # v5.182(사용자 지시 — [3] 토스 자동 채움): entered 저널 레코드 중
+    # entry_actual이 비어있고 토스 보유종목에 같은 티커가 있으면 토스
+    # 평단가로 채운다(entry_source='toss'). 이미 actual이 있으면(사용자
+    # 직접 입력·이전 토스 채움 전부 포함) 절대 덮어쓰지 않는다 — 조회
+    # 전용 원칙 그대로, 이 동기화는 값을 "추가"만 하지 기존 실체결
+    # 기록을 바꾸지 않는다. 최초 보유일: 토스 getHoldings 응답엔 매수일
+    # 필드가 없다(sync_toss.py._extract_positions가 뽑는 필드는
+    # symbol/name/marketCountry/quantity/averagePurchasePrice/currency뿐,
+    # 스펙 자체에 날짜가 없음) — 정확한 매수일을 알 방법이 없어, 대신
+    # "이 동기화에서 처음 확인된 날짜"를 채운다(실제 매수일보다 늦을 수
+    # 있다는 한계를 코드가 아니라 이 주석과 UI로 알린다).
+    try:
+        by_ticker = {}
+        for p in out:
+            by_ticker.setdefault(p["ticker"], p)
+        journal = load_journal()
+        journal_changed = False
+        today_kst = datetime.now(KST).strftime("%Y-%m-%d")
+        for r in journal:
+            if r.get("status") != "entered" or r.get("entry_actual") is not None:
+                continue
+            pos = by_ticker.get(r.get("ticker"))
+            if not pos or not pos.get("avg_price"):
+                continue
+            r["entry_actual"] = pos["avg_price"]
+            r["entry_actual_date"] = today_kst
+            r["entry_source"] = "toss"
+            journal_changed = True
+        if journal_changed:
+            _write_journal_file(journal)
+    except Exception as e:
+        print(f"[positions_sync] 저널 실체결가 자동채움 실패(포지션 동기화 자체는 정상 완료): {e}")
+
     # 성공 = IP 문제가 해소됐다는 뜻이므로 이전에 기록된 sync_error를 지운다.
     if os.path.exists(SYNC_ERROR_PATH):
         try:

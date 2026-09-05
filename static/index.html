@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.181</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.182</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3313,6 +3313,41 @@ async function onEnterPositionsTab() {
 // 실적일을 GET /api/calendar 한 번으로 받아 그린다.
 let _calendarData = null;
 
+// v5.182(사용자 지시 — [2] 돌파임박 KR 종가확인 자동전환): 백엔드가
+// get_calendar()(읽기 전용 GET)에서 직접 저널을 쓰면 브라우저의
+// journalCache가 그 변경을 모른 채로 있다가 updateTracking() 등 다른
+// setJournal() 호출이 통째로 덮어써서 방금 생긴 auto_close 기록이
+// 조용히 사라질 수 있다(CLAUDE.md "journal_user.json... 브라우저 탭이
+// 옛 내용을 들고 있다가 덮어쓴다" 위험과 같은 종류) — 그래서 전환은
+// 반드시 프론트가 이미 로드해둔 journalCache를 통해서만 한다(quickWatch
+// 계열이 등록 직후 loadJournalFromServer()로 캐시를 동기화하는 것과
+// 같은 원칙: "저널 쓰기는 항상 최신 캐시를 거쳐서"). "🎯 오늘의 결정"
+// immediate 배열의 pending_watch+entry_candidate 항목(=돌파임박 KR
+// 종가확인 통과)이 저널에 아직 pending으로 남아있으면 entered로 전환
+// — entry=확인일 종가, entry_source='auto_close'(실체결 아님, 참고가).
+async function _promoteConfirmCloseEntries(td) {
+  const items = (td && td.immediate) || [];
+  if (!items.length) return;
+  const journal = getJournal();
+  if (!journal || !journal.length) return;
+  let changed = false;
+  for (const item of items) {
+    if (item.source !== 'pending_watch' || item.verdict !== 'entry_candidate') continue;
+    const id = parseInt(String(item.key || '').split(':')[1], 10);
+    if (!id) continue;
+    const r = journal.find(x => x.id === id);
+    if (!r || r.status !== 'pending') continue;
+    r.status = 'entered';
+    r.entry = item.entry;
+    r.entry_source = 'auto_close';
+    r.date = kstStr(new Date());
+    r.tracking = true;
+    r.closed_reason = '';
+    changed = true;
+  }
+  if (changed) await setJournal(journal);
+}
+
 async function onEnterCalendarTab() {
   const doc = document.getElementById('calendarDoc');
   doc.innerHTML = '<div class="loading"><div class="spinner"></div>불러오는 중…</div>';
@@ -3320,6 +3355,7 @@ async function onEnterCalendarTab() {
     const res = await fetch('/api/calendar');
     if (!res.ok) throw new Error('HTTP ' + res.status);
     _calendarData = await res.json();
+    await _promoteConfirmCloseEntries(_calendarData.today_decision);
     renderCalendar(_calendarData);
   } catch (e) {
     doc.innerHTML = '<p class="mf-err">불러오기 실패 — 새로고침 해보세요.</p>';
@@ -5695,7 +5731,13 @@ function viewRow(r) {
     <td><a href="${tvUrl(r.ticker, r.market)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${r.name} <span style="font-size:9px;opacity:.5">↗</span>${r.manual?`<span class="st-badge" style="background:#1e3a2e;color:#5fd99a;margin-left:4px;font-size:9px">수동</span>`:''}<div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div>${subInfo?`<div style="font-size:10px;color:var(--muted);opacity:.8">${subInfo}</div>`:''}</a></td>
     <td class="mono">${(() => {
       const isKr = /\.(KS|KQ)$/i.test(r.ticker || '');
-      const entryStr = r.entry ?? '-';
+      // v5.182(사용자 지시 — [4]/[5] 검증: "entry_val이 화면에 '참고' 라벨"):
+      // entry_source가 'actual'/'toss'(실제 확인된 값)가 아니면 이 진입가는
+      // 시스템이 채운 기준가일 뿐이라는 걸 진입가 칸 자체에 작게 표시 —
+      // pending(피벗)·entered(auto_pivot/auto_close) 전부 해당.
+      const isRealEntry = r.entry_source === 'actual' || r.entry_source === 'toss';
+      const entryStr = (r.entry ?? '-') + (r.entry != null && !isRealEntry
+        ? '<sup style="color:var(--amber);font-size:9px" title="참고 기준가 — 실제 체결가 아님">(참고)</sup>' : '');
       // 토스 평단 대비 차이 — 참고용, entry를 덮어쓰지 않음. 진입 상태 + 토스
       // 잔고에 같은 종목이 있을 때만(포지션 탭을 열어 _positionsData가 채워진
       // 경우에 한함) 표시.
@@ -5747,23 +5789,29 @@ function viewRow(r) {
             ? (r.last_price
                 ? `<span style="color:var(--muted);font-size:11px">${/\.(KS|KQ)$/i.test(r.ticker||'') ? Math.round(parseFloat(r.last_price)).toLocaleString() : parseFloat(r.last_price).toFixed(2)}</span>${triggerInfoHtml(r)}${leaderWatchInfoHtml(r)}`
                 : `<span style="color:var(--muted);font-size:11px">관찰중</span>${triggerInfoHtml(r)}${leaderWatchInfoHtml(r)}`)
-        : (r.tracking && r.last_price && r.entry && r.stop
-            ? (() => {
-                const entryN = parseFloat(r.entry), stopN = parseFloat(r.stop);
-                const liveR = (parseFloat(r.last_price) - entryN) / (entryN - stopN);
-                const dheld = Math.floor((Date.now() - new Date(r.date)) / 86400000);
-                const col = liveR >= 0 ? 'var(--px-up)' : 'var(--px-down)';
-                // v4.76: 현재 R만 보고는 "얼마까지 가야 2R인지" 감이 안 와서, 2R 도달가를 같이 표시.
-                const isKr2 = /\.(KS|KQ)$/i.test(r.ticker || '');
-                const px2R = entryN + 2 * (entryN - stopN);
-                const px2RStr = isKr2 ? Math.round(px2R).toLocaleString() : px2R.toFixed(2);
-                return `<span style="color:${col};font-weight:600">${liveR>=0?'+':''}${liveR.toFixed(1)}R</span>`
-                     + `<div style="font-size:9px;color:var(--muted)">D+${dheld} · 2R ${px2RStr}</div>`
-                     // v4.68: 장중 손절가 터치 — 아직 종가 확정 전이라 자동종료는 안 됐지만 경고만.
-                     + (r.stop_touched_intraday ? `<div style="font-size:9px;color:#f87171;font-weight:600" title="장중 손절가를 스쳤지만 종가로만 손절을 확정합니다. 마감까지 지켜보세요.">⚠️ 장중 손절터치</div>` : '')
-                     // v4.95: 목표가 도달은 이제 자동 종료 안 하고 알림만 — 부분익절 고려 유도.
-                     + (r.target_reached ? `<div style="font-size:9px;color:#f2b33d;font-weight:600" title="목표가(2R) 도달 — 자동 종료되지 않습니다. 부분익절(🔪) 또는 직접 종료 여부를 판단하세요.">🎯 목표가 도달</div>` : '');
-              })()
+        // v5.182(사용자 지시 — [4] "참고가로 R 계산하지 마라"): r.entry는
+        // 실제 체결가라는 보장이 없다(auto_pivot/auto_close는 시스템이
+        // 채운 참고가일 뿐) — 라이브 R은 entry_actual이 있을 때만
+        // 계산하고, 없으면 계산 자체를 안 하고 입력을 유도한다.
+        : (r.tracking && r.last_price && r.stop
+            ? (r.entry_actual != null
+                ? (() => {
+                    const entryN = parseFloat(r.entry_actual), stopN = parseFloat(r.stop);
+                    const liveR = (parseFloat(r.last_price) - entryN) / (entryN - stopN);
+                    const dheld = Math.floor((Date.now() - new Date(r.date)) / 86400000);
+                    const col = liveR >= 0 ? 'var(--px-up)' : 'var(--px-down)';
+                    // v4.76: 현재 R만 보고는 "얼마까지 가야 2R인지" 감이 안 와서, 2R 도달가를 같이 표시.
+                    const isKr2 = /\.(KS|KQ)$/i.test(r.ticker || '');
+                    const px2R = entryN + 2 * (entryN - stopN);
+                    const px2RStr = isKr2 ? Math.round(px2R).toLocaleString() : px2R.toFixed(2);
+                    return `<span style="color:${col};font-weight:600">${liveR>=0?'+':''}${liveR.toFixed(1)}R</span>`
+                         + `<div style="font-size:9px;color:var(--muted)">D+${dheld} · 2R ${px2RStr}${r.entry_source==='toss'?' · 🔄토스':''}</div>`
+                         // v4.68: 장중 손절가 터치 — 아직 종가 확정 전이라 자동종료는 안 됐지만 경고만.
+                         + (r.stop_touched_intraday ? `<div style="font-size:9px;color:#f87171;font-weight:600" title="장중 손절가를 스쳤지만 종가로만 손절을 확정합니다. 마감까지 지켜보세요.">⚠️ 장중 손절터치</div>` : '')
+                         // v4.95: 목표가 도달은 이제 자동 종료 안 하고 알림만 — 부분익절 고려 유도.
+                         + (r.target_reached ? `<div style="font-size:9px;color:#f2b33d;font-weight:600" title="목표가(2R) 도달 — 자동 종료되지 않습니다. 부분익절(🔪) 또는 직접 종료 여부를 판단하세요.">🎯 목표가 도달</div>` : '');
+                  })()
+                : `<span style="color:var(--amber);font-size:11px" title="entry=${r.entry ?? '-'}는 참고가(${{auto_pivot:'피벗 자동기입',auto_close:'확인일 종가 자동기입'}[r.entry_source]||'미상'})라 R 계산에 안 씀">R 미산출</span><div style="font-size:9px;color:var(--muted)">⚠️ 체결가 입력 (참고가 ${r.entry ?? '-'})</div>`)
             : `<span style="color:var(--muted);font-size:11px">추적대기</span><div style="font-size:9px;color:var(--muted)">${r.entry?'앱 새로고침 시 갱신':''}</div>`))
     }</td>
     <td style="white-space:normal;max-width:240px;font-size:11px;color:var(--muted)"><div class="note-clamp" title="${(r.note||'').replace(/"/g,'&quot;')}${r.review?' / 복기: '+r.review.replace(/"/g,'&quot;'):''}">${r.note || ''}${r.review?`<br><i style="color:var(--amber)">복기: ${r.review}</i>`:''}</div></td>
@@ -6039,6 +6087,18 @@ function editRow(r) {
           <span class="del" onclick="editingId=null;renderJournal()" title="취소">↩ 취소</span>
         </div>
       </div>
+      ${r.status === 'entered' ? `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card)">
+        <span style="font-size:11px;color:var(--muted)">실체결가</span>
+        <input id="e_entry_actual" class="ein" value="${r.entry_actual ?? ''}" inputmode="decimal" style="width:80px" placeholder="${r.entry ?? '-'}(참고가)">
+        <input id="e_entry_actual_date" class="ein" type="date" value="${r.entry_actual_date || ''}" style="width:130px">
+        <span style="font-size:10px;color:var(--muted)">${
+          r.entry_source === 'actual' ? '✓ 직접입력'
+          : r.entry_source === 'toss' ? `✓ 토스 자동채움(${r.entry_actual_date || '-'})`
+          : r.entry_source === 'auto_close' ? '⚠️ 확인일 종가(자동, 참고가일 뿐)'
+          : '⚠️ 체결가 미입력 — 참고가로 R 계산 안 함'
+        }</span>
+      </div>` : ''}
       <textarea id="e_note" class="ein" style="width:100%;height:130px;margin-top:6px;font-size:13px;line-height:1.5" placeholder="진입 근거">${r.note || ''}</textarea>
       <textarea id="e_review" class="ein" style="width:100%;height:130px;margin-top:6px;font-size:13px;line-height:1.5" placeholder="복기 (왜 잘됐나/못됐나)">${r.review || ''}</textarea>
     </td>
@@ -6078,6 +6138,27 @@ function saveEdit(id) {
   const entry = parseFloat(document.getElementById('e_entry').value) || null;
   const stop = parseFloat(document.getElementById('e_stop').value) || null;
   r.entry = entry; r.stop = stop;
+  // v5.182(사용자 지시 — [4] 실체결가 UI): 입력칸은 entered 행에만 있음
+  // (editRow가 status==='entered'일 때만 렌더) — 값을 넣으면 entry_source
+  // ='actual'로 확정. 지우면(빈칸) entry_actual/date/source 전부 초기화
+  // (실수로 잘못 넣은 값 되돌리기 지원) — 단 이미 'toss'/'auto_close'
+  // 였던 걸 사용자가 빈칸으로 되돌리면 그 정보도 같이 사라지는 트레이드
+  // 오프는 감수(입력칸이 '직접 수정' UI라 되돌리기도 직접 수정으로 취급).
+  const eaEl = document.getElementById('e_entry_actual');
+  if (eaEl) {
+    const eaVal = eaEl.value.trim();
+    const dateEl = document.getElementById('e_entry_actual_date');
+    if (eaVal !== '') {
+      const ea = parseFloat(eaVal);
+      if (!isNaN(ea)) {
+        r.entry_actual = ea;
+        r.entry_actual_date = (dateEl && dateEl.value) || kstStr(new Date());
+        r.entry_source = 'actual';
+      }
+    } else {
+      r.entry_actual = null; r.entry_actual_date = null; r.entry_source = null;
+    }
+  }
   // 수량 사후 수정 (부분체결 정정 등) — 빈칸이면 기존 값 유지(강제로 지우지 않음).
   const qtyEl = document.getElementById('e_qty');
   if (qtyEl && qtyEl.value.trim() !== '') {
