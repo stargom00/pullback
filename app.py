@@ -5,6 +5,13 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.194 [UI 개선] 재점화 갱신 결과 패널 가독성(사용자 지시, 커밋명
+        reignition-panel-readability). 티커만으론 뭔지 바로 안 와닿는다는
+        지적 — changed/touched_detail/dropped_duplicates/discretion_fail
+        전부에 종목명 병기("105560.KS KB금융" 형식). 재량 미달 사유는
+        서버에서 걸린 조건을 "+"로 미리 합쳐서("200일선 아래 + 조정폭
+        55.0%") 전달 — 기존엔 조건별로 대괄호 태그를 따로 붙여서
+        둘 다 걸려도 얼핏 하나만 걸린 것처럼 보이기 쉬웠음.
 v5.193 [긴급 버그수정] 재점화 창 만료 오판 수정(사용자 지시, 커밋명
         reignition-window-fix). 원인: 만료 판정이 window_end_date(화면
         표시값)를 전혀 안 쓰고 `key not in current_keys`(이번 실행에서
@@ -4943,7 +4950,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.193"
+VERSION = "v5.194"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6126,7 +6133,7 @@ async def _refresh_reignition_watch(bundle: dict):
     for c in candidates:
         td_key = (c["ticker"], c["d0_date"])
         if td_key in seen_ticker_d0:
-            dropped_duplicates.append({"ticker": c["ticker"], "d0_date": c["d0_date"],
+            dropped_duplicates.append({"ticker": c["ticker"], "name": c.get("name"), "d0_date": c["d0_date"],
                                         "dropped_theme": c["theme"], "kept_theme": seen_ticker_d0[td_key]})
             print(f"[reignition] 중복 후보 스킵: {c['ticker']} D0={c['d0_date']} "
                   f"테마={c['theme']}(대표 테마={seen_ticker_d0[td_key]})")
@@ -6368,7 +6375,7 @@ async def _refresh_reignition_watch(bundle: dict):
     # v5.192([2][3] 보고용): 호출부(수동 갱신 엔드포인트 등)가 이번 실행에서
     # 걸러진 중복과, 현재 터치 대기 중인 레코드를 바로 알 수 있게 반환.
     # 기존 호출부(_warm_market 등)는 반환값을 안 쓰므로 무해.
-    touched_now = [{"ticker": r.get("ticker"), "theme": r.get("theme"),
+    touched_now = [{"ticker": r.get("ticker"), "name": r.get("name"), "theme": r.get("theme"),
                      "pivot_touch_date": r.get("pivot_touch_date"),
                      "days_since_touch": r.get("days_since_touch")}
                     for r in store.values()
@@ -10100,7 +10107,8 @@ async def reignition_manual_refresh():
         b = before.get(key)
         if b is None or b["status"] != rec.get("status") or b["pivot_touch_date"] != rec.get("pivot_touch_date"):
             changed.append({
-                "ticker": rec.get("ticker"), "theme": rec.get("theme"), "d0_date": rec.get("d0_date"),
+                "ticker": rec.get("ticker"), "name": rec.get("name"), "theme": rec.get("theme"),
+                "d0_date": rec.get("d0_date"),
                 "status_before": b["status"] if b else None, "status_after": rec.get("status"),
                 "pivot_touch_date": rec.get("pivot_touch_date"), "expire_reason": rec.get("expire_reason"),
                 "expire_detail": rec.get("expire_detail"),
@@ -10132,8 +10140,18 @@ async def reignition_manual_refresh():
         below = src.get("below_ma200") is True
         over = src.get("decline_from_peak_pct") is not None and src.get("decline_from_peak_pct") > 35
         if below or over:
-            discretion_fail.append({"ticker": r.get("ticker"), "below_ma200": below,
-                                     "decline_from_peak_pct": src.get("decline_from_peak_pct")})
+            # v5.194(사용자 지시): 걸린 조건 전부를 하나의 문자열로 —
+            # 프론트가 각자 따로 태그를 붙이면 둘 다 걸려도 얼핏 하나만
+            # 걸린 것처럼 보이기 쉬워서(붙어있는 대괄호 두 개), 서버에서
+            # "+"로 합쳐 애매함 없이 하나의 사유로 전달.
+            reasons = []
+            if below:
+                reasons.append("200일선 아래")
+            if over:
+                reasons.append(f"조정폭 {src.get('decline_from_peak_pct')}%")
+            discretion_fail.append({"ticker": r.get("ticker"), "name": r.get("name"), "below_ma200": below,
+                                     "decline_from_peak_pct": src.get("decline_from_peak_pct"),
+                                     "reason": " + ".join(reasons)})
     result = {
         "ok": True, "n_total": len(after), "n_changed": len(changed), "changed": changed,
         "watching_no_touch": watching_no_touch, "watching_touched": watching_touched,
