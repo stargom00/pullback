@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.190</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.191</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -1620,30 +1620,95 @@ function toggleReignitionPullbackExpired() {
   reignitionPullbackExpiredOpen = !reignitionPullbackExpiredOpen;
   renderCards();
 }
+// v5.191(사용자 지시 — [2] 소급 만료 수동 갱신): 주말·휴장일엔
+// _warm_market() EOD 분기가 아예 안 돌아 v5.190의 pivot_touch_date
+// 소급계산·만료가 다음 KR 거래일까지 미뤄진다 — 지금 바로 반영하고 싶을
+// 때 누르는 수동 트리거(POST /api/reignition/refresh, 세션 로그인 필요).
+let reignitionRefreshBusy = false;
+async function reignitionManualRefresh(btn) {
+  if (reignitionRefreshBusy) return;
+  reignitionRefreshBusy = true;
+  const origText = btn.textContent;
+  btn.textContent = '갱신 중…';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/reignition/refresh', { method: 'POST' });
+    const d = await res.json();
+    if (!d.ok) {
+      alert(`갱신 실패: ${d.error || res.status}`);
+    } else {
+      const lines = [
+        `총 ${d.n_total}건 중 ${d.n_changed}건 상태 변경`,
+        `감시(터치 없음) ${d.watching_no_touch} · 감시(터치) ${d.watching_touched} · 체결 ${d.confirmed} · 만료 ${d.expired}`,
+      ];
+      if (d.changed.length) {
+        lines.push('', '변경 내역:');
+        d.changed.forEach(c => lines.push(`- ${c.ticker}(${c.theme}) ${c.status_before || '(신규)'} → ${c.status_after}${c.expire_reason ? ` [${c.expire_reason}]` : ''}`));
+      }
+      alert(lines.join('\n'));
+      await loadReignitionPullbackStatus();
+    }
+  } catch (e) {
+    alert(`갱신 실패: ${e}`);
+  } finally {
+    reignitionRefreshBusy = false;
+    btn.textContent = origText;
+    btn.disabled = false;
+  }
+}
+// v5.191(사용자 지시 — [3] 표시 수정): 상태를 감시(터치 없음)/감시(터치)/
+// 체결/만료 4단계로 명확히 분리. "터치"는 서버 status가 아니라
+// status==='watching' && pivot_touch_date 존재로 클라에서 판정.
+function reignitionStateMeta(it) {
+  if (it.status === 'confirmed') return { icon: '🔁', label: '체결' };
+  if (it.status === 'expired') return { icon: '⚰️', label: '만료' };
+  return it.pivot_touch_date ? { icon: '👆', label: '터치' } : { icon: '⏳', label: '감시' };
+}
+// v5.191([1] 정정 + [3] 표시 수정): 괄호 안엔 D0 날짜 대신 테마만 —
+// D0/창/터치 정보는 아래 상태줄에서 명시적으로 보여준다("D0 2025-12-23 ·
+// 창 ~2026-09-10 · 터치 없음" / "터치 09-03 · 확인 대기 D+2/3" 형식,
+// 사용자 지시). confirm_window_days는 /api/reignition/watchlist 응답의
+// 최상위 필드(theme_reignition.REIGNITE_CONFIRM_WINDOW_DAYS)를 그대로 씀
+// — 하드코딩 안 함.
+function reignitionStatusLine(it, confirmWindowDays) {
+  if (it.status === 'confirmed') {
+    return `확인 ${(it.confirm || {}).date || '-'} · 체결`;
+  }
+  if (it.status === 'expired') {
+    const reasonTxt = it.expire_reason === 'pivot_touch_timeout'
+      ? `터치 후 ${confirmWindowDays}거래일 미확인`
+      : '창 종료(D0+180거래일)';
+    return `D0 ${it.d0_date} · 만료(${reasonTxt})`;
+  }
+  if (it.pivot_touch_date) {
+    const mmdd = it.pivot_touch_date.slice(5);
+    const n = it.days_since_touch != null ? it.days_since_touch : '?';
+    return `터치 ${mmdd} · 확인 대기 D+${n}/${confirmWindowDays}`;
+  }
+  const windowTxt = it.window_end_date ? `창 ~${it.window_end_date}` : '창 정보없음';
+  return `D0 ${it.d0_date} · ${windowTxt} · 터치 없음`;
+}
 function reignitionPullbackSectionHtml() {
   const d = reignitionPullbackData;
   if (!d || !(d.items || []).length) return '';
-  const STATUS_META = {
-    watching: { icon: '⏳', label: '감시' },
-    confirmed: { icon: '🔁', label: '체결(재량)' },
-    expired: { icon: '⚰️', label: '만료' },
-  };
+  const confirmWindowDays = d.confirm_window_days != null ? d.confirm_window_days : 3;
   const rowHtml = it => {
-    const st = STATUS_META[it.status] || { icon: '·', label: it.status };
+    const st = reignitionStateMeta(it);
     const confirmed = it.status === 'confirmed';
     const pivot = confirmed ? (it.confirm || {}).pivot : (it.exec || {}).pivot;
     const stop = confirmed ? (it.confirm || {}).stop : (it.exec || {}).atr_stop;
     const priceTxt = pivot != null ? `고가 ${fmtPrice(pivot, 'KR')}` : '고가 -';
     const stopTxt = stop != null ? `손절 ${fmtPrice(stop, 'KR')}` : '손절 -';
     const nameLink = `<a class="name-link" href="${tvUrl(it.ticker, 'kr')}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기">${it.name}</a>`;
-    // v5.190([6]): 체결(재량) 행에만 재량 체크리스트 ⓘ — confirm 스냅샷에
+    // v5.190([6]): 체결 행에만 재량 체크리스트 ⓘ — confirm 스냅샷에
     // 실측값(vol_mult/decline_from_peak_pct)이 이미 있음(app.py 참고).
     const checklistIcon = confirmed
       ? ` <span style="cursor:help;opacity:.8;font-size:11px" title="${reignitionChecklistTooltip({...(it.confirm || {}), risk_pct: (pivot != null && stop != null && pivot > stop) ? Math.round((pivot - stop) / pivot * 10000) / 100 : null})}">ⓘ 재량 체크리스트</span>`
       : '';
-    return `<div class="jongga-forward-sub" style="display:flex;justify-content:space-between;gap:8px;padding:3px 0">
-      <span>${st.icon} <b>${nameLink}</b> <span style="opacity:.7">(${it.theme} · ${it.d0_date})</span>${checklistIcon}</span>
-      <span style="white-space:nowrap">${priceTxt} · ${stopTxt} · ${st.label}</span>
+    return `<div class="jongga-forward-sub" style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;flex-wrap:wrap">
+      <span>${st.icon} <b>${nameLink}</b> <span style="opacity:.7">(${it.theme})</span>${checklistIcon}</span>
+      <span style="white-space:nowrap">${priceTxt} · ${stopTxt}</span>
+      <span style="width:100%;opacity:.75;font-size:10px;padding-left:20px">${reignitionStatusLine(it, confirmWindowDays)}</span>
     </div>`;
   };
   // v5.190([7] 재점화 감시 만료): 만료분은 기본 접기 — 개수만 보이고
@@ -1656,7 +1721,10 @@ function reignitionPullbackSectionHtml() {
     : '';
   const expiredRows = reignitionPullbackExpiredOpen ? expiredItems.map(rowHtml).join('') : '';
   return `<div class="jongga-forward-box" style="margin-bottom:12px">
-    <div class="jongga-forward-title">🔥 재점화 감시 현황 (${d.items.length}건)</div>
+    <div class="jongga-forward-title" style="display:flex;justify-content:space-between;align-items:center">
+      <span>🔥 재점화 감시 현황 (${d.items.length}건)</span>
+      <button class="journal-btn" style="padding:2px 10px;font-size:11px" onclick="reignitionManualRefresh(this)" title="주말·휴장일엔 자동 갱신이 안 돌아요 — 지금 1회 강제 갱신">🔄 지금 갱신</button>
+    </div>
     <div class="jongga-forward-sub" style="opacity:.85;margin-bottom:4px">🔎 관심(재량) — 근거 n=53, 시기반분 재현 미검증(Rule 9 미달) · buy-stop가/손절은 참고 표시, 체결은 재량 체크리스트로 판단 · 근거: docs/kr_theme_leader_reignition.md</div>
     ${activeRows}
     ${expiredToggle}
@@ -3546,15 +3614,18 @@ const TODAY_DECISION_INFO_ICON =
 // 이미 계산해 confirm/exec에 저장해둔 값)가 있으면 쓰고 없으면 "실측값
 // 없음"으로 표시(구버전 캐시 호환). 자동 게이트 아님 — 사람이 5항목 중
 // 2개 이상 애매하면 패스하는 재량 판단 보조용.
+// v5.191(사용자 지시 — [1] 정정): 항목4의 "재점화일 저가"는 부정확한
+// 표현이었다 — stop은 그날의 저가가 아니라 확인일 기준 트레일링 20거래일
+// 저가(theme_reignition.py check_confirm() L148)다. "20일 저가"로 정정.
 function reignitionChecklistTooltip(item) {
   const volTxt = item.vol_mult != null ? `(실측 ${item.vol_mult}배)` : '(실측값 없음)';
   const declineTxt = item.decline_from_peak_pct != null ? `(실측 ${item.decline_from_peak_pct}%)` : '(실측값 없음)';
   const riskTxt = item.risk_pct != null ? `(실측 ${item.risk_pct}%)` : '(실측값 없음)';
   return '재량 판단 5항목 (2개 이상 애매하면 패스)\n' +
     '1. 테마 생존 — 2·3등도 같이 움직이나 (혼자면 약함)\n' +
-    `2. 재점화일 캔들 — 거래량 ≥1.5배 ${volTxt}, 종가가 고가 위 1/3\n` +
+    `2. 확인일 캔들 — 거래량 ≥1.5배 ${volTxt}, 종가가 고가 위 1/3\n` +
     `3. 조정 폭 — 고점 대비 10~25% ${declineTxt} (35% 초과는 대장 지위 상실)\n` +
-    `4. 손절 거리 — buy-stop → 재점화일 저가 5% 이내 ${riskTxt}\n` +
+    `4. 손절 거리 — buy-stop → 20일 저가 5% 이내 ${riskTxt}\n` +
     '5. 게이트 — 🟡이면 상한 1.5R\n' +
     '체결 시 저널 "재량"으로, 체결가 기록.';
 }

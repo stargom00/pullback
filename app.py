@@ -5,6 +5,31 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.191 [정정+기능] 재점화 박스 표시 정의 정정 + 수동 갱신 + 표시 개편
+        (사용자 지시, 커밋명 reignition-labels).
+        [1] 용어 정정: 박스 괄호 안 날짜는 재점화일이 아니라 D0(원 점화일)
+        였고, "고가"(pivot)는 D0 고가도 재점화일(그날) 고가도 아니라
+        확인 시점 기준 트레일링 20거래일 고가(theme_reignition.py
+        check_confirm() L147, PIVOT_LOOKBACK=20 — 매일 재계산되다가
+        확인되는 순간 그 값으로 고정)다. "재점화일 고가"라고 설명했던
+        문구(interest.append reason, 재량 체크리스트 항목4)를 "20일
+        고가(피벗)"/"20일 저가"로 정정.
+        [2] `/api/reignition/watchlist?include_expired=1`를 쓰는 눌림목
+        탭 박스에 "🔄 지금 갱신" 버튼 신설(POST /api/reignition/refresh,
+        세션 로그인 필요) — `_warm_market()`의 EOD 분기가 is_trading_day
+        가드 때문에 주말·휴장일엔 안 돌아서 v5.190의 pivot_touch_date
+        소급계산·만료가 미뤄지는 문제를 사람이 직접 눌러 즉시 반영.
+        갱신 전/후 스냅샷을 비교해 상태 바뀐 레코드만 diff로 반환.
+        [3] 표시 개편: 상태를 감시(터치 없음)/감시(터치)/체결/만료
+        4단계로 명확히 분리(터치는 서버 status가 아니라 클라에서
+        status==='watching' && pivot_touch_date로 판정). 형식 "D0
+        2025-12-23 · 창 ~2026-09-10 · 터치 없음"(감시, 터치 없음) /
+        "터치 09-03 · 확인 대기 D+2/3"(감시, 터치함) / "확인 {날짜} ·
+        체결" / "D0 {d0} · 만료({사유})". window_end_date(D0+180영업일
+        근사, "~" 접두)는 레코드 생성 시 1회 계산해 고정, 기존 레코드는
+        소급 계산. `/api/reignition/watchlist`에 `confirm_window_days`
+        상단 필드 추가(프론트가 "D+N/3" 문구를 하드코딩 안 하고 이 값을
+        쓰게).
 v5.190 [정정+기능] 재점화 등급 조정 + 감시 만료 버그 수정(사용자 지시,
         커밋명 reignition-downgrade — 사용자가 v5.189로 지시했으나 그
         번호는 바로 위 커밋이 이미 씀, v5.190으로 정정).
@@ -4843,7 +4868,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.190"
+VERSION = "v5.191"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6023,10 +6048,22 @@ async def _refresh_reignition_watch(bundle: dict):
         current_keys.add(key)
         rec = store.get(key)
         if rec is None:
+            # v5.191(사용자 지시 — [3] 표시 수정): window_end_date는 D0 +
+            # WATCH_WINDOW_END(180) 영업일의 근사 캘린더 날짜("~" 접두로
+            # 근사임을 표시) — KR 공휴일은 반영 안 해 며칠 오차 있을 수
+            # 있음(정확한 KRX 거래일 캘린더가 아니라 Mon-Fri 영업일 기준).
+            # D0 시점에 1회만 계산해 고정(어차피 안 바뀌는 값, 매일 재계산
+            # 불필요).
+            window_end = pd.Timestamp(c["d0_date"]) + pd.tseries.offsets.BDay(theme_reignition.WATCH_WINDOW_END)
             rec = {"theme": c["theme"], "ticker": c["ticker"], "name": c["name"],
                    "d0_date": c["d0_date"], "first_seen": today, "status": "watching",
-                   "compression": None, "confirm": None, "forward": None, "pivot_touch_date": None}
+                   "compression": None, "confirm": None, "forward": None, "pivot_touch_date": None,
+                   "window_end_date": str(window_end.date())}
             store[key] = rec
+        elif not rec.get("window_end_date"):
+            # v5.191([3]): 이 필드 신설 이전 기존 레코드 소급 계산.
+            window_end = pd.Timestamp(rec["d0_date"]) + pd.tseries.offsets.BDay(theme_reignition.WATCH_WINDOW_END)
+            rec["window_end_date"] = str(window_end.date())
         rec["days_since_d0"] = c["days_since_d0"]
         rec["window_days_left"] = c["window_days_left"]
         rec["rs_rank"] = c.get("rs_rank")
@@ -6092,6 +6129,7 @@ async def _refresh_reignition_watch(bundle: dict):
                             try:
                                 touch_pos = df.index.get_loc(pd.Timestamp(touch_date))
                                 days_since_touch = (len(df) - 1) - touch_pos
+                                rec["days_since_touch"] = days_since_touch  # v5.191([3]): 표시용("확인 대기 D+N/3")
                                 if days_since_touch >= theme_reignition.REIGNITE_CONFIRM_WINDOW_DAYS:
                                     rec["status"] = "expired"
                                     rec["expired_at"] = str(df.index[-1].date())
@@ -9725,6 +9763,12 @@ def _reignition_watchlist_view(include_expired_today: bool = False) -> list:
               "d0_date": r["d0_date"], "days_since_d0": r.get("days_since_d0"),
               "window_days_left": r.get("window_days_left"), "status": r["status"],
               "rs_rank": r.get("rs_rank"), "expired_at": r.get("expired_at"),
+              "expire_reason": r.get("expire_reason"),
+              # v5.191(사용자 지시 — [3] 표시 수정): 감시/터치/체결/만료
+              # 4단계 표시용 — window_end_date(D0+180영업일 근사),
+              # pivot_touch_date/days_since_touch(터치 후 확인 대기 카운트).
+              "window_end_date": r.get("window_end_date"),
+              "pivot_touch_date": r.get("pivot_touch_date"), "days_since_touch": r.get("days_since_touch"),
               "compression": r.get("compression"), "confirm": r.get("confirm"),
               "forward": r.get("forward"), "exec": r.get("exec")}
              for r in store.values()
@@ -9761,6 +9805,9 @@ async def reignition_watchlist(include_expired: bool = False):
         "entry_rule": "대기 중엔 관망 · 20일 고가 돌파 + 거래량 1.5배 확인 시 진입 (검증 EV +0.755R) · 손절 ATR×1.5",
         "window_start_days": theme_reignition.WATCH_WINDOW_START,
         "window_end_days": theme_reignition.WATCH_WINDOW_END,
+        # v5.191([3] 표시 수정): 프론트가 "확인 대기 D+N/3" 문구를 하드코딩
+        # 안 하고 이 값으로 만들게 — 상수 바뀌면 문구도 자동으로 맞음.
+        "confirm_window_days": theme_reignition.REIGNITE_CONFIRM_WINDOW_DAYS,
     }))
 
 
@@ -9793,6 +9840,41 @@ async def reignition_forward():
     """🔁 재점화 포워드 트래킹 누적 통계(v5.125) — 백테스트(+0.755R, n=53,
     docs/kr_theme_leader_reignition.md)와 실전 결과를 계속 대조."""
     return JSONResponse(_clean_nan(_reignition_forward_stats()))
+
+
+@app.post("/api/reignition/refresh")
+async def reignition_manual_refresh():
+    """v5.191(사용자 지시 — [2] 소급 만료 수동 갱신): `_warm_market()`의
+    EOD 분기는 is_trading_day 가드 때문에 주말·휴장일엔 안 돈다 — v5.190의
+    pivot_touch_date 소급 계산/만료가 KR 다음 거래일까지 기다리지 않고
+    지금 바로 반영되게 사람이 직접 누르는 수동 트리거. 세션 로그인 필요
+    (기본 인증 게이트 그대로, API_READ_TOKEN 허용목록에 안 넣음 — 실제
+    fetch+쓰기가 일어나는 액션이라 봇 읽기 전용 경로와는 성격이 다름).
+    갱신 전/후 스냅샷을 비교해 상태가 바뀐 레코드만 diff로 반환."""
+    bundle = await _fetch_market_data("kr", wait_for_fresh=True)
+    if not bundle:
+        return JSONResponse({"ok": False, "error": "KR 데이터 로드 실패"}, status_code=503)
+    before = {k: {"status": v.get("status"), "pivot_touch_date": v.get("pivot_touch_date")}
+              for k, v in _load_reignition_watch().items()}
+    await _refresh_reignition_watch(bundle)
+    after = _load_reignition_watch()
+    changed = []
+    for key, rec in after.items():
+        b = before.get(key)
+        if b is None or b["status"] != rec.get("status") or b["pivot_touch_date"] != rec.get("pivot_touch_date"):
+            changed.append({
+                "ticker": rec.get("ticker"), "theme": rec.get("theme"), "d0_date": rec.get("d0_date"),
+                "status_before": b["status"] if b else None, "status_after": rec.get("status"),
+                "pivot_touch_date": rec.get("pivot_touch_date"), "expire_reason": rec.get("expire_reason"),
+            })
+    watching_no_touch = sum(1 for r in after.values() if r.get("status") == "watching" and not r.get("pivot_touch_date"))
+    watching_touched = sum(1 for r in after.values() if r.get("status") == "watching" and r.get("pivot_touch_date"))
+    return JSONResponse(_clean_nan({
+        "ok": True, "n_total": len(after), "n_changed": len(changed), "changed": changed,
+        "watching_no_touch": watching_no_touch, "watching_touched": watching_touched,
+        "confirmed": sum(1 for r in after.values() if r.get("status") == "confirmed"),
+        "expired": sum(1 for r in after.values() if r.get("status") == "expired"),
+    }))
 
 
 @app.get("/api/vol/{ticker}")
@@ -11059,8 +11141,13 @@ async def get_calendar():
                 "vol_mult": c.get("vol_mult"), "decline_from_peak_pct": c.get("decline_from_peak_pct"),
                 "risk_pct": risk_pct,
                 "interest_label": "🔎 관심(재량) — 근거 n=53, 재현 미검증 · 재량 판단",
-                "reason": f"재점화({it['theme']} D0리더) — 재점화일 고가 {pivot}에 buy-stop 참고가(재량 판단) "
-                          f"· 손절 {stop}(구조적 20일저가) · 근거 n=53, 시기반분 재현 미검증(Rule 9 미달) "
+                # v5.191(사용자 지시 — [1] 정정): "재점화일 고가"는 부정확한
+                # 표현이었다 — pivot은 D0 고가도, 재점화일(확인일) 그날의
+                # 고가도 아니고, 확인일 기준 트레일링 20거래일 고가
+                # (theme_reignition.py check_confirm() L147,
+                # PIVOT_LOOKBACK=20)다. "20일 고가(피벗)"로 정정.
+                "reason": f"재점화({it['theme']} D0리더) — 20일 고가(피벗) {pivot}에 buy-stop 참고가(재량 판단) "
+                          f"· 손절 {stop}(트레일링 20일 저가) · 근거 n=53, 시기반분 재현 미검증(Rule 9 미달) "
                           "· docs/kr_theme_leader_reignition.md",
             })
         elif it["status"] == "watching":
