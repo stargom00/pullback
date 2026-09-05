@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.187</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.188</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -1596,6 +1596,50 @@ function reignitionWatchSectionHtml() {
     <div style="margin-bottom:6px">${sortBtn('window', '창 잔여일')} ${sortBtn('rs', 'RS순')} ${sortBtn('compression', '응축 여부')}</div>
     ${rows}
     <div class="jongga-forward-sub" style="opacity:.65;margin-top:6px">응축 여부는 참고 배지일 뿐 필수 조건 아님(백테스트에서 재점화 전 응축 선행 43.7%, 과반 미달) — 근거: docs/kr_theme_leader_reignition.md</div>
+  </div>`;
+}
+
+// v5.188(사용자 지시 — [2] 재점화 가시화): 눌림목 탭 상단 "🔥 재점화" 요약.
+// 대장관찰 탭의 reignitionWatchData/loadReignitionWatch()와는 별도 캐시 —
+// 이쪽만 include_expired=1로 오늘 만료분까지 받아 감시·체결·만료 3상태를
+// 전부 보여준다(사용자 지시: 상태는 감시/체결/만료). 값은 전부 서버가
+// _refresh_reignition_watch()에서 이미 계산해둔 스냅샷(exec/confirm)
+// 그대로 — 여기서 새로 계산하지 않는다(🔴 카드와 동일 원칙).
+let reignitionPullbackData = null;
+async function loadReignitionPullbackStatus() {
+  try {
+    const res = await fetch('/api/reignition/watchlist?include_expired=1');
+    reignitionPullbackData = await res.json();
+  } catch (e) {
+    reignitionPullbackData = null;
+  }
+  if (mode === 'pullback') renderCards();
+}
+function reignitionPullbackSectionHtml() {
+  const d = reignitionPullbackData;
+  if (!d || !(d.items || []).length) return '';
+  const STATUS_META = {
+    watching: { icon: '⏳', label: '감시' },
+    confirmed: { icon: '🔁', label: '체결' },
+    expired: { icon: '⚰️', label: '만료' },
+  };
+  const rows = d.items.map(it => {
+    const st = STATUS_META[it.status] || { icon: '·', label: it.status };
+    const confirmed = it.status === 'confirmed';
+    const pivot = confirmed ? (it.confirm || {}).pivot : (it.exec || {}).pivot;
+    const stop = confirmed ? (it.confirm || {}).stop : (it.exec || {}).atr_stop;
+    const priceTxt = pivot != null ? `고가 ${fmtPrice(pivot, 'KR')}` : '고가 -';
+    const stopTxt = stop != null ? `손절 ${fmtPrice(stop, 'KR')}` : '손절 -';
+    const nameLink = `<a class="name-link" href="${tvUrl(it.ticker, 'kr')}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기">${it.name}</a>`;
+    return `<div class="jongga-forward-sub" style="display:flex;justify-content:space-between;gap:8px;padding:3px 0">
+      <span>${st.icon} <b>${nameLink}</b> <span style="opacity:.7">(${it.theme} · ${it.d0_date})</span></span>
+      <span style="white-space:nowrap">${priceTxt} · ${stopTxt} · ${st.label}</span>
+    </div>`;
+  }).join('');
+  return `<div class="jongga-forward-box" style="margin-bottom:12px">
+    <div class="jongga-forward-title">🔥 재점화 감시 현황 (${d.items.length}건)</div>
+    <div class="jongga-forward-sub" style="opacity:.85;margin-bottom:4px">🔴 오늘의 결정 카드와 같은 스냅샷 값 · 근거: docs/kr_theme_leader_reignition.md</div>
+    ${rows}
   </div>`;
 }
 
@@ -2955,7 +2999,8 @@ function renderCards() {
     </div>
     ${pfExpanded ? `<div class="grid pf-frozen-grid">${frozenList.map(card).join('')}</div>` : ''}
   ` : '';
-  content.innerHTML = mainHtml + frozenHtml + jonggaForwardFooterHtml() + reignitionWatchSectionHtml();
+  const reignitionTopHtml = (mode === 'pullback') ? reignitionPullbackSectionHtml() : '';
+  content.innerHTML = reignitionTopHtml + mainHtml + frozenHtml + jonggaForwardFooterHtml() + reignitionWatchSectionHtml();
   const pfToggle = document.getElementById('pfFrozenToggle');
   if (pfToggle) {
     pfToggle.addEventListener('click', () => {
@@ -3453,6 +3498,21 @@ function todayDecisionRiskBadge(item) {
   const unknownTitle = 'ATR 데이터가 없어 손절폭 적정성을 판정하지 못했습니다.\n직접 확인하세요.';
   return ` <span class="mono" style="color:var(--muted)" title="${unknownTitle}">(-${riskPct}%)</span>`;
 }
+// v5.188(사용자 지시 — 오늘의 결정 툴팁): 🔴/🔎 버킷 판정 기준을 카드
+// 밖에서 한눈에(호버/탭) — _dedup_today_decision/app.py "정직성 가드"가
+// 이미 강제하는 verdict==='entry_candidate' 4종을 그대로 문구화한 것,
+// 새 판정 로직 아님(docs/confirm_entry_lookahead_2026-09-04.md 근거).
+const TODAY_DECISION_INFO =
+  '🔴 즉시 행동에 오르는 검증 진입 4종\n' +
+  '· 돌파임박 KR — 종가 확인 후 종가 진입 (0.157R, 한계)\n' +
+  '· 종가베팅 — 종가 진입 (z=3.54)\n' +
+  '· 재점화 — 재점화일 고가에 buy-stop (0.755R)\n' +
+  '· US 눌림목 — 즉시 진입 (+0.206R)\n' +
+  '그 외 모든 탭·시장 히트는 🔎 관심. 피벗 장중 매수 금지(z=-6.22).\n' +
+  '근거: docs/confirm_entry_lookahead_2026-09-04.md';
+const TODAY_DECISION_INFO_ICON =
+  `<span style="cursor:help;opacity:.6;font-size:12px" title="${TODAY_DECISION_INFO}">ⓘ</span>`;
+
 function renderTodayDecisionHtml(td) {
   if (!td) return '';
   _tdBadgeStats = { green: 0, orange: 0, gray: 0, none: 0 };
@@ -3626,7 +3686,7 @@ function renderTodayDecisionHtml(td) {
 
   if (!(td.immediate || []).length && !(td.interest || []).length && !(td.near || []).length) {
     return `<div>
-      <div class="mf-toolbar"><b>🎯 오늘의 결정</b></div>
+      <div class="mf-toolbar"><b>🎯 오늘의 결정</b> ${TODAY_DECISION_INFO_ICON}</div>
       <div style="font-size:13px;color:var(--muted);margin-bottom:10px">오늘 행동할 것 없음${td.waiting_total ? ` — 대기 ${td.waiting_total}건` : ''}. 방금 배포했다면 캐시 워밍 중이라 몇 분 뒤 다시 채워집니다.</div>
       ${waitingHtml}
     </div>`;
@@ -3645,7 +3705,7 @@ function renderTodayDecisionHtml(td) {
     ? sectionHeader('🔴 즉시 행동', '#ff9b9b') + immediateHtml
     : sectionHeader('🔴 즉시 행동 — 없음', '#666');
   return `<div>
-    <div class="mf-toolbar"><b>🎯 오늘의 결정</b></div>
+    <div class="mf-toolbar"><b>🎯 오늘의 결정</b> ${TODAY_DECISION_INFO_ICON}</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;max-width:1400px;margin:0 auto">
       ${immediateSection}
       ${interestHtml ? sectionHeader('🔎 관심(확인됨)', '#8fb3ff') + interestHtml : ''}
@@ -4017,6 +4077,11 @@ document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click'
   // 데이터라 이 탭 자체의 시장 필터는 안 건드림 — 미국 대장후보도 계속
   // 그대로 보이게).
   if (mode === 'leader') { loadReignitionWatch(); }
+  // v5.188(사용자 지시 — 재점화 가시화): 눌림목 탭 상단 "🔥 재점화" 요약도
+  // 같은 워치리스트 데이터를 쓰지만 만료 포함 여부가 달라(대장관찰은
+  // 감시/체결만, 여긴 오늘 만료분도) 별도 캐시(reignitionPullbackData)로
+  // 분리 — 대장관찰 탭의 정렬/펼치기 상태를 건드리지 않기 위함.
+  if (mode === 'pullback') { loadReignitionPullbackStatus(); }
   applyTabViewState();
 }));
 

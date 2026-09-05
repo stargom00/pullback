@@ -5,6 +5,21 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.188 [UI] "오늘의 결정" 툴팁 + 재점화 가시화(사용자 지시).
+        [1] "🎯 오늘의 결정" 제목 옆 ⓘ 호버/탭 툴팁 — 검증된 진입 4종
+        (돌파임박 KR 종가진입 0.157R · 종가베팅 z=3.54 · 재점화
+        buy-stop 0.755R · US 눌림목 즉시진입 +0.206R)만 🔴, 나머지는
+        🔎 관심이라는 판정 기준을 카드 밖에서 설명. 새 판정 로직 아님 —
+        `_dedup_today_decision` 뒤의 "정직성 가드"(verdict==
+        'entry_candidate' 4종 강제)를 그대로 문구화(근거:
+        docs/confirm_entry_lookahead_2026-09-04.md). [2] 재점화
+        가시화: `_refresh_reignition_watch()`가 관리하는 감시목록이
+        대장관찰 탭에만 있어 눌림목 사용자에겐 안 보이던 문제 —
+        눌림목 탭 상단에 "🔥 재점화" 요약(대장주/테마/재점화일/고가
+        (buy-stop)/손절/상태) 신설. `_reignition_watchlist_view()`에
+        `include_expired_today` 옵션 추가(기본 False, 기존 호출부
+        불변) — 감시·체결에 더해 오늘 만료분까지 3상태 노출. 값은
+        전부 기존 스냅샷(exec/confirm) 재사용, 새 계산 없음.
 v5.187 [수정] 저널 병합 가드 + 내 일지 "＋직접 추가" 강화(사용자 지시).
         [1] 병합 가드: `POST /api/journal`(모든 setJournal() 호출의 유일한
         저장 경로)이 그동안 받은 배열을 그대로 덮어썼다 — CLAUDE.md에
@@ -4781,7 +4796,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.187"
+VERSION = "v5.188"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -9488,22 +9503,31 @@ async def theme_lifecycle_rotation():
     return JSONResponse(_clean_nan({"themes": list(matrix.keys()), "matrix": matrix}))
 
 
-def _reignition_watchlist_view() -> list:
+def _reignition_watchlist_view(include_expired_today: bool = False) -> list:
     """대장관찰 탭 '🔁 재점화 대기' 섹션 + 봇 조회 공용 뷰. status=watching/
     confirmed만 노출(expired는 UI에서 볼 필요 없는 소멸 이력).
 
     v5.130: 같은 종목이 여러 D0 사이클로 중복 표시되던 문제 — 티커별로
     묶어 최신 D0를 primary, 나머지를 older(펼치기용)로 반환. 그룹 정렬은
     기존과 동일(confirmed 우선 → window_days_left 오름차순, primary
-    기준)."""
+    기준).
+
+    v5.188(사용자 지시 — 재점화 가시화): include_expired_today=True면
+    오늘 막 만료된(expired_at==today) 항목도 포함 — 눌림목 탭 상단
+    "🔥 재점화" 요약이 감시·체결·만료 3상태를 다 보여줘야 해서 추가.
+    기존 호출부(대장관찰 탭, /api/reignition/confirmed 등)는 기본값
+    False라 동작 불변."""
     store = _load_reignition_watch()
+    today = datetime.now(KST).strftime("%Y-%m-%d")
     items = [{"theme": r["theme"], "ticker": r["ticker"], "name": r["name"],
               "d0_date": r["d0_date"], "days_since_d0": r.get("days_since_d0"),
               "window_days_left": r.get("window_days_left"), "status": r["status"],
-              "rs_rank": r.get("rs_rank"),
+              "rs_rank": r.get("rs_rank"), "expired_at": r.get("expired_at"),
               "compression": r.get("compression"), "confirm": r.get("confirm"),
               "forward": r.get("forward"), "exec": r.get("exec")}
-             for r in store.values() if r.get("status") in ("watching", "confirmed")]
+             for r in store.values()
+             if r.get("status") in ("watching", "confirmed")
+             or (include_expired_today and r.get("status") == "expired" and r.get("expired_at") == today)]
 
     by_ticker: dict[str, list] = {}
     for it in items:
@@ -9519,13 +9543,16 @@ def _reignition_watchlist_view() -> list:
 
 
 @app.get("/api/reignition/watchlist")
-async def reignition_watchlist():
+async def reignition_watchlist(include_expired: bool = False):
     """🔁 전 리더 재점화 대기 목록 (v5.125) — docs/kr_theme_leader_reignition.md
     채택 결과의 실시간 워치리스트. _refresh_reignition_watch()가 KR 장마감
     후 하루 1회 갱신한 저장분을 그대로 노출(이 엔드포인트 자체는 새 계산을
     하지 않음 — 대장관찰 탭 로드를 무겁게 만들지 않기 위함, 캘린더 탭과
-    같은 원칙)."""
-    items = _reignition_watchlist_view()
+    같은 원칙).
+
+    v5.188: include_expired=1이면 오늘 만료분도 포함(눌림목 탭 "🔥 재점화"
+    요약용, _reignition_watchlist_view() 참고). 기본값은 기존 그대로."""
+    items = _reignition_watchlist_view(include_expired_today=include_expired)
     n_cycles = len(items) + sum(len(i["older_cycles"]) for i in items)
     return JSONResponse(_clean_nan({
         "items": items, "count": len(items), "n_cycles": n_cycles,
