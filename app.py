@@ -5,6 +5,29 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.185 [수정] 토스 자동채움 미작동 조사·수정(사용자 지시 — 한미사이언스
+        008930.KS entry_actual 안 채워짐). 점검 결과: ① launchd 동기화는
+        v5.182 배포 이후에도 정상 실행 중(sync_toss.log — "동기화 완료:
+        2건 저장됨"이 여러 차례 반복, 실패 없음) — 타이밍 문제 아님.
+        ② 티커 정규화도 정상 — "008930.KS"가 실제 유니버스에 있고
+        (`get_universe(None)` 확인 완료), 사용자가 이미 positions.json
+        에서 이 형식으로 보고 있었으니 resolved 단계는 문제 없었음.
+        ③ 실제 버그: `positions_sync()`의 저널 크로스필 조건이
+        `r.get("status") != "entered"`(엄격 일치)였는데, 프론트 전역이
+        쓰는 관례는 `(r.status || 'entered')`(status 필드가 없는
+        구버전 레코드도 entered로 취급) — 이 구버전 스타일 레코드가
+        엄격 비교에 걸려 스킵되고 있었을 가능성. 프론트와 동일한 폴백
+        으로 통일. 채움 성공 시 로그 한 줄 추가(`entry_actual=...`,
+        다음에 또 안 채워지면 Railway 로그에서 바로 확인 가능하게).
+        **참고(수정 안 함, 사용자 판단 필요)**: 위 수정으로도 재발하면
+        가장 유력한 원인은 이 세션 내내 열려 있었을 브라우저 탭의
+        오래된 journalCache가 `updateTracking()`의 자동 저장(주기적,
+        사용자 조작 없이도 발생) 때마다 서버의 최신 저널(entry_source/
+        entry_actual 필드 포함)을 구버전 스냅샷으로 덮어쓰는 경우 —
+        CLAUDE.md에 이미 기록된 같은 위험(저널 캐시 문서화 참고)이 이번
+        v5.182~184의 스키마 추가에도 그대로 적용됨. 탭을 새로고침(또는
+        전부 닫았다 재접속)하면 해소되지만, 이 세션에서 실시간으로 열려
+        있는 탭 상태는 확인할 방법이 없어 추정만 기록.
 v5.184 [수정] 확인일이 스캔 실행일로 찍히던 버그(사용자 지시) —
         `_refresh_auto_watch()`/`_refresh_reignition_watch()`가 확인·
         만료 시점의 날짜를 `daykey`/`today`(스케줄러가 이번 틱을 시작한
@@ -4705,7 +4728,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.184"
+VERSION = "v5.185"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -11838,7 +11861,12 @@ async def positions_sync(request: Request):
         journal_changed = False
         today_kst = datetime.now(KST).strftime("%Y-%m-%d")
         for r in journal:
-            if r.get("status") != "entered" or r.get("entry_actual") is not None:
+            # v5.184(사용자 지시 — 토스 자동채움 미작동 조사): 프론트 전역이
+            # (r.status || 'entered')로 status 없는 레코드를 entered
+            # 취급하는 관례가 있는데(구버전 레코드 호환), 여기는 엄격
+            # 일치(!= "entered")만 봐서 그런 레코드를 건너뛰고 있었다 —
+            # 프론트와 같은 폴백으로 통일.
+            if (r.get("status") or "entered") != "entered" or r.get("entry_actual") is not None:
                 continue
             pos = by_ticker.get(r.get("ticker"))
             if not pos or not pos.get("avg_price"):
@@ -11847,6 +11875,7 @@ async def positions_sync(request: Request):
             r["entry_actual_date"] = today_kst
             r["entry_source"] = "toss"
             journal_changed = True
+            print(f"[positions_sync] 토스 자동채움: {r.get('ticker')} entry_actual={pos['avg_price']}")
         if journal_changed:
             _write_journal_file(journal)
     except Exception as e:
