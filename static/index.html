@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.191</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.192</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -1645,6 +1645,16 @@ async function reignitionManualRefresh(btn) {
         lines.push('', '변경 내역:');
         d.changed.forEach(c => lines.push(`- ${c.ticker}(${c.theme}) ${c.status_before || '(신규)'} → ${c.status_after}${c.expire_reason ? ` [${c.expire_reason}]` : ''}`));
       }
+      // v5.192([2][3] 보고): 이번 실행에서 스킵된 중복 후보 + 터치 대기
+      // 종목의 확인 기한을 갱신 결과에 바로 표시.
+      if (d.touched_detail && d.touched_detail.length) {
+        lines.push('', `터치 대기 ${d.touched_detail.length}건:`);
+        d.touched_detail.forEach(t => lines.push(`- ${t.ticker}(${t.theme}) 터치 ${t.pivot_touch_date} · D+${t.days_since_touch} · 확인 기한 ~${t.confirm_deadline_approx || '?'}`));
+      }
+      if (d.dropped_duplicates && d.dropped_duplicates.length) {
+        lines.push('', `중복 스킵 ${d.dropped_duplicates.length}건:`);
+        d.dropped_duplicates.forEach(dd => lines.push(`- ${dd.ticker} D0=${dd.d0_date}: "${dd.dropped_theme}" 스킵(대표 "${dd.kept_theme}")`));
+      }
       alert(lines.join('\n'));
       await loadReignitionPullbackStatus();
     }
@@ -1688,6 +1698,21 @@ function reignitionStatusLine(it, confirmWindowDays) {
   const windowTxt = it.window_end_date ? `창 ~${it.window_end_date}` : '창 정보없음';
   return `D0 ${it.d0_date} · ${windowTxt} · 터치 없음`;
 }
+// v5.192(사용자 지시 — [5] 재량 기준 미달): (a) 종가<200일선 또는 (b)
+// 고점 대비 조정폭>35% — 둘 다 이미 계산 중인 값(app.py exec/confirm의
+// below_ma200·decline_from_peak_pct) 재사용, 새 계산 없음. 삭제·만료
+// 아님(상태는 안 건드림) — 표시만 회색+기본 접기.
+function reignitionDiscretionFail(it) {
+  const src = it.status === 'confirmed' ? (it.confirm || {}) : (it.exec || {});
+  const belowMa200 = src.below_ma200 === true;
+  const overDecline = src.decline_from_peak_pct != null && src.decline_from_peak_pct > 35;
+  return { fail: belowMa200 || overDecline, belowMa200, overDecline };
+}
+let reignitionPullbackDiscretionOpen = false;   // v5.192([5]): 재량 기준 미달분 기본 접기
+function toggleReignitionPullbackDiscretion() {
+  reignitionPullbackDiscretionOpen = !reignitionPullbackDiscretionOpen;
+  renderCards();
+}
 function reignitionPullbackSectionHtml() {
   const d = reignitionPullbackData;
   if (!d || !(d.items || []).length) return '';
@@ -1705,17 +1730,32 @@ function reignitionPullbackSectionHtml() {
     const checklistIcon = confirmed
       ? ` <span style="cursor:help;opacity:.8;font-size:11px" title="${reignitionChecklistTooltip({...(it.confirm || {}), risk_pct: (pivot != null && stop != null && pivot > stop) ? Math.round((pivot - stop) / pivot * 10000) / 100 : null})}">ⓘ 재량 체크리스트</span>`
       : '';
-    return `<div class="jongga-forward-sub" style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;flex-wrap:wrap">
-      <span>${st.icon} <b>${nameLink}</b> <span style="opacity:.7">(${it.theme})</span>${checklistIcon}</span>
-      <span style="white-space:nowrap">${priceTxt} · ${stopTxt}</span>
-      <span style="width:100%;opacity:.75;font-size:10px;padding-left:20px">${reignitionStatusLine(it, confirmWindowDays)}</span>
+    // v5.192(사용자 지시 — [4] 레이아웃): 고가·손절을 종목명 바로 옆(같은
+    // 줄, 왼쪽)으로 옮기고 우측 정렬 제거 — flex space-between이 가격을
+    // 오른쪽 끝에 붙여놔서 종목명과 매칭이 안 된다는 지적. D0/창/터치
+    // 상태줄은 그대로 아래 줄.
+    const df = reignitionDiscretionFail(it);
+    const dimStyle = df.fail ? 'opacity:.5' : '';
+    const failTag = df.fail
+      ? ` <span style="color:#f87171;font-size:10px" title="${df.belowMa200 ? '종가가 200일선 아래' : ''}${df.belowMa200 && df.overDecline ? ' · ' : ''}${df.overDecline ? '고점 대비 조정폭 35% 초과' : ''}">⚠️ 재량 기준 미달</span>`
+      : '';
+    return `<div class="jongga-forward-sub" style="padding:3px 0;${dimStyle}">
+      <div>${st.icon} <b>${nameLink}</b> <span style="opacity:.7">(${it.theme})</span> · ${priceTxt} · ${stopTxt}${checklistIcon}${failTag}</div>
+      <div style="opacity:.75;font-size:10px;padding-left:20px">${reignitionStatusLine(it, confirmWindowDays)}</div>
     </div>`;
   };
   // v5.190([7] 재점화 감시 만료): 만료분은 기본 접기 — 개수만 보이고
   // 클릭해야 펼쳐짐(watching/confirmed는 그대로 항상 표시).
-  const activeItems = d.items.filter(it => it.status !== 'expired');
+  // v5.192([5]): 만료 아닌 것 중에서도 재량 기준 미달분은 별도로 접어둔다.
+  const nonExpired = d.items.filter(it => it.status !== 'expired');
+  const activeItems = nonExpired.filter(it => !reignitionDiscretionFail(it).fail);
+  const discretionFailItems = nonExpired.filter(it => reignitionDiscretionFail(it).fail);
   const expiredItems = d.items.filter(it => it.status === 'expired');
   const activeRows = activeItems.map(rowHtml).join('');
+  const discretionToggle = discretionFailItems.length
+    ? `<div class="jongga-forward-sub" style="opacity:.7;cursor:pointer;margin-top:4px" onclick="toggleReignitionPullbackDiscretion()">⚠️ 재량 기준 미달 ${discretionFailItems.length}건 ${reignitionPullbackDiscretionOpen ? '▴숨기기' : '▾펼치기'}</div>`
+    : '';
+  const discretionRows = reignitionPullbackDiscretionOpen ? discretionFailItems.map(rowHtml).join('') : '';
   const expiredToggle = expiredItems.length
     ? `<div class="jongga-forward-sub" style="opacity:.7;cursor:pointer;margin-top:4px" onclick="toggleReignitionPullbackExpired()">⚰️ 만료 ${expiredItems.length}건 ${reignitionPullbackExpiredOpen ? '▴숨기기' : '▾펼치기'}</div>`
     : '';
@@ -1727,6 +1767,8 @@ function reignitionPullbackSectionHtml() {
     </div>
     <div class="jongga-forward-sub" style="opacity:.85;margin-bottom:4px">🔎 관심(재량) — 근거 n=53, 시기반분 재현 미검증(Rule 9 미달) · buy-stop가/손절은 참고 표시, 체결은 재량 체크리스트로 판단 · 근거: docs/kr_theme_leader_reignition.md</div>
     ${activeRows}
+    ${discretionToggle}
+    ${discretionRows}
     ${expiredToggle}
     ${expiredRows}
   </div>`;

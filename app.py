@@ -5,6 +5,41 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.192 [버그수정+기능] 재점화 중복레코드/window_end_date 버그 수정 +
+        재량 기준 미달 배지 + 레이아웃 수정(사용자 지시, 커밋명
+        reignition-dedup-fix — 실사용자가 v5.191 배포 후 "🔄 지금
+        갱신"을 실제로 눌러 나온 실측 결과(40건 중 31건 변경, 감시5·
+        터치1·체결0·만료34)를 근거로 신고한 버그들).
+        [1] "창 정보없음" 잔존 버그: window_end_date 소급 계산이
+        candidates 루프 "안"에서만 돌아서, 그 실행의 candidates에
+        없는(사이클 탐지가 그날 놓친) 기존 레코드는 계속 못 채워졌다 —
+        store 전체를 훑는 별도 패스로 옮겨 candidates 멤버십과 무관하게
+        확실히 채우도록(레코드별 try/except라 하나 실패해도 나머지는
+        계속 처리) 수정.
+        [2] 080220.KQ 등 중복 레코드(40건 중 실제 (ticker,D0) 조합은
+        28개) 원인: `_reignition_compute_candidates()`가 테마별로
+        순회해서, 같은 종목이 theme_map.json에서 2개 이상 테마에 속하고
+        같은 D0로 잡히면 테마만 다른 candidate가 여러 개 생겼다 — 감시
+        로직(check_confirm 등)은 테마와 무관하게 종목 가격만 보므로 테마
+        별로 따로 추적할 이유가 없음. 저장 키를
+        `f"{theme}|{ticker}|{d0_date}"`에서 `f"{ticker}|{d0_date}"`로
+        바꾸고 candidates를 (ticker, d0_date) 기준 dedup(먼저 나온
+        테마를 대표로) — 옛 theme포함 키 레코드는 다음 실행부터
+        current_keys에 안 잡혀 창만료 경로로 자연 정리(마이그레이션
+        스크립트 불필요, pivot_touch_date 소급계산과 같은 자가치유
+        패턴). 수동 갱신 응답에 이번 실행에서 스킵된 중복 목록도 반환.
+        [3] 터치 1건 보고: 이전엔 조회할 방법이 없었다는 지적(프로덕션
+        비접근) 대응 — `/api/reignition/refresh` 응답에 `touched_detail`
+        (터치 종목/터치일/확인 기한 근사)을 추가해 다음 갱신부터 클릭
+        한 번으로 바로 보이게 함.
+        [4] 레이아웃: 종목명 옆(같은 줄, 왼쪽)에 "고가·손절"을 배치하고
+        flex space-between(가격이 오른쪽 끝에 붙어 종목명과 안 맞던
+        원인) 제거 — D0/창/터치 상태줄은 그대로 아래 줄.
+        [5] "⚠️ 재량 기준 미달" 배지: 종가<200일선(스캐너 전역 정의
+        c.rolling(200).mean() 재사용) 또는 고점대비조정폭>35%(이미
+        계산 중인 decline_from_peak_pct 재사용, 새 계산 없음)면 회색
+        처리 + 기본 접기(삭제·만료 아님, 표시만) — 만료 버킷과 별개의
+        접힘 섹션으로 분리.
 v5.191 [정정+기능] 재점화 박스 표시 정의 정정 + 수동 갱신 + 표시 개편
         (사용자 지시, 커밋명 reignition-labels).
         [1] 용어 정정: 박스 괄호 안 날짜는 재점화일이 아니라 D0(원 점화일)
@@ -4868,7 +4903,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.191"
+VERSION = "v5.192"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6032,6 +6067,34 @@ async def _refresh_reignition_watch(bundle: dict):
     current_keys = set()
     import pandas as pd
 
+    # v5.192(사용자 지시 — [2] 중복 레코드): _reignition_compute_candidates()
+    # 가 테마별로 순회하기 때문에 같은 종목이 theme_map.json에서 두 테마
+    # 이상에 속해 있고 같은 D0로 동시에 잡히면(예: 080220.KQ) (ticker,
+    # d0_date)는 같은데 theme만 다른 candidate가 2개 이상 생긴다. 예전 키
+    # (f"{theme}|{ticker}|{d0_date}")는 이걸 별개 레코드로 저장해 40건 중
+    # 실제 (ticker, D0) 조합은 28개뿐인 중복을 만들었다 — 감시 로직
+    # 자체(check_confirm 등)는 테마와 무관하게 그 종목 가격만 보므로 테마별
+    # 로 따로 추적할 이유가 없다. (ticker, d0_date) 기준으로 dedup(먼저
+    # 나온 테마를 대표로 채택, theme_map.json 순회 순서상 결정적)하고 키도
+    # theme를 뺀 f"{ticker}|{d0_date}"로 바꾼다 — 예전 theme 포함 키였던
+    # 레코드는 이번 실행부터 current_keys에 안 잡혀 자연스럽게 창만료
+    # 경로로 정리된다(별도 마이그레이션 스크립트 불필요, 기존 pivot_touch_
+    # date 소급계산과 같은 자가치유 패턴).
+    seen_ticker_d0 = {}
+    deduped_candidates = []
+    dropped_duplicates = []   # v5.192([2] 보고용) — 이번 실행에서 스킵된 중복 후보
+    for c in candidates:
+        td_key = (c["ticker"], c["d0_date"])
+        if td_key in seen_ticker_d0:
+            dropped_duplicates.append({"ticker": c["ticker"], "d0_date": c["d0_date"],
+                                        "dropped_theme": c["theme"], "kept_theme": seen_ticker_d0[td_key]})
+            print(f"[reignition] 중복 후보 스킵: {c['ticker']} D0={c['d0_date']} "
+                  f"테마={c['theme']}(대표 테마={seen_ticker_d0[td_key]})")
+            continue
+        seen_ticker_d0[td_key] = c["theme"]
+        deduped_candidates.append(c)
+    candidates = deduped_candidates
+
     def _peak_decline_pct(df, d0_pos: int, pivot: float):
         """v5.190: d0_pos~어제(오늘 제외, pivot/stop과 동일 관례)까지의
         고점 대비 pivot이 몇 % 눌렸는지 — "재량 체크리스트" 항목3(조정폭)
@@ -6043,27 +6106,27 @@ async def _refresh_reignition_watch(bundle: dict):
             return None
         return round((peak - pivot) / peak * 100, 2)
 
+    def _below_ma200(df) -> bool | None:
+        """v5.192(사용자 지시 — [5] 재량 기준 미달 배지): 스캐너 전역의
+        200일선 정의(scanner.py 여러 곳, c.rolling(200).mean()) 그대로
+        재사용 — 새 정의 만들지 않음. 200봉 미만이면 판정 불가(None)."""
+        close = df["Close"]
+        if len(close) < 200:
+            return None
+        ma200 = close.rolling(200).mean().iloc[-1]
+        if ma200 != ma200:  # NaN
+            return None
+        return bool(float(close.iloc[-1]) < float(ma200))
+
     for c in candidates:
-        key = f"{c['theme']}|{c['ticker']}|{c['d0_date']}"
+        key = f"{c['ticker']}|{c['d0_date']}"
         current_keys.add(key)
         rec = store.get(key)
         if rec is None:
-            # v5.191(사용자 지시 — [3] 표시 수정): window_end_date는 D0 +
-            # WATCH_WINDOW_END(180) 영업일의 근사 캘린더 날짜("~" 접두로
-            # 근사임을 표시) — KR 공휴일은 반영 안 해 며칠 오차 있을 수
-            # 있음(정확한 KRX 거래일 캘린더가 아니라 Mon-Fri 영업일 기준).
-            # D0 시점에 1회만 계산해 고정(어차피 안 바뀌는 값, 매일 재계산
-            # 불필요).
-            window_end = pd.Timestamp(c["d0_date"]) + pd.tseries.offsets.BDay(theme_reignition.WATCH_WINDOW_END)
             rec = {"theme": c["theme"], "ticker": c["ticker"], "name": c["name"],
                    "d0_date": c["d0_date"], "first_seen": today, "status": "watching",
-                   "compression": None, "confirm": None, "forward": None, "pivot_touch_date": None,
-                   "window_end_date": str(window_end.date())}
+                   "compression": None, "confirm": None, "forward": None, "pivot_touch_date": None}
             store[key] = rec
-        elif not rec.get("window_end_date"):
-            # v5.191([3]): 이 필드 신설 이전 기존 레코드 소급 계산.
-            window_end = pd.Timestamp(rec["d0_date"]) + pd.tseries.offsets.BDay(theme_reignition.WATCH_WINDOW_END)
-            rec["window_end_date"] = str(window_end.date())
         rec["days_since_d0"] = c["days_since_d0"]
         rec["window_days_left"] = c["window_days_left"]
         rec["rs_rank"] = c.get("rs_rank")
@@ -6083,6 +6146,7 @@ async def _refresh_reignition_watch(bundle: dict):
                         decline_pct = _peak_decline_pct(df, d0_pos, res["pivot"])
                     except Exception:
                         d0_pos, decline_pct = None, None
+                    below_ma200 = _below_ma200(df)  # v5.192([5]): 재량 기준 미달 배지용
                     # v5.130: 실행 정보(피벗/현재가/거리%/참고손절/리스크%/2R목표) —
                     # UI 카드 표시용, 매일 갱신(장중 라이브 아님, EOD 확정치).
                     rec["exec"] = {
@@ -6092,6 +6156,7 @@ async def _refresh_reignition_watch(bundle: dict):
                         "atr_pct": res.get("atr_pct"),  # v5.155: 오늘의 결정 손절폭 배지용
                         "vol_mult": res.get("vol_mult"),  # v5.190: 재량 체크리스트 실측값
                         "decline_from_peak_pct": decline_pct,  # v5.190: 재량 체크리스트 실측값
+                        "below_ma200": below_ma200,  # v5.192([5]): 재량 기준 미달 배지
                     }
                     if res["confirmed"]:
                         rec["status"] = "confirmed"
@@ -6106,7 +6171,7 @@ async def _refresh_reignition_watch(bundle: dict):
                         # 있어(오늘의 결정 배지 배경 사례), 그 판정에 필요.
                         rec["confirm"] = {"date": confirm_bar_date, "pivot": res["pivot"], "stop": res["stop"],
                                            "atr_pct": res.get("atr_pct"), "vol_mult": res.get("vol_mult"),
-                                           "decline_from_peak_pct": decline_pct}
+                                           "decline_from_peak_pct": decline_pct, "below_ma200": below_ma200}
                         rec["forward"] = {"opened_at": confirm_bar_date, "entry": res["pivot"], "stop": res["stop"],
                                           "bars_held": 0, "r_progress": 0.0,
                                           "resolved": False, "resolved_r": None, "resolved_reason": None}
@@ -6138,6 +6203,23 @@ async def _refresh_reignition_watch(bundle: dict):
                                           f"{days_since_touch}거래일째 미확인(거래량 미충족)")
                             except Exception:
                                 pass
+
+    # ── v5.192(사용자 지시 — [1] 버그수정): window_end_date 소급 계산을
+    #    candidates 루프 안(위)에서만 하면, 그 실행의 candidates에 없는
+    #    레코드(사이클 탐지가 그날 그 종목을 놓친 경우 등)는 계속 못
+    #    채워진다 — "창 정보없음"이 갱신 후에도 안 없어지던 원인. store
+    #    전체를 훑어 candidates 멤버십과 무관하게 확실히 채운다(status
+    #    무관 — expired에도 넣어둬서 나쁠 거 없음, 소급 계산이라 새 계산
+    #    아님). d0_date 파싱 자체가 실패하는 손상 레코드가 있어도 그
+    #    레코드만 건너뛰고 나머지는 계속 처리(예외 하나가 전체 루프를
+    #    끊는 걸 방지 — 이전엔 후보 루프 안에 있어서 이 위험이 있었음).
+    for key, rec in store.items():
+        if not rec.get("window_end_date") and rec.get("d0_date"):
+            try:
+                window_end = pd.Timestamp(rec["d0_date"]) + pd.tseries.offsets.BDay(theme_reignition.WATCH_WINDOW_END)
+                rec["window_end_date"] = str(window_end.date())
+            except Exception as e:
+                print(f"[reignition] {rec.get('ticker')} window_end_date 계산 실패(d0_date={rec.get('d0_date')!r}): {e}")
 
     # ── 창 만료(180거래일 초과) 또는 테마 매핑 자체가 사라짐 — 자동 해제 ──
     for key, rec in store.items():
@@ -6193,6 +6275,15 @@ async def _refresh_reignition_watch(bundle: dict):
             fwd["resolved"], fwd["resolved_r"], fwd["resolved_reason"] = True, r_now, "time"
 
     _save_reignition_watch(store)
+    # v5.192([2][3] 보고용): 호출부(수동 갱신 엔드포인트 등)가 이번 실행에서
+    # 걸러진 중복과, 현재 터치 대기 중인 레코드를 바로 알 수 있게 반환.
+    # 기존 호출부(_warm_market 등)는 반환값을 안 쓰므로 무해.
+    touched_now = [{"ticker": r.get("ticker"), "theme": r.get("theme"),
+                     "pivot_touch_date": r.get("pivot_touch_date"),
+                     "days_since_touch": r.get("days_since_touch")}
+                    for r in store.values()
+                    if r.get("status") == "watching" and r.get("pivot_touch_date")]
+    return {"dropped_duplicates": dropped_duplicates, "touched": touched_now}
 
 
 def _reignition_forward_stats() -> dict:
@@ -9851,12 +9942,13 @@ async def reignition_manual_refresh():
     (기본 인증 게이트 그대로, API_READ_TOKEN 허용목록에 안 넣음 — 실제
     fetch+쓰기가 일어나는 액션이라 봇 읽기 전용 경로와는 성격이 다름).
     갱신 전/후 스냅샷을 비교해 상태가 바뀐 레코드만 diff로 반환."""
+    import pandas as pd
     bundle = await _fetch_market_data("kr", wait_for_fresh=True)
     if not bundle:
         return JSONResponse({"ok": False, "error": "KR 데이터 로드 실패"}, status_code=503)
     before = {k: {"status": v.get("status"), "pivot_touch_date": v.get("pivot_touch_date")}
               for k, v in _load_reignition_watch().items()}
-    await _refresh_reignition_watch(bundle)
+    refresh_info = await _refresh_reignition_watch(bundle) or {}
     after = _load_reignition_watch()
     changed = []
     for key, rec in after.items():
@@ -9869,11 +9961,26 @@ async def reignition_manual_refresh():
             })
     watching_no_touch = sum(1 for r in after.values() if r.get("status") == "watching" and not r.get("pivot_touch_date"))
     watching_touched = sum(1 for r in after.values() if r.get("status") == "watching" and r.get("pivot_touch_date"))
+    # v5.192([3] 보고): 터치 대기 중인 레코드 — 확인 기한(터치일 +
+    # REIGNITE_CONFIRM_WINDOW_DAYS 거래일, 근사 영업일 계산 — 정확한 값은
+    # 다음 EOD에 df 기준으로 판정됨)까지 명시.
+    touched_detail = []
+    for t in refresh_info.get("touched", []):
+        deadline = None
+        if t.get("pivot_touch_date"):
+            try:
+                deadline = str((pd.Timestamp(t["pivot_touch_date"])
+                                + pd.tseries.offsets.BDay(theme_reignition.REIGNITE_CONFIRM_WINDOW_DAYS)).date())
+            except Exception:
+                deadline = None
+        touched_detail.append({**t, "confirm_deadline_approx": deadline})
     return JSONResponse(_clean_nan({
         "ok": True, "n_total": len(after), "n_changed": len(changed), "changed": changed,
         "watching_no_touch": watching_no_touch, "watching_touched": watching_touched,
         "confirmed": sum(1 for r in after.values() if r.get("status") == "confirmed"),
         "expired": sum(1 for r in after.values() if r.get("status") == "expired"),
+        "touched_detail": touched_detail,
+        "dropped_duplicates": refresh_info.get("dropped_duplicates", []),
     }))
 
 
