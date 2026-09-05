@@ -5,6 +5,46 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.193 [긴급 버그수정] 재점화 창 만료 오판 수정(사용자 지시, 커밋명
+        reignition-window-fix). 원인: 만료 판정이 window_end_date(화면
+        표시값)를 전혀 안 쓰고 `key not in current_keys`(이번 실행에서
+        theme_reignition.find_watch_candidates()가 재탐지했는지)만
+        봤다 — 재탐지는 이 저장소에 이미 문서화된 KR fetch 순서
+        비결정성(docs/kr_us_strategy_map.md 9절과 같은 유형)에 취약해서
+        "지금 갱신"을 짧은 간격으로 두 번 누르면 창이 전혀 안 끝난
+        종목도 순간적으로 안 잡혀 "window_180d"로 오판됐다(2026-09-06
+        실사고: 세명전기/KB금융/현대오토에버/지엔씨에너지/HD현대에너지
+        솔루션 5건). 표시와 판정이 다른 소스를 본다는 사용자 가설이
+        정확했음.
+        [1] 만료 판정을 `today > window_end_date` 비교로 교체 —
+        current_keys에 없다는 사실만으론 더 이상 만료 안 시킴(그날
+        재탐지를 놓쳤을 뿐이면 그날의 exec 갱신만 건너뛰고 watching
+        유지, 다음 실행에서 재탐지되면 정상 재개). 소급 복구 패스 추가
+        — expire_reason='window_180d'인데 window_end_date가 아직 안
+        지난 레코드는 자동으로 watching 복구(pivot_touch_date 등 다른
+        필드는 그대로 유지 — KB금융 터치 상태 보존). 매 실행마다 돌아도
+        멱등(이미 정상인 레코드는 조건에 안 걸림).
+        [2] 위 수정 자체가 멱등성 보장 — window_end_date는 안정값이라
+        연속 갱신해도 같은 결과. "오늘"은 KST 캘린더 날짜 문자열 비교라
+        거래일/봉수 세는 로직 자체가 없어 주말 이슈 없음.
+        [3] expire_reason에 실제 비교값을 담은 expire_detail 필드 추가 —
+        "창 종료 (오늘 09-06 > 종료 2027-03-10)" / "터치 후 미확인
+        (터치 {날짜} + N거래일 경과 >= 확인기한 3거래일)". 프론트는
+        expire_detail이 있으면 그대로 쓰고 없는 구버전 레코드만 기존
+        하드코딩 문구로 폴백.
+        [4] 갱신 결과를 alert() 대신 복사 가능한 인라인 패널로(닫기/복사
+        버튼) + `/data/reignition_refresh_log.json`에 매 실행 이력
+        저장(최근 50회, `_append_reignition_refresh_log()`). 조회용
+        `GET /api/reignition/refresh_log` 신설.
+        [5] 갱신 응답에 discretion_fail(재량 기준 미달 목록, 프론트
+        reignitionDiscretionFail과 완전히 같은 조건) 추가 — 화면 확인
+        없이도 응답만으로 검증 가능.
+        [6] 갱신 응답에 old_format_keys(구버전 theme|ticker|d0_date 키
+        정리 전/후 건수, 상태별 잔존 건수) 추가 + 안전 정리 자동 실행 —
+        구버전 키 중 status='watching'인 것만 삭제(v5.192 이후 다시는
+        current_keys에 못 들어오는 영구 동결 쓰레기라 정보 가치 없음),
+        expired/confirmed는 이력·포워드추적 가치가 있어 유지(삭제는
+        사용자 별도 판단).
 v5.192 [버그수정+기능] 재점화 중복레코드/window_end_date 버그 수정 +
         재량 기준 미달 배지 + 레이아웃 수정(사용자 지시, 커밋명
         reignition-dedup-fix — 실사용자가 v5.191 배포 후 "🔄 지금
@@ -4903,7 +4943,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.192"
+VERSION = "v5.193"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6199,6 +6239,12 @@ async def _refresh_reignition_watch(bundle: dict):
                                     rec["status"] = "expired"
                                     rec["expired_at"] = str(df.index[-1].date())
                                     rec["expire_reason"] = "pivot_touch_timeout"
+                                    # v5.193([3]): 실제 비교값 포함.
+                                    rec["expire_detail"] = (
+                                        f"터치 후 미확인 (터치 {touch_date} + "
+                                        f"{days_since_touch}거래일 경과 >= 확인기한 "
+                                        f"{theme_reignition.REIGNITE_CONFIRM_WINDOW_DAYS}거래일)"
+                                    )
                                     print(f"[reignition] {c['ticker']} 만료 — 터치일 {touch_date}부터 "
                                           f"{days_since_touch}거래일째 미확인(거래량 미충족)")
                             except Exception:
@@ -6221,12 +6267,56 @@ async def _refresh_reignition_watch(bundle: dict):
             except Exception as e:
                 print(f"[reignition] {rec.get('ticker')} window_end_date 계산 실패(d0_date={rec.get('d0_date')!r}): {e}")
 
-    # ── 창 만료(180거래일 초과) 또는 테마 매핑 자체가 사라짐 — 자동 해제 ──
+    # ── v5.193([1] 긴급 버그수정) 소급 복구: 구버전 로직(아래 참고)이
+    #    "이번 실행 candidates에 없음"만으로 잘못 만료시킨 레코드를
+    #    되살린다 — window_end_date가 있고 아직 안 지났으면(진짜로는
+    #    창이 안 끝났다는 뜻) watching으로 복구. pivot_touch_date가
+    #    남아있으면 그대로 유지(사용자 지시 — "터치 상태 유지").
+    #    이 복구 패스는 매 실행마다 돌아도 안전(멱등) — 이미 정상인
+    #    레코드는 조건에 안 걸림.
     for key, rec in store.items():
-        if rec.get("status") == "watching" and key not in current_keys:
+        if rec.get("status") == "expired" and rec.get("expire_reason") == "window_180d":
+            wed = rec.get("window_end_date")
+            if wed and today <= wed:
+                rec["status"] = "watching"
+                rec.pop("expired_at", None)
+                rec.pop("expire_reason", None)
+                rec.pop("expire_detail", None)
+                print(f"[reignition] {rec.get('ticker')} 잘못된 만료 복구 — "
+                      f"오늘 {today} <= 창종료 {wed}, 아직 안 끝남(터치일={rec.get('pivot_touch_date')})")
+
+    # ── v5.193([1] 긴급 버그수정): 창 만료(180거래일 초과) 판정을
+    #    current_keys 멤버십이 아니라 window_end_date(안정적으로 저장된
+    #    캘린더 값, 화면 표시값과 동일 소스)와 직접 비교하도록 변경.
+    #    구버전은 "이번 실행에서 재탐지 안 됨" == "창 끝남"으로 취급했는데,
+    #    재탐지(theme_reignition.find_watch_candidates())는 KR 데이터
+    #    fetch 순서 비결정성에 취약해서(docs/kr_us_strategy_map.md 9절과
+    #    같은 유형) 짧은 시간차로 두 번 갱신하면 창이 전혀 안 끝난
+    #    종목도 순간적으로 안 잡혀 "window_180d"로 오판될 수 있었다
+    #    (2026-09-06 실사고: 세명전기/KB금융 등 5건). 이제 그날 재탐지에서
+    #    빠진 종목은 그냥 그날의 exec 갱신만 건너뛰고(다음 실행에서 다시
+    #    잡히면 정상 갱신 재개) watching을 유지 — 진짜로 window_end_date를
+    #    넘긴 경우에만 만료. window_end_date가 없는(이론상 위 백필
+    #    패스가 다 채워야 함) 손상 레코드만 방어적으로 구버전 방식 폴백.
+    for key, rec in store.items():
+        if rec.get("status") != "watching":
+            continue
+        wed = rec.get("window_end_date")
+        if wed:
+            if today > wed:
+                rec["status"] = "expired"
+                rec["expired_at"] = today
+                rec["expire_reason"] = "window_180d"
+                # v5.193([3] 사용자 지시): 만료 사유에 실제 비교값을 넣어
+                # 오판이 화면에서 바로 보이게 — "표시와 판정이 다른 값"
+                # 문제의 재발 방지 원칙.
+                rec["expire_detail"] = f"창 종료 (오늘 {today[5:]} > 종료 {wed})"
+        elif key not in current_keys:
             rec["status"] = "expired"
             rec["expired_at"] = today
-            rec.setdefault("expire_reason", "window_180d")
+            rec["expire_reason"] = "window_180d_no_enddate"
+            rec["expire_detail"] = "창종료일 계산 불가(손상 레코드) — 재탐지 실패로 폴백 만료"
+            print(f"[reignition] ⚠️ {rec.get('ticker')} window_end_date 없이 폴백 만료 — 점검 필요")
 
     # ── v5.190([7] 진단, 레코드당 1회): 이미 confirmed된 레코드가 새
     #    만료규칙(REIGNITE_CONFIRM_WINDOW_DAYS) 기준으론 터치 후 그 창을
@@ -7562,6 +7652,34 @@ ALERTS_USER_PATH = _resolve_persistent_path("alerts_user.txt")
 JONGGA_FORWARD_PATH = _resolve_persistent_path("jongga_forward.json")  # v5.98 포워드 트래킹
 REIGNITION_WATCH_PATH = _resolve_persistent_path("reignition_watch.json")  # v5.125 재점화 워치리스트
 DECISION_LOG_PATH = _resolve_persistent_path("decision_log.json")  # v5.189 "오늘의 결정" 🔴 건수 EOD 로그(표시 없음, 집계용)
+# v5.193(사용자 지시 — [4]): 수동 갱신(POST /api/reignition/refresh) 결과를
+# alert()로만 보여주면 복사해서 공유하기 불편하고 휘발된다 — 파일로도 남긴다.
+REIGNITION_REFRESH_LOG_PATH = _resolve_persistent_path("reignition_refresh_log.json")
+REIGNITION_REFRESH_LOG_MAX = 50  # 최근 50회분만 보관(무한 증식 방지)
+
+
+def _load_reignition_refresh_log() -> list:
+    if os.path.exists(REIGNITION_REFRESH_LOG_PATH):
+        try:
+            with open(REIGNITION_REFRESH_LOG_PATH, encoding="utf-8") as f:
+                data = _json.load(f)
+                return data if isinstance(data, list) else []
+        except (ValueError, OSError):
+            return []
+    return []
+
+
+def _append_reignition_refresh_log(entry: dict):
+    log = _load_reignition_refresh_log()
+    log.append(entry)
+    log = log[-REIGNITION_REFRESH_LOG_MAX:]
+    try:
+        tmp = REIGNITION_REFRESH_LOG_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(log, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, REIGNITION_REFRESH_LOG_PATH)
+    except OSError as e:
+        print(f"[reignition-refresh-log] 저장 실패: {e}")
 
 # v5.189(사용자 지시): "🔴 즉시 행동"이 실제로 하루 몇 건 뜨는지 화면 없이
 # 로그만 쌓는다(일주일치 모아 "하루 평균 몇 건" 파악용). immediate 항목의
@@ -9854,7 +9972,7 @@ def _reignition_watchlist_view(include_expired_today: bool = False) -> list:
               "d0_date": r["d0_date"], "days_since_d0": r.get("days_since_d0"),
               "window_days_left": r.get("window_days_left"), "status": r["status"],
               "rs_rank": r.get("rs_rank"), "expired_at": r.get("expired_at"),
-              "expire_reason": r.get("expire_reason"),
+              "expire_reason": r.get("expire_reason"), "expire_detail": r.get("expire_detail"),
               # v5.191(사용자 지시 — [3] 표시 수정): 감시/터치/체결/만료
               # 4단계 표시용 — window_end_date(D0+180영업일 근사),
               # pivot_touch_date/days_since_touch(터치 후 확인 대기 카운트).
@@ -9941,7 +10059,14 @@ async def reignition_manual_refresh():
     지금 바로 반영되게 사람이 직접 누르는 수동 트리거. 세션 로그인 필요
     (기본 인증 게이트 그대로, API_READ_TOKEN 허용목록에 안 넣음 — 실제
     fetch+쓰기가 일어나는 액션이라 봇 읽기 전용 경로와는 성격이 다름).
-    갱신 전/후 스냅샷을 비교해 상태가 바뀐 레코드만 diff로 반환."""
+    갱신 전/후 스냅샷을 비교해 상태가 바뀐 레코드만 diff로 반환.
+
+    v5.193(사용자 지시): [4] 결과를 reignition_refresh_log.json에도
+    남긴다(alert()만으로는 복사·공유가 불편하고 휘발됨). [6] 구버전 키
+    (theme|ticker|d0_date, v5.192 이전)를 계속 보고 + status='watching'
+    인 것만 안전 정리(다시는 current_keys에 못 들어오는 영구 동결 쓰레기
+    — expired/confirmed는 이력·포워드추적 가치가 있어 남겨둠, 삭제는
+    사용자 별도 판단)."""
     import pandas as pd
     bundle = await _fetch_market_data("kr", wait_for_fresh=True)
     if not bundle:
@@ -9950,6 +10075,26 @@ async def reignition_manual_refresh():
               for k, v in _load_reignition_watch().items()}
     refresh_info = await _refresh_reignition_watch(bundle) or {}
     after = _load_reignition_watch()
+
+    # v5.193([6] 보고+안전정리): 구버전 키(파이프 2개 = theme|ticker|d0_date)
+    # vs 신버전 키(파이프 1개 = ticker|d0_date) 집계. watching인 구버전
+    # 레코드는 v5.192 이후 다시는 current_keys에 못 들어오는 영구 동결
+    # 쓰레기라 안전하게 삭제 — expired/confirmed는 이력 가치가 있어 유지.
+    old_format_by_status: dict[str, int] = {}
+    purge_keys = []
+    for k, rec in after.items():
+        if k.count("|") == 2:   # theme|ticker|d0_date
+            st = rec.get("status") or "?"
+            old_format_by_status[st] = old_format_by_status.get(st, 0) + 1
+            if st == "watching":
+                purge_keys.append(k)
+    n_before_cleanup = len(after)
+    if purge_keys:
+        for k in purge_keys:
+            del after[k]
+        _save_reignition_watch(after)
+        print(f"[reignition] 구버전 키 watching {len(purge_keys)}건 정리(영구 동결 쓰레기)")
+
     changed = []
     for key, rec in after.items():
         b = before.get(key)
@@ -9958,6 +10103,7 @@ async def reignition_manual_refresh():
                 "ticker": rec.get("ticker"), "theme": rec.get("theme"), "d0_date": rec.get("d0_date"),
                 "status_before": b["status"] if b else None, "status_after": rec.get("status"),
                 "pivot_touch_date": rec.get("pivot_touch_date"), "expire_reason": rec.get("expire_reason"),
+                "expire_detail": rec.get("expire_detail"),
             })
     watching_no_touch = sum(1 for r in after.values() if r.get("status") == "watching" and not r.get("pivot_touch_date"))
     watching_touched = sum(1 for r in after.values() if r.get("status") == "watching" and r.get("pivot_touch_date"))
@@ -9974,14 +10120,42 @@ async def reignition_manual_refresh():
             except Exception:
                 deadline = None
         touched_detail.append({**t, "confirm_deadline_approx": deadline})
-    return JSONResponse(_clean_nan({
+    # v5.193([5] 확인용): 재량 기준 미달(종가<200일선 또는 조정폭>35%)로
+    # 표시가 회색+접힘으로 가는 레코드를 서버에서도 명시적으로 보고 —
+    # 프론트(reignitionDiscretionFail)와 완전히 같은 조건, 새 계산 없음.
+    discretion_fail = []
+    for r in after.values():
+        if r.get("status") not in ("watching", "confirmed"):
+            continue
+        src = r.get("confirm") if r.get("status") == "confirmed" else r.get("exec")
+        src = src or {}
+        below = src.get("below_ma200") is True
+        over = src.get("decline_from_peak_pct") is not None and src.get("decline_from_peak_pct") > 35
+        if below or over:
+            discretion_fail.append({"ticker": r.get("ticker"), "below_ma200": below,
+                                     "decline_from_peak_pct": src.get("decline_from_peak_pct")})
+    result = {
         "ok": True, "n_total": len(after), "n_changed": len(changed), "changed": changed,
         "watching_no_touch": watching_no_touch, "watching_touched": watching_touched,
         "confirmed": sum(1 for r in after.values() if r.get("status") == "confirmed"),
         "expired": sum(1 for r in after.values() if r.get("status") == "expired"),
         "touched_detail": touched_detail,
         "dropped_duplicates": refresh_info.get("dropped_duplicates", []),
-    }))
+        "discretion_fail": discretion_fail,
+        "old_format_keys": {
+            "n_before_cleanup": n_before_cleanup, "n_after_cleanup": len(after),
+            "purged_watching": len(purge_keys), "remaining_by_status": old_format_by_status,
+        },
+    }
+    _append_reignition_refresh_log({"ts": datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"), **_clean_nan(result)})
+    return JSONResponse(_clean_nan(result))
+
+
+@app.get("/api/reignition/refresh_log")
+async def reignition_refresh_log():
+    """v5.193(사용자 지시 — [4]): 수동 갱신 이력 최근 REIGNITION_REFRESH_LOG_MAX
+    회분. 세션 로그인 필요(쓰기 액션의 이력이라 읽기도 같은 게이트)."""
+    return JSONResponse(_clean_nan({"log": _load_reignition_refresh_log()}))
 
 
 @app.get("/api/vol/{ticker}")

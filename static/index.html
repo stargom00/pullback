@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.192</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.193</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -1625,6 +1625,26 @@ function toggleReignitionPullbackExpired() {
 // 소급계산·만료가 다음 KR 거래일까지 미뤄진다 — 지금 바로 반영하고 싶을
 // 때 누르는 수동 트리거(POST /api/reignition/refresh, 세션 로그인 필요).
 let reignitionRefreshBusy = false;
+// v5.193(사용자 지시 — [4]): alert()는 복사·공유가 불편하고 닫으면
+// 휘발된다 — 복사 가능한 패널로 교체(서버가 reignition_refresh_log.json
+// 에도 같은 내용을 남기니 새로고침해도 이력은 안 없어짐, /api/reignition/
+// refresh_log 참고).
+let reignitionRefreshPanelText = null;
+let reignitionRefreshPanelOpen = false;
+function closeReignitionRefreshPanel() {
+  reignitionRefreshPanelOpen = false;
+  renderCards();
+}
+async function reignitionCopyRefreshPanel(btn) {
+  try {
+    await navigator.clipboard.writeText(reignitionRefreshPanelText || '');
+    const orig = btn.textContent;
+    btn.textContent = '복사됨!';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+  } catch (e) {
+    alert('복사 실패 — 직접 드래그해서 복사해주세요');
+  }
+}
 async function reignitionManualRefresh(btn) {
   if (reignitionRefreshBusy) return;
   reignitionRefreshBusy = true;
@@ -1635,7 +1655,7 @@ async function reignitionManualRefresh(btn) {
     const res = await fetch('/api/reignition/refresh', { method: 'POST' });
     const d = await res.json();
     if (!d.ok) {
-      alert(`갱신 실패: ${d.error || res.status}`);
+      reignitionRefreshPanelText = `갱신 실패: ${d.error || res.status}`;
     } else {
       const lines = [
         `총 ${d.n_total}건 중 ${d.n_changed}건 상태 변경`,
@@ -1643,7 +1663,7 @@ async function reignitionManualRefresh(btn) {
       ];
       if (d.changed.length) {
         lines.push('', '변경 내역:');
-        d.changed.forEach(c => lines.push(`- ${c.ticker}(${c.theme}) ${c.status_before || '(신규)'} → ${c.status_after}${c.expire_reason ? ` [${c.expire_reason}]` : ''}`));
+        d.changed.forEach(c => lines.push(`- ${c.ticker}(${c.theme}) ${c.status_before || '(신규)'} → ${c.status_after}${c.expire_detail ? ` [${c.expire_detail}]` : (c.expire_reason ? ` [${c.expire_reason}]` : '')}`));
       }
       // v5.192([2][3] 보고): 이번 실행에서 스킵된 중복 후보 + 터치 대기
       // 종목의 확인 기한을 갱신 결과에 바로 표시.
@@ -1655,16 +1675,41 @@ async function reignitionManualRefresh(btn) {
         lines.push('', `중복 스킵 ${d.dropped_duplicates.length}건:`);
         d.dropped_duplicates.forEach(dd => lines.push(`- ${dd.ticker} D0=${dd.d0_date}: "${dd.dropped_theme}" 스킵(대표 "${dd.kept_theme}")`));
       }
-      alert(lines.join('\n'));
+      // v5.193([5] 확인용) 재량 기준 미달, [6] 구버전 키 정리 보고.
+      if (d.discretion_fail && d.discretion_fail.length) {
+        lines.push('', `⚠️ 재량 기준 미달 ${d.discretion_fail.length}건(회색+접힘):`);
+        d.discretion_fail.forEach(f => lines.push(`- ${f.ticker}${f.below_ma200 ? ' [200일선 아래]' : ''}${f.decline_from_peak_pct != null && f.decline_from_peak_pct > 35 ? ` [조정폭 ${f.decline_from_peak_pct}%]` : ''}`));
+      }
+      if (d.old_format_keys) {
+        const o = d.old_format_keys;
+        lines.push('', `구버전 키: 정리 전 ${o.n_before_cleanup}건 → 정리 후 ${o.n_after_cleanup}건(watching ${o.purged_watching}건 삭제) · 잔존(expired/confirmed) ${JSON.stringify(o.remaining_by_status)}`);
+      }
+      reignitionRefreshPanelText = lines.join('\n');
       await loadReignitionPullbackStatus();
     }
   } catch (e) {
-    alert(`갱신 실패: ${e}`);
+    reignitionRefreshPanelText = `갱신 실패: ${e}`;
   } finally {
+    reignitionRefreshPanelOpen = true;
     reignitionRefreshBusy = false;
     btn.textContent = origText;
     btn.disabled = false;
+    renderCards();
   }
+}
+function reignitionRefreshPanelHtml() {
+  if (!reignitionRefreshPanelOpen || reignitionRefreshPanelText == null) return '';
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return `<div class="jongga-forward-box" style="margin-bottom:8px;border:1px solid var(--line)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <b style="font-size:12px">갱신 결과</b>
+      <span>
+        <button class="journal-btn" style="padding:2px 8px;font-size:11px" onclick="reignitionCopyRefreshPanel(this)">복사</button>
+        <button class="journal-btn" style="padding:2px 8px;font-size:11px" onclick="closeReignitionRefreshPanel()">닫기</button>
+      </span>
+    </div>
+    <pre style="white-space:pre-wrap;font-size:11px;font-family:inherit;max-height:300px;overflow-y:auto;margin:0">${esc(reignitionRefreshPanelText)}</pre>
+  </div>`;
 }
 // v5.191(사용자 지시 — [3] 표시 수정): 상태를 감시(터치 없음)/감시(터치)/
 // 체결/만료 4단계로 명확히 분리. "터치"는 서버 status가 아니라
@@ -1685,9 +1730,12 @@ function reignitionStatusLine(it, confirmWindowDays) {
     return `확인 ${(it.confirm || {}).date || '-'} · 체결`;
   }
   if (it.status === 'expired') {
-    const reasonTxt = it.expire_reason === 'pivot_touch_timeout'
+    // v5.193(사용자 지시 — [3]): expire_detail(실제 비교값 포함, app.py가
+    // 만료 시점에 계산해 저장)이 있으면 그대로 — 없는 구버전 레코드만
+    // 하드코딩 문구로 폴백.
+    const reasonTxt = it.expire_detail || (it.expire_reason === 'pivot_touch_timeout'
       ? `터치 후 ${confirmWindowDays}거래일 미확인`
-      : '창 종료(D0+180거래일)';
+      : '창 종료(D0+180거래일)');
     return `D0 ${it.d0_date} · 만료(${reasonTxt})`;
   }
   if (it.pivot_touch_date) {
@@ -1715,7 +1763,8 @@ function toggleReignitionPullbackDiscretion() {
 }
 function reignitionPullbackSectionHtml() {
   const d = reignitionPullbackData;
-  if (!d || !(d.items || []).length) return '';
+  // v5.193([4]): items가 비어도 방금 갱신한 결과 패널은 보여줘야 한다.
+  if (!d || !(d.items || []).length) return reignitionRefreshPanelHtml();
   const confirmWindowDays = d.confirm_window_days != null ? d.confirm_window_days : 3;
   const rowHtml = it => {
     const st = reignitionStateMeta(it);
@@ -1760,7 +1809,7 @@ function reignitionPullbackSectionHtml() {
     ? `<div class="jongga-forward-sub" style="opacity:.7;cursor:pointer;margin-top:4px" onclick="toggleReignitionPullbackExpired()">⚰️ 만료 ${expiredItems.length}건 ${reignitionPullbackExpiredOpen ? '▴숨기기' : '▾펼치기'}</div>`
     : '';
   const expiredRows = reignitionPullbackExpiredOpen ? expiredItems.map(rowHtml).join('') : '';
-  return `<div class="jongga-forward-box" style="margin-bottom:12px">
+  return `${reignitionRefreshPanelHtml()}<div class="jongga-forward-box" style="margin-bottom:12px">
     <div class="jongga-forward-title" style="display:flex;justify-content:space-between;align-items:center">
       <span>🔥 재점화 감시 현황 (${d.items.length}건)</span>
       <button class="journal-btn" style="padding:2px 10px;font-size:11px" onclick="reignitionManualRefresh(this)" title="주말·휴장일엔 자동 갱신이 안 돌아요 — 지금 1회 강제 갱신">🔄 지금 갱신</button>
