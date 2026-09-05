@@ -5,6 +5,22 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.179 [정정] 확인 카드 최종 정리 + 강한확인 배지 제거(사용자 지시 —
+        docs/confirm_entry_lookahead_2026-09-04.md 결론 반영). 확인
+        카드에 `verdict` 필드 신설 — "돌파임박 KR 종가진입"(사전등록
+        기준을 통과한 유일한 조합)만 `entry_candidate`로 진입가/손절/
+        목표/사이즈 표시 + "진입 후보(종가진입 0.157R z=2.37, 한계)",
+        나머지 4탭(KR)과 US 전 탭은 `watch_interest`로 entry/stop/
+        target_2r을 아예 None 처리하고 "🔎 관심 — 진입 근거 미유의" +
+        확인일 종가만 표시(pending_watch/auto_watch confirmed 분기
+        둘 다). 🔥강한확인 배지(vol_mult>=2.0)는 근거였던 격자탐색이
+        무효라 계산·저장·표시·정렬 전부 제거(`_refresh_auto_watch`의
+        `strong_confirm` 필드, `_immediate_sort_key`의 해당 티어, 프론트
+        `strongBadge` 전부 삭제) — `_immediate_sort_key`는 verdict
+        티어(entry_candidate 우선)로 대체. GUIDE.md 확인진입 관련 문단
+        전부(국장 요약·눌림목/돌파/돌파임박 챕터) 최종 결론으로 교체,
+        docs/kr_us_strategy_map.md 상단에 "2026-09-01~05 주간 정리"
+        절 신설.
 v5.178 [정정] 5탭 확인진입 EV 인용 전부 철회(사용자 지시 — [A] 프로덕션
         정정, 종가진입 재측정 결과 반영). `CONFIRM_RULE_BY_TAB`의
         0.5~1.1R대 EV 문구가 전부 피벗(신호일고가) 지정가 체결 가정
@@ -4589,7 +4605,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.178"
+VERSION = "v5.179"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -9815,7 +9831,7 @@ async def _refresh_auto_watch(bundle: dict, market: str, daykey: str):
                 "rs": rs, "risk_pct": risk_pct, "atr_pct": atr_pct,
                 "registered_at": daykey,
                 "confirmed_at": None, "confirm_close": None, "confirm_stop": None,
-                "strong_confirm": False, "expired_at": None,
+                "expired_at": None,
             }
 
     # ── ② 확인/만료 판정: watching 전부, 신호일 기준 거래일 카운트(bar 위치차 —
@@ -9845,7 +9861,9 @@ async def _refresh_auto_watch(bundle: dict, market: str, daykey: str):
             rec["status"] = "confirmed"
             rec["confirmed_at"] = daykey
             rec["confirm_close"] = close
-            rec["strong_confirm"] = rec["tab"] == "눌림목" and vol_mult is not None and vol_mult >= 2.0
+            # v5.179(사용자 지시): strong_confirm(vol_mult>=2.0) 배지는
+            # 근거였던 격자탐색이 피벗진입 가정이라 무효 — 계산 자체를 제거
+            # (docs/confirm_entry_lookahead_2026-09-04.md).
             # 돌파임박은 프로덕션 정의(CONFIRM_RULE_BY_TAB)와 동일하게
             # 손절을 신호일저가로 재정의 — 나머지 4탭은 구조적 stop 그대로.
             if rec["tab"] == "돌파임박" and rec.get("signal_low") is not None and rec["signal_low"] < rec["signal_high"]:
@@ -10581,33 +10599,32 @@ async def get_calendar():
                 confirmed = False
         dist_pct = round((pivot_f - close) / pivot_f * 100, 2)
         if rule and confirmed:
-            # v5.177(사용자 지시 — [A] 즉시 UI 수정): 확인된 카드의 진입가를
-            # 피벗(신호일 고가 레벨, 백테스트의 "지정가 체결" 가정)에서
-            # 확인일 실제 종가로 변경 — 화면에 뜨는 진입가가 실제로 살 수
-            # 있는 가격이어야 한다는 지적. 손절은 스냅샷 값 그대로(불변),
-            # 목표/사이즈는 종가 기준으로 재계산(리스크폭이 커진 만큼 자동
-            # 반영). 피벗은 "pivot" 필드로 별도 유지해 카드에 갭 크기를
-            # 같이 보여준다. CONFIRM_RULE_BY_TAB의 EV 수치는 여전히
-            # 피벗-진입 가정으로 측정된 값이라 이 변경과 불일치가 생기는데,
-            # 종가-진입 재측정([B], 사용자 지시)이 끝날 때까지는 EV 문구에
-            # 임시 표기로 알린다.
-            target_2r = round(close + 2 * (close - stop_f), 2) if stop_f and close > stop_f else None
-            # v5.170(사용자 지시): 눌림목은 vol_mult 2.0배 자체를 게이트로
-            # 올리지 않는다(격자탐색에서 EV 0.798→1.000R·z=3.11로 유의했지만
-            # 확인율이 12.8%→7.5%로 줄어 "히트당 총 기대R"이 -26% — 주력
-            # 진입탭이라 총 기회 감소가 실익보다 크다는 판단, docs
-            # "확인조건 격자탐색" 절 "결정" 참고). 대신 이미 1.5배로 확인된
-            # 건 중 실제 달성 배수(vol_mult, 항상 반환됨)가 2.0배 이상이면
-            # 순수 표시용 플래그만 얹는다 — 진입 여부·정렬에 영향 없음.
-            strong_confirm = tab == "눌림목" and vol_mult is not None and vol_mult >= 2.0
+            # v5.179(사용자 지시 — [프로덕션 정리] 확인 카드 최종 정리):
+            # docs/confirm_entry_lookahead_2026-09-04.md 결론 — 실행 가능한
+            # 4개 진입정의(피벗지정가/종가/buystop/종가+확인일저가손절) 중
+            # 사전등록 기준을 통과한 건 "돌파임박 KR 종가진입"(EV 0.157R,
+            # z=2.37, 한계) 하나뿐이다. 나머지(눌림목/박스돌파/돌파/추세전환
+            # KR, US 5탭 전부)는 "확인됐다"는 사실 자체는 유효한 정보지만
+            # 진입 근거(EV)가 통계적으로 확인 안 됨 — 진입가/손절/사이즈를
+            # 아예 안 보여주고 "관심"으로만 표시(entry/stop/target_2r=None).
+            # 강한확인 배지(vol_mult>=2.0)는 같은 격자탐색(피벗진입 가정)이
+            # 근거였으므로 배지 자체를 제거(계산도 안 함).
+            is_entry_candidate = tab == "돌파임박" and market == "KR"
+            if is_entry_candidate:
+                target_2r = round(close + 2 * (close - stop_f), 2) if stop_f and close > stop_f else None
+                entry_field, stop_field, target_field = close, stop_f, target_2r
+                verdict_label = f"{tab} 진입 후보 (종가진입 0.157R z=2.37, 한계) · docs/confirm_entry_lookahead_2026-09-04.md"
+            else:
+                entry_field, stop_field, target_field = None, None, None
+                verdict_label = f"{tab} 관심 — 확인됐으나 진입 근거 미유의 · docs/confirm_entry_lookahead_2026-09-04.md"
             immediate.append({
                 "source": "pending_watch", "key": f"pending:{r.get('id')}",
                 "ticker": ticker, "name": r.get("name") or ticker, "market": market,
                 "mode": r.get("mode_raw") or None, "sector": r.get("sector"),
-                "entry": close, "stop": stop_f, "target_2r": target_2r,
+                "entry": entry_field, "stop": stop_field, "target_2r": target_field,
                 "close": close, "pivot": pivot_f, "atr_pct": atr_pct,
-                "strong_confirm": strong_confirm,
-                "reason": f"{tab} {rule}" + (" · 🔥강한확인(거래량 2배+)" if strong_confirm else ""),
+                "verdict": "entry_candidate" if is_entry_candidate else "watch_interest",
+                "reason": verdict_label,
             })
         elif dist_pct <= 2:
             # v5.176(사용자 지시): KR 확인대기 UI — 이미 피벗 돌파(dist_pct<=0)
@@ -10732,21 +10749,34 @@ async def get_calendar():
             stop = rec.get("confirm_stop") or rec.get("stop")
             if not entry or not stop or entry <= stop:
                 continue
-            target_2r = round(entry + 2 * (entry - stop), 2)
-            rule_text = CONFIRM_RULE_BY_TAB.get(rec["tab"], "")
+            # v5.179(사용자 지시 — [프로덕션 정리]): pending_watch 쪽과 동일
+            # 원칙 — 사전등록 기준을 통과한 유일한 조합(돌파임박 KR
+            # 종가진입)만 진입가/손절/사이즈 표시, 나머지는 "관심"으로만
+            # (entry/stop/target_2r 감춤). 강한확인 배지(vol_mult>=2.0)는
+            # 같은 무효 격자탐색이 근거였으므로 계산·표시 둘 다 제거.
+            is_entry_candidate = rec["tab"] == "돌파임박" and rec.get("market") == "KR"
+            if is_entry_candidate:
+                target_2r = round(entry + 2 * (entry - stop), 2)
+                entry_field, stop_field, target_field = entry, stop, target_2r
+                verdict_label = "돌파임박 진입 후보 (종가진입 0.157R z=2.37, 한계) · docs/confirm_entry_lookahead_2026-09-04.md"
+            else:
+                entry_field, stop_field, target_field = None, None, None
+                verdict_label = f"{rec['tab']} 관심 — 확인됐으나 진입 근거 미유의 · docs/confirm_entry_lookahead_2026-09-04.md"
             # v5.175(사용자 지시 — 게이트→배지 전환) 원래 등록 게이트였던
             # RS>=80 & 손절<=ATR×1.5를 여기서 표시용 "강한 셋업" 배지로 계산
-            # (_is_auto_watch_strong_setup — 정의는 등록 루프와 동일 함수 공유).
+            # (_is_auto_watch_strong_setup — 정의는 등록 루프와 동일 함수 공유,
+            # vol_mult 격자탐색과는 별개 측정이라 유지).
             strong_setup = _is_auto_watch_strong_setup(rec.get("rs"), rec.get("risk_pct"), rec.get("atr_pct"))
             immediate.append({
                 "source": "auto_watch", "key": f"auto_watch:{key}",
                 "ticker": rec["ticker"], "name": rec.get("name") or rec["ticker"],
                 "market": rec.get("market"), "mode": None, "sector": rec.get("sector"),
-                "entry": entry, "stop": stop, "target_2r": target_2r,
+                "entry": entry_field, "stop": stop_field, "target_2r": target_field,
                 "close": entry, "pivot": pivot, "atr_pct": rec.get("atr_pct"),
-                "rs": rec.get("rs"), "strong_confirm": rec.get("strong_confirm", False),
+                "rs": rec.get("rs"),
+                "verdict": "entry_candidate" if is_entry_candidate else "watch_interest",
                 "strong_setup": strong_setup,
-                "reason": f"{rec['tab']} 🤖자동감시 {rule_text}",
+                "reason": verdict_label,
             })
         elif rec.get("status") == "watching":
             # v5.176(사용자 지시): KR 확인대기 UI를 auto_watch 풀에도 —
@@ -10799,12 +10829,15 @@ async def get_calendar():
         # 프론트 계산과 동일 공식) — 소스마다 다른 스키마를 하나로 다룸.
         # v5.175(사용자 지시 — 게이트→배지 전환) ②로 "강한 셋업"(원래 auto_watch
         # 등록 게이트였던 RS/손절 필터) 티어 추가 — 강한확인 다음, 손절폭 정렬 전.
+        # v5.179(사용자 지시 — 확인 카드 최종 정리): strong_confirm 티어 제거
+        # (근거 무효, 배지 자체 삭제) — 대신 verdict(entry_candidate가
+        # watch_interest보다 우선) 티어로 대체, "강한 셋업" 티어는 그대로 유지.
         entry, stop = item.get("entry"), item.get("stop")
         risk_pct = (entry - stop) / entry * 100 if entry and stop and entry > stop else None
         rs = item.get("rs")
         return (
             item["source"] != "reignition",
-            not item.get("strong_confirm", False),
+            item.get("verdict") == "watch_interest",
             not item.get("strong_setup", False),
             risk_pct if risk_pct is not None else 999.0,
             -(rs if rs is not None else -1),

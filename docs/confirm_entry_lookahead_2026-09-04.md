@@ -176,26 +176,74 @@ JSON에 저장돼 있었는데, 어느 문서에도 인용되지 않고 묻혀 �
 
 ---
 
-## d) 실제 KR 진입 4건 — 접근 불가, 데이터 필요
+## d) 실제 KR 진입 5건 (JW신약·글로벌텍스프리·아스플로·대정화금·에이플러스에셋)
 
-**이 항목은 완성하지 못했다.** 저널(`journal_user.json`)은 Railway
-영구 볼륨(`/data`)에만 있고, 이 로컬 체크아웃에는 사본이 없다. 라이브
-API(`pullback2-production.up.railway.app`)는 세션 쿠키 로그인이
-필요한 401 응답만 반환하며(`app.py` L4588 `{"ok": false, "error":
-"로그인 필요"}`), 로그인 자격 증명을 이 세션이 대신 입력하는 건
-안전 정책상 하지 않는다.
+원래 이 절은 저널의 실제 체결가와 그 시점 피벗/확인일 종가를 직접
+대조할 계획이었다(2026-09-04 초안에서 "접근 불가"로 보류). 사용자가
+이 5건의 진입가는 **⚡감시 등록 시 자동 기입된 값**이라고 알려줬고
+(JW신약은 테스트 등록), 실제 체결 기록이 아니라 등록 당시 시스템이
+채운 값이라는 뜻이라 — 원자료(체결가 실측)를 다시 구할 필요 없이
+**그 자동 기입 로직이 뭘 채우는지를 코드로 직접 확인**하는 게 더
+정확하고 빠르다.
 
-**진행하려면 다음 중 하나가 필요하다**:
-1. 사용자가 저널에서 확인(entered)된 KR 5탭 히트 4건의 `ticker/tab/
-   entered_at(날짜)/entry(체결가)`를 직접 붙여주면, 그 티커·날짜로
-   로컬에서 OHLCV를 다시 조회해 그 시점의 피벗(신호일 고가)/확인일
-   종가를 역산해 비교표를 채운다.
-2. 또는 `GET /api/debug/{ticker}` 같은 기존 디버그 엔드포인트 출력을
-   사용자가 브라우저에서 직접 열어 붙여주면 같은 방식으로 처리한다.
+### 코드 경로
 
-데이터가 오면 이 절만 후속 커밋으로 채운다 — 이 문서의 나머지 결론
-(e/f/g)은 이 항목 없이도 90개 체크포인트 집계 통계로 완결돼 있어
-독립적으로 유효하다.
+`static/index.html` `quickWatch()`(⚡감시 버튼 클릭)는 현재가가
+피벗 아래일 때 `/api/watch/quick`에 `pivot: s.pivot`만 보내고
+`entry`는 안 보낸다. 서버(`app.py`)가 그 payload를 받아 저널 레코드를
+만드는 지점:
+
+```python
+# app.py L11227-11233 (@app.post("/api/watch/quick"))
+entered_now = (not is_observe) and force_status == "entered"
+if entered_now:
+    entry_val = entry_override if entry_override is not None else (reg_price if reg_price is not None else pivot)
+elif is_observe:
+    entry_val = None
+else:
+    entry_val = pivot   # 대기 항목만 entry=피벗 관례, 관찰은 없음
+```
+
+**표준 ⚡감시 등록(대부분의 경우, `force_status` 없음)은
+`entry_val = pivot`으로 고정 저장된다.** 이후 pending→entered 자동
+전환(`static/index.html`의 `updateTracking()`)도 `entry` 필드를 다시
+쓰지 않는다:
+
+```javascript
+// static/index.html L4558-4567 (updateTracking() 내부)
+if ((r.status || 'entered') === 'pending') {
+  ...
+  if (crossable && px >= entry) {
+    r.status = 'entered';
+    r.tracking = true;
+    r.date = kstStr(today);  // 실제 진입일로 갱신
+    ...
+    // r.entry는 여기서 갱신 안 됨 — 등록 시점 pivot 값 그대로 유지
+  }
+```
+
+전환 조건 자체도 `px >= entry`(현재가가 피벗 이상이면 즉시)일 뿐,
+거래량 조건도 종가 조건도 없다 — 확인진입(안C)의 확인조건과 무관한,
+완전히 별개의 단순 레벨 크로스 로직이다(이 별개성이 애초에
+`auto_watch`를 저널과 분리해 만든 이유이기도 하다,
+`docs/signal_snapshot_design_2026-09-04.md` 참고).
+
+**유일한 예외**는 `pivotChoiceEnterNow()`(현재가가 이미 피벗 위일 때
+"바로 진입" 선택) 경로로, 이때만 `entry_override: s.close`를 보내
+`entry_val`이 등록 클릭 시점의 현재가가 된다 — 그래도 이건 "확인일
+종가"가 아니라 "클릭한 순간의 가격"이라 안C의 종가진입 정의와는
+또 다르다.
+
+### 결론
+
+**5건의 저널 진입가는 실행 가능성의 증거가 아니다.** 표준 경로로
+등록된 건 전부(테스트 건인 JW신약 포함) `entry = pivot`이 등록
+시점에 고정 저장된 값이고, 이후 상태가 "진입"으로 바뀌어도 그 숫자는
+갱신되지 않는다 — 이 문서 a) 절에서 지적한 "확인은 종가로 하고
+레이스는 피벗으로 돌린다"는 것과 **같은 종류의 가정**이 저널 UI에도
+이미 있었던 것이다. 즉 이 5건이 "확인 후 종가에 사는 게 실제로
+가능했다"는 근거가 되지 못한다 — 오히려 프로덕션 코드 자체가 피벗
+지정가 체결을 기본 가정으로 삼고 있었다는 걸 재확인해줄 뿐이다.
 
 ---
 
