@@ -5,6 +5,28 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.186 [추가] 페이퍼 추적(forward 검증, 자동) + 저널 대기 만료(사용자 지시,
+        원래 "v5.185"로 요청됐으나 토스 자동채움 수정이 이미 v5.185를
+        선점해 v5.186으로 정정).
+        [1] 페이퍼 추적: `_refresh_auto_watch()`가 확인(confirmed)되는
+        순간 딱 1번 `/data/paper_track.json`에 등록(진입=확인일 종가,
+        손절=스냅샷 stop, 돌파임박만 신호일저가) — 이후 매 EOD
+        harness.race()와 동일 규칙(저가≤손절 우선, 고가≥2R 목표, 60봉
+        미해결 시 unresolved=0R)으로 진행 판정, bars_held로 이어서
+        캐치업. 실체결 저널(journal_user.json)과 완전 분리, 합산 없음,
+        사용자 입력 없음. `GET /api/paper-track`이 탭×시장별 n/EV/
+        승률을 반환하고 n>=12부터 PAPER_TRACK_BACKTEST_EV(90cp 백테스트
+        수치)를 병기해 gap을 노출 — 그 미만은 표본 부족으로 비교 자체를
+        안 보여줌. 저널 통계 카드에 "📝 페이퍼(forward)" 섹션으로 표시.
+        [2] 저널 대기 만료: pending_watch 등록 후 JOURNAL_PENDING_EXPIRE_
+        DAYS(10, 사용자 확인 — AUTO_WATCH_CONFIRM_WINDOW_DAYS(3, 안C
+        백테스트 정의에 묶임)와 의도적으로 분리된 별도 상수)거래일 내
+        확인이 안 되면 "관찰 종료"(archived)로 접힘 — 삭제 아님, 저널
+        화면에서 "♻️복구" 가능. get_calendar()는 GET 전용이라 저널
+        파일에 직접 쓰지 않고 만료 대상 id만 `today_decision.
+        expired_pending_ids`로 내려주며, 프론트가 자신의 최신
+        journalCache를 읽어 archived로 바꾼 뒤 setJournal()로 저장(v5.184
+        확인일 버그와 동일한 "GET 라우트는 저널에 직접 안 쓴다" 원칙).
 v5.185 [수정] 토스 자동채움 미작동 조사·수정(사용자 지시 — 한미사이언스
         008930.KS entry_actual 안 채워짐). 점검 결과: ① launchd 동기화는
         v5.182 배포 이후에도 정상 실행 중(sync_toss.log — "동기화 완료:
@@ -4728,7 +4750,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.185"
+VERSION = "v5.186"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -9899,6 +9921,13 @@ AUTO_WATCH_RS_MIN = 80              # "강한 셋업" 배지 기준 — RS>=80
 AUTO_WATCH_MAX_STOP_ATR_MULT = 1.5  # "강한 셋업" 배지 기준 — 손절폭 <= ATR×1.5
 AUTO_WATCH_CONFIRM_WINDOW_DAYS = 3  # 신호일 다음 최대 3거래일(안C 정의와 동일)
 
+# v5.186(사용자 지시 — [2] 저널 대기 만료, "10거래일과 안C 확인대기(3거래일)는
+# 별도 상수" 확인 완료): 사용자가 ⚡감시로 등록한 저널 pending 레코드가
+# 등록 후 이만큼 지나도 확인(안C 조건)이 안 되면 "관찰 종료"로 접는다 —
+# AUTO_WATCH_CONFIRM_WINDOW_DAYS(안C 백테스트 정의에 묶인 값, 3)와는
+# 다른, 저널 하우스키핑 전용 값이라 절대 같이 바꾸지 않는다.
+JOURNAL_PENDING_EXPIRE_DAYS = 10
+
 
 def _is_auto_watch_strong_setup(rs, risk_pct, atr_pct) -> bool:
     """v5.175 — 원래 auto_watch 등록 게이트였던 조건(RS>=80 & 손절폭<=ATR×1.5)을
@@ -9935,6 +9964,52 @@ def _save_auto_watch(data: dict):
 
 
 _auto_watch = _load_auto_watch()  # {"ticker|tab": {...}} — journal과 별도 저장소(위 설명 참고)
+
+# v5.186(사용자 지시 — [1] 페이퍼 추적, forward 검증): auto_watch 풀에서
+# 확인(안C)된 히트를 "실제로 확인일 종가에 진입했다면" 가정으로 사용자
+# 입력 없이 자동 추적 — 저널(journal_user.json)과 완전히 분리된 별도
+# 저장소, 통계 절대 합산 금지(사용자 지시). 리스트[{ticker, tab, market,
+# signal_date, confirm_date, entry, stop, outcome(open|stop|target|
+# unresolved), r, bars_held, closed_at}].
+PAPER_TRACK_PATH = _resolve_persistent_path("paper_track.json")
+PAPER_TRACK_MAX_BARS = 60  # harness.race() 기본값과 동일(안C 백테스트와 같은 레이스 규칙)
+
+# ⑥ 종가진입 재측정(docs/confirm_entry_lookahead_2026-09-04.md) 90개
+# 체크포인트 백테스트 EV — 페이퍼(forward) 실측과 나란히 보여줄 기준선.
+# 리터럴 사본이지만 이 값들은 "그 문서가 확정한 역사적 측정 결과"라
+# CONFIG처럼 나중에 또 바뀌는 값이 아니다(측정 자체가 새로 나오면 이
+# 표를 그때 갱신) — cfg 공용 참조 대상이 아니라 예외로 둔다.
+PAPER_TRACK_BACKTEST_EV = {
+    ("눌림목", "KR"): 0.170, ("눌림목", "US"): 0.087,
+    ("돌파임박", "KR"): 0.157, ("돌파임박", "US"): 0.067,
+    ("박스돌파", "KR"): 0.286, ("박스돌파", "US"): 0.059,
+    ("돌파", "KR"): 0.225, ("돌파", "US"): 0.050,
+    ("추세전환", "KR"): 0.144, ("추세전환", "US"): 0.064,
+}
+
+
+def _load_paper_track() -> list:
+    if os.path.exists(PAPER_TRACK_PATH):
+        try:
+            with open(PAPER_TRACK_PATH, encoding="utf-8") as f:
+                data = _json.load(f)
+                return data if isinstance(data, list) else []
+        except (ValueError, OSError):
+            return []
+    return []
+
+
+def _save_paper_track(data: list):
+    try:
+        tmp = PAPER_TRACK_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(data, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, PAPER_TRACK_PATH)
+    except OSError:
+        pass
+
+
+_paper_track = _load_paper_track()
 
 
 async def _refresh_auto_watch(bundle: dict, market: str, daykey: str):
@@ -9995,6 +10070,7 @@ async def _refresh_auto_watch(bundle: dict, market: str, daykey: str):
     # ── ② 확인/만료 판정: watching 전부, 신호일 기준 거래일 카운트(bar 위치차 —
     #    _record_signal_snapshot의 gap 판정과 동일 기법) ──
     import pandas as pd
+    paper_track_registered = False
     for key, rec in _auto_watch.items():
         if rec.get("status") != "watching":
             continue
@@ -10033,12 +10109,70 @@ async def _refresh_auto_watch(bundle: dict, market: str, daykey: str):
                 rec["confirm_stop"] = rec["signal_low"]
             else:
                 rec["confirm_stop"] = rec["stop"]
+            # v5.186(사용자 지시 — [1] 페이퍼 추적): 확인된 이 순간 딱 1번만
+            # 등록된다 — 이 분기는 status가 "watching"이던 레코드가 방금
+            # "confirmed"로 바뀔 때만 타고, 다음 틱부터는 바깥 루프의
+            # `status != "watching"` 가드에 걸려 다시 안 옴(재등록 불가능).
+            _paper_track.append({
+                "ticker": rec["ticker"], "tab": rec["tab"], "market": rec["market"],
+                "signal_date": rec["signal_date"], "confirm_date": rec["confirmed_at"],
+                "entry": rec["confirm_close"], "stop": rec["confirm_stop"],
+                "outcome": "open", "r": None, "bars_held": 0, "closed_at": None,
+            })
+            paper_track_registered = True
         elif days_since >= AUTO_WATCH_CONFIRM_WINDOW_DAYS:
             rec["status"] = "expired"
             # v5.184: confirmed_at과 같은 이유로 daykey(스캔 실행일) 대신
             # 실제 판정 시점 봉의 날짜.
             rec["expired_at"] = str(df.index[-1].date())
 
+    # ── ③ 페이퍼 추적 갱신(진행중 레이스) — harness.race()와 동일 규칙:
+    #    확인일 다음 봉부터, 그날 저가≤손절이면 손절 우선, 고가≥목표(2R)
+    #    면 도달, 60봉 넘도록 미해결이면 "unresolved"(0R, EV 분모 포함 —
+    #    harness.ev_summary()와 동일 관례). bars_held에 이미 검사한
+    #    봉 수를 저장해두고 다음 갱신 때 그 다음 봉부터만 이어서 본다 —
+    #    스케줄러가 하루 이틀 못 돌아도 순서대로 다 놓치지 않고 따라잡음.
+    _mkt_label = "KR" if market == "kr" else "US"
+    paper_changed = paper_track_registered
+    for p in _paper_track:
+        if p.get("outcome") != "open" or p.get("market") != _mkt_label:
+            continue
+        df = data.get(p["ticker"])
+        if df is None or df.empty:
+            continue
+        try:
+            confirm_ts = pd.Timestamp(p["confirm_date"])
+            if confirm_ts not in df.index:
+                continue
+            start_pos = df.index.get_loc(confirm_ts) + 1
+        except Exception:
+            continue
+        entry, stop = p.get("entry"), p.get("stop")
+        if not entry or not stop or entry <= stop:
+            continue   # 데이터 이상 — 그냥 열어둠(다음 갱신에서 재시도)
+        target = entry + 2 * (entry - stop)
+        bars_checked = p.get("bars_held", 0)
+        for i in range(start_pos + bars_checked, len(df)):
+            lo, hi = float(df["Low"].iloc[i]), float(df["High"].iloc[i])
+            bars_checked += 1
+            if lo <= stop:
+                p["outcome"], p["r"] = "stop", -1.0
+                p["closed_at"] = str(df.index[i].date())
+                break
+            if hi >= target:
+                p["outcome"], p["r"] = "target", 2.0
+                p["closed_at"] = str(df.index[i].date())
+                break
+        else:
+            if bars_checked >= PAPER_TRACK_MAX_BARS:
+                p["outcome"], p["r"] = "unresolved", 0.0
+                p["closed_at"] = str(df.index[-1].date())
+        if bars_checked != p.get("bars_held", 0):
+            paper_changed = True
+        p["bars_held"] = bars_checked
+
+    if paper_changed:
+        _save_paper_track(_paper_track)
     _save_auto_watch(_auto_watch)
 
 
@@ -10601,6 +10735,13 @@ async def get_calendar():
     # 안 들어간다("🔴 즉시 행동"에 진입 근거 없는 항목이 섞이는 게 버그라는
     # 지적, docs/confirm_entry_lookahead_2026-09-04.md 결론 반영).
     immediate, interest, near, waiting = [], [], [], {}
+    # v5.186(사용자 지시 — [2] 저널 대기 만료): 아래 pending_watch 루프가
+    # 채운다 — 프론트가 이 id들을 자기 journalCache에 반영(status를
+    # "관찰종료"로, 삭제 아님)해야 실제로 접힌다. get_calendar()는 GET
+    # 전용이라 저널에 직접 쓰지 않는다(v5.184의 confirm_date 안전 원칙과
+    # 동일 — 브라우저 저널 캐시 경합 방지, _promoteConfirmCloseEntries와
+    # 같은 프론트 경로 재사용).
+    expired_pending_ids = []
 
     # ① 재점화 확인진입(오늘) — docs/kr_theme_leader_reignition.md,
     #    확인진입 EV +0.755R(대조군 대비 유의, z>=1.96 두 건).
@@ -10767,6 +10908,24 @@ async def get_calendar():
         # 못 구했다. 캐시 미스면 atr_pct=None → 카드에서 "판정불가"로 표시
         # (조용히 통과 안 시킴, 사용자 지시).
         df = _calendar_ticker_df(ticker)
+        # v5.186(사용자 지시 — [2] 저널 대기 만료): 등록(신호일 기준) 후
+        # JOURNAL_PENDING_EXPIRE_DAYS(10)거래일이 지나도 확인이 안 되면
+        # 이 레코드는 근접/관심 카드 생성에서 제외하고 id만 모아둔다 —
+        # get_calendar()는 GET 전용이라 저널에 직접 쓰지 않고(v5.184의
+        # confirm_date 안전 원칙과 동일 이유), 프론트가 다음 로드에서
+        # journalCache를 통해 실제로 "관찰 종료"로 접는다(삭제 아님).
+        reg_date = r.get("date")
+        if df is not None and len(df) and reg_date:
+            try:
+                import pandas as pd
+                reg_ts = pd.Timestamp(reg_date)
+                if reg_ts in df.index:
+                    days_since_reg = (len(df) - 1) - df.index.get_loc(reg_ts)
+                    if days_since_reg >= JOURNAL_PENDING_EXPIRE_DAYS and r.get("id") is not None:
+                        expired_pending_ids.append(r["id"])
+                        continue
+            except Exception:
+                pass
         atr_pct = None
         if df is not None and len(df) >= 15:
             try:
@@ -11127,6 +11286,9 @@ async def get_calendar():
     today_decision = {
         "immediate": immediate, "interest": interest, "near": near, "waiting": waiting,
         "waiting_total": sum(waiting.values()),
+        # v5.186(사용자 지시 — [2] 저널 대기 만료): 프론트가 journalCache에서
+        # 이 id들을 찾아 status를 "관찰종료"로 접는다.
+        "expired_pending_ids": expired_pending_ids,
     }
 
     # ── ⑤ 강세테마 × 스캐너 교집합 — KR 돈의흐름 확산(본격)/streak2+ 테마 소속
@@ -11258,6 +11420,33 @@ async def macro_calendar_status():
     """POST /api/calendar/macro/run이 던진 백그라운드 생성의 진행상태 —
     새 저장소 없이 기존 캐시 파일 + 실행중 플래그 재사용(위 설명 참고)."""
     return JSONResponse(_clean_nan({"generating": _macro_calendar_task_running, **_load_macro_calendar()}))
+
+
+@app.get("/api/paper-track")
+async def paper_track_status():
+    """페이퍼 추적(forward 검증, v5.186 사용자 지시 [1]) 통계 — 실체결
+    저널(journal_user.json)과 완전 분리, 사용자 입력 없이 _refresh_auto_watch()가
+    매 EOD 자동 적립·판정. n>=12부터 90cp 백테스트 EV(PAPER_TRACK_BACKTEST_EV)를
+    병기해 괴리를 보이게 한다(그 미만은 표본이 너무 작아 비교 자체가 무의미)."""
+    data = _load_paper_track()
+    groups: dict = {}
+    for p in data:
+        groups.setdefault((p.get("tab"), p.get("market")), []).append(p)
+    stats = []
+    for (tab, mkt), rows in groups.items():
+        closed = [p for p in rows if p.get("outcome") in ("stop", "target", "unresolved")]
+        n = len(closed)
+        ev = round(sum(p["r"] for p in closed) / n, 3) if n else None
+        win = round(sum(1 for p in closed if (p.get("r") or 0) > 0) / n * 100, 1) if n else None
+        backtest_ev = PAPER_TRACK_BACKTEST_EV.get((tab, mkt))
+        stats.append({
+            "tab": tab, "market": mkt, "n": n, "n_open": len(rows) - n,
+            "ev": ev, "win_rate": win,
+            "backtest_ev": backtest_ev if n >= 12 else None,
+            "gap": round(ev - backtest_ev, 3) if (n >= 12 and ev is not None and backtest_ev is not None) else None,
+        })
+    stats.sort(key=lambda s: (s["market"] or "", s["tab"] or ""))
+    return JSONResponse(_clean_nan({"stats": stats, "records": data}))
 
 
 @app.get("/api/apiguard/status")
