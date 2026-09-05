@@ -5,6 +5,14 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.189 [로그] "오늘의 결정" 🔴 즉시 행동 건수 EOD 로그(사용자 지시).
+        표시 없음, 집계만 — 일주일 뒤 하루 평균 몇 건 뜨는지 보려는
+        용도. `_warm_market()`의 market별 EOD 분기(jongga/reignition/
+        auto_watch 갱신 전부 끝난 뒤)에서 `_log_decision_snapshot()`
+        호출 — get_calendar()(새 fetch 없는 순수 캐시 조회)를 그대로
+        불러 그 market 몫의 immediate 항목만 걸러 탭별로 세고
+        `/data/decision_log.json`에 `{날짜: {KR/US: {탭: 건수}}}`로
+        저장. `_warmed` 가드 덕에 market당 하루 1회만 실행.
 v5.188 [UI] "오늘의 결정" 툴팁 + 재점화 가시화(사용자 지시).
         [1] "🎯 오늘의 결정" 제목 옆 ⓘ 호버/탭 툴팁 — 검증된 진입 4종
         (돌파임박 KR 종가진입 0.157R · 종가베팅 z=3.54 · 재점화
@@ -4796,7 +4804,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.188"
+VERSION = "v5.189"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7114,6 +7122,14 @@ async def _warm_market(market: str):
                 await _refresh_auto_watch(bundle, market, daykey)
             except Exception as e2:
                 print(f"[auto_watch] EOD 갱신 실패: {e2}")
+            # v5.189(사용자 지시): "🔴 즉시 행동" 건수 EOD 로그 — 위
+            # jongga/reignition/auto_watch 갱신이 전부 끝난 뒤라야 오늘자
+            # 최종 집계가 나온다. 표시용 아님, /data/decision_log.json에만
+            # 쌓는다(_log_decision_snapshot 참고).
+            try:
+                await _log_decision_snapshot(market, daykey)
+            except Exception as e2:
+                print(f"[decision-log] EOD 기록 실패: {e2}")
         except Exception as e:
             print(f"[scheduler] warm {market} failed: {e}")
         # v5.147(사용자 지시, 비용 절감): 돈의흐름 자동실행을 여기(매일
@@ -7296,6 +7312,70 @@ def _resolve_persistent_path(filename: str) -> str:
 ALERTS_USER_PATH = _resolve_persistent_path("alerts_user.txt")
 JONGGA_FORWARD_PATH = _resolve_persistent_path("jongga_forward.json")  # v5.98 포워드 트래킹
 REIGNITION_WATCH_PATH = _resolve_persistent_path("reignition_watch.json")  # v5.125 재점화 워치리스트
+DECISION_LOG_PATH = _resolve_persistent_path("decision_log.json")  # v5.189 "오늘의 결정" 🔴 건수 EOD 로그(표시 없음, 집계용)
+
+# v5.189(사용자 지시): "🔴 즉시 행동"이 실제로 하루 몇 건 뜨는지 화면 없이
+# 로그만 쌓는다(일주일치 모아 "하루 평균 몇 건" 파악용). immediate 항목의
+# "source"는 정직성 가드(get_calendar())가 verdict==entry_candidate만
+# 통과시킨 뒤에도 그대로 남아있는 필드라 탭 이름 매핑에 그대로 쓴다 —
+# 4종 각각 정확히 하나의 (탭,시장) 조합에만 대응(auto_watch/pending_watch
+# 둘 다 "돌파임박 KR 종가진입"의 서로 다른 소스 파이프라인일 뿐 같은 탭).
+_DECISION_TAB_BY_SOURCE = {
+    "reignition": "재점화", "jongga": "종가베팅", "us_pullback": "눌림목",
+    "pending_watch": "돌파임박", "auto_watch": "돌파임박",
+}
+
+
+def _load_decision_log() -> dict:
+    if os.path.exists(DECISION_LOG_PATH):
+        try:
+            with open(DECISION_LOG_PATH, encoding="utf-8") as f:
+                data = _json.load(f)
+                return data if isinstance(data, dict) else {}
+        except (ValueError, OSError):
+            return {}
+    return {}
+
+
+def _save_decision_log(data: dict):
+    try:
+        tmp = DECISION_LOG_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(data, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, DECISION_LOG_PATH)
+    except OSError as e:
+        print(f"[decision-log] 저장 실패: {e}")
+
+
+async def _log_decision_snapshot(market: str, daykey: str):
+    """매 EOD(market별 1회, `_warmed` 가드로 자연히 중복 방지) "🔴 즉시
+    행동" 건수를 탭×시장별로 기록만 한다 — UI 표시 없음(사용자 지시).
+    get_calendar()는 새 fetch 없이 기존 캐시만 읽는 순수 조회라(그
+    docstring 참고) 스케줄러에서 직접 호출해도 안전 — 그 결과에서 이
+    market 몫만 걸러 저장한다(다른 시장의 캐시가 아직 그날 자로 안
+    갱신됐을 수 있어 섞으면 왜곡)."""
+    try:
+        resp = await get_calendar()
+        data = _json.loads(resp.body)
+    except Exception as e:
+        print(f"[decision-log] get_calendar 조회 실패: {e}")
+        return
+    immediate = ((data.get("today_decision") or {}).get("immediate")) or []
+    mkt_upper = market.upper()
+    counts: dict[str, int] = {}
+    for item in immediate:
+        if (item.get("market") or "").upper() != mkt_upper:
+            continue
+        tab = _DECISION_TAB_BY_SOURCE.get(item.get("source")) or item.get("mode") or item.get("source") or "기타"
+        counts[tab] = counts.get(tab, 0) + 1
+    log = _load_decision_log()
+    day_rec = log.setdefault(daykey, {})
+    day_rec[mkt_upper] = counts
+    day_rec["updated_at"] = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+    _save_decision_log(log)
+    print(f"[decision-log] {daykey} {mkt_upper} 🔴 {sum(counts.values())}건: {counts}")
+
+
 # v5.103: 포지션 보드 — 토스 잔고 동기화(수량·평단, sync_toss.py가 30분마다
 # 덮어씀)와 사용자가 UI에서 입력하는 손절가(positions_meta.json, sync가
 # 절대 안 건드림)를 별도 파일로 분리. 같은 파일에 같이 두면 다음 동기화가
