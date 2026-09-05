@@ -555,8 +555,8 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.179</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
-    <div class="app-tagline">확인진입 원칙 — 종가&gt;피벗 &amp; 거래량 1.5배+ 확인 후 진입</div>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.180</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
   <div class="tabs" role="tablist" id="modeTabs">
@@ -631,7 +631,7 @@ tr.editing{background:rgba(242,179,61,.06)}
      돌파/추세전환) 전부 복원. v5.167에서 ①②③④ 검증 대기로 2탭만 남겼던 걸,
      검증 통과(docs/kr_us_strategy_map.md "후속 확인 ①②③④") 후 v5.165 원안대로
      되돌림. CONFIRM_ENTRY_MODES/renderCards() 참고. -->
-<div class="stopwidth-warn" id="confirmEntryBanner" style="display:none">확인진입 원칙 — 종가 &gt; 피벗 &amp; 거래량 1.5배+(돌파는 3.0배+) 확인 후 진입. 즉시진입 EV ~0, 확인진입 EV +0.5~1.0R (2026-09-04 KR/US 재검증, 눌림목/돌파는 격자탐색 후 조정)</div>
+<div class="stopwidth-warn" id="confirmEntryBanner" style="display:none">KR 히트는 관심 신호다 — 5탭 확인진입 EV는 피벗 지정가 체결 가정의 산물로 밝혀져 철회됐다(2026-09-05). 돌파임박 KR 종가진입(0.157R, z=2.37)만 한계적으로 유효, 나머지는 확인돼도 진입 근거 없음. 상세: docs/confirm_entry_lookahead_2026-09-04.md</div>
 <div class="stopwidth-warn" id="stopWidthWarnBanner" style="display:none"></div>
 <div class="jongga-safety-banner" id="jonggaSafetyBanner" style="display:none">⚠️ 단기 오버나이트 전략 — 소액 고정 비중, 익일 아침 무조건 정리. 갭하락 리스크 있음(백테스트 평균이며 개별 결과 아님).</div>
 <div class="stopwidth-warn" id="jonggaSessionBanner" style="display:none"></div>
@@ -1227,13 +1227,13 @@ function entrySignal(s) {
 // 체크리스트 상단 안내 — 탭마다 판정 항목 수가 달라 "신호등"이라는 이름이
 // 과장될 수 있는 지점(특히 1항목 탭)을 명시. sig.activeItems/activeCount는
 // entrySignal()이 채워줌.
-// v5.91: 시장별 전략 지도(docs/kr_us_strategy_map.md, 사전 등록 검정
-// z=4.88) — KR 되돌림 계열(눌림목·돌파임박) 카드에만 참고 정보로 표시.
-// 진입을 막지 않음, 정보용 한 줄. US 카드는 변경 없음(요청 그대로).
+// v5.91에서 "KR 되돌림 계열 EV 0.089R — 돌파 계열(0.372R) 우선 권장"을
+// 표시했으나, 이 계열 우열(z=4.88, 20개 창)은 90개 창 재검증에서
+// 재현 실패(z=4.88→1.38, 비유의)로 철회됨 — docs/kr_us_strategy_map.md
+// "재검증(2026-08-31, 6배 표본)" 절. v5.180(사용자 지시): 대체 문구
+// 없이 완전 삭제 — 호출부(line ~1998)는 그대로 두고 이 함수만 no-op화.
 function strategyMapNoteHtml(s) {
-  if (s.market !== 'KR') return '';
-  if (s.mode !== 'pullback' && s.mode !== 'imminent') return '';
-  return `<div class="sig-note" title="사전 등록 합산 검정(z=4.88) — docs/kr_us_strategy_map.md">ℹ️ KR 되돌림 계열 EV 0.089R — 돌파 계열(0.372R) 우선 권장 (전략 지도)</div>`;
+  return '';
 }
 function entrySignalNoteHtml(s, sig) {
   if (sig.activeCount >= 4) return '';
@@ -3441,23 +3441,9 @@ function renderTodayDecisionHtml(td) {
       : item.source === 'pending_watch' ? ' <span title="직접 등록한 감시">👤</span>'
       : '';
     const nameLine = `<div><b>${nameLink(item)}</b> <span class="mkt">${mkt}</span>${sourceBadge}${strongSetupBadge}</div>`;
-    // v5.179(사용자 지시 — 확인 카드 최종 정리, docs/confirm_entry_
-    // lookahead_2026-09-04.md 결론 반영): 5탭 확인진입 중 사전등록 기준을
-    // 통과한 조합은 "돌파임박 KR 종가진입" 하나뿐(verdict==='entry_
-    // candidate') — 나머지는 verdict==='watch_interest'로 진입가/손절/
-    // 목표/사이즈를 아예 안 보여준다(값 자체가 백엔드에서 null). 🔥강한확인
-    // 배지(vol_mult>=2.0)는 같은 무효 격자탐색이 근거였으므로 완전히 삭제
-    // (계산도 app.py에서 제거됨). reignition/jongga 등 이 정리 대상이 아닌
-    // 소스는 verdict 필드 자체가 없어 기존(entry_candidate와 동일) 렌더링.
-    if (item.verdict === 'watch_interest') {
-      return cardShell('var(--line)', 'var(--card)', `
-        ${nameLine}
-        <div style="font-size:15px;font-weight:700;margin-top:4px;color:var(--muted)">확인됨 · 종가 ${fmtPrice(item.close, mkt)}</div>
-        <div style="font-size:11px;color:#ffb27a;font-weight:700;margin-top:2px">🔎 관심 — 진입 근거 미유의</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:4px;${descClamp}">${item.reason}</div>
-        ${actions(item, false)}
-      `);
-    }
+    // v5.180(사용자 지시 — 버킷 재정의): verdict==='watch_interest' 항목은
+    // 이제 백엔드가 immediate에 아예 안 담는다(interest 버킷으로 분리,
+    // 아래 interestHtml 참고) — immediate는 항상 entry_candidate만.
     const qty = (item.entry != null && item.stop != null) ? calcShares(item.entry, item.stop, mkt) : null;
     const stopStr = item.stop != null
       ? `${fmtPrice(item.stop, mkt)}${todayDecisionRiskBadge(item)}`
@@ -3507,6 +3493,12 @@ function renderTodayDecisionHtml(td) {
       descParts.push('⌛ 확인 대기 만료');
     } else if (item.confirm_pending) {
       descParts.push(`⏳ 확인 대기 (거래량 ${item.vol_mult_required}배 필요)`);
+    } else if (item.pre_pivot_wait) {
+      // v5.180(사용자 지시 — [2]): 아직 피벗 아래(🟡 근접)인 항목도
+      // "뚫으면 진입 X"라고 쓰면 돌파 즉시 매수해도 된다는 근거처럼
+      // 읽힌다 — 실제로는 돌파 후에도 확인(종가+거래량)을 기다려야
+      // 한다는 게 결론이라 피벗/손절을 "기준값"으로만 표시.
+      descParts.push(`피벗 ${fmtPrice(item.pivot, mkt)} · 손절 기준 ${fmtPrice(item.stop, mkt)} · ⏳ 확인 대기`);
     } else {
       descParts.push(`뚫으면 진입 ${fmtPrice(item.entry_if_triggered, mkt)}`);
       if (item.stop_if_triggered != null) descParts.push(`손절 ${fmtPrice(item.stop_if_triggered, mkt)}${todayDecisionRiskBadge(item)}`);
@@ -3526,6 +3518,21 @@ function renderTodayDecisionHtml(td) {
   const nearHtml = nearBelow.map(renderNearRow).join('');
   const crossedHtml = nearCrossed.map(renderNearRow).join('');
 
+  // v5.180(사용자 지시 — 버킷 재정의 [1]): "🔎 관심(확인됨)" 신설 —
+  // verdict==='watch_interest'(확인은 됐지만 진입 근거 미유의)만 여기로.
+  // 종목·탭·확인일·종가 + 피벗·손절 기준값(참고용, "진입가" 아님)만
+  // 표시 — 사이즈 없음(사용자 지시).
+  const interestHtml = (td.interest || []).map(item => {
+    const mkt = mktOf(item);
+    return cardShell('var(--line)', 'var(--card)', `
+      <div><b>${nameLink(item)}</b> <span class="mkt">${mkt}</span></div>
+      <div style="font-size:15px;font-weight:700;margin-top:4px;color:var(--muted)">${item.tab || ''} · 확인일 ${item.confirmed_at || '-'} · 종가 ${fmtPrice(item.close, mkt)}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">피벗(기준) ${fmtPrice(item.pivot, mkt)} · 손절(기준) ${fmtPrice(item.stop, mkt)}</div>
+      <div style="font-size:11px;color:#ffb27a;font-weight:700;margin-top:2px">🔎 관심 — 진입 근거 미유의</div>
+      ${actions(item, false)}
+    `);
+  }).join('');
+
   // v5.158: 배지 판정 결과 집계 로그 — "조용히 안 뜬다"를 콘솔에서 바로
   // 확인 가능하게(사용자 지시, entry undefined로 배지 전체가 안 뜨던
   // 사고 재발 시 즉시 알아채기 위함).
@@ -3542,7 +3549,7 @@ function renderTodayDecisionHtml(td) {
        <div id="tdWaitingDetail" style="display:${_tdWaitingOpen ? '' : 'none'};font-size:11px;color:var(--muted);margin-top:2px">${waitingParts.join(' · ')}</div>`
     : '';
 
-  if (!(td.immediate || []).length && !(td.near || []).length) {
+  if (!(td.immediate || []).length && !(td.interest || []).length && !(td.near || []).length) {
     return `<div>
       <div class="mf-toolbar"><b>🎯 오늘의 결정</b></div>
       <div style="font-size:13px;color:var(--muted);margin-bottom:10px">오늘 행동할 것 없음${td.waiting_total ? ` — 대기 ${td.waiting_total}건` : ''}. 방금 배포했다면 캐시 워밍 중이라 몇 분 뒤 다시 채워집니다.</div>
@@ -3555,10 +3562,18 @@ function renderTodayDecisionHtml(td) {
   // 1열로 자동 조정(사용자 지시).
   const sectionHeader = (label, color) =>
     `<div style="grid-column:1/-1;font-size:12px;color:${color};font-weight:700;margin-top:4px">${label}</div>`;
+  // v5.180(사용자 지시 — 검증 항목 "🔴 비어있으면 비어있다고 표시"):
+  // 다른 버킷(🔎/🟠/🟡)에 항목이 있는데 🔴만 비어있으면 헤더 자체가
+  // 사라져서 "즉시 행동이 있는지 없는지" 조용히 안 보이는 사고를 막는다
+  // — 진입 근거가 있는 항목이 하나도 없다는 사실 자체가 중요한 정보다.
+  const immediateSection = immediateHtml
+    ? sectionHeader('🔴 즉시 행동', '#ff9b9b') + immediateHtml
+    : sectionHeader('🔴 즉시 행동 — 없음', '#666');
   return `<div>
     <div class="mf-toolbar"><b>🎯 오늘의 결정</b></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;max-width:1400px;margin:0 auto">
-      ${immediateHtml ? sectionHeader('🔴 즉시 행동', '#ff9b9b') + immediateHtml : ''}
+      ${immediateSection}
+      ${interestHtml ? sectionHeader('🔎 관심(확인됨)', '#8fb3ff') + interestHtml : ''}
       ${crossedHtml ? sectionHeader('🟠 이미 돌파(확인 필요)', '#ffb27a') + crossedHtml : ''}
       ${nearHtml ? sectionHeader('🟡 근접', '#ffd98a') + nearHtml : ''}
     </div>

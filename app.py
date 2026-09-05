@@ -5,6 +5,25 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.180 [정정] "오늘의 결정" 버킷 재정의(사용자 지시 — 스샷 기준 3개
+        불일치 수정). (1) verdict==watch_interest 항목이 "🔴 즉시
+        행동"에 섞여 있던 버그 수정 — immediate/near와 나란한 3번째
+        버킷 `interest`(🔎 관심(확인됨)) 신설, `_dedup_today_decision`/
+        `_URGENCY_PRIORITY`(immediate>interest>near)도 3-way로 확장.
+        watch_interest는 이제 종목·탭·확인일·종가 + 피벗/손절 기준값
+        (참고용, 사이즈 없음)만 보여주는 별도 카드로 렌더링, immediate는
+        entry_candidate만 남아 순수해짐(sort key의 verdict 티어 제거).
+        (2) 🟡 근접 카드(dist_pct>0, 아직 미돌파)의 "뚫으면 진입 X ·
+        손절 Y"를 KR 전 탭 + US(눌림목 제외)에서 "피벗 {pivot} · 손절
+        기준 {stop} · ⏳ 확인 대기"로 교체(`pre_pivot_wait` 플래그) —
+        US 눌림목은 즉시진입 EV가 유효한 유일한 예외라 기존 표시 유지.
+        돌파임박 KR만 "확인 시 종가 진입" 문구 추가. pending_watch·
+        imminent-top5(항상 돌파임박) 두 소스 다 적용. (3) 상단
+        태그라인/확인진입 배너 문구를 "KR 히트는 관심 신호 — 진입은
+        종가베팅·재점화·돌파임박 종가확인만"으로 교체. (4) 이미
+        z=4.88→1.38로 철회된 "KR 되돌림 계열 EV 0.089R vs 돌파 계열
+        0.372R"(v5.91 잔재, `strategyMapNoteHtml()`) 완전 삭제 —
+        대체 문구 없음.
 v5.179 [정정] 확인 카드 최종 정리 + 강한확인 배지 제거(사용자 지시 —
         docs/confirm_entry_lookahead_2026-09-04.md 결론 반영). 확인
         카드에 `verdict` 필드 신설 — "돌파임박 KR 종가진입"(사전등록
@@ -4605,7 +4624,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.179"
+VERSION = "v5.180"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -10236,37 +10255,41 @@ def _pending_watch_confirm_check(df, pivot: float, vol_mult_required: float = 1.
 # v5.173: auto_watch(자동 감시)를 맨 뒤에 추가 — 사용자가 직접 고른
 # pending_watch보다 신뢰도를 낮게 둔다(자동 등록은 필터만 걸었을 뿐 사람이
 # 확인한 게 아님). 같은 티커가 수동/자동 둘 다로 뜨면 수동이 이긴다.
-_URGENCY_PRIORITY = {"immediate": 0, "near": 1}
+# v5.180(사용자 지시 — 버킷 재정의): interest(🔎 관심)가 immediate와
+# near 사이 긴급도 티어로 신설됨 — "확인은 됐지만 진입 근거는 없다"는
+# immediate(진입 근거 있음)보다는 급하지 않지만 near(아직 확인도 안 됨)
+# 보다는 급하다는 순서.
+_URGENCY_PRIORITY = {"immediate": 0, "interest": 1, "near": 2}
 _DECISION_SOURCE_PRIORITY = {"reignition": 0, "pending_watch": 1, "jongga": 2, "imminent": 3, "auto_watch": 4}
 
 
-def _dedup_today_decision(immediate: list, near: list) -> tuple[list, list]:
-    """티커별로 1건만 남긴다 — 1차 긴급도(immediate가 항상 near를 이김),
-    2차(같은 긴급도 안에서만) 소스 신뢰도. immediate/near 리스트 구분과
-    무관하게 전체를 대상으로 티커를 묶는다(같은 티커가 한쪽엔 immediate,
-    다른 쪽엔 near로 들어오는 조합도 처리). 버려진 항목은 어느 축으로
-    졌는지까지 로그로 남김 — 조용히 사라지면 나중에 "왜 이 카드가
-    안 보이지"로 헤매게 된다."""
-    tagged = [("immediate", d) for d in immediate] + [("near", d) for d in near]
+def _dedup_today_decision(immediate: list, interest: list, near: list) -> tuple[list, list, list]:
+    """티커별로 1건만 남긴다 — 1차 긴급도(immediate>interest>near),
+    2차(같은 긴급도 안에서만) 소스 신뢰도. 세 리스트 구분과 무관하게
+    전체를 대상으로 티커를 묶는다(같은 티커가 서로 다른 버킷에 들어오는
+    조합도 처리). 버려진 항목은 어느 축으로 졌는지까지 로그로 남김 —
+    조용히 사라지면 나중에 "왜 이 카드가 안 보이지"로 헤매게 된다."""
+    tagged = ([("immediate", d) for d in immediate] + [("interest", d) for d in interest]
+              + [("near", d) for d in near])
     by_ticker: dict[str, list] = {}
     for list_name, d in tagged:
         by_ticker.setdefault(d["ticker"], []).append((list_name, d))
 
-    kept_immediate, kept_near = [], []
+    kept = {"immediate": [], "interest": [], "near": []}
     for ticker, entries in by_ticker.items():
         if len(entries) == 1:
             list_name, d = entries[0]
-            (kept_immediate if list_name == "immediate" else kept_near).append(d)
+            kept[list_name].append(d)
             continue
         entries.sort(key=lambda e: (_URGENCY_PRIORITY.get(e[0], 99),
                                      _DECISION_SOURCE_PRIORITY.get(e[1]["source"], 99)))
         winner_list, winner = entries[0]
-        (kept_immediate if winner_list == "immediate" else kept_near).append(winner)
+        kept[winner_list].append(winner)
         for dropped_list, dropped in entries[1:]:
             reason = "긴급도 우선" if dropped_list != winner_list else "소스 우선순위"
             print(f"[decision] {ticker} 중복 제거: {dropped['source']}({dropped_list}) 버림 "
                   f"→ {winner['source']}({winner_list}) 채택 ({reason})")
-    return kept_immediate, kept_near
+    return kept["immediate"], kept["interest"], kept["near"]
 
 
 @app.get("/api/calendar")
@@ -10427,7 +10450,11 @@ async def get_calendar():
     # 데이터를 재사용해 즉시행동(🔴 검증된 규칙 충족)/근접(🟡)/대기(⚪개수)
     # 3단으로 재분류. 새 스캔/새 fetch 트리거 안 함(캘린더 원칙 그대로) —
     # 캐시 미스면 그 소스만 조용히 비움.
-    immediate, near, waiting = [], [], {}
+    # v5.180(사용자 지시 — 버킷 재정의): interest(🔎 관심)를 immediate/near와
+    # 나란한 3번째 버킷으로 신설 — verdict==watch_interest는 이제 immediate에
+    # 안 들어간다("🔴 즉시 행동"에 진입 근거 없는 항목이 섞이는 게 버그라는
+    # 지적, docs/confirm_entry_lookahead_2026-09-04.md 결론 반영).
+    immediate, interest, near, waiting = [], [], [], {}
 
     # ① 재점화 확인진입(오늘) — docs/kr_theme_leader_reignition.md,
     #    확인진입 EV +0.755R(대조군 대비 유의, z>=1.96 두 건).
@@ -10612,20 +10639,27 @@ async def get_calendar():
             is_entry_candidate = tab == "돌파임박" and market == "KR"
             if is_entry_candidate:
                 target_2r = round(close + 2 * (close - stop_f), 2) if stop_f and close > stop_f else None
-                entry_field, stop_field, target_field = close, stop_f, target_2r
-                verdict_label = f"{tab} 진입 후보 (종가진입 0.157R z=2.37, 한계) · docs/confirm_entry_lookahead_2026-09-04.md"
+                immediate.append({
+                    "source": "pending_watch", "key": f"pending:{r.get('id')}",
+                    "ticker": ticker, "name": r.get("name") or ticker, "market": market,
+                    "mode": r.get("mode_raw") or None, "sector": r.get("sector"),
+                    "entry": close, "stop": stop_f, "target_2r": target_2r,
+                    "close": close, "pivot": pivot_f, "atr_pct": atr_pct,
+                    "verdict": "entry_candidate",
+                    "reason": f"{tab} 진입 후보 (종가진입 0.157R z=2.37, 한계) · docs/confirm_entry_lookahead_2026-09-04.md",
+                })
             else:
-                entry_field, stop_field, target_field = None, None, None
-                verdict_label = f"{tab} 관심 — 확인됐으나 진입 근거 미유의 · docs/confirm_entry_lookahead_2026-09-04.md"
-            immediate.append({
-                "source": "pending_watch", "key": f"pending:{r.get('id')}",
-                "ticker": ticker, "name": r.get("name") or ticker, "market": market,
-                "mode": r.get("mode_raw") or None, "sector": r.get("sector"),
-                "entry": entry_field, "stop": stop_field, "target_2r": target_field,
-                "close": close, "pivot": pivot_f, "atr_pct": atr_pct,
-                "verdict": "entry_candidate" if is_entry_candidate else "watch_interest",
-                "reason": verdict_label,
-            })
+                # v5.180(사용자 지시 — 버킷 재정의): watch_interest는 더 이상
+                # immediate에 안 들어간다 — "🔎 관심(확인됨)" 전용 버킷으로
+                # 분리. 진입가/손절/사이즈 없음, 종목·탭·확인일·종가 +
+                # 피벗·손절 기준값(참고용, "진입가" 아님)만.
+                interest.append({
+                    "source": "pending_watch", "key": f"pending:{r.get('id')}",
+                    "ticker": ticker, "name": r.get("name") or ticker, "market": market,
+                    "tab": tab, "confirmed_at": today,
+                    "close": close, "pivot": pivot_f, "stop": stop_f,
+                    "reason": f"{tab} 관심 — 확인됐으나 진입 근거 미유의 · docs/confirm_entry_lookahead_2026-09-04.md",
+                })
         elif dist_pct <= 2:
             # v5.176(사용자 지시): KR 확인대기 UI — 이미 피벗 돌파(dist_pct<=0)
             # 했는데 확인규칙(rule)이 있는 탭에서 거래량 미충족인 KR 종목은
@@ -10651,14 +10685,25 @@ async def get_calendar():
                     days_since_signal = None
                 if days_since_signal is not None and days_since_signal >= AUTO_WATCH_CONFIRM_WINDOW_DAYS:
                     confirm_expired = True
+            # v5.180(사용자 지시 — [2] 🟡 근접 카드 정리): dist_pct>0(아직
+            # 피벗 아래, 🟡 근접)도 "뚫으면 진입 X"라고 쓰면 마치 돌파 즉시
+            # 매수해도 된다는 근거가 있는 것처럼 읽힌다 — 실제로는 돌파
+            # 후에도 확인(종가+거래량)을 기다려야 한다는 게 이 문서 전체의
+            # 결론이므로, KR 전 탭 + US(눌림목 제외, 즉시진입 EV 유효한
+            # 유일한 예외라 기존 표시 유지)는 "피벗/손절 기준값 + 확인 대기"
+            # 로 통일한다. 돌파임박 KR만 "확인 시 종가 진입" 문구 추가
+            # (유일하게 통계적으로 유의한 확인진입 조합이므로).
+            far_use_legacy = market == "US" and tab == "눌림목"
             if confirm_expired:
                 reason = f"{tab} 확인 대기 만료({AUTO_WATCH_CONFIRM_WINDOW_DAYS}거래일 내 거래량 {vol_mult_req}배 미충족)"
             elif dist_pct <= 0:
                 # 피벗은 넘었는데(종가>피벗) 거래량 확인 요건 미충족, 또는
                 # 확인 규칙 자체가 없는 탭 — 근접(🟡)으로만, EV 인용 없이.
                 reason = f"{tab or '감시'} 피벗 돌파" + (" — 거래량 확인 대기" if rule else " — 확인규칙 미검증, 사용자 판단")
-            else:
+            elif far_use_legacy:
                 reason = f"{tab or '감시'} 피벗까지 {dist_pct:.1f}%"
+            else:
+                reason = f"{tab or '감시'} 피벗까지 {dist_pct:.1f}%" + (" · 확인 시 종가 진입" if (tab == "돌파임박" and market == "KR") else "")
             item = {
                 "source": "pending_watch", "key": f"pending:{r.get('id')}",
                 "ticker": ticker, "name": r.get("name") or ticker, "market": market,
@@ -10673,6 +10718,11 @@ async def get_calendar():
                 item["vol_mult_required"] = vol_mult_req
                 # 진입가/손절 미표시(확인 전 오해 방지) — entry_if_triggered/
                 # stop_if_triggered를 아예 넣지 않는다.
+            elif dist_pct > 0 and not far_use_legacy:
+                item["pre_pivot_wait"] = True
+                # pivot/stop은 위에서 이미 참고값으로 들어가 있다(entry_if_
+                # triggered/stop_if_triggered는 넣지 않음 — "확정 진입가"로
+                # 오해될 문구 자체를 없앤다).
             else:
                 item["entry_if_triggered"] = pivot_f
                 item["stop_if_triggered"] = stop_f
@@ -10715,20 +10765,33 @@ async def get_calendar():
         if not pivot or not close:
             continue
         snap_date = h.get("_snapshot_date")
-        near.append({
+        dist_pct = round((pivot - close) / pivot * 100, 2)
+        imm_market = h.get("market")
+        item = {
             "source": "imminent", "key": f"imminent:{h['ticker']}",
-            "ticker": h["ticker"], "name": h.get("name", h["ticker"]), "market": h.get("market"),
+            "ticker": h["ticker"], "name": h.get("name", h["ticker"]), "market": imm_market,
             "mode": "imminent", "sector": h.get("sector"), "rs": h.get("rs"),
-            "current_price": close, "pivot": pivot, "dist_pct": round((pivot - close) / pivot * 100, 2),
-            "entry_if_triggered": pivot, "stop_if_triggered": h.get("stop"),
+            "current_price": close, "pivot": pivot, "dist_pct": dist_pct,
             "close": close, "stop": h.get("stop"),
             # v5.155: 손절폭 배지용 — analyze_imminent()가 이미 계산해둔 값
             # 그대로 pass-through(badge_fields/_rr_block, scanner.py) — 새
             # 계산 없음.
             "atr_pct": h.get("atr_pct"),
             "snapshot_date": snap_date, "snapshot_stale": bool(snap_date) and snap_date != today,
-            "reason": "돌파임박 상위 후보 — 참고(확인진입 전환 시 안C 규칙 적용)",
-        })
+        }
+        # v5.180(사용자 지시 — [2]): 이 소스는 항상 돌파임박 탭이라 US
+        # 눌림목 예외가 적용되지 않는다 — dist_pct>0(아직 미돌파, 🟡)이면
+        # KR/US 둘 다 "피벗/손절 기준값 + 확인 대기"로 통일, KR만 "확인 시
+        # 종가 진입" 문구 추가(유일하게 유의한 조합). dist_pct<=0(🟠, 이미
+        # 돌파)은 기존 표시 유지(사용자 지시 범위 밖).
+        if dist_pct > 0:
+            item["pre_pivot_wait"] = True
+            item["reason"] = "돌파임박 상위 후보 — 참고" + (" · 확인 시 종가 진입" if imm_market == "KR" else "")
+        else:
+            item["entry_if_triggered"] = pivot
+            item["stop_if_triggered"] = h.get("stop")
+            item["reason"] = "돌파임박 상위 후보 — 참고(확인진입 전환 시 안C 규칙 적용)"
+        near.append(item)
     waiting["imminent"] = max(0, len(imminent_hits) - IMMINENT_TOP_N)
 
     # ④ 5탭 자동 감시(auto_watch, v5.173) — journal과 완전 분리된 별도
@@ -10757,27 +10820,32 @@ async def get_calendar():
             is_entry_candidate = rec["tab"] == "돌파임박" and rec.get("market") == "KR"
             if is_entry_candidate:
                 target_2r = round(entry + 2 * (entry - stop), 2)
-                entry_field, stop_field, target_field = entry, stop, target_2r
-                verdict_label = "돌파임박 진입 후보 (종가진입 0.157R z=2.37, 한계) · docs/confirm_entry_lookahead_2026-09-04.md"
+                # v5.175(사용자 지시 — 게이트→배지 전환) 원래 등록 게이트였던
+                # RS>=80 & 손절<=ATR×1.5를 여기서 표시용 "강한 셋업" 배지로
+                # 계산(_is_auto_watch_strong_setup — vol_mult 격자탐색과는
+                # 별개 측정이라 유지).
+                strong_setup = _is_auto_watch_strong_setup(rec.get("rs"), rec.get("risk_pct"), rec.get("atr_pct"))
+                immediate.append({
+                    "source": "auto_watch", "key": f"auto_watch:{key}",
+                    "ticker": rec["ticker"], "name": rec.get("name") or rec["ticker"],
+                    "market": rec.get("market"), "mode": None, "sector": rec.get("sector"),
+                    "entry": entry, "stop": stop, "target_2r": target_2r,
+                    "close": entry, "pivot": pivot, "atr_pct": rec.get("atr_pct"),
+                    "rs": rec.get("rs"),
+                    "verdict": "entry_candidate",
+                    "strong_setup": strong_setup,
+                    "reason": "돌파임박 진입 후보 (종가진입 0.157R z=2.37, 한계) · docs/confirm_entry_lookahead_2026-09-04.md",
+                })
             else:
-                entry_field, stop_field, target_field = None, None, None
-                verdict_label = f"{rec['tab']} 관심 — 확인됐으나 진입 근거 미유의 · docs/confirm_entry_lookahead_2026-09-04.md"
-            # v5.175(사용자 지시 — 게이트→배지 전환) 원래 등록 게이트였던
-            # RS>=80 & 손절<=ATR×1.5를 여기서 표시용 "강한 셋업" 배지로 계산
-            # (_is_auto_watch_strong_setup — 정의는 등록 루프와 동일 함수 공유,
-            # vol_mult 격자탐색과는 별개 측정이라 유지).
-            strong_setup = _is_auto_watch_strong_setup(rec.get("rs"), rec.get("risk_pct"), rec.get("atr_pct"))
-            immediate.append({
-                "source": "auto_watch", "key": f"auto_watch:{key}",
-                "ticker": rec["ticker"], "name": rec.get("name") or rec["ticker"],
-                "market": rec.get("market"), "mode": None, "sector": rec.get("sector"),
-                "entry": entry_field, "stop": stop_field, "target_2r": target_field,
-                "close": entry, "pivot": pivot, "atr_pct": rec.get("atr_pct"),
-                "rs": rec.get("rs"),
-                "verdict": "entry_candidate" if is_entry_candidate else "watch_interest",
-                "strong_setup": strong_setup,
-                "reason": verdict_label,
-            })
+                # v5.180(사용자 지시 — 버킷 재정의): watch_interest는 "🔎
+                # 관심(확인됨)" 전용 버킷으로 분리 — 진입가/손절/사이즈 없음.
+                interest.append({
+                    "source": "auto_watch", "key": f"auto_watch:{key}",
+                    "ticker": rec["ticker"], "name": rec.get("name") or rec["ticker"],
+                    "market": rec.get("market"), "tab": rec["tab"], "confirmed_at": today,
+                    "close": entry, "pivot": pivot, "stop": stop,
+                    "reason": f"{rec['tab']} 관심 — 확인됐으나 진입 근거 미유의 · docs/confirm_entry_lookahead_2026-09-04.md",
+                })
         elif rec.get("status") == "watching":
             # v5.176(사용자 지시): KR 확인대기 UI를 auto_watch 풀에도 —
             # 이미 피벗(signal_high) 돌파했는데 거래량 미충족인 종목을
@@ -10820,32 +10888,35 @@ async def get_calendar():
             })
     waiting["auto_watch"] = auto_watch_waiting
 
-    immediate, near = _dedup_today_decision(immediate, near)
+    immediate, interest, near = _dedup_today_decision(immediate, interest, near)
 
     def _immediate_sort_key(item):
-        # v5.173(사용자 지시): 🔴 안에서 ①강한확인 ②손절폭 좁은순 ③RS
-        # 높은순 — reignition만 그 위 최우선 티어(기존 관례 유지). risk_pct는
-        # 저장된 필드가 아니라 entry/stop에서 그때그때 계산(todayDecisionRiskBadge
+        # v5.173(사용자 지시): 🔴 안에서 ①손절폭 좁은순 ②RS 높은순 —
+        # reignition만 그 위 최우선 티어(기존 관례 유지). risk_pct는 저장된
+        # 필드가 아니라 entry/stop에서 그때그때 계산(todayDecisionRiskBadge
         # 프론트 계산과 동일 공식) — 소스마다 다른 스키마를 하나로 다룸.
-        # v5.175(사용자 지시 — 게이트→배지 전환) ②로 "강한 셋업"(원래 auto_watch
-        # 등록 게이트였던 RS/손절 필터) 티어 추가 — 강한확인 다음, 손절폭 정렬 전.
-        # v5.179(사용자 지시 — 확인 카드 최종 정리): strong_confirm 티어 제거
-        # (근거 무효, 배지 자체 삭제) — 대신 verdict(entry_candidate가
-        # watch_interest보다 우선) 티어로 대체, "강한 셋업" 티어는 그대로 유지.
+        # v5.175(사용자 지시 — 게이트→배지 전환) "강한 셋업"(원래 auto_watch
+        # 등록 게이트였던 RS/손절 필터) 티어 추가 — 손절폭 정렬 전.
+        # v5.180(사용자 지시 — 버킷 재정의): immediate는 이제 verdict==
+        # entry_candidate만 들어온다(watch_interest는 interest 버킷으로
+        # 분리) — strong_confirm/verdict 정렬 티어 전부 제거, 순수하게
+        # 손절폭·RS만 남김.
         entry, stop = item.get("entry"), item.get("stop")
         risk_pct = (entry - stop) / entry * 100 if entry and stop and entry > stop else None
         rs = item.get("rs")
         return (
             item["source"] != "reignition",
-            item.get("verdict") == "watch_interest",
             not item.get("strong_setup", False),
             risk_pct if risk_pct is not None else 999.0,
             -(rs if rs is not None else -1),
         )
     immediate.sort(key=_immediate_sort_key)
+    # v5.180: interest는 확인일(오늘 고정, confirmed_at) 다음 티커명순 —
+    # 전부 "오늘 확인된" 항목이라 시간순 의미가 없어 이름으로만 안정 정렬.
+    interest.sort(key=lambda x: x.get("name") or x.get("ticker") or "")
     near.sort(key=lambda x: x.get("dist_pct", 999))
     today_decision = {
-        "immediate": immediate, "near": near, "waiting": waiting,
+        "immediate": immediate, "interest": interest, "near": near, "waiting": waiting,
         "waiting_total": sum(waiting.values()),
     }
 
