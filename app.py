@@ -5,6 +5,20 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.184 [수정] 확인일이 스캔 실행일로 찍히던 버그(사용자 지시) —
+        `_refresh_auto_watch()`/`_refresh_reignition_watch()`가 확인·
+        만료 시점의 날짜를 `daykey`/`today`(스케줄러가 이번 틱을 시작한
+        세션 날짜)로 찍고 있었다 — 정상적인 경우(당일 EOD 데이터로 당일
+        실행)엔 확인봉 날짜와 같지만, 데이터 지연·재실행 시 어긋난다.
+        `signal_date`가 이미 쓰던 원칙(확인 조건을 실제로 계산한 df의
+        마지막 봉 `df.index[-1].date()`)으로 통일 — auto_watch의
+        `confirmed_at`/`expired_at`, 재점화의 `confirm.date`/
+        `forward.opened_at`, get_calendar()가 pending_watch 확인 카드에
+        새로 채우는 `confirm_date` 전부. 프론트 `_promoteConfirmCloseEntries`
+        (돌파임박 KR 자동전환)도 브라우저의 오늘 날짜(`kstStr(new Date())`)
+        대신 이 `confirm_date`를 저널 `date`에 씀. `signal_date` 자체
+        (`_record_signal_snapshot()`)는 처음부터 `df.index[-1]` 기준이라
+        같은 문제 없음 — 확인 후 점검 결과.
 v5.183 [기능] result_r 실체결 기준(사용자 지시, v5.182 후속) —
         static/index.html 전용(이 값들은 전부 브라우저에서 계산·저장됨).
         (1) 청산 시 result_r 계산에 entry_actual이 있으면 그걸 분모/
@@ -4691,7 +4705,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.183"
+VERSION = "v5.184"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -5877,12 +5891,18 @@ async def _refresh_reignition_watch(bundle: dict):
                     }
                     if res["confirmed"]:
                         rec["status"] = "confirmed"
+                        # v5.184(사용자 지시 — 확인일 버그, auto_watch와 동일
+                        # 원인): "오늘"(스캔/스케줄러 실행일)이 아니라 확인
+                        # 조건을 실제로 충족시킨 봉의 날짜(df.index[-1])를
+                        # 써야 한다 — 기존엔 today를 써서 데이터 지연·재실행
+                        # 시 스캔 실행일이 확인일로 찍히는 문제가 있었다.
+                        confirm_bar_date = str(df.index[-1].date())
                         # v5.155: atr_pct도 같이 기록 — confirm의 stop은 구조적
                         # 20일저가라 atr_stop과 무관하게 risk_pct가 벌어질 수
                         # 있어(오늘의 결정 배지 배경 사례), 그 판정에 필요.
-                        rec["confirm"] = {"date": today, "pivot": res["pivot"], "stop": res["stop"],
+                        rec["confirm"] = {"date": confirm_bar_date, "pivot": res["pivot"], "stop": res["stop"],
                                            "atr_pct": res.get("atr_pct")}
-                        rec["forward"] = {"opened_at": today, "entry": res["pivot"], "stop": res["stop"],
+                        rec["forward"] = {"opened_at": confirm_bar_date, "entry": res["pivot"], "stop": res["stop"],
                                           "bars_held": 0, "r_progress": 0.0,
                                           "resolved": False, "resolved_r": None, "resolved_reason": None}
 
@@ -9974,7 +9994,12 @@ async def _refresh_auto_watch(bundle: dict, market: str, daykey: str):
             df, rec["signal_high"], vol_mult_required=vol_mult_req, base_vol50=rec.get("base_vol50"))
         if confirmed:
             rec["status"] = "confirmed"
-            rec["confirmed_at"] = daykey
+            # v5.184(사용자 지시 — 확인일 버그): daykey는 스케줄러가 이번
+            # 틱을 시작한 "오늘" 세션 키라 스캔 실행일이지, 확인 조건을
+            # 충족시킨 실제 봉의 날짜가 아니다(데이터 지연·재실행 등으로
+            # 어긋날 수 있음) — signal_date와 동일 원칙(df.index[-1]이
+            # 실제 확인봉)으로 통일.
+            rec["confirmed_at"] = str(df.index[-1].date())
             rec["confirm_close"] = close
             # v5.179(사용자 지시): strong_confirm(vol_mult>=2.0) 배지는
             # 근거였던 격자탐색이 피벗진입 가정이라 무효 — 계산 자체를 제거
@@ -9987,7 +10012,9 @@ async def _refresh_auto_watch(bundle: dict, market: str, daykey: str):
                 rec["confirm_stop"] = rec["stop"]
         elif days_since >= AUTO_WATCH_CONFIRM_WINDOW_DAYS:
             rec["status"] = "expired"
-            rec["expired_at"] = daykey
+            # v5.184: confirmed_at과 같은 이유로 daykey(스캔 실행일) 대신
+            # 실제 판정 시점 봉의 날짜.
+            rec["expired_at"] = str(df.index[-1].date())
 
     _save_auto_watch(_auto_watch)
 
@@ -10772,6 +10799,13 @@ async def get_calendar():
             # 강한확인 배지(vol_mult>=2.0)는 같은 격자탐색(피벗진입 가정)이
             # 근거였으므로 배지 자체를 제거(계산도 안 함).
             is_entry_candidate = tab == "돌파임박" and market == "KR"
+            # v5.184(사용자 지시 — 확인일 버그): "확인일"은 스캔/캘린더를
+            # 연 세션의 오늘(`today`)이 아니라 확인 조건을 실제로 충족시킨
+            # 그 봉의 날짜(df의 마지막 행)여야 한다 — signal_date가 이미
+            # 쓰는 원칙(df.index[-1])과 통일. 데이터가 비어있는 방어적
+            # 경우만 today로 폴백(사실상 도달 안 함 — confirmed=True면
+            # df가 이미 유효했다는 뜻).
+            confirm_bar_date = str(df.index[-1].date()) if df is not None and len(df) else today
             if is_entry_candidate:
                 target_2r = round(close + 2 * (close - stop_f), 2) if stop_f and close > stop_f else None
                 immediate.append({
@@ -10781,6 +10815,7 @@ async def get_calendar():
                     "entry": close, "stop": stop_f, "target_2r": target_2r,
                     "close": close, "pivot": pivot_f, "atr_pct": atr_pct,
                     "verdict": "entry_candidate", "entry_method": "종가진입",
+                    "confirm_date": confirm_bar_date,
                     "reason": f"{tab} 진입 후보 (종가진입 0.157R z=2.37, 한계) · docs/confirm_entry_lookahead_2026-09-04.md",
                 })
             else:
@@ -10791,7 +10826,7 @@ async def get_calendar():
                 interest.append({
                     "source": "pending_watch", "key": f"pending:{r.get('id')}",
                     "ticker": ticker, "name": r.get("name") or ticker, "market": market,
-                    "tab": tab, "confirmed_at": today,
+                    "tab": tab, "confirmed_at": confirm_bar_date,
                     "close": close, "pivot": pivot_f, "stop": stop_f,
                     "reason": f"{tab} 관심 — 확인됐으나 진입 근거 미유의 · docs/confirm_entry_lookahead_2026-09-04.md",
                 })
@@ -10969,15 +11004,20 @@ async def get_calendar():
                     "rs": rec.get("rs"),
                     "verdict": "entry_candidate", "entry_method": "종가진입",
                     "strong_setup": strong_setup,
+                    "confirm_date": rec.get("confirmed_at"),
                     "reason": "돌파임박 진입 후보 (종가진입 0.157R z=2.37, 한계) · docs/confirm_entry_lookahead_2026-09-04.md",
                 })
             else:
                 # v5.180(사용자 지시 — 버킷 재정의): watch_interest는 "🔎
                 # 관심(확인됨)" 전용 버킷으로 분리 — 진입가/손절/사이즈 없음.
+                # v5.184(사용자 지시 — 확인일 버그): confirmed_at은 이미
+                # `_refresh_auto_watch()`가 확인봉의 실제 날짜(df.index[-1])
+                # 로 기록해둔 값이라 그대로 재사용 — 여기서 `today`(세션
+                # 날짜)로 다시 덮어쓰면 스캔 실행일로 되돌아간다.
                 interest.append({
                     "source": "auto_watch", "key": f"auto_watch:{key}",
                     "ticker": rec["ticker"], "name": rec.get("name") or rec["ticker"],
-                    "market": rec.get("market"), "tab": rec["tab"], "confirmed_at": today,
+                    "market": rec.get("market"), "tab": rec["tab"], "confirmed_at": rec.get("confirmed_at"),
                     "close": entry, "pivot": pivot, "stop": stop,
                     "reason": f"{rec['tab']} 관심 — 확인됐으나 진입 근거 미유의 · docs/confirm_entry_lookahead_2026-09-04.md",
                 })
@@ -11037,7 +11077,10 @@ async def get_calendar():
             print(f"[decision] 정직성 가드: {_item.get('source')}:{_item.get('ticker')} "
                   f"verdict={_item.get('verdict')!r} — 🔴 자격 없음, 🔎 관심으로 강등")
             _item.setdefault("tab", _item.get("mode") or "")
-            _item.setdefault("confirmed_at", today)
+            # v5.184: confirm_date(pending_watch immediate가 쓰는 필드명)가
+            # 있으면 그대로 재사용 — 이 방어 경로에서도 today(세션 날짜)로
+            # 덮어써 확인일 버그를 재도입하지 않는다.
+            _item.setdefault("confirmed_at", _item.get("confirm_date") or today)
             interest.append(_item)
 
     immediate, interest, near = _dedup_today_decision(immediate, interest, near)
