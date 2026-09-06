@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.201</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.202</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -4068,8 +4068,20 @@ function renderTodayDecisionHtml(td) {
 // "🇺🇸 US 상위5" 두 블록으로 나눠 보여주고, 캘린더 상단 시장 필터(전역
 // `market`)에 맞춰 해당 블록만 표시 — renderTodayDecisionHtml의 market
 // 필터와 같은 원칙(index.html의 다른 v5.199 필터 로직 참고).
+// v5.202(사용자 지시): trend(60일 대비 20일 RS 백분위 변화, app.py
+// _build_sector_flow가 ±15 기준으로 판정)를 화살표로 — up=가속(초록),
+// down=둔화(빨강), flat="제자리"(회색), null=판정불가(20일 RS 없음, 표시 생략).
+// 이 앱의 --up/--down은 국내 시세 관례(빨강=상승/파랑=하락)라 "개선/악화"
+// 의미론엔 안 맞음 — 여기선 green/px-down(빨강)으로 명시.
+const _SECTOR_TREND_ARROW = { up: '↑', down: '↓', flat: '→' };
+const _SECTOR_TREND_COLOR = { up: 'var(--green)', down: 'var(--px-down)', flat: 'var(--muted)' };
 function renderSectorFlowHtml(sf) {
   if (!sf) return '';
+  const trendHtml = r => {
+    const arrow = _SECTOR_TREND_ARROW[r.trend];
+    if (!arrow) return '';
+    return ` <span style="color:${_SECTOR_TREND_COLOR[r.trend]}" title="60일 RS ${r.rs_pct} → 20일 RS ${r.rs20_pct != null ? r.rs20_pct : '-'}">${arrow}</span>`;
+  };
   const block = (label, rows, hotSectors) => {
     if (!rows || !rows.length) return '';
     const body = rows.map(r => {
@@ -4081,7 +4093,7 @@ function renderSectorFlowHtml(sf) {
       return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)">
         <div style="font-size:13px"><b>${r.sector}</b>${hot}${ret}</div>
         <div style="text-align:right;font-size:12px;white-space:nowrap">
-          <span class="mono" style="color:var(--rs)">섹터RS ${r.rs_pct}</span>
+          <span class="mono" style="color:var(--rs)">섹터RS ${r.rs_pct}</span>${trendHtml(r)}
           <div style="color:var(--muted)">대장 ${leaders}${hits}</div>
         </div>
       </div>`;
@@ -4094,14 +4106,36 @@ function renderSectorFlowHtml(sf) {
       ${hotLine}
     </div>`;
   };
+  // v5.202 [2]: 🚀 가속 블록 — 20일 RS는 이미 강한데(≥80) 60일 RS는 아직
+  // 안 따라잡은(≤60) 섹터, "60일 RS 45 → 20일 RS 92" 형식으로 변화 자체를
+  // 강조(위 상위5 행은 순위 나열이 목적이라 형식이 다름).
+  const accelBlock = (label, rows) => {
+    if (!rows || !rows.length) return '';
+    const body = rows.map(r => {
+      const leaders = (r.leaders || []).map(l => l.name).join(', ') || '-';
+      return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)">
+        <div style="font-size:13px"><b>${r.sector}</b></div>
+        <div style="text-align:right;font-size:12px;white-space:nowrap">
+          <span class="mono" style="color:var(--green)">60일 RS ${r.rs_pct} → 20일 RS ${r.rs20_pct}</span>
+          <div style="color:var(--muted)">대장 ${leaders}</div>
+        </div>
+      </div>`;
+    }).join('');
+    return `<div style="margin-top:10px">
+      <div style="font-size:12px;color:var(--muted);font-weight:700;margin-bottom:2px">${label}</div>
+      ${body}
+    </div>`;
+  };
   const showKr = market !== 'us';
   const showUs = market !== 'kr';
   const krBlock = showKr ? block('🇰🇷 KR 상위 5', sf.top_rs_kr, sf.new_high_sectors_kr) : '';
   const usBlock = showUs ? block('🇺🇸 US 상위 5', sf.top_rs_us, sf.new_high_sectors_us) : '';
+  const accelKr = showKr ? accelBlock('🚀 가속 — KR', sf.accel_kr) : '';
+  const accelUs = showUs ? accelBlock('🚀 가속 — US', sf.accel_us) : '';
   if (!krBlock && !usBlock) return '';
   return `<div style="margin-top:14px">
     <div class="mf-toolbar"><b>📊 섹터 흐름</b></div>
-    ${krBlock}${usBlock}
+    ${krBlock}${usBlock}${accelKr}${accelUs}
   </div>`;
 }
 

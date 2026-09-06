@@ -5,6 +5,27 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.202 [기능개선] 섹터 흐름 가속 블록(사용자 지시).
+        [1] sector_snapshot.compute()에 rs20_pct(20일 수익률 백분위) 추가
+        — 기존 sector_rs_pct(60일)와 같은 방식(시장 내에서만, to_rs_rank
+        재사용), (섹터,시장) 조합 단위로 별도 계산.
+        [2] 캘린더 "📊 섹터 흐름"에 "🚀 가속" 블록 신규 — 20일 RS는
+        강한데(≥80) 60일 RS는 아직 낮은(≤60) "막 붙기 시작한" 섹터,
+        rs20_pct 내림차순 시장별 최대 5개. "60일 RS 45 → 20일 RS 92"
+        형식 + 대장3(기존 상위5와 같은 leaders 재사용).
+        [3] 기존 상위5 행에 추세 화살표 — rs20_pct−sector_rs_pct(60일)
+        ≥+15면 ↑(초록), ≤−15면 ↓(빨강), 그 사이는 →(회색). 이 앱의
+        --up/--down 변수는 국내 시세 관례(빨강=상승)라 "개선/악화"
+        의미론과 안 맞아 --green/--px-down으로 명시 지정.
+        [4] 검증: 실데이터 재현 테스트(v5.201과 같은 153종목 세트)로
+        확인 — 반도체-장비(KR)가 60일 RS 40·20일 RS 99로 가속 블록에
+        정확히 잡히고 대장3(피에스케이·피에스케이홀딩스·테스)도 정상
+        노출, 데이터센터(US)도 60→85로 가속 블록 진입 확인. 손해보험은
+        이 테스트 스냅샷에서 60일 RS 99·20일 RS 79(다른 KR 섹터들도 60일
+        급등 후 20일 조정 국면)로 ↓(제자리 아님) — 사용자가 실제로 보는
+        라이브 데이터의 날짜/구성 종목과는 다른 테스트 세트라 방향까지
+        똑같이 재현되진 않지만, ±15 임계값 판정 로직 자체(≥+15 up /
+        ≤−15 down / 사이 flat)는 정상 동작 확인.
 v5.201 [버그수정] 섹터 흐름 카드에 KR 섹터 누락(사용자 지시).
         [조사] sector_snapshot.json 직접 확인은 못 했지만(서버 파일이라
         로컬에서 못 봄), 실데이터 재현 테스트(손해보험12·은행10·기타금융5·
@@ -5229,7 +5250,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.201"
+VERSION = "v5.202"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -11637,7 +11658,13 @@ def _build_sector_flow(today: str) -> dict | None:
     에서만의 백분위), 여기서는 그냥 market 필드로 나눠 KR/US 각각 상위5를
     뽑기만 하면 된다). 그날 스캔이 아직 한 번도 안 돌았으면(엔트리 없음)
     None → 프론트가 카드 자체를 생략(폴백 없이 판정불가로 두는 기존
-    컨벤션, index.html:1296 참고)."""
+    컨벤션, index.html:1296 참고).
+
+    v5.202(사용자 지시): rs20_pct(20일 수익률 백분위, 시장 내)를 추가로
+    노출하고 두 가지를 더 계산한다 — (a) 기존 상위5 각 행에 trend(60일 대비
+    20일 백분위 변화, ±15 기준 up/flat/down) (b) accel_kr/accel_us: 20일
+    RS는 강한데(≥80) 60일 RS는 아직 낮은(≤60) "막 붙기 시작한" 섹터,
+    시장별 최대 5개."""
     day = sector_snapshot.load_all().get(today)
     if not day:
         return None
@@ -11649,9 +11676,19 @@ def _build_sector_flow(today: str) -> dict | None:
         mkt = rec.get("market")
         if mkt not in rows_by_mkt:
             continue
+        rs_pct, rs20_pct = rec.get("sector_rs_pct"), rec.get("rs20_pct")
+        # v5.202 [3]: 60일 대비 20일 백분위 변화로 방향 표시 — ±15 미만은
+        # "제자리"(→), 그 이상 벌어지면 가속(↑)/둔화(↓). rs20_pct가 없으면
+        # (60봉은 있는데 21봉 미만인 극히 짧은 히스토리 등) 판정 불가(None).
+        trend = None
+        if rs_pct is not None and rs20_pct is not None:
+            delta = rs20_pct - rs_pct
+            trend = "up" if delta >= 15 else ("down" if delta <= -15 else "flat")
         rows_by_mkt[mkt].append({
             "sector": rec.get("sector"),
-            "rs_pct": rec.get("sector_rs_pct"),
+            "rs_pct": rs_pct,
+            "rs20_pct": rs20_pct,
+            "trend": trend,
             "ret20": rec.get("ret20"),
             "ret60": rec.get("ret60"),
             "n": rec.get("n"),
@@ -11663,9 +11700,20 @@ def _build_sector_flow(today: str) -> dict | None:
         return None
     for rows in rows_by_mkt.values():
         rows.sort(key=lambda r: r["rs_pct"], reverse=True)
+    # v5.202 [2]: 🚀 가속 블록 — 20일 RS는 강한데(≥80) 60일 RS는 아직
+    # 안 따라잡은(≤60) 섹터, 즉 "최근에 막 붙기 시작한" 섹터. rs20_pct
+    # 내림차순으로 시장별 최대 5개.
+    accel_by_mkt = {}
+    for mkt, rows in rows_by_mkt.items():
+        accel = [r for r in rows if r["rs20_pct"] is not None and r["rs20_pct"] >= 80
+                 and r["rs_pct"] is not None and r["rs_pct"] <= 60]
+        accel.sort(key=lambda r: r["rs20_pct"], reverse=True)
+        accel_by_mkt[mkt] = accel[:5]
     return {
         "top_rs_kr": rows_by_mkt["KR"][:5],
         "top_rs_us": rows_by_mkt["US"][:5],
+        "accel_kr": accel_by_mkt["KR"],
+        "accel_us": accel_by_mkt["US"],
         "new_high_sectors_kr": [r["sector"] for r in rows_by_mkt["KR"] if r["new_high_52w"]],
         "new_high_sectors_us": [r["sector"] for r in rows_by_mkt["US"] if r["new_high_52w"]],
         "asof": today,

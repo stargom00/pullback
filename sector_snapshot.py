@@ -1,5 +1,6 @@
 """섹터 합성지표 (v5.195, 사용자 지시 — 섹터 층 1단계 [3];
-v5.201, 사용자 지시 — KR/US 시장별 분리).
+v5.201, 사용자 지시 — KR/US 시장별 분리;
+v5.202, 사용자 지시 — 20일 RS 백분위(rs20_pct) 추가, 가속 판정용).
 
 스캔이 이미 메모리에 갖고 있는 종목별 일봉(OHLCV)만으로 섹터 단위 지표를
 계산한다 — 추가 네트워크 fetch 0건. 섹터 소속은 호출부(app.py)가 넘겨주는
@@ -87,6 +88,7 @@ def compute(data: dict, rs_ranks: dict, sector_of) -> dict:
     by_sector: dict[str, dict] = {}
     rank_maps: dict[str, dict] = {}
     ret60_by_key: dict[str, dict[str, float]] = {"KR": {}, "US": {}}
+    ret20_by_key: dict[str, dict[str, float]] = {"KR": {}, "US": {}}   # v5.202 [1]: 가속 판정용
 
     for key, tickers in groups.items():
         if len(tickers) < MIN_SECTOR_SIZE:
@@ -118,6 +120,7 @@ def compute(data: dict, rs_ranks: dict, sector_of) -> dict:
         if idx is not None:
             if len(idx) >= 21:
                 entry["ret20"] = round(float(idx.iloc[-1] / idx.iloc[-21] - 1) * 100, 2)
+                ret20_by_key[mkt][key] = entry["ret20"]
             entry["ret60"] = round(float(idx.iloc[-1] / idx.iloc[-61] - 1) * 100, 2)
             lookback = idx.tail(min(len(idx), 252))
             entry["new_high_52w"] = bool(idx.iloc[-1] >= lookback.max())
@@ -132,8 +135,14 @@ def compute(data: dict, rs_ranks: dict, sector_of) -> dict:
         pct_map = to_rs_rank(ret60_by_key[mkt]) if ret60_by_key[mkt] else {}
         for key, pct in pct_map.items():
             by_sector[key]["sector_rs_pct"] = pct
+        # v5.202 [1]: 20일 수익률 백분위 — sector_rs_pct(60일)와 같은 방식,
+        # 같은 시장 안에서만(가속 판정용, app.py _build_sector_flow 참고).
+        pct20_map = to_rs_rank(ret20_by_key[mkt]) if ret20_by_key[mkt] else {}
+        for key, pct in pct20_map.items():
+            by_sector[key]["rs20_pct"] = pct
     for entry in by_sector.values():
         entry.setdefault("sector_rs_pct", None)
+        entry.setdefault("rs20_pct", None)
 
     by_ticker = {}
     for key, rmap in rank_maps.items():
@@ -175,7 +184,7 @@ def save_market_stats(daykey: str, by_sector: dict) -> None:
         rec.update({
             "sector": entry["sector"], "market": entry["market"],
             "n": entry["n"], "ret20": entry.get("ret20"), "ret60": entry.get("ret60"),
-            "sector_rs_pct": entry.get("sector_rs_pct"),
+            "sector_rs_pct": entry.get("sector_rs_pct"), "rs20_pct": entry.get("rs20_pct"),
             "new_high_52w": entry.get("new_high_52w"),
             "pct_20d_high": entry.get("pct_20d_high"),
             "pct_above_ma50": entry.get("pct_above_ma50"),
