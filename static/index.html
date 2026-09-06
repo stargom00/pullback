@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.198</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.199</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3799,6 +3799,22 @@ function renderTodayDecisionHtml(td) {
   if (!td) return '';
   _tdBadgeStats = { green: 0, orange: 0, gray: 0, none: 0 };
   const mktOf = item => (item.market || '').toUpperCase() === 'KR' || /\.(KS|KQ)$/.test(item.ticker || '') ? 'KR' : 'US';
+  // v5.199(사용자 지시 — 버그수정): 캘린더 상단 시장 필터(전체/한국/미국,
+  // 전역 `market`)가 오늘의 결정 섹션엔 전혀 안 먹혀서 "한국"으로 걸러도
+  // 🟡근접 등에 US 종목이 그대로 보이던 문제. renderTodayDecisionHtml
+  // 자체가 market을 한 번도 안 읽고 있었음(5탭/섹터 탭은 서버가 market
+  // 파라미터로 이미 걸러 보내주지만, 캘린더는 /api/calendar 하나가
+  // KR+US를 합쳐서 반환 — 필터링을 여기서 클라이언트가 해야 함). immediate/
+  // interest/near 전부에 적용(근접만이 아니라 전체가 같은 문제였음).
+  if (market !== 'all') {
+    const keep = item => mktOf(item).toLowerCase() === market;
+    td = {
+      ...td,
+      immediate: (td.immediate || []).filter(keep),
+      interest: (td.interest || []).filter(keep),
+      near: (td.near || []).filter(keep),
+    };
+  }
   const actions = (item, showWatch) => {
     _todayDecisionMap[item.key] = item;
     const btnStyle = 'width:auto;padding:4px 16px;font-size:11px';
@@ -4353,7 +4369,13 @@ document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('clic
   userMarketOverride = true;
   localStorage.setItem(MARKET_FILTER_KEY, t.dataset.market);
   setMarket(t.dataset.market);
-  if (mode === 'moneyflow') { loadMoneyflowDate(null); } else { renderCards(); }  // 재스캔 없이 화면만 다시 그림 (lastHits는 전체 보유)
+  // v5.199(사용자 지시 — 버그수정): 캘린더 탭은 #content가 아니라
+  // #calendarDoc을 쓰므로 renderCards()를 불러도 화면에 아무 변화가
+  // 없었다(숨겨진 #content만 갱신) — renderCalendar()를 직접 다시 불러야
+  // 오늘의 결정 등 캘린더 자체 섹션에 시장 필터가 반영된다.
+  if (mode === 'moneyflow') { loadMoneyflowDate(null); }
+  else if (mode === 'calendar') { if (_calendarData) renderCalendar(_calendarData); }
+  else { renderCards(); }  // 재스캔 없이 화면만 다시 그림 (lastHits는 전체 보유)
 }));
 // v5.92: "⋯ 실험" 접기 그룹 — 패턴/Stage2/IBD9/강한피벗/실적우수/급등 6개.
 // 상태 저장 안 함(새로고침마다 항상 접힘부터 시작, 사용자 지시).

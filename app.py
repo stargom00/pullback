@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.199 [버그수정] 캘린더 시장 필터(전체/한국/미국)가 "오늘의 결정" 섹션에
+        적용 안 되던 문제(사용자 리포트 — 🟡근접에 US 종목 노출).
+        [원인] renderTodayDecisionHtml()이 전역 `market` 변수를 아예 안
+        읽음 — 5탭/섹터 탭은 서버가 market 파라미터로 이미 걸러 보내주지만
+        (`/api/scan?market=kr` 등), 캘린더는 `/api/calendar` 하나가 KR+US를
+        합쳐서 반환해서 필터링을 클라이언트가 해야 하는데 그 로직 자체가
+        없었음. 게다가 시장 필터 버튼 클릭 핸들러가 캘린더 탭에서도
+        renderCards()만 불렀는데 그건 숨겨진 #content를 갱신할 뿐이라
+        (캘린더는 #calendarDoc 사용) 어차피 화면에 반영도 안 됐음.
+        [수정] immediate/interest/near(근접만이 아니라 전체가 같은 문제
+        였음) 전부에 market 필터 적용. 필터 버튼 클릭 시 mode==='calendar'
+        면 renderCalendar()를 다시 호출하도록 수정.
 v5.198 [버그수정] "서버 배지 v5.194" 재확인(사용자 지시) — 실제 원인은
         배포가 아니라 static/index.html의 #verBadge 정적 텍스트가
         v5.194로 하드코딩된 채 안 바뀌고 있었던 것. 이 값은 페이지 첫
@@ -5149,7 +5161,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.198"
+VERSION = "v5.199"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
