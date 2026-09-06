@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.209</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.210</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -1146,6 +1146,28 @@ const ENTRY_SIGNAL_STRUCTURAL_NOTE = {
   breakout: '거래량은 게이트(1.5배 이상)에서 이미 확인됐고(참고·중복), RS는 역방향으로 확인돼 판정에서 제외(참고·역방향) — 남은 건 AVWAP뿐입니다.',
 };
 
+// v5.210(사용자 지시 — 피벗 밀착 금지 표시): docs/kr_us_strategy_map.md
+// "⛔ 피벗 위 0~0.5ATR 즉시진입 금지"(2026-09-07 측정, KR/US×돌파/박스돌파
+// 4/4 유의, z −2.75~−5.94) 근거. close가 pivot을 이미 넘었고(0 이상) 그
+// 거리가 0.5ATR 미만이면 ATR배수 거리를, 아니면 null을 반환 — 새 지표
+// 계산 없이 기존 close/pivot/atr_pct 필드만 재사용하는 순수 표시용 함수.
+function pivotHuggingDistAtr(close, pivot, atrPct) {
+  if (close == null || pivot == null || atrPct == null || atrPct <= 0) return null;
+  if (close <= pivot) return null;
+  const atrPrice = close * atrPct / 100;
+  if (atrPrice <= 0) return null;
+  const dist = (close - pivot) / atrPrice;
+  return (dist >= 0 && dist < 0.5) ? dist : null;
+}
+// v5.210(사용자 지시 — [2]): 위 판정을 배지 HTML로 — 관심·근접·이미돌파
+// 카드와 시나리오①에서 공용으로 쓴다(문구 통일).
+function pivotHugBadgeHtml(close, pivot, atrPct) {
+  const d = pivotHuggingDistAtr(close, pivot, atrPct);
+  return d != null
+    ? `<div style="font-size:11px;color:#FF5A6E;font-weight:700;margin-top:2px">⛔ 피벗 밀착 (${d.toFixed(1)}ATR) — 즉시진입 금지 구간</div>`
+    : '';
+}
+
 function entrySignal(s) {
   const activeItems = ENTRY_SIGNAL_ITEMS[s.mode] || ENTRY_SIGNAL_ALL;
   const isActive = (key) => activeItems.includes(key);
@@ -1238,6 +1260,17 @@ function entrySignal(s) {
       checks.push(['danger', `변동성 ATR ${s.atr_pct}% — 손절 대비 큼(노이즈 손절 위험)`, 'atr_tight', true, null]); danger++;
     } else {
       checks.push(['warn', `고변동 ATR ${s.atr_pct}% — 비중 축소 권장`, 'atr_high', true, null]); warn++;
+    }
+  }
+  // 7) 피벗 밀착(0~0.5ATR 구간, 돌파·박스돌파 한정) — v5.210(사용자 지시):
+  //    docs/kr_us_strategy_map.md "⛔ 피벗 위 0~0.5ATR 즉시진입 금지"
+  //    (2026-09-07 측정) 근거. 게이트(analyze_breakout/analyze_boxbreak)는
+  //    무변경 — 신호등 표시 사유만 추가(위 atr_pct_high 체크와 동일 패턴으로
+  //    ENTRY_SIGNAL_ITEMS 설정과 무관하게 항상 판정에 반영).
+  if (s.mode === 'breakout' || s.mode === 'boxbreak') {
+    const hugDist = pivotHuggingDistAtr(s.close, s.pivot, s.atr_pct);
+    if (hugDist != null) {
+      checks.push(['danger', `⛔ 피벗 밀착 (${hugDist.toFixed(1)}ATR) — 즉시진입 금지 구간`, 'pivot_hug', true, null]); danger++;
     }
   }
   let level, label;
@@ -1815,7 +1848,7 @@ function reignitionPullbackSectionHtml() {
     // 확정 체결(confirmed)은 이미 진입 판정이 끝난 상태라 "미리 정해두는"
     // 재량 시나리오의 대상이 아님 — watching(exec)에만 붙인다.
     const scenarioHtml = (!confirmed && (it.exec || {}).scenario)
-      ? renderScenarioHtml(it.exec.scenario, 'KR', 'sc_reig_' + it.ticker)
+      ? renderScenarioHtml(it.exec.scenario, 'KR', 'sc_reig_' + it.ticker, it.exec.atr_pct)
       : '';
     return `<div class="jongga-forward-sub" style="padding:3px 0;${dimStyle}">
       <div>${st.icon} <b>${nameLink}</b> <span style="opacity:.7">(${it.theme})</span> · ${priceTxt} · ${stopTxt}${checklistIcon}${failTag}</div>
@@ -3882,7 +3915,7 @@ function toggleScenarioBox(id) {
   const caret = document.getElementById(id + '_caret');
   if (caret) caret.textContent = show ? '▾' : '▸';
 }
-function renderScenarioHtml(sc, market, domId) {
+function renderScenarioHtml(sc, market, domId, atrPct) {
   if (!sc) return '';
   const fp = v => v != null ? fmtPrice(v, market) : '-';
   const lv = sc.levels, s1 = sc.scenario1, s2 = sc.scenario2, s3 = sc.scenario3;
@@ -3903,7 +3936,14 @@ function renderScenarioHtml(sc, market, domId) {
   // "진입 X · 손절 Y (-Z%)" 라벨 명시, 화살표 제거(조건→진입도 포함 —
   // 가격 두 개를 화살표로 이으면 "가격이 움직였다"로 오해하기 쉬움).
   const riskParen = pct => pct != null ? ` (-${pct}%)` : '';
-  const row1 = `<div style="${hl(1)}">${s1.label} (${s1.condition}): 진입 ${fp(s1.entry)} · 손절 ${fp(s1.stop)}${riskParen(s1.risk_pct)}${star(1)}</div>`;
+  // v5.210(사용자 지시 — [2]): ①은 "저항 돌파 시 진입"인데, 원래 pivot을
+  // 이미 넘어서(resistance_broken_pivot) 다음 저항으로 넘어간 경우라면
+  // 지금 자리가 바로 그 "돌파 직후 0~0.5ATR" 구간일 수 있다 — 이 경우만
+  // 판정(원래 pivot 기준, 아직 안 넘었으면 close<pivot이라 항상 null).
+  const hugBadge = lv.resistance_broken_pivot != null
+    ? pivotHugBadgeHtml(lv.close, lv.resistance_broken_pivot, atrPct)
+    : '';
+  const row1 = `<div style="${hl(1)}">${s1.label} (${s1.condition}): 진입 ${fp(s1.entry)} · 손절 ${fp(s1.stop)}${riskParen(s1.risk_pct)}${star(1)}</div>${hugBadge}`;
   const row2 = s2
     ? `<div style="${hl(2)}">${s2.label}: 진입 ${fp(s2.entry)} · 손절 ${fp(s2.stop)}${riskParen(s2.risk_pct)} · R ${s2.r_multiple}${star(2)}</div>`
     : `<div style="color:var(--muted)">② 계산 불가 — 지지/무효 없음</div>`;
@@ -4041,7 +4081,7 @@ function renderTodayDecisionHtml(td) {
       <div style="font-size:15px;font-weight:700;margin-top:4px">진입 ${fmtPrice(item.entry, mkt)} · 손절 ${stopStr}</div>
       ${pivotGapLine}
       <div style="font-size:11px;color:var(--muted);margin-top:4px;${descClamp}">${descParts.join(' · ')}</div>
-      ${item.scenario ? renderScenarioHtml(item.scenario, mkt, 'sc_td_' + item.key) : ''}
+      ${item.scenario ? renderScenarioHtml(item.scenario, mkt, 'sc_td_' + item.key, item.atr_pct) : ''}
       ${actions(item, false)}
     `);
   }).join('');
@@ -4077,11 +4117,16 @@ function renderTodayDecisionHtml(td) {
     // v5.147(사용자 지시): 캐시가 아직 오늘 것으로 안 갱신됐으면(어제 장마감
     // 스냅샷이 그대로 노출 중) 오늘 장중 데이터로 오해하지 않도록 경고.
     if (item.snapshot_stale && item.snapshot_date) descParts.push(`⚠️ ${item.snapshot_date.slice(5)} 스냅샷(장중 갱신 전)`);
+    // v5.210(사용자 지시 — [2]): 🟡근접(피벗 아래)은 current_price<=pivot이라
+    // 항상 null(자동 무발동) — 🟠이미돌파(피벗 위로 넘어간 항목)만 실제로
+    // 뜬다. 별도 분기 없이 공용 헬퍼로 통일.
+    const hugBadge = pivotHugBadgeHtml(item.current_price, item.pivot, item.atr_pct);
     return cardShell('var(--line)', 'var(--card)', `
       <div><b>${nameLink(item)}</b> <span class="mkt">${mkt}</span></div>
       <div style="font-size:15px;font-weight:700;margin-top:4px">${fmtPrice(item.current_price, mkt)} → ${fmtPrice(item.pivot, mkt)} <span style="font-size:12px;font-weight:400;color:var(--muted)">(${distStr})</span></div>
       <div style="font-size:11px;color:var(--muted);margin-top:4px;${descClamp}">${descParts.join(' · ')}</div>
-      ${item.scenario ? renderScenarioHtml(item.scenario, mkt, 'sc_td_' + item.key) : ''}
+      ${hugBadge}
+      ${item.scenario ? renderScenarioHtml(item.scenario, mkt, 'sc_td_' + item.key, item.atr_pct) : ''}
       ${actions(item, item.source !== 'reignition')}
     `);
   };
@@ -4105,12 +4150,15 @@ function renderTodayDecisionHtml(td) {
     const checklistIcon = item.source === 'reignition'
       ? ` <span style="cursor:help;opacity:.8;font-size:11px;font-weight:400" title="${reignitionChecklistTooltip(item)}">ⓘ 재량 체크리스트</span>`
       : '';
+    // v5.210(사용자 지시 — [2]): 🔎관심은 확인 후 종가(close)가 기준가.
+    const hugBadge = pivotHugBadgeHtml(item.close, item.pivot, item.atr_pct);
     return cardShell('var(--line)', 'var(--card)', `
       <div><b>${nameLink(item)}</b> <span class="mkt">${mkt}</span></div>
       <div style="font-size:15px;font-weight:700;margin-top:4px;color:var(--muted)">${item.tab || ''} · 확인일 ${item.confirmed_at || '-'} · 종가 ${fmtPrice(item.close, mkt)}</div>
       <div style="font-size:11px;color:var(--muted);margin-top:2px">피벗(기준) ${fmtPrice(item.pivot, mkt)} · 손절(기준) ${fmtPrice(item.stop, mkt)}</div>
       <div style="font-size:11px;color:#ffb27a;font-weight:700;margin-top:2px">${labelText}${checklistIcon}</div>
-      ${item.scenario ? renderScenarioHtml(item.scenario, mkt, 'sc_td_' + item.key) : ''}
+      ${hugBadge}
+      ${item.scenario ? renderScenarioHtml(item.scenario, mkt, 'sc_td_' + item.key, item.atr_pct) : ''}
       ${actions(item, false)}
     `);
   }).join('');
@@ -6747,7 +6795,7 @@ function viewRow(r) {
     // 추가는 null). colspan은 위 <td> 8개(날짜·상태·종목·진입·손절·결과·
     // 메모·액션)와 맞춤.
     (st === 'pending' && r.scenario)
-      ? `<tr><td colspan="8" style="padding:0 8px 6px 8px;border-top:none">${renderScenarioHtml(r.scenario, r.market, 'sc_jr_' + r.id)}</td></tr>`
+      ? `<tr><td colspan="8" style="padding:0 8px 6px 8px;border-top:none">${renderScenarioHtml(r.scenario, r.market, 'sc_jr_' + r.id, r.atr_pct)}</td></tr>`
       : ''
   }`;
 }

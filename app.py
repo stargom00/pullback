@@ -5,6 +5,55 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.210 [UI 개선] 피벗 밀착 금지 표시(사용자 지시, 표시 전용 —
+        analyze_breakout()/analyze_boxbreak()/게이트 로직 무변경, 백엔드
+        신규 필드 없음 — close/pivot/atr_pct 기존 필드만 재사용).
+        [1] docs/kr_us_strategy_map.md에 새 절 추가: "⛔ 피벗 위 0~0.5ATR
+        즉시진입 금지 — KR/US×돌파/박스돌파"(2026-09-07 측정,
+        scripts/measurements/2026-09-07_kr_us_breakout_boxbreak_post_pivot_consolidation_ev.py
+        근거) — ATR거리 0~0.5구간이 4/4(KR돌파 z=-5.94/KR박스돌파
+        z=-4.66/US돌파 z=-3.71/US박스돌파 z=-2.75) 전부 유의하게 나쁨
+        (EV -0.22~-0.37R), 0.5ATR 이상 구간은 대부분 비유의(US돌파
+        1.5ATR초과만 예외적으로 +0.342R 유의). "안착 대기"(돌파 후 며칠
+        기다리면 나아지는지) 가설은 기각 — 대기일수와 EV 사이 유의한
+        관계 없음(같은 스크립트 "질문1_안착일수EV").
+        [2] 오늘의 결정 🔎관심·🟡근접·🟠이미돌파 카드 + 재량 시나리오①에
+        "⛔ 피벗 밀착 (N.NATR) — 즉시진입 금지 구간" 배지. 신규 공용 함수
+        pivotHuggingDistAtr(close,pivot,atrPct)/pivotHugBadgeHtml(...)
+        (static/index.html) — close>pivot이고 그 거리가 0~0.5ATR
+        미만이면 배지, 아니면 무표시. 🟡근접(피벗 아직 아래, dist_pct>0)
+        항목은 정의상 close<=pivot이라 이 조건이 항상 false — 실제로는
+        🟠이미돌파(피벗 넘은 뒤 확인 대기)·🔎관심(확인 후 종가 기준)에서만
+        발동. 시나리오①("저항 돌파 시 진입")은 원래 pivot을 이미 넘어
+        다음 저항으로 넘어간 경우(resistance_broken_pivot)에 한해 원래
+        pivot 기준 거리로 판정 — renderScenarioHtml에 atrPct 인자 추가,
+        5개 호출부(재점화 감시/오늘의 결정 3곳/내 일지 대기행) 전부 각
+        소스의 atr_pct 필드를 전달하도록 갱신(이미 app.py가 각 소스에
+        atr_pct를 붙여두고 있어 백엔드 변경 없음 — 필드가 없는 호출부는
+        배지가 조용히 안 뜰 뿐, 에러 없음).
+        [3] 5탭 돌파·박스돌파 카드 신호등(entrySignal, static/index.html):
+        s.mode가 breakout/boxbreak이고 같은 0~0.5ATR 조건이면 체크리스트에
+        "🔴 ⛔ 피벗 밀착(N.NATR) — 즉시진입 금지 구간" active=true danger
+        항목 추가(기존 atr_pct_high 체크와 동일 패턴 — ENTRY_SIGNAL_ITEMS
+        설정과 무관하게 항상 판정에 반영). "판정 로직은 그대로, 표시
+        사유만"의 의미: analyze_breakout()/analyze_boxbreak() 게이트
+        자체는 무변경이고, entrySignal()은 원래도 게이트가 아니라 카드
+        신호등(정렬 참고용) 표시 계층이라 여기 추가는 판정 로직 변경이
+        아님(entrySignal는 analyze() 결과 dict를 그대로 소비만 함).
+        [4] "안착 대기"(며칠 기다렸다 진입) UI는 만들지 않음(가설 기각,
+        지시대로 구현 생략).
+        검증: 함수만 추출해 Node로 직접 테스트 — pivotHuggingDistAtr
+        (close 10050/pivot 10000/atr_pct 2% → 0.5ATR=100.5원, 실제거리
+        50원 → 0.25ATR로 배지 발동 확인, close 10250 → 1.22ATR로
+        미발동 확인). entrySignal({mode:'breakout', close:10050,
+        pivot:10000, atr_pct:2, ...}) → checks에 pivot_hug danger 포함,
+        level='danger'/label='🔴 진입 자제' 확인. mode='pullback'(같은
+        가격 조건)은 발동 안 함(5탭 한정 확인). renderTodayDecisionHtml을
+        mock td로 직접 호출 — 🟠이미돌파(current_price 10040>pivot
+        10000) 배지 O, 🟡근접(current_price 9800<pivot 10000) 배지 X,
+        🔎관심(close 10040>pivot 10000) 배지 O 전부 확인. renderScenarioHtml
+        (resistance_broken_pivot=10000, atrPct=2 전달) → 시나리오①
+        아래에 배지 렌더 확인.
 v5.209 [UI 개선] 섹터 흐름 카드 압축(사용자 지시, static/index.html만
         변경 — 백엔드 필드는 이미 v5.201~v5.204에서 다 있어서 무변경).
         섹터당 2줄짜리 카드형 목록 → 한 섹터 = 한 줄 테이블(섹터|20일|
@@ -5417,7 +5466,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.209"
+VERSION = "v5.210"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
