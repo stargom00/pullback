@@ -5,6 +5,36 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.197 [긴급 수정] v5.195/v5.196 배포 후 서버가 v5.194 그대로였던 문제
+        조사(사용자 지시, 커밋명 us-industry-cache-boot-fix).
+        [조사] (1) git log origin/main — 커밋 f6cc7b3까지 push 정상 확인
+        (배포 파이프라인/커밋 문제 아님). (2) 로컬 `python -c "import app"` —
+        신규 모듈(sector_snapshot/scenario/us_industry_cache) import 에러
+        없음. (3) `uvicorn app:app` 로컬 기동 — 정상 기동하지만, 부팅 후
+        스케줄러 첫 틱(20초 후)에서 `[us_industry_cache] 30일 경과 — 월간
+        재빌드 백그라운드 시작` 로그와 함께 yfinance 2000+회 순차 호출
+        서브프로세스가 매번 자동으로 뜨는 것을 확인 — `is_stale()`이
+        "파일 없음"과 "30일 경과" 둘 다 True를 반환하는데, v5.195 구현이
+        이 둘을 구분 안 하고 둘 다 자동 트리거해버림(원 설계는 "최초 1회는
+        사람이 수동 nohup, 이후 월 1회만 자동"이었는데 최초 상태도 자동
+        트리거되게 잘못 구현). (4) Railway CLI 미설치 — 원격 로그 직접
+        확인은 못 함.
+        [원인 추정] 확정은 못 했지만(Railway 로그 미확인) 가장 유력한
+        설명: Railway는 처음 배포라 us_industry_cache.json이 아예 없는
+        상태 → 배포 직후(부팅 20초+스케줄러 틱) 무거운 백그라운드
+        서브프로세스가 곧바로 떠서 헬스체크 안정화 구간에 리소스 경합을
+        일으켜 새 배포가 정상 기동 판정을 못 받고 이전(v5.194) 컨테이너가
+        계속 서빙됐을 가능성.
+        [수정] `_ensure_us_industry_cache_fresh()`에 "파일이 아예 없으면
+        자동 트리거 안 함" 가드 추가 — 최초 빌드는 원 설계대로 사람이
+        `build_us_industry_cache.py`를 수동 nohup으로 1회 실행해야 하고,
+        스케줄러는 그 파일이 일단 생긴 뒤에만(30일 경과 시) 자동 재빌드.
+        수정 후 로컬 재기동 확인 — 캐시 파일 없는 상태에서 서브프로세스
+        자동 트리거 로그가 더 이상 안 뜸.
+        [남은 불확실성] 이 수정으로도 배포가 여전히 v5.194에 머물면
+        Railway 쪽(자동배포 설정/빌드 실패/헬스체크 설정) 문제일 수 있음 —
+        Railway CLI(`npm i -g @railway/cli` 또는 `brew install railway`)로
+        `railway logs --deployment`를 직접 확인 필요.
 v5.196 [기능개선] 시나리오 카드(사용자 지시, 커밋명 scenario-card) —
         표시 전용·재량 훈련용, 게이트·판정 로직 무변경, 새 지표 없음
         (이미 계산되는 값만 조합). scenario.py 신규.
@@ -5099,7 +5129,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.196"
+VERSION = "v5.197"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7743,12 +7773,26 @@ def _reload_us_industry_cache_if_updated() -> None:
 
 
 async def _ensure_us_industry_cache_fresh() -> None:
-    """월 1회(30일 경과) US 업종 캐시 자동 재빌드 — build_us_industry_cache.py를
+    """월 1회(30일 경과) US 업종 캐시 자동 "재"빌드 — build_us_industry_cache.py를
     별도 프로세스로 nohup 방식(start_new_session=True) 띄운다. yfinance
     2000+회 순회(스로틀 포함 수십 분)라 이벤트루프/스레드풀 안에서 직접
     돌리지 않음. 빌드 중엔 메모리에 있는 기존 캐시(또는 아예 없으면
-    us_sectors_auto 폴백, _sector_of 참고)를 그대로 쓴다."""
+    us_sectors_auto 폴백, _sector_of 참고)를 그대로 쓴다.
+
+    v5.197(긴급 수정): 최초 빌드(파일이 아예 없는 상태)는 자동 트리거하지
+    않는다 — v5.195 원 설계(사용자 지시 "1회 빌드 → ... 백그라운드 nohup.
+    월 1회 갱신 스케줄"에서 "1회 빌드"는 수동, 스케줄은 그 이후 "갱신"만)를
+    잘못 구현해 파일이 없을 때도 is_stale()=True로 잡혀 배포 직후 매번
+    (스케줄러 첫 틱, 부팅 20초 후) 무거운 서브프로세스(yfinance 2000+회
+    순차 호출, 수십 분)가 자동으로 뜨고 있었다 — Railway 배포 직후 헬스체크
+    타이밍에 리소스 경합을 일으켜 새 배포가 정상 기동을 못 하고 이전
+    버전이 계속 서빙되는 원인일 가능성이 높다(v5.195/v5.196 배포 후 서버가
+    v5.194 그대로였던 증상). 최초 빌드는 build_us_industry_cache.py를
+    사람이 직접 nohup으로 1회 실행 — 파일이 일단 생기면 그다음부턴 이
+    함수가 30일마다 자동 재빌드한다."""
     _reload_us_industry_cache_if_updated()
+    if not os.path.exists(us_industry_cache.cache_path()):
+        return  # 최초 빌드는 자동 트리거 안 함 — 수동 nohup 필요(위 docstring)
     if not us_industry_cache.is_stale():
         return
     if us_industry_cache.is_locked():
