@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.208</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.209</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -4193,76 +4193,100 @@ const _SECTOR_TREND_COLOR = { up: 'var(--green)', down: 'var(--px-down)', flat: 
 // 추가돼(app.py _refine_sector_leaders) RS만으론 못 채운 자리는
 // qualifies=false로 표시된다 — 그 대장은 회색으로("바닥 반등주"라 진짜
 // 대장은 아니라는 뜻, 조용히 숨기지 않고 이유를 title에 남김).
-function _sectorLeaderLinksHtml(leaders) {
-  if (!leaders || !leaders.length) return '-';
+// v5.209(사용자 지시 — 카드 압축): 대장 표시를 테이블 폭에 맞게 압축 —
+// KR은 종목명 6자로 자르고, US는 이름 대신 티커(원래 짧음) 그대로.
+function _sectorLeaderCompactHtml(leaders, marketCode) {
+  if (!leaders || !leaders.length) return '<span style="color:var(--muted)">-</span>';
   return leaders.map(l => {
+    const label = marketCode === 'US' ? (l.ticker || '') : (l.name || l.ticker || '').slice(0, 6);
     const gray = l.qualifies === false;
     const title = gray ? '200일선 아래이거나 최근 4분기 적자 — 진짜 대장 아님, 참고용' : '트레이딩뷰 차트 열기';
     const style = gray ? 'color:var(--muted);opacity:.7' : '';
-    return `<a class="name-link" href="${tvUrl(l.ticker)}" target="_blank" rel="noopener" title="${title}" style="${style}">${l.name}${gray ? ' ⚠️' : ''}</a>`;
-  }).join(', ');
+    return `<a class="name-link" href="${tvUrl(l.ticker)}" target="_blank" rel="noopener" title="${title}" style="${style}">${label}${gray ? '⚠️' : ''}</a>`;
+  }).join(' · ');
+}
+// v5.209: 한 섹터 = 한 줄 테이블(섹터/20일/60일/RS↕/대장) — 예전 카드형
+// (섹터당 2줄, 5탭히트까지 표시)보다 훨씬 조밀하다. accel=true면 RS 열이
+// "34→96"(60일RS→20일RS) 형식으로 바뀌고 나머지 열은 동일.
+function _sectorTableRowHtml(r, marketCode, accel) {
+  const secFull = r.sector || '';
+  const secLabel = secFull.length > 12 ? secFull.slice(0, 12) + '…' : secFull;
+  const fmtPct = v => v != null ? `${v >= 0 ? '+' : ''}${v}%` : '-';
+  let rsCell;
+  if (accel) {
+    rsCell = `${r.rs_pct}→${r.rs20_pct}`;
+  } else {
+    const arrow = _SECTOR_TREND_ARROW[r.trend] || '';
+    const color = _SECTOR_TREND_COLOR[r.trend] || 'var(--muted)';
+    rsCell = `<span style="color:var(--rs)">${r.rs_pct}</span>${arrow ? ` <span style="color:${color}">${arrow}</span>` : ''}`;
+  }
+  const hot = r.new_high_52w ? ' 🔥' : '';
+  return `<tr>
+    <td style="max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:2px 4px 2px 0" title="${secFull}">${secLabel}${hot}</td>
+    <td style="text-align:right;white-space:nowrap;padding:2px 4px">${fmtPct(r.ret20)}</td>
+    <td style="text-align:right;white-space:nowrap;padding:2px 4px">${fmtPct(r.ret60)}</td>
+    <td style="text-align:right;white-space:nowrap;padding:2px 4px">${rsCell}</td>
+    <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:2px 0 2px 4px">${_sectorLeaderCompactHtml(r.leaders, marketCode)}</td>
+  </tr>`;
+}
+function _sectorTableHtml(rows, marketCode, accel) {
+  if (!rows || !rows.length) return '';
+  const body = rows.map(r => _sectorTableRowHtml(r, marketCode, accel)).join('');
+  return `<table class="mono" style="width:100%;border-collapse:collapse;font-size:11px">
+    <colgroup><col><col style="width:42px"><col style="width:42px"><col style="width:54px"><col></colgroup>
+    <thead><tr style="color:var(--muted);font-size:10px">
+      <th style="text-align:left;font-weight:400;padding:0 4px 2px 0">섹터</th>
+      <th style="text-align:right;font-weight:400;padding:0 4px 2px">20일</th>
+      <th style="text-align:right;font-weight:400;padding:0 4px 2px">60일</th>
+      <th style="text-align:right;font-weight:400;padding:0 4px 2px">RS${accel ? '' : '↕'}</th>
+      <th style="text-align:left;font-weight:400;padding:0 0 2px 4px">대장(3)</th>
+    </tr></thead>
+    <tbody>${body}</tbody>
+  </table>`;
+}
+// v5.209 [6]: 기본 접힘(상위3+가속3), "더보기"로 5개까지 — 카드 전체 접힌
+// 높이를 화면 1/3 이내로 줄이는 게 목표라 기본 노출 수를 줄임. 토글은
+// renderCards()류 기존 토글과 같은 패턴(전역 상태 + 전체 재렌더).
+let _sectorFlowExpanded = false;
+function toggleSectorFlowExpanded() {
+  _sectorFlowExpanded = !_sectorFlowExpanded;
+  if (_calendarData) renderCalendar(_calendarData);
+}
+function _sectorFlowColumnHtml(flagLabel, marketCode, topRows, accelRows, hotSectors, n) {
+  if ((!topRows || !topRows.length) && (!accelRows || !accelRows.length)) return '';
+  const hotBadge = (hotSectors && hotSectors.length)
+    ? ` <span style="font-size:10px;color:var(--muted)" title="52주 신고가 섹터: ${hotSectors.join(', ')}">🔥${hotSectors.length}</span>` : '';
+  const topHtml = _sectorTableHtml((topRows || []).slice(0, n), marketCode, false);
+  const accelHtml = (accelRows && accelRows.length)
+    ? `<div style="font-size:11px;color:var(--muted);font-weight:700;margin:8px 0 2px">🚀 가속</div>${_sectorTableHtml(accelRows.slice(0, n), marketCode, true)}`
+    : '';
+  return `<div>
+    <div style="font-size:12px;font-weight:700;margin-bottom:2px">${flagLabel}${hotBadge}</div>
+    ${topHtml}
+    ${accelHtml}
+  </div>`;
 }
 function renderSectorFlowHtml(sf) {
   if (!sf) return '';
-  const trendHtml = r => {
-    const arrow = _SECTOR_TREND_ARROW[r.trend];
-    if (!arrow) return '';
-    return ` <span style="color:${_SECTOR_TREND_COLOR[r.trend]}" title="60일 RS ${r.rs_pct} → 20일 RS ${r.rs20_pct != null ? r.rs20_pct : '-'}">${arrow}</span>`;
-  };
-  const block = (label, rows, hotSectors) => {
-    if (!rows || !rows.length) return '';
-    const body = rows.map(r => {
-      const leaders = _sectorLeaderLinksHtml(r.leaders);
-      const hot = r.new_high_52w ? ' 🔥' : '';
-      const hits = r.hits_today ? ` · 오늘 ${r.hits_today}탭 히트` : '';
-      const ret = (r.ret20 != null && r.ret60 != null)
-        ? `<span style="color:var(--muted);font-size:11px"> (20일 ${r.ret20 >= 0 ? '+' : ''}${r.ret20}% · 60일 ${r.ret60 >= 0 ? '+' : ''}${r.ret60}%)</span>` : '';
-      return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)">
-        <div style="font-size:13px"><b>${r.sector}</b>${hot}${ret}</div>
-        <div style="text-align:right;font-size:12px;white-space:nowrap">
-          <span class="mono" style="color:var(--rs)">섹터RS ${r.rs_pct}</span>${trendHtml(r)}
-          <div style="color:var(--muted)">대장 ${leaders}${hits}</div>
-        </div>
-      </div>`;
-    }).join('');
-    const hotLine = (hotSectors && hotSectors.length)
-      ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">🔥 52주 신고가 섹터: ${hotSectors.join(', ')}</div>` : '';
-    return `<div style="margin-top:10px">
-      <div style="font-size:12px;color:var(--muted);font-weight:700;margin-bottom:2px">${label}</div>
-      ${body}
-      ${hotLine}
-    </div>`;
-  };
-  // v5.202 [2]: 🚀 가속 블록 — 20일 RS는 이미 강한데(≥80) 60일 RS는 아직
-  // 안 따라잡은(≤60) 섹터, "60일 RS 45 → 20일 RS 92" 형식으로 변화 자체를
-  // 강조(위 상위5 행은 순위 나열이 목적이라 형식이 다름).
-  const accelBlock = (label, rows) => {
-    if (!rows || !rows.length) return '';
-    const body = rows.map(r => {
-      const leaders = _sectorLeaderLinksHtml(r.leaders);
-      return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)">
-        <div style="font-size:13px"><b>${r.sector}</b></div>
-        <div style="text-align:right;font-size:12px;white-space:nowrap">
-          <span class="mono" style="color:var(--green)">60일 RS ${r.rs_pct} → 20일 RS ${r.rs20_pct}</span>
-          <div style="color:var(--muted)">대장 ${leaders}</div>
-        </div>
-      </div>`;
-    }).join('');
-    return `<div style="margin-top:10px">
-      <div style="font-size:12px;color:var(--muted);font-weight:700;margin-bottom:2px">${label}</div>
-      ${body}
-    </div>`;
-  };
+  // v5.209 [2]: 시장 필터가 한국/미국이면 그 열만 전폭으로.
   const showKr = market !== 'us';
   const showUs = market !== 'kr';
-  const krBlock = showKr ? block('🇰🇷 KR 상위 5', sf.top_rs_kr, sf.new_high_sectors_kr) : '';
-  const usBlock = showUs ? block('🇺🇸 US 상위 5', sf.top_rs_us, sf.new_high_sectors_us) : '';
-  const accelKr = showKr ? accelBlock('🚀 가속 — KR', sf.accel_kr) : '';
-  const accelUs = showUs ? accelBlock('🚀 가속 — US', sf.accel_us) : '';
-  if (!krBlock && !usBlock) return '';
+  const n = _sectorFlowExpanded ? 5 : 3;
+  const krCol = showKr ? _sectorFlowColumnHtml('🇰🇷 KR', 'KR', sf.top_rs_kr, sf.accel_kr, sf.new_high_sectors_kr, n) : '';
+  const usCol = showUs ? _sectorFlowColumnHtml('🇺🇸 US', 'US', sf.top_rs_us, sf.accel_us, sf.new_high_sectors_us, n) : '';
+  if (!krCol && !usCol) return '';
+  const bothShown = !!krCol && !!usCol;
+  const hasMore = (sf.top_rs_kr || []).length > 3 || (sf.top_rs_us || []).length > 3 ||
+    (sf.accel_kr || []).length > 3 || (sf.accel_us || []).length > 3;
+  const moreToggle = hasMore
+    ? `<div style="text-align:center;margin-top:6px;cursor:pointer;font-size:11px;color:var(--muted)" onclick="toggleSectorFlowExpanded()">${_sectorFlowExpanded ? '▴ 접기' : '▾ 더보기(5개)'}</div>`
+    : '';
   return `<div style="margin-top:14px">
     <div class="mf-toolbar"><b>📊 섹터 흐름</b></div>
-    ${krBlock}${usBlock}${accelKr}${accelUs}
+    <div style="display:grid;grid-template-columns:${bothShown ? '1fr 1fr' : '1fr'};gap:16px">
+      ${krCol}${usCol}
+    </div>
+    ${moreToggle}
   </div>`;
 }
 
