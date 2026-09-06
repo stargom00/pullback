@@ -23,3 +23,5 @@ us_industry_cache.json
 us_industry_cache.lock
 us_industry_cache_build.log
 daily_notes.json
+index_gate_cache.json
+decision_log.json
