@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.205</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.206</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3651,6 +3651,23 @@ function _escapeHtml(s) {
   return String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 }
 
+// v5.206(사용자 지시): 기본 5줄, 내용 늘어나면 최대 15줄까지 자동 확장
+// (scrollHeight 기준), 그 이상은 스크롤. resize:vertical은 그대로 둬서
+// 수동으로도 늘리고 줄일 수 있게 — 다음 입력이 오면 다시 scrollHeight
+// 기준으로 재계산된다(간단함 우선, 수동 크기 "기억"은 안 함).
+const DAILY_NOTE_MAX_ROWS = 15;
+function _dailyNoteAutoGrow(el) {
+  const cs = getComputedStyle(el);
+  const lineHeight = parseFloat(cs.lineHeight) || 19.5;
+  const paddingV = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
+    + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+  const maxHeight = lineHeight * DAILY_NOTE_MAX_ROWS + paddingV;
+  el.style.height = 'auto';
+  const needed = el.scrollHeight;
+  el.style.height = Math.min(needed, maxHeight) + 'px';
+  el.style.overflowY = needed > maxHeight ? 'auto' : 'hidden';
+}
+
 async function loadDailyNoteBox() {
   const box = document.getElementById('dailyNoteBox');
   if (!box) return;
@@ -3681,11 +3698,15 @@ function renderDailyNoteBox(d) {
        <div id="dailyNoteYesterdayBody" style="display:none;font-size:12px;color:var(--muted);white-space:pre-wrap;padding:4px 0 0 14px">${_escapeHtml(d.yesterday_note)}</div>`
     : '';
   box.innerHTML = `<div style="margin-bottom:14px">
-    <textarea id="dailyNoteText" placeholder="오늘의 메모 — 자유롭게" style="width:100%;min-height:60px;font-size:13px;line-height:1.5;padding:8px;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:8px;resize:vertical;box-sizing:border-box">${_escapeHtml(d.today_note)}</textarea>
+    <textarea id="dailyNoteText" rows="5" placeholder="오늘의 메모 — 자유롭게" style="width:100%;font-size:13px;line-height:1.5;padding:8px;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:8px;resize:vertical;box-sizing:border-box;overflow-y:hidden">${_escapeHtml(d.today_note)}</textarea>
     <div id="dailyNoteStatus" style="font-size:10px;color:var(--muted);margin-top:2px;height:12px"></div>
     ${yesterdayHtml}
   </div>`;
   const ta = document.getElementById('dailyNoteText');
+  if (ta) {
+    _dailyNoteAutoGrow(ta);   // v5.206: 기존 메모 불러왔을 때도 첫 렌더부터 내용만큼 펼침
+    ta.addEventListener('input', () => _dailyNoteAutoGrow(ta));
+  }
   if (ta) ta.addEventListener('input', e => {
     clearTimeout(_dailyNoteSaveTimer);
     const status = document.getElementById('dailyNoteStatus');

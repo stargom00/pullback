@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.206 [UI 개선] 오늘의 메모 textarea 크기(사용자 지시) — 기본 5줄
+        (rows=5), 내용이 늘어나면 scrollHeight 기준으로 최대 15줄까지
+        자동 확장(그 이상은 내부 스크롤), resize:vertical은 그대로 둬서
+        수동 리사이즈도 가능(다음 입력이 오면 다시 내용 기준으로 재계산
+        — 수동 크기를 따로 기억하진 않음, 단순함 우선).
 v5.205 [기능개선] 오늘의 메모(사용자 지시). 캘린더 탭 "🎯 오늘의 결정"
         위에 자유 메모 textarea 신규 — 태그·검색·서식 없음, 그냥 텍스트
         한 칸. 입력 1초 디바운스 후 자동 저장(POST /api/daily-note →
@@ -5292,7 +5297,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.205"
+VERSION = "v5.206"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
