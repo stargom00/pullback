@@ -82,6 +82,7 @@ def _us_earnings_growth(ticker: str) -> dict:
 
     # ── 조건2/4: 분기 EPS YoY(+가속) ──
     q_yoy = q_yoy_prev = None
+    out["eps_sum_last4q"] = None   # v5.204: 최근 4분기 EPS 합 — 섹터 대장 게이트(적자 여부)용
     if qinc is not None and "Diluted EPS" in qinc.index:
         qeps = qinc.loc["Diluted EPS"].dropna().sort_index()
         vals = qeps.tolist()
@@ -89,6 +90,8 @@ def _us_earnings_growth(ticker: str) -> dict:
             q_yoy = _pct_change(vals[-1], vals[-5])
         if len(vals) >= 6:
             q_yoy_prev = _pct_change(vals[-2], vals[-6])
+        if len(vals) >= 4:
+            out["eps_sum_last4q"] = round(sum(vals[-4:]), 4)
     out["quarterly_eps_yoy_pct"] = round(q_yoy, 1) if q_yoy is not None else None
 
     # ── 조건3: 매출 YoY(같은 분기) ──
@@ -200,6 +203,10 @@ def _kr_earnings_growth(ticker: str) -> dict:
     # ── 조건2/4: 분기 EPS YoY(+가속) — 실제치 기준, 4분기 전과 비교 ──
     actual_q_eps = [c["value"] for c in quarterly_eps_cells if not c["est"] and c["value"] is not None]
     q_yoy = q_yoy_prev = None
+    if len(actual_q_eps) >= 4:
+        out["eps_sum_last4q"] = round(sum(actual_q_eps[-4:]), 4)   # v5.204: 섹터 대장 게이트(적자 여부)용
+    else:
+        out["eps_sum_last4q"] = None
     if len(actual_q_eps) >= 5:
         q_yoy = _pct_change(actual_q_eps[-1], actual_q_eps[-5])
     if len(actual_q_eps) >= 6:

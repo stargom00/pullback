@@ -5,6 +5,30 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.204 [기능개선] 섹터 흐름 대장 선정 기준 강화(사용자 지시) — RS 순위만
+        보면 바닥 반등주(장기추세 아래, 적자)가 섹터 대장으로 잡히는 문제.
+        RS 순위 + 종가>200일선 + 최근 4분기 EPS 합>0로 게이트 추가.
+        [1] earnings.py에 eps_sum_last4q(최근 4분기 EPS 합) 필드 신규 —
+        미국(yfinance quarterly_income_stmt)/한국(네이버 실적표) 둘 다
+        기존에 분기 EPS 리스트를 이미 파싱해 갖고 있었는데 YoY%만 뽑고
+        원값 합계는 노출을 안 하고 있었음.
+        [2] sector_snapshot.compute()는 (섹터,시장)별 RS 상위 10을
+        leader_candidates로만 담아 넘기고(순수 계산, 네트워크 없음),
+        app.py _refine_sector_leaders()(신규, async)가 200일선(이미
+        메모리의 df로 무료 판정) 통과분만 골라 EPS(6시간 캐시
+        _get_earnings_safe 재사용 — 다른 탭이 이미 조회했으면 새 fetch
+        0건)를 조회해 최종 3명을 확정. 3명을 못 채우면(섹터 전체가 게이트
+        미달) 남은 자리는 RS 상위 미달 후보로 채우되 qualifies=False로
+        표시(조용히 숨기지 않음).
+        [3] 프론트: qualifies=false인 대장은 회색 + ⚠️ + 툴팁("200일선
+        아래이거나 최근 4분기 적자 — 진짜 대장 아님, 참고용")로 표시.
+        [4] 검증: 손해보험 실데이터로 RS 상위 10 전원의 200일선/EPS4분기합
+        직접 확인 — 000400(EPS합 -48, 적자)과 211050·031210(200일선 아래)
+        은 정확히 탈락 판정, 나머지 6개는 정상 통과. 이번 스냅샷에선
+        RS 상위 6개가 전부 게이트도 통과해 상위3 결과 자체는 안 바뀌었지만
+        (244920 에이플러스에셋·001450 현대해상·000370 한화손해보험),
+        게이트가 실제로 판별해내는 것 자체는 확인됨 — 라이브에서 어떻게
+        나오는지는 배포 후 직접 확인 필요.
 v5.203 [기능개선] 섹터 흐름 카드 종목명 링크(사용자 지시). 상위5·가속
         블록의 대장 종목명을 트레이딩뷰 링크로 — 기존 5탭 카드 ↗ 링크와
         같은 tvUrl() 그대로 재사용(KR: KRX:005830, US: 심볼만 줘도
@@ -5255,7 +5279,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.203"
+VERSION = "v5.204"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -5787,6 +5811,57 @@ async def _refresh_market_data_bg(market: str, cache_key: str):
         _market_refreshing[cache_key] = False
 
 
+LEADER_MA200_MIN_BARS = 200
+
+
+async def _refine_sector_leaders(by_sector: dict, data: dict) -> None:
+    """v5.204(사용자 지시): 섹터 대장(leaders) 선정에 RS 순위만이 아니라
+    "종가>200일선" + "최근 4분기 EPS 합>0" 게이트를 추가 — RS만 보면 장기
+    추세 아래에서 반등 중인 적자 종목(바닥 반등주)이 섹터 대장으로 잡히는
+    문제가 있었다. sector_snapshot.compute()가 담아둔 leader_candidates
+    (섹터 내 RS 상위 10, 이미 순수 계산으로 끝남)를 순서대로 검사해 게이트
+    통과 3개를 leaders로 확정한다. 200일선은 이미 메모리에 있는 df로 즉시
+    판정(무료) — 그걸 통과한 후보에 대해서만 EPS(네트워크, 6시간 캐시
+    _get_earnings_safe)를 조회해 비용을 줄인다. 3개를 다 못 채우면(섹터
+    전체가 게이트 미달) 남은 슬롯은 RS 상위 미달 후보로 채우되
+    qualifies=False로 표시 — 프론트가 회색 처리해서 "이건 진짜 대장이
+    아니다"를 알 수 있게(조용히 숨기지 않음)."""
+    for entry in by_sector.values():
+        candidates = entry.pop("leader_candidates", [])
+        if not candidates:
+            entry["leaders"] = []
+            continue
+        above_ma200 = {}
+        for t in candidates:
+            df = data.get(t)
+            ok = False
+            if df is not None and "Close" in df and len(df) >= LEADER_MA200_MIN_BARS:
+                c = df["Close"]
+                ok = float(c.iloc[-1]) > float(c.tail(LEADER_MA200_MIN_BARS).mean())
+            above_ma200[t] = ok
+        ma_pass = [t for t in candidates if above_ma200[t]]
+        eg_by_ticker = {}
+        if ma_pass:
+            try:
+                results = await asyncio.gather(*[_get_earnings_safe(t) for t in ma_pass], return_exceptions=True)
+                eg_by_ticker = {t: (r if isinstance(r, dict) else {}) for t, r in zip(ma_pass, results)}
+            except Exception as e:
+                print(f"[sector_snapshot] 대장 EPS 조회 실패: {e}", flush=True)
+        qualified, fallback = [], []
+        for t in candidates:
+            eps_sum = eg_by_ticker.get(t, {}).get("eps_sum_last4q")
+            if above_ma200[t] and eps_sum is not None and eps_sum > 0:
+                qualified.append(t)
+            else:
+                fallback.append(t)
+        leaders = [{"ticker": t, "qualifies": True} for t in qualified[:3]]
+        for t in fallback:
+            if len(leaders) >= 3:
+                break
+            leaders.append({"ticker": t, "qualifies": False})
+        entry["leaders"] = leaders
+
+
 async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = False) -> dict:
 
     # 1) 장 마감 후면 디스크 캐시 우선 — 다음 거래일까지 재호출 0
@@ -5930,6 +6005,9 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
     # 계산해 market 필터별 카드가 그 필터 안에서의 순위/백분위를 보게 한다.
     try:
         sector_info = sector_snapshot.compute(data, rs_ranks, _sector_of)
+        # v5.204: 대장(leaders) RS 상위 후보를 200일선+EPS 게이트로 재확정 —
+        # by_sector를 in-place로 갱신(leader_candidates 소비, leaders 확정).
+        await _refine_sector_leaders(sector_info["by_sector"], data)
     except Exception as e:
         print(f"[sector_snapshot] compute 실패: {e}", flush=True)
         sector_info = {"by_ticker": {}, "by_sector": {}}
@@ -11698,7 +11776,11 @@ def _build_sector_flow(today: str) -> dict | None:
             "ret60": rec.get("ret60"),
             "n": rec.get("n"),
             "new_high_52w": bool(rec.get("new_high_52w")),
-            "leaders": [{"ticker": tk, "name": uni.get(tk, tk)} for tk in (rec.get("leaders") or [])],
+            # v5.204: leaders는 이제 {ticker, qualifies}(200일선+EPS 게이트
+            # 통과 여부) — qualifies=False면 프론트가 회색 처리.
+            "leaders": [{"ticker": ld.get("ticker"), "name": uni.get(ld.get("ticker"), ld.get("ticker")),
+                         "qualifies": ld.get("qualifies")}
+                        for ld in (rec.get("leaders") or [])],
             "hits_today": sector_snapshot.hit_tab_count(today, rec.get("sector"), mkt),
         })
     if not rows_by_mkt["KR"] and not rows_by_mkt["US"]:

@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.203</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.204</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -4079,11 +4079,18 @@ const _SECTOR_TREND_COLOR = { up: 'var(--green)', down: 'var(--px-down)', flat: 
 // ↗ 링크와 같은 URL 규칙(tvUrl 재사용 — KR: KRX:005830, US: 심볼만 줘도
 // 트레이딩뷰가 자동 해석). 새 탭. 섹터명 클릭으로 구성종목 펼치기는
 // 범위 밖(다음에) — 지금은 링크만.
+// v5.204(사용자 지시): 대장 선정에 200일선 위 + 최근4분기 EPS합>0 게이트가
+// 추가돼(app.py _refine_sector_leaders) RS만으론 못 채운 자리는
+// qualifies=false로 표시된다 — 그 대장은 회색으로("바닥 반등주"라 진짜
+// 대장은 아니라는 뜻, 조용히 숨기지 않고 이유를 title에 남김).
 function _sectorLeaderLinksHtml(leaders) {
   if (!leaders || !leaders.length) return '-';
-  return leaders.map(l =>
-    `<a class="name-link" href="${tvUrl(l.ticker)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기">${l.name}</a>`
-  ).join(', ');
+  return leaders.map(l => {
+    const gray = l.qualifies === false;
+    const title = gray ? '200일선 아래이거나 최근 4분기 적자 — 진짜 대장 아님, 참고용' : '트레이딩뷰 차트 열기';
+    const style = gray ? 'color:var(--muted);opacity:.7' : '';
+    return `<a class="name-link" href="${tvUrl(l.ticker)}" target="_blank" rel="noopener" title="${title}" style="${style}">${l.name}${gray ? ' ⚠️' : ''}</a>`;
+  }).join(', ');
 }
 function renderSectorFlowHtml(sf) {
   if (!sf) return '';

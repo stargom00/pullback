@@ -128,7 +128,14 @@ def compute(data: dict, rs_ranks: dict, sector_of) -> dict:
 
         ranked = sorted(tickers, key=lambda tt: rs_ranks.get(tt, -1), reverse=True)
         rank_maps[key] = {tt: i + 1 for i, tt in enumerate(ranked)}
-        entry["leaders"] = ranked[:3]
+        # v5.204(사용자 지시): 대장 선정에 RS 순위 말고도 200일선 위 + 최근
+        # 4분기 EPS합>0 게이트가 추가됐다 — 이 게이트엔 EPS 조회(네트워크)가
+        # 필요해 순수 계산 함수인 이 모듈에서 못 하고, 호출부(app.py
+        # _refine_sector_leaders, async)가 처리한다. 여기서는 RS 상위
+        # 10명을 후보 풀로만 넘겨둔다(3명 확정은 호출부 몫) — leaders는
+        # 호출부가 leader_candidates를 소비하며 최종 확정해 다시 채운다.
+        entry["leader_candidates"] = ranked[:10]
+        entry["leaders"] = [{"ticker": t, "qualifies": None} for t in ranked[:3]]  # 호출부 실패 시 폴백
         by_sector[key] = entry
 
     for mkt in ("KR", "US"):
