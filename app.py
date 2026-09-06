@@ -5,6 +5,41 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.208 [긴급 수정] v5.207 후속 2건(사용자 지시, 미루지 않고 즉시 처리).
+        [1] "$35.60 → $34.76 (-2.4%)" → "진입 $35.60 · 손절 $34.76 (-2.4%)"
+        로 라벨 명시, 화살표 제거 — 🔴 카드 헤드라인(진입→손절)과 시나리오
+        카드 ①②행(조건→진입, 진입→손절→리스크) 둘 다 수정. "관심" 카드는
+        이미 "피벗(기준) X · 손절(기준) Y" 라벨+"·" 형식이라 변경 불필요
+        (확인만 함, 애초에 화살표가 없었음).
+        [2] _fetch_market_data_inner()에 is_trading_day 게이트 추가 —
+        v5.207에서 "표시 시점 재확인"으로 증상만 막아뒀던 뿌리 원인.
+        _market_session_key()는 요일/시각 휴리스틱만 보고 공휴일을
+        모르는데, 이 값을 그대로 daykey로 쓰던 두 함수(_fetch_market_data/
+        _inner — /api/scan 전체와 "다시 스캔"이 타는 경로)가 휴장일에
+        "오늘"을 확정 daykey로 착각해 캐시 미스로 보고 백그라운드
+        재계산을 트리거할 수 있었다(_warm_market()은 애초부터 바로
+        다음 줄에서 is_trading_day로 이걸 막고 있었는데, 데이터를 실제로
+        받아오는 이 두 함수엔 같은 가드가 없었음 — 어제 섹터 카드가 안
+        뜨던 것도 같은 뿌리: sector_snapshot 갱신이 이 재계산 경로에
+        얹혀 있어서 날짜가 꼬이면 같이 영향받음).
+        수정: _confirmed_daykey(market) 신규 — _market_session_key()가
+        "마감 확정"을 줘도 is_trading_day로 재검증해서, 실제 휴장이면
+        그 시장이 마지막으로 열렸던 날짜(_last_trading_daykey 재사용)로
+        대체한다("오늘 daykey"를 아예 안 만듦). _fetch_market_data와
+        _fetch_market_data_inner 두 곳의 daykey 계산을 이걸로 교체 —
+        나머지 로직(캐시 우선순위, force 시 재계산, 디스크 저장)은
+        무변경이라 daykey가 이제 항상 "실제 거래일"이 되는 것만 고쳐짐.
+        실측(오늘 실제 2026-09-07 Labor Day로 검증):
+        (a) _confirmed_daykey('us') == '2026-09-04'(마지막 실거래일),
+            _confirmed_daykey('kr') == 오늘 실제 날짜(정상 거래일, 회귀
+            없음) 확인.
+        (b) 금요일 daykey로 이미 캐시가 있는 상태에서 force=False로 호출
+            — get_universe() 0회 호출(캐시 정상 히트, 예전엔 여기서
+            불필요한 재계산이 트리거됐음) 확인.
+        (c) force=True(다시 스캔)로 실제 재계산을 강제해도 결과 bundle의
+            daykey가 여전히 '2026-09-04'로 나옴(오늘 날짜로 잘못 찍히지
+            않음) — 사용자 스펙 "휴장일 다시 스캔은 마지막 거래일 daykey로
+            재계산" 그대로 확인.
 v5.207 [긴급 수정] 월요일(US Labor Day 휴장) 🔴 즉시 행동에 US 눌림목
         12건+ 노출(사용자 지시, 실제 사고일 2026-09-07 기준 조사).
         [1] hit_date 조사: US 눌림목 히트 자체엔 "봉 날짜 vs 스캔실행일"
@@ -5355,7 +5390,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.207"
+VERSION = "v5.208"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -5805,6 +5840,28 @@ _market_fetch_locks: dict = {}
 _market_refreshing: dict = {}   # v4.86: cache_key -> True인 동안 백그라운드 갱신 진행중
 
 
+def _confirmed_daykey(market: str) -> str | None:
+    """v5.208(사용자 지시 — 버그수정, v5.207 "별도 발견"의 뿌리 수정):
+    _market_session_key()는 요일/시각 휴리스틱만 보고 실제 공휴일 여부는
+    모른다 — 휴장일에도 "오늘"을 확정 daykey로 만들어버려서, 이 값을 쓰는
+    _fetch_market_data/_inner()가 캐시 미스로 착각하고 실제 재계산을
+    트리거할 수 있었다(_warm_market()은 진작부터 바로 다음 줄에서
+    is_trading_day()로 이걸 막고 있었는데, 데이터를 실제로 받아오는 이
+    두 함수엔 같은 가드가 없었다 — 서로 다른 두 경로가 같은
+    _market_session_key()를 쓰면서 한쪽만 검증하던 불일치).
+    _market_session_key()가 "장 마감 확정"이라고 준 날짜가 실제 거래일이
+    아니면, 그 시장이 마지막으로 진짜 열렸던 날짜(_last_trading_daykey)로
+    대체한다 — "오늘 daykey"를 아예 만들지 않는다. 장중/애매한 시간이라
+    session_key 자체가 None이면(아직 확정 안 됨) 그대로 None 반환(기존
+    동작 그대로, 10분 TTL 경로를 탐)."""
+    session_key = _market_session_key(market)
+    if not session_key:
+        return None
+    if is_trading_day(market, session_key):
+        return session_key
+    return _last_trading_daykey(market, datetime.now(KST))
+
+
 async def _fetch_market_data(market: str, wait_for_fresh: bool = False, force: bool = False) -> dict | None:
     """시장 단위로 종목 일봉 + RS 계산. 모드와 무관하므로 시장별로 캐시해 재사용.
     여기서만 네이버/야후를 호출한다 (모드 전환 시 재호출 안 함).
@@ -5842,7 +5899,7 @@ async def _fetch_market_data(market: str, wait_for_fresh: bool = False, force: b
         async with _lock:
             return await _fetch_market_data_inner(market, cache_key, force=force)
 
-    daykey = _market_session_key(market)
+    daykey = _confirmed_daykey(market)
     mem = _data_cache.get(cache_key)
     if daykey and mem and mem.get("daykey") == daykey:
         return mem
@@ -5942,7 +5999,9 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
 
     # 1) 장 마감 후면 디스크 캐시 우선 — 다음 거래일까지 재호출 0
     #    (v5.200: force=True면 건너뜀 — "다시 스캔" 버튼용, 위 _fetch_market_data 참고)
-    daykey = _market_session_key(market)
+    #    (v5.208: daykey는 _confirmed_daykey()로 — 휴장일엔 "오늘"이 아니라
+    #    마지막 실제 거래일로 보정, _warm_market()과 동일 규칙)
+    daykey = _confirmed_daykey(market)
     if daykey and not force:
         mem = _data_cache.get(cache_key)
         if mem and mem.get("daykey") == daykey:

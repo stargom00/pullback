@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.207</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.208</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3899,9 +3899,13 @@ function renderScenarioHtml(sc, market, domId) {
   const resistanceLabel = lv.resistance_broken_pivot != null
     ? `pivot ${fp(lv.resistance_broken_pivot)} 돌파 후 다음 저항`
     : lv.resistance_source;
-  const row1 = `<div style="${hl(1)}">${s1.label} (${s1.condition}) → 진입 ${fp(s1.entry)} · 손절 ${fp(s1.stop)} · 리스크 ${s1.risk_pct != null ? s1.risk_pct + '%' : '-'}${star(1)}</div>`;
+  // v5.208(사용자 지시 — 버그수정): 🔴 카드와 같은 형식으로 통일 —
+  // "진입 X · 손절 Y (-Z%)" 라벨 명시, 화살표 제거(조건→진입도 포함 —
+  // 가격 두 개를 화살표로 이으면 "가격이 움직였다"로 오해하기 쉬움).
+  const riskParen = pct => pct != null ? ` (-${pct}%)` : '';
+  const row1 = `<div style="${hl(1)}">${s1.label} (${s1.condition}): 진입 ${fp(s1.entry)} · 손절 ${fp(s1.stop)}${riskParen(s1.risk_pct)}${star(1)}</div>`;
   const row2 = s2
-    ? `<div style="${hl(2)}">${s2.label} → 진입 ${fp(s2.entry)} · 손절 ${fp(s2.stop)} · 리스크 ${s2.risk_pct}% · R ${s2.r_multiple}${star(2)}</div>`
+    ? `<div style="${hl(2)}">${s2.label}: 진입 ${fp(s2.entry)} · 손절 ${fp(s2.stop)}${riskParen(s2.risk_pct)} · R ${s2.r_multiple}${star(2)}</div>`
     : `<div style="color:var(--muted)">② 계산 불가 — 지지/무효 없음</div>`;
   const row3 = `<div style="color:var(--muted)">${s3.label} — ${s3.condition} → ${s3.action}</div>`;
   return `<div class="jongga-forward-sub" style="cursor:pointer;margin-top:4px" onclick="toggleScenarioBox('${domId}')"><span id="${domId}_caret">▸</span> 시나리오 <span style="opacity:.6">(${sc.label})</span></div>
@@ -4030,7 +4034,11 @@ function renderTodayDecisionHtml(td) {
       : '';
     return cardShell('#6b2b2b', '#2a1414', `
       ${nameLine}
-      <div style="font-size:15px;font-weight:700;margin-top:4px">${fmtPrice(item.entry, mkt)} → ${stopStr}</div>
+      <!-- v5.208(사용자 지시 — 버그수정): "$35.60 → $34.76 (-2.4%)"는
+           화살표 때문에 시세 변동(진입가에서 지금 가격으로 움직인 것)
+           처럼 오해할 수 있었다 — 둘 다 정적 계산값(진입가·손절가)일
+           뿐이라 라벨로 명시하고 화살표를 뺀다. -->
+      <div style="font-size:15px;font-weight:700;margin-top:4px">진입 ${fmtPrice(item.entry, mkt)} · 손절 ${stopStr}</div>
       ${pivotGapLine}
       <div style="font-size:11px;color:var(--muted);margin-top:4px;${descClamp}">${descParts.join(' · ')}</div>
       ${item.scenario ? renderScenarioHtml(item.scenario, mkt, 'sc_td_' + item.key) : ''}
