@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.200</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.201</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -4060,28 +4060,48 @@ function renderTodayDecisionHtml(td) {
 // 스캔이 이미 메모리에 갖고 있던 일봉으로 계산 — 추가 fetch 0건). 그날
 // market=all 스캔이 한 번도 안 돌았으면 sector_flow가 null → 카드 자체 생략
 // (오늘의 결정과 같은 컨벤션: 폴백으로 옛날 값 억지로 채우지 않음).
+//
+// v5.201(사용자 지시 — 버그수정): 예전엔 KR+US 섹터를 한 풀에서 rs_pct로
+// 정렬해 상위5를 뽑아서, US 섹터가 수적으로 많다 보니 KR이 상위5에서
+// 통째로 밀려나는 날이 잦았다(백엔드 sector_snapshot.py가 이제 시장별로
+// 백분위를 따로 매김 — top_rs_kr/top_rs_us로 분리 수신). "🇰🇷 KR 상위5"/
+// "🇺🇸 US 상위5" 두 블록으로 나눠 보여주고, 캘린더 상단 시장 필터(전역
+// `market`)에 맞춰 해당 블록만 표시 — renderTodayDecisionHtml의 market
+// 필터와 같은 원칙(index.html의 다른 v5.199 필터 로직 참고).
 function renderSectorFlowHtml(sf) {
-  if (!sf || !sf.top_rs || !sf.top_rs.length) return '';
-  const rows = sf.top_rs.map(r => {
-    const leaders = (r.leaders || []).map(l => l.name).join(', ') || '-';
-    const hot = r.new_high_52w ? ' 🔥' : '';
-    const hits = r.hits_today ? ` · 오늘 ${r.hits_today}탭 히트` : '';
-    const ret = (r.ret20 != null && r.ret60 != null)
-      ? `<span style="color:var(--muted);font-size:11px"> (20일 ${r.ret20 >= 0 ? '+' : ''}${r.ret20}% · 60일 ${r.ret60 >= 0 ? '+' : ''}${r.ret60}%)</span>` : '';
-    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)">
-      <div style="font-size:13px"><b>${r.sector}</b>${hot}${ret}</div>
-      <div style="text-align:right;font-size:12px;white-space:nowrap">
-        <span class="mono" style="color:var(--rs)">섹터RS ${r.rs_pct}</span>
-        <div style="color:var(--muted)">대장 ${leaders}${hits}</div>
-      </div>
+  if (!sf) return '';
+  const block = (label, rows, hotSectors) => {
+    if (!rows || !rows.length) return '';
+    const body = rows.map(r => {
+      const leaders = (r.leaders || []).map(l => l.name).join(', ') || '-';
+      const hot = r.new_high_52w ? ' 🔥' : '';
+      const hits = r.hits_today ? ` · 오늘 ${r.hits_today}탭 히트` : '';
+      const ret = (r.ret20 != null && r.ret60 != null)
+        ? `<span style="color:var(--muted);font-size:11px"> (20일 ${r.ret20 >= 0 ? '+' : ''}${r.ret20}% · 60일 ${r.ret60 >= 0 ? '+' : ''}${r.ret60}%)</span>` : '';
+      return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)">
+        <div style="font-size:13px"><b>${r.sector}</b>${hot}${ret}</div>
+        <div style="text-align:right;font-size:12px;white-space:nowrap">
+          <span class="mono" style="color:var(--rs)">섹터RS ${r.rs_pct}</span>
+          <div style="color:var(--muted)">대장 ${leaders}${hits}</div>
+        </div>
+      </div>`;
+    }).join('');
+    const hotLine = (hotSectors && hotSectors.length)
+      ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">🔥 52주 신고가 섹터: ${hotSectors.join(', ')}</div>` : '';
+    return `<div style="margin-top:10px">
+      <div style="font-size:12px;color:var(--muted);font-weight:700;margin-bottom:2px">${label}</div>
+      ${body}
+      ${hotLine}
     </div>`;
-  }).join('');
-  const hotLine = (sf.new_high_sectors && sf.new_high_sectors.length)
-    ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">🔥 52주 신고가 섹터: ${sf.new_high_sectors.join(', ')}</div>` : '';
+  };
+  const showKr = market !== 'us';
+  const showUs = market !== 'kr';
+  const krBlock = showKr ? block('🇰🇷 KR 상위 5', sf.top_rs_kr, sf.new_high_sectors_kr) : '';
+  const usBlock = showUs ? block('🇺🇸 US 상위 5', sf.top_rs_us, sf.new_high_sectors_us) : '';
+  if (!krBlock && !usBlock) return '';
   return `<div style="margin-top:14px">
     <div class="mf-toolbar"><b>📊 섹터 흐름</b></div>
-    ${rows}
-    ${hotLine}
+    ${krBlock}${usBlock}
   </div>`;
 }
 

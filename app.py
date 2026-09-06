@@ -5,6 +5,36 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.201 [버그수정] 섹터 흐름 카드에 KR 섹터 누락(사용자 지시).
+        [조사] sector_snapshot.json 직접 확인은 못 했지만(서버 파일이라
+        로컬에서 못 봄), 실데이터 재현 테스트(손해보험12·은행10·기타금융5·
+        복합기업18·반도체-장비KR26 + US 반도체/클라우드/에너지 등 78종목)로
+        전 경로를 직접 실행해 확인 — KR df 미도달도 kr_sectors_auto 매핑
+        실패도 아니었다(손해보험 등 KR 섹터가 sector_snapshot.compute()의
+        by_sector엔 정상적으로 들어가 있었음, rs_pct=63으로 계산도 됨).
+        원인은 [2]와 같은 근본 문제: 섹터RS 백분위를 KR+US 전체 섹터
+        (약 60여개, US 쪽이 수적으로 훨씬 많음) 한 풀에서 매기고 "📊 섹터
+        흐름" 카드는 그 풀 전체에서 상위 5개만 뽑았다 — US 섹터가 그날
+        따라 강하면 KR 섹터가 상위5에 하나도 못 들어 통째로 안 보이는
+        구조였다("구성≥5 필터" 자체 때문에 빠진 게 아니라 "상위5" 컷 때문).
+        [2] sector_snapshot.py를 (섹터, 시장) 조합 단위로 완전히 분리 —
+        AI 밸류체인 큐레이션 버킷(반도체-장비 등, KR+US 혼합)도 이제
+        "반도체-장비|KR"/"반도체-장비|US" 두 개의 독립 그룹으로 쪼개서
+        각각 자기 시장 안에서만 섹터RS 백분위를 매긴다(다른 시장 섹터
+        개수와 무관해짐). 카드 필드도 top_rs_kr/top_rs_us,
+        new_high_sectors_kr/_us로 분리(app.py _build_sector_flow).
+        카드 종목별 순위/백분위(카드 tick 줄의 "· {섹터} {순위}/{n} ·
+        섹터RS {pct}")도 부수적으로 더 정확해짐 — 이제 자기 시장 섹터끼리만
+        비교한 값.
+        [3] 캘린더 "📊 섹터 흐름" 카드에 "🇰🇷 KR 상위5"/"🇺🇸 US 상위5" 두
+        블록 표시, 상단 시장 필터(전체/한국/미국)에 맞춰 해당 블록만
+        노출(renderTodayDecisionHtml의 v5.199 필터와 같은 원칙 — 전역
+        `market` 변수 재사용).
+        [4] 검증: 실데이터 재현 테스트에서 KR 풀 단독 상위5 = 손해보험
+        (rs_pct 99) · 은행 · 기타금융 · 반도체-장비 · 복합기업, 손해보험
+        대장에 현대해상 포함 확인. 삼성화재·DB손보는 이 테스트 시점의
+        실제 RS 순위상 대장3위 밖이라 미포함(그날그날의 실제 순위를
+        그대로 반영하는 게 의도 — v5.195 검증 때와 같은 결론, 버그 아님).
 v5.200 [버그수정] 3건(사용자 지시).
         [1] "다시 스캔"이 휴장일에 동작 안 함. [조사] is_trading_day
         가드가 아니라 _market_session_key()가 요일/시각만으로 "장 마감
@@ -5199,7 +5229,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.200"
+VERSION = "v5.201"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -11595,35 +11625,49 @@ def _dedup_today_decision(immediate: list, interest: list, near: list) -> tuple[
 
 
 def _build_sector_flow(today: str) -> dict | None:
-    """v5.195 [4]: 캘린더 "📊 섹터 흐름" 카드 원본. sector_snapshot.json의
-    오늘자 엔트리(_fetch_market_data_inner가 market="all" 스캔마다 갱신)를
-    읽어 섹터RS 상위5·52주 신고가 섹터·섹터별 대장3·오늘 히트 탭 수로 정리.
-    그날 스캔이 아직 한 번도 안 돌았으면(엔트리 없음) None → 프론트가 카드
-    자체를 생략(폴백 없이 판정불가로 두는 기존 컨벤션, index.html:1296 참고)."""
+    """v5.195 [4]/v5.201(사용자 지시 — KR/US 분리): 캘린더 "📊 섹터 흐름"
+    카드 원본. sector_snapshot.json의 오늘자 엔트리(_fetch_market_data_inner가
+    market="all" 스캔마다 갱신)를 읽어 시장별 섹터RS 상위5·52주 신고가
+    섹터·섹터별 대장3·오늘 히트 탭 수로 정리.
+
+    v5.201: 이전엔 KR+US 전 섹터를 한 풀에서 rs_pct로 정렬해 상위5를
+    뽑았는데, US 섹터 수/종목 수가 훨씬 많아 KR 섹터가 상위5에 낄 확률이
+    구조적으로 낮았다("섹터 흐름"에 KR이 안 보이던 원인 — sector_snapshot.
+    compute()가 이미 시장별로 sector_rs_pct를 따로 매기므로(그 시장 안
+    에서만의 백분위), 여기서는 그냥 market 필드로 나눠 KR/US 각각 상위5를
+    뽑기만 하면 된다). 그날 스캔이 아직 한 번도 안 돌았으면(엔트리 없음)
+    None → 프론트가 카드 자체를 생략(폴백 없이 판정불가로 두는 기존
+    컨벤션, index.html:1296 참고)."""
     day = sector_snapshot.load_all().get(today)
     if not day:
         return None
     uni = get_universe("all")
-    rows = []
-    for sec, rec in day.items():
+    rows_by_mkt = {"KR": [], "US": []}
+    for key, rec in day.items():
         if rec.get("sector_rs_pct") is None:
             continue
-        rows.append({
-            "sector": sec,
+        mkt = rec.get("market")
+        if mkt not in rows_by_mkt:
+            continue
+        rows_by_mkt[mkt].append({
+            "sector": rec.get("sector"),
             "rs_pct": rec.get("sector_rs_pct"),
             "ret20": rec.get("ret20"),
             "ret60": rec.get("ret60"),
             "n": rec.get("n"),
             "new_high_52w": bool(rec.get("new_high_52w")),
             "leaders": [{"ticker": tk, "name": uni.get(tk, tk)} for tk in (rec.get("leaders") or [])],
-            "hits_today": sector_snapshot.hit_tab_count(today, sec),
+            "hits_today": sector_snapshot.hit_tab_count(today, rec.get("sector"), mkt),
         })
-    if not rows:
+    if not rows_by_mkt["KR"] and not rows_by_mkt["US"]:
         return None
-    rows.sort(key=lambda r: r["rs_pct"], reverse=True)
+    for rows in rows_by_mkt.values():
+        rows.sort(key=lambda r: r["rs_pct"], reverse=True)
     return {
-        "top_rs": rows[:5],
-        "new_high_sectors": [r["sector"] for r in rows if r["new_high_52w"]],
+        "top_rs_kr": rows_by_mkt["KR"][:5],
+        "top_rs_us": rows_by_mkt["US"][:5],
+        "new_high_sectors_kr": [r["sector"] for r in rows_by_mkt["KR"] if r["new_high_52w"]],
+        "new_high_sectors_us": [r["sector"] for r in rows_by_mkt["US"] if r["new_high_52w"]],
         "asof": today,
     }
 
