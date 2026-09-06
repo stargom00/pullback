@@ -14,6 +14,9 @@
 """
 from __future__ import annotations
 
+import scanner  # v5.211: ATR 재사용(scanner.atr()과 동일 정의 — 표시값 일관성,
+                 # 새 지표 아니라 이미 df에 있는 High/Low/Close로 재계산만)
+
 
 def compute_levels(close_series, high_series, low_series, pivot: float | None = None,
                     stop: float | None = None) -> dict:
@@ -21,8 +24,13 @@ def compute_levels(close_series, high_series, low_series, pivot: float | None = 
     최신). 각 레벨의 출처(source)도 같이 반환 — 카드 표시에 "135,700(21EMA)"
     처럼 붙이기 위함. 베이스 저점(무효 최종 폴백)은 200MA·스냅샷 stop이
     둘 다 없을 때만 최근 60봉 저가로 계산(scanner.py 여러 곳의 base_low
-    관례 — lo.tail(N).min() — 와 같은 방식, N=60은 이 용도의 범용 기본값)."""
+    관례 — lo.tail(N).min() — 와 같은 방식, N=60은 이 용도의 범용 기본값).
+    atr_pct(v5.211): 시나리오 리스크%의 ATR 배수 환산·1.0ATR 미만 경고·
+    ★ 자격 판정에 씀(scanner.atr()와 동일 정의, close_series/high_series/
+    low_series가 이미 있어 추가 fetch 없음)."""
     close = float(close_series.iloc[-1])
+    atr_val = scanner.atr(high_series, low_series, close_series)
+    atr_pct = round(atr_val / close * 100, 2) if close > 0 else None
 
     # v5.200 [3](사용자 지시 — 버그수정): pivot이 있어도 현재가가 이미 그
     # pivot을 넘었으면(돌파 확인 후 계속 상승 등) pivot을 저항으로 쓰는 게
@@ -73,6 +81,7 @@ def compute_levels(close_series, high_series, low_series, pivot: float | None = 
         "support": round(support, 4) if support is not None else None, "support_source": support_source,
         "invalidation": round(invalidation, 4) if invalidation is not None else None,
         "invalidation_source": invalidation_source,
+        "atr_pct": atr_pct,
     }
 
 
@@ -84,12 +93,19 @@ def compute_scenarios(levels: dict) -> dict:
     support = levels.get("support")
     invalidation = levels.get("invalidation")
 
+    atr_pct = levels.get("atr_pct")
+    # v5.211(사용자 지시): 리스크%를 ATR 배수로도 병기 — scanner.py 손절폭
+    # 게이트가 쓰는 것과 같은 환산(risk_pct/atr_pct, L1774-1795 참고,
+    # 둘 다 "현재가 대비 %"라 굳이 가격단위로 변환 안 해도 동일 배수).
+    def _atr_mult(risk_pct):
+        return round(risk_pct / atr_pct, 1) if (risk_pct is not None and atr_pct) else None
+
     risk1 = None
     if support is not None and resistance:
         risk1 = round((resistance - support) / resistance * 100, 1)
     scenario1 = {
         "label": "① 저항 돌파", "condition": "거래량 1.5배+ 동반 돌파",
-        "entry": resistance, "stop": support, "risk_pct": risk1,
+        "entry": resistance, "stop": support, "risk_pct": risk1, "atr_mult": _atr_mult(risk1),
     }
 
     scenario2 = None
@@ -99,6 +115,7 @@ def compute_scenarios(levels: dict) -> dict:
         scenario2 = {
             "label": "② 저항 거절 → 지지 조정", "condition": "저항에서 밀려 지지까지 되돌림",
             "entry": support, "stop": invalidation, "risk_pct": risk2, "r_multiple": r2,
+            "atr_mult": _atr_mult(risk2),
         }
 
     scenario3 = {
@@ -112,19 +129,34 @@ def compute_scenarios(levels: dict) -> dict:
     # ★가 붙어서 "리스크 유리"로 오인될 수 있었다. RISK_LIMIT(8%) 이하인
     # 시나리오에만 ★ 자격을 주고, 둘 다 초과면 별 대신 경고로 바꾼다.
     RISK_LIMIT = 8.0
+    # v5.211(사용자 지시 — [2][3]): 2026-09-07 측정(docs/kr_us_strategy_map.md
+    # "손절폭(ATR 배수)과 손절 도달률의 관계") — 손절폭이 좁을수록(ATR
+    # 배수가 작을수록) 손절 도달률이 10개 탭×시장 조합 전부에서 단조
+    # 증가한다(정식 EV z검정 4/4 재현은 아니라 게이트는 안 바꾸지만,
+    # ★ 자격에는 반영). 8% 상한(risk_warning)은 원래 정의 그대로 유지 —
+    # ATR 미달은 "리스크 과대"가 아니라 "노이즈 손절 위험"이라 별개
+    # 문구([2], 프론트)로 처리하고 여기선 별 자격만 깎는다.
+    ATR_MIN_MULT = 1.0
     favored = None
     risk_warning = False
     r1, r2 = scenario1.get("risk_pct"), scenario2.get("risk_pct") if scenario2 else None
     if r1 is not None and r2 is not None:
-        ok1, ok2 = r1 <= RISK_LIMIT, r2 <= RISK_LIMIT
-        if not ok1 and not ok2:
+        cap1, cap2 = r1 <= RISK_LIMIT, r2 <= RISK_LIMIT
+        if not cap1 and not cap2:
             risk_warning = True
-        elif ok1 and ok2:
-            favored = 1 if r1 <= r2 else 2
-        elif ok1:
-            favored = 1
         else:
-            favored = 2
+            m1, m2 = scenario1.get("atr_mult"), scenario2.get("atr_mult")
+            ok1 = cap1 and (m1 is None or m1 >= ATR_MIN_MULT)
+            ok2 = cap2 and (m2 is None or m2 >= ATR_MIN_MULT)
+            if ok1 and ok2:
+                favored = 1 if r1 <= r2 else 2
+            elif ok1:
+                favored = 1
+            elif ok2:
+                favored = 2
+            # else: 둘 다 8%는 통과했지만 ATR<1.0 — favored 없음(별 없음),
+            # risk_warning도 아님(진짜 "리스크 과대"는 아니므로) — 각
+            # 시나리오 행의 개별 "노이즈 손절 위험" 배지([2])로만 표시.
 
     highlight = None
     if resistance and close >= resistance * 0.98:

@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.210</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.211</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3935,7 +3935,20 @@ function renderScenarioHtml(sc, market, domId, atrPct) {
   // v5.208(사용자 지시 — 버그수정): 🔴 카드와 같은 형식으로 통일 —
   // "진입 X · 손절 Y (-Z%)" 라벨 명시, 화살표 제거(조건→진입도 포함 —
   // 가격 두 개를 화살표로 이으면 "가격이 움직였다"로 오해하기 쉬움).
-  const riskParen = pct => pct != null ? ` (-${pct}%)` : '';
+  // v5.211(사용자 지시 — [1]): ATR 배수 병기("리스크 5.5% (1.2ATR)") —
+  // atr_mult는 scenario.py가 risk_pct/atr_pct로 이미 계산해서 넣어둠(둘
+  // 다 "현재가 대비 %"라 배수 자체는 그대로 재사용, 새 계산 없음).
+  const riskParen = (pct, atrMult) => {
+    if (pct == null) return '';
+    return atrMult != null ? ` (-${pct}%, ${atrMult}ATR)` : ` (-${pct}%)`;
+  };
+  // v5.211(사용자 지시 — [2]): 2026-09-07 측정(docs/kr_us_strategy_map.md
+  // "손절폭(ATR 배수)과 손절 도달률의 관계") — 손절폭 1.0ATR 미만은 10개
+  // 탭×시장 조합 전부에서 손절 도달률이 높았음(정식 EV z검정 재현은
+  // 아니라 게이트는 무변경, 표시 경고만).
+  const noiseWarn = atrMult => (atrMult != null && atrMult < 1.0)
+    ? ` <span style="color:#ff6b6b;font-weight:700">⚠️ 노이즈 손절 위험 — 손절 도달률 높음</span>`
+    : '';
   // v5.210(사용자 지시 — [2]): ①은 "저항 돌파 시 진입"인데, 원래 pivot을
   // 이미 넘어서(resistance_broken_pivot) 다음 저항으로 넘어간 경우라면
   // 지금 자리가 바로 그 "돌파 직후 0~0.5ATR" 구간일 수 있다 — 이 경우만
@@ -3943,9 +3956,9 @@ function renderScenarioHtml(sc, market, domId, atrPct) {
   const hugBadge = lv.resistance_broken_pivot != null
     ? pivotHugBadgeHtml(lv.close, lv.resistance_broken_pivot, atrPct)
     : '';
-  const row1 = `<div style="${hl(1)}">${s1.label} (${s1.condition}): 진입 ${fp(s1.entry)} · 손절 ${fp(s1.stop)}${riskParen(s1.risk_pct)}${star(1)}</div>${hugBadge}`;
+  const row1 = `<div style="${hl(1)}">${s1.label} (${s1.condition}): 진입 ${fp(s1.entry)} · 손절 ${fp(s1.stop)}${riskParen(s1.risk_pct, s1.atr_mult)}${star(1)}${noiseWarn(s1.atr_mult)}</div>${hugBadge}`;
   const row2 = s2
-    ? `<div style="${hl(2)}">${s2.label}: 진입 ${fp(s2.entry)} · 손절 ${fp(s2.stop)}${riskParen(s2.risk_pct)} · R ${s2.r_multiple}${star(2)}</div>`
+    ? `<div style="${hl(2)}">${s2.label}: 진입 ${fp(s2.entry)} · 손절 ${fp(s2.stop)}${riskParen(s2.risk_pct, s2.atr_mult)} · R ${s2.r_multiple}${star(2)}${noiseWarn(s2.atr_mult)}</div>`
     : `<div style="color:var(--muted)">② 계산 불가 — 지지/무효 없음</div>`;
   const row3 = `<div style="color:var(--muted)">${s3.label} — ${s3.condition} → ${s3.action}</div>`;
   return `<div class="jongga-forward-sub" style="cursor:pointer;margin-top:4px" onclick="toggleScenarioBox('${domId}')"><span id="${domId}_caret">▸</span> 시나리오 <span style="opacity:.6">(${sc.label})</span></div>

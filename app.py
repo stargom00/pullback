@@ -5,6 +5,48 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.211 [UI 개선] 시나리오 리스크를 ATR 배수로 병기(사용자 지시, 표시
+        전용 — 게이트·확인규칙 무변경).
+        [1] 재량 시나리오 ①②의 리스크% 옆에 ATR 배수 병기: "손절
+        10,300원 (-1.9%, 1.0ATR)". scenario.py compute_levels()가
+        close_series/high_series/low_series(이미 전달받는 df, 새 fetch
+        없음)로 scanner.atr()을 재계산해 atr_pct를 levels에 추가하고,
+        compute_scenarios()가 risk_pct/atr_pct로 atr_mult를 scenario1/
+        scenario2에 각각 부착(scanner.py 손절폭 게이트가 쓰는 것과 같은
+        환산 — 둘 다 "현재가 대비 %"라 가격 단위 변환 없이 배수 그대로).
+        [2] docs/kr_us_strategy_map.md에 새 절 "손절폭(ATR 배수)과 손절
+        도달률의 관계" 추가 — 5탭×KR/US 확인진입 표본(90개 체크포인트)
+        에서 손절 도달률(stop_rate)이 ATR배수 버킷(0.5~3.0+)이 커질수록
+        10개 탭×시장 조합 전부 단조 감소(예: 눌림목 KR 0.5~1.0ATR
+        67%(n=6) → 3.0ATR초과 33%(n=212)). 단, 이건 EV z검정으로
+        4/4 재현되는 수준은 아님(저배수 버킷 표본 부족으로 대부분
+        판정불가, 고배수 버킷의 유의한 EV차조차 초반/후반 반분에서
+        재현 안 됨) — 그래서 게이트가 아니라 시나리오 카드 손절폭
+        1.0ATR 미만에 "⚠️ 노이즈 손절 위험 — 손절 도달률 높음" 참고
+        경고를 붙이고 별 자격만 조정(아래 [2][3]).
+        [2][프론트] renderScenarioHtml에 noiseWarn(atrMult) 추가 — s1/
+        s2.atr_mult < 1.0이면 위 경고 문구를 해당 행에 인라인 표시.
+        [3] ★(R유리) 자격 변경: scenario.py compute_scenarios()의 favored
+        선정에 "8% 이하"(기존, RISK_LIMIT 그대로 유지) + "1.0ATR 이상"
+        (신규, ATR_MIN_MULT) 두 조건 모두 요구. 기존 "둘 다 8% 초과 시
+        ⚠️ 두 시나리오 모두 리스크 과대" 경고(risk_warning)는 8%
+        기준만으로 그대로 유지(사용자 지시 [3]) — ATR 미달은 "리스크
+        과대"가 아니라 "노이즈 손절 위험"이라 별개 문구([2])로 처리하고
+        risk_warning 조건 자체는 안 건드림(둘 다 8%는 통과했는데 ATR만
+        미달인 경우는 favored=None·risk_warning=False로 떨어지고, 각
+        행의 개별 [2] 배지만 뜬다).
+        검증: scenario.py 직접 호출 — (a) risk1=0.5%/atr_mult=0.5(8%는
+        통과하지만 ATR미달) vs risk2=2.0%/atr_mult=2.0 → favored=2(①은
+        별 없음, 노이즈 경고만) 확인. (b) 양쪽 다 atr_mult<1.0(0.5/0.1,
+        risk%는 둘 다 낮음)이면 favored=None·risk_warning=False(각자
+        노이즈 배지만, "리스크 과대" 아님) 확인. (c) 기존 8% 상한
+        회귀 확인 — risk1=9.1%/risk2=20%(둘 다 초과) → risk_warning=True
+        그대로(atr_mult와 무관하게 발동, 원래 동작 유지). (d) 실제
+        AAPL 6개월 데이터(yfinance)로 검증 — atr_pct=2.08%, 시나리오
+        ①4.3%/2.1ATR·②4.0%/1.9ATR, 둘 다 자격 충족·경고 없음·
+        favored=2. renderScenarioHtml Node 추출 테스트로 프론트 렌더링
+        (배수 표기·1.0ATR 경계(정확히 1.0이면 경고 없음)·노이즈 경고
+        문구) 확인.
 v5.210 [UI 개선] 피벗 밀착 금지 표시(사용자 지시, 표시 전용 —
         analyze_breakout()/analyze_boxbreak()/게이트 로직 무변경, 백엔드
         신규 필드 없음 — close/pivot/atr_pct 기존 필드만 재사용).
@@ -5466,7 +5508,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.210"
+VERSION = "v5.211"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
