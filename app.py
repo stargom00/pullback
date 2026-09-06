@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.205 [기능개선] 오늘의 메모(사용자 지시). 캘린더 탭 "🎯 오늘의 결정"
+        위에 자유 메모 textarea 신규 — 태그·검색·서식 없음, 그냥 텍스트
+        한 칸. 입력 1초 디바운스 후 자동 저장(POST /api/daily-note →
+        daily_notes.json, {날짜: 텍스트} 단일 필드 덮어쓰기라 병합 가드
+        불필요). 서버 저장이라 기기를 바꿔도 유지. 오늘 메모 아래 "어제
+        메모"를 접어서 표시(전날 쓴 걸 다음날 아침에 볼 수 있게).
+        구현 메모: #dailyNoteBox를 #calendarDoc 밖의 별도 DOM에 둠 —
+        renderCalendar()가 시장 필터를 누를 때마다 #calendarDoc을 통째로
+        다시 그리는데, 메모 textarea가 그 안에 있으면 필터 클릭마다
+        재생성돼 입력 중 커서/포커스가 끊기는 문제가 있어 분리(탭 진입
+        시 onEnterCalendarTab에서 1회만 채움). 실측: 로컬 서버 기동 후
+        POST→GET 라운드트립, 오늘/어제 두 날짜 키 모두 정상 저장·조회,
+        date 누락 시 400 확인.
 v5.204 [기능개선] 섹터 흐름 대장 선정 기준 강화(사용자 지시) — RS 순위만
         보면 바닥 반등주(장기추세 아래, 적자)가 섹터 대장으로 잡히는 문제.
         RS 순위 + 종가>200일선 + 최근 4분기 EPS 합>0로 게이트 추가.
@@ -5279,7 +5292,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.204"
+VERSION = "v5.205"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -11805,6 +11818,62 @@ def _build_sector_flow(today: str) -> dict | None:
         "new_high_sectors_us": [r["sector"] for r in rows_by_mkt["US"] if r["new_high_52w"]],
         "asof": today,
     }
+
+
+DAILY_NOTES_PATH = _resolve_persistent_path("daily_notes.json")
+
+
+def _load_daily_notes() -> dict:
+    """v5.205(사용자 지시) — 캘린더 탭 자유 메모. {날짜: 텍스트} 단일 필드
+    덮어쓰기라 저널/스냅샷류와 달리 병합 가드 자체가 필요 없음."""
+    if os.path.exists(DAILY_NOTES_PATH):
+        try:
+            with open(DAILY_NOTES_PATH, encoding="utf-8") as f:
+                data = _json.load(f)
+                return data if isinstance(data, dict) else {}
+        except (ValueError, OSError):
+            return {}
+    return {}
+
+
+def _save_daily_notes(notes: dict) -> None:
+    try:
+        tmp = DAILY_NOTES_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(notes, f, ensure_ascii=False)
+        os.replace(tmp, DAILY_NOTES_PATH)
+    except OSError as e:
+        print(f"[daily_notes] 저장 실패: {e}", flush=True)
+
+
+@app.get("/api/daily-note")
+async def get_daily_note():
+    """오늘 메모 + 어제 메모(접힘 표시용) 반환. 태그·검색·서식 없음 — 순수
+    텍스트 한 덩어리."""
+    notes = _load_daily_notes()
+    now = datetime.now(KST)
+    today = now.strftime("%Y-%m-%d")
+    yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    return JSONResponse({
+        "today": today, "today_note": notes.get(today, ""),
+        "yesterday": yesterday, "yesterday_note": notes.get(yesterday, ""),
+    })
+
+
+@app.post("/api/daily-note")
+async def save_daily_note(request: Request):
+    """저장만 — 서버가 진실원(기기 바뀌어도 유지). 클라이언트가 1초
+    디바운스 후 호출(매 키입력마다 안 침). 단일 필드 덮어쓰기라 마지막
+    저장이 그대로 이김(동시편집 시나리오 자체가 없는 개인 도구)."""
+    body = await request.json()
+    date = (body.get("date") or "").strip()
+    if not date:
+        return JSONResponse({"ok": False, "error": "date 필요"}, status_code=400)
+    text = body.get("text") or ""
+    notes = _load_daily_notes()
+    notes[date] = text
+    _save_daily_notes(notes)
+    return JSONResponse({"ok": True})
 
 
 @app.post("/api/refresh-market")

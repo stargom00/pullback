@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.204</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.205</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -713,6 +713,12 @@ tr.editing{background:rgba(242,179,61,.06)}
 <!-- v5.108: 📅 캘린더 탭 — 로그인 후 기본 화면. 오늘 요약(게이트 신호등+
      돈의흐름 한 문장) + D+14 매크로 일정/휴장일/보유·즐겨찾기 실적일. -->
 <div class="jrnl-wrap" id="calendarView" style="display:none">
+  <!-- v5.205(사용자 지시): 오늘의 메모 — #calendarDoc(renderCalendar가
+       market 필터 클릭마다도 통째로 다시 그림) 밖에 별도로 둔다. 안에
+       두면 필터를 누를 때마다 textarea가 통째로 재생성돼 입력 중 커서/
+       포커스가 끊긴다. renderCalendar가 아니라 onEnterCalendarTab에서
+       탭 진입 시 1회만 채움. -->
+  <div id="dailyNoteBox"></div>
   <div id="calendarDoc">불러오는 중…</div>
 </div>
 
@@ -3630,7 +3636,82 @@ async function refreshCalendarTab() {
   }
   await onEnterCalendarTab();
 }
+// v5.205(사용자 지시): 캘린더 탭 자유 메모 — textarea, 입력 1초 후 자동
+// 저장(/api/daily-note), 오늘 메모 + "어제 메모" 접힘. 서버(daily_notes.json,
+// 날짜 키 단일 필드 덮어쓰기)가 진실원이라 기기를 바꿔도 유지되고, 병합
+// 가드가 필요 없다(충돌 개념 자체가 없음). #calendarDoc 밖의 별도
+// #dailyNoteBox에 렌더(이유는 static HTML 쪽 주석 참고) — onEnterCalendarTab
+// 에서 탭 진입 시 1회만 채우고, renderCalendar()의 market 필터 재렌더는
+// 안 건드린다(그래야 필터를 눌러도 입력 중인 textarea가 안 끊김).
+let _dailyNoteDate = null;
+let _dailyNoteSaveTimer = null;
+let _dailyNoteYesterdayOpen = false;
+
+function _escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+}
+
+async function loadDailyNoteBox() {
+  const box = document.getElementById('dailyNoteBox');
+  if (!box) return;
+  try {
+    const res = await fetch('/api/daily-note');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    _dailyNoteDate = d.today;
+    renderDailyNoteBox(d);
+  } catch (e) {
+    box.innerHTML = '';   // 조용히 생략 — 캘린더 본문 로드를 막지 않음
+  }
+}
+
+function toggleDailyNoteYesterday() {
+  _dailyNoteYesterdayOpen = !_dailyNoteYesterdayOpen;
+  const body = document.getElementById('dailyNoteYesterdayBody');
+  if (body) body.style.display = _dailyNoteYesterdayOpen ? '' : 'none';
+  const caret = document.getElementById('dailyNoteYesterdayCaret');
+  if (caret) caret.textContent = _dailyNoteYesterdayOpen ? '▾' : '▸';
+}
+
+function renderDailyNoteBox(d) {
+  const box = document.getElementById('dailyNoteBox');
+  if (!box) return;
+  const yesterdayHtml = d.yesterday_note
+    ? `<div class="jongga-forward-sub" style="cursor:pointer;margin-top:6px" onclick="toggleDailyNoteYesterday()"><span id="dailyNoteYesterdayCaret">▸</span> 어제(${d.yesterday}) 메모</div>
+       <div id="dailyNoteYesterdayBody" style="display:none;font-size:12px;color:var(--muted);white-space:pre-wrap;padding:4px 0 0 14px">${_escapeHtml(d.yesterday_note)}</div>`
+    : '';
+  box.innerHTML = `<div style="margin-bottom:14px">
+    <textarea id="dailyNoteText" placeholder="오늘의 메모 — 자유롭게" style="width:100%;min-height:60px;font-size:13px;line-height:1.5;padding:8px;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:8px;resize:vertical;box-sizing:border-box">${_escapeHtml(d.today_note)}</textarea>
+    <div id="dailyNoteStatus" style="font-size:10px;color:var(--muted);margin-top:2px;height:12px"></div>
+    ${yesterdayHtml}
+  </div>`;
+  const ta = document.getElementById('dailyNoteText');
+  if (ta) ta.addEventListener('input', e => {
+    clearTimeout(_dailyNoteSaveTimer);
+    const status = document.getElementById('dailyNoteStatus');
+    if (status) status.textContent = '';
+    _dailyNoteSaveTimer = setTimeout(() => saveDailyNote(e.target.value), 1000);
+  });
+}
+
+async function saveDailyNote(text) {
+  const status = document.getElementById('dailyNoteStatus');
+  try {
+    await fetch('/api/daily-note', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: _dailyNoteDate, text }),
+    });
+    if (status) {
+      status.textContent = '저장됨';
+      setTimeout(() => { if (status) status.textContent = ''; }, 1500);
+    }
+  } catch (e) {
+    if (status) status.textContent = '저장 실패 — 네트워크 확인';
+  }
+}
+
 async function onEnterCalendarTab() {
+  loadDailyNoteBox();   // 캘린더 본문과 독립 — 실패해도 본문 로드는 계속
   const doc = document.getElementById('calendarDoc');
   doc.innerHTML = '<div class="loading"><div class="spinner"></div>불러오는 중…</div>';
   try {
