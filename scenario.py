@@ -24,7 +24,18 @@ def compute_levels(close_series, high_series, low_series, pivot: float | None = 
     관례 — lo.tail(N).min() — 와 같은 방식, N=60은 이 용도의 범용 기본값)."""
     close = float(close_series.iloc[-1])
 
-    if pivot:
+    # v5.200 [3](사용자 지시 — 버그수정): pivot이 있어도 현재가가 이미 그
+    # pivot을 넘었으면(돌파 확인 후 계속 상승 등) pivot을 저항으로 쓰는 게
+    # 무의미하다(이미 지나간 자리) — 다음 저항(20일 고가, 그것도 pivot보다
+    # 낮으면 pivot 유지)으로 넘어가되, resistance_broken_pivot에 원래
+    # pivot을 같이 반환해 프론트가 "(pivot 5,730 돌파 후 다음 저항)"처럼
+    # 왜 20일고가가 됐는지 명시할 수 있게 한다(조용히 바뀌면 혼란).
+    resistance_broken_pivot = None
+    if pivot and close >= pivot:
+        resistance_broken_pivot = float(pivot)
+        resistance = max(float(high_series.tail(20).max()), float(pivot))
+        resistance_source = "20일고가"
+    elif pivot:
         resistance, resistance_source = float(pivot), "pivot"
     else:
         resistance, resistance_source = float(high_series.tail(20).max()), "20일고가"
@@ -58,6 +69,7 @@ def compute_levels(close_series, high_series, low_series, pivot: float | None = 
     return {
         "close": round(close, 4),
         "resistance": round(resistance, 4), "resistance_source": resistance_source,
+        "resistance_broken_pivot": round(resistance_broken_pivot, 4) if resistance_broken_pivot is not None else None,
         "support": round(support, 4) if support is not None else None, "support_source": support_source,
         "invalidation": round(invalidation, 4) if invalidation is not None else None,
         "invalidation_source": invalidation_source,
@@ -95,9 +107,24 @@ def compute_scenarios(levels: dict) -> dict:
         "action": "관심 해제",
     }
 
+    # v5.200 [3](사용자 지시 — 버그수정): 예전엔 ①②의 리스크 중 그냥 더 낮은
+    # 쪽에 항상 ★를 줬는데, 둘 다 리스크가 커도(예: 12% vs 15%) "낮은 쪽"에
+    # ★가 붙어서 "리스크 유리"로 오인될 수 있었다. RISK_LIMIT(8%) 이하인
+    # 시나리오에만 ★ 자격을 주고, 둘 다 초과면 별 대신 경고로 바꾼다.
+    RISK_LIMIT = 8.0
     favored = None
-    if scenario1.get("risk_pct") is not None and scenario2 and scenario2.get("risk_pct") is not None:
-        favored = 1 if scenario1["risk_pct"] <= scenario2["risk_pct"] else 2
+    risk_warning = False
+    r1, r2 = scenario1.get("risk_pct"), scenario2.get("risk_pct") if scenario2 else None
+    if r1 is not None and r2 is not None:
+        ok1, ok2 = r1 <= RISK_LIMIT, r2 <= RISK_LIMIT
+        if not ok1 and not ok2:
+            risk_warning = True
+        elif ok1 and ok2:
+            favored = 1 if r1 <= r2 else 2
+        elif ok1:
+            favored = 1
+        else:
+            favored = 2
 
     highlight = None
     if resistance and close >= resistance * 0.98:
@@ -109,7 +136,7 @@ def compute_scenarios(levels: dict) -> dict:
         "label": "재량 시나리오",
         "levels": levels,
         "scenario1": scenario1, "scenario2": scenario2, "scenario3": scenario3,
-        "favored": favored, "highlight": highlight,
+        "favored": favored, "highlight": highlight, "risk_warning": risk_warning,
     }
 
 

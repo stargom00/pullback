@@ -5,6 +5,44 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.200 [버그수정] 3건(사용자 지시).
+        [1] "다시 스캔"이 휴장일에 동작 안 함. [조사] is_trading_day
+        가드가 아니라 _market_session_key()가 요일/시각만으로 "장 마감
+        확정" daykey를 만드는 게 원인(실제 공휴일 여부는 안 봄) —
+        _fetch_market_data_inner()가 이 daykey에 메모리/디스크 캐시가
+        있으면 refresh 여부와 무관하게 무조건 그 캐시를 반환해서, 스캔
+        자체가 재실행이 안 됐다(캘린더 미갱신 쪽 문제가 아니었음 — 애초에
+        시장데이터 번들이 안 바뀌니 캘린더가 갱신될 것도 없었음). 실측:
+        _data_cache에 오늘(일요일) daykey로 mem을 직접 넣고 확인 —
+        force=False면 get_universe() 0회 호출(캐시 즉시 반환), force=True면
+        1회 호출(재계산 경로 진입) 확인. [수정] _fetch_market_data/
+        _fetch_market_data_inner에 force 매개변수 추가 — "다시 스캔"
+        (refresh=true)이면 daykey/TTL 캐시 우선 반환 두 개를 전부 건너뛰고
+        무조건 재계산(종목별 실제 재수집 여부는 안쪽 REUSE_TTL이 그대로
+        판단하므로 닫힌 시장에 헛기별 안 함). 캘린더 탭은 애초에 [data-mode]
+        스캔 모드가 아니라 "다시 스캔" 클릭이 조용히 pullback으로 폴백돼
+        숨겨진 #content만 갱신했던 것도 같이 수정 — /api/refresh-market
+        신규(get_calendar() 자체는 "새 fetch 안 함" 원 설계 유지, 이
+        엔드포인트가 번들만 강제 갱신한 뒤 프론트가 /api/calendar를
+        재호출). 재계산 경로를 타면 sector_snapshot.json도 같이 갱신됨
+        (_fetch_market_data_inner 안에 이미 있던 로직 재사용).
+        [2] 시나리오 카드가 auto_watch 출처(예: 🟠이미돌파의 코스맥스엔비티)
+        엔 없었음 — pending_watch만 시나리오를 계산하고 있었다.
+        auto_watch의 4개 append 지점(진입후보/관심/근접-대기/근접-만료 중
+        만료 제외 3곳 — confirmed 상태는 이미 판정 끝나 재량 시나리오
+        대상 아님, pending_watch의 confirmed 제외와 같은 원칙) 전부에
+        _scenario_for() 부착. df는 새로 안 받고 _calendar_ticker_df로
+        auto_watch 갱신 시 이미 캐시된 bundle을 재사용.
+        [3] 시나리오 ★ 로직 — ①②의 리스크 중 낮은 쪽에 무조건 ★를 주던
+        걸 "리스크 ≤8%인 쪽에만" ★로 제한. 둘 다 8% 초과면 ★ 대신
+        "⚠️ 두 시나리오 모두 리스크 과대 — 지금 자리 아님" 경고로 교체
+        (scenario.py risk_warning 필드 신규). 저항이 20일고가로 잡히는
+        경우 확인 — pivot이 있어도 현재가가 이미 그 pivot을 넘었으면
+        (이미 지나간 자리라 저항으로 쓸 이유가 없음) 다음 저항(20일고가,
+        그게 pivot보다 낮으면 pivot 유지)으로 넘어가도록 만들고,
+        resistance_broken_pivot 필드로 원래 pivot 값을 같이 반환해 카드에
+        "(pivot 5,730 돌파 후 다음 저항)"처럼 명시(조용히 숫자만 바뀌면
+        왜 안 쓰였는지 헷갈림).
 v5.199 [버그수정] 캘린더 시장 필터(전체/한국/미국)가 "오늘의 결정" 섹션에
         적용 안 되던 문제(사용자 리포트 — 🟡근접에 US 종목 노출).
         [원인] renderTodayDecisionHtml()이 전역 `market` 변수를 아예 안
@@ -5161,7 +5199,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.199"
+VERSION = "v5.200"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -5611,7 +5649,7 @@ _market_fetch_locks: dict = {}
 _market_refreshing: dict = {}   # v4.86: cache_key -> True인 동안 백그라운드 갱신 진행중
 
 
-async def _fetch_market_data(market: str, wait_for_fresh: bool = False) -> dict | None:
+async def _fetch_market_data(market: str, wait_for_fresh: bool = False, force: bool = False) -> dict | None:
     """시장 단위로 종목 일봉 + RS 계산. 모드와 무관하므로 시장별로 캐시해 재사용.
     여기서만 네이버/야후를 호출한다 (모드 전환 시 재호출 안 함).
 
@@ -5628,12 +5666,25 @@ async def _fetch_market_data(market: str, wait_for_fresh: bool = False) -> dict 
                revalidate). 캐시가 아예 없을 때(콜드 스타트)만 실제로 기다린다.
                wait_for_fresh=True(스케줄러 워밍 전용)는 기존처럼 락을 잡고
                진짜로 최신 데이터가 될 때까지 기다린다 — 워밍의 목적 자체가
-               '미리 실제로 받아두기'라 여기서까지 스킵하면 캐시가 영영 안 됨."""
+               '미리 실제로 받아두기'라 여기서까지 스킵하면 캐시가 영영 안 됨.
+
+    v5.200(사용자 지시 — 버그수정): force=True("다시 스캔" 버튼 전용) —
+    휴장일엔 _market_session_key()가 요일/시각만으로 "장 마감 확정"
+    daykey를 만드는데(실제 공휴일 여부는 안 봄, is_trading_day()와 다른
+    기준), 이 daykey에 이미 메모리/디스크 캐시가 있으면 위 두 캐시 우선
+    분기가 refresh 여부와 무관하게 무조건 그 캐시를 반환해버려서 "다시
+    스캔"을 눌러도 아무 일도 안 일어났다(스캔 자체가 재실행 안 되니
+    sector_snapshot.json 갱신·섹터 흐름 카드도 당연히 그대로). force=True는
+    _fetch_market_data_inner()의 daykey/TTL 캐시 우선 반환 두 개를 전부
+    건너뛰고 무조건 재계산 경로를 태운다 — 종목별 실제 재수집 여부는
+    이 함수보다 안쪽(REUSE_TTL, 30분)이 그대로 판단하므로 시장이 닫혀
+    있으면 네이버/야후를 헛되이 두들기지 않는다(가격은 동일, 재계산되는
+    건 RS·섹터 통계 등 파생값과 daykey 캐시 갱신 자체)."""
     cache_key = f"data:{market}"
-    if wait_for_fresh:
+    if wait_for_fresh or force:
         _lock = _market_fetch_locks.setdefault(cache_key, asyncio.Lock())
         async with _lock:
-            return await _fetch_market_data_inner(market, cache_key)
+            return await _fetch_market_data_inner(market, cache_key, force=force)
 
     daykey = _market_session_key(market)
     mem = _data_cache.get(cache_key)
@@ -5680,11 +5731,12 @@ async def _refresh_market_data_bg(market: str, cache_key: str):
         _market_refreshing[cache_key] = False
 
 
-async def _fetch_market_data_inner(market: str, cache_key: str) -> dict:
+async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = False) -> dict:
 
     # 1) 장 마감 후면 디스크 캐시 우선 — 다음 거래일까지 재호출 0
+    #    (v5.200: force=True면 건너뜀 — "다시 스캔" 버튼용, 위 _fetch_market_data 참고)
     daykey = _market_session_key(market)
-    if daykey:
+    if daykey and not force:
         mem = _data_cache.get(cache_key)
         if mem and mem.get("daykey") == daykey:
             return mem  # 메모리에 이미 그날치 있음
@@ -5693,9 +5745,9 @@ async def _fetch_market_data_inner(market: str, cache_key: str) -> dict:
             _data_cache[cache_key] = disk  # 메모리로 승격
             return disk
 
-    # 2) 장중/애매한 시간 → 기존 10분 메모리 TTL
+    # 2) 장중/애매한 시간 → 기존 10분 메모리 TTL (force=True면 이것도 건너뜀)
     cached = _data_cache.get(cache_key)
-    if cached and not daykey and time.time() - cached["ts"] < DATA_TTL:
+    if cached and not daykey and not force and time.time() - cached["ts"] < DATA_TTL:
         return cached
 
     universe = get_universe(market)
@@ -7169,9 +7221,11 @@ async def _run_scan_earnings(bundle: dict) -> dict:
     return _pending_scan_result("all", "earnings")
 
 
-async def run_scan(market: str, mode: str) -> dict:
+async def run_scan(market: str, mode: str, refresh: bool = False) -> dict:
     # 데이터는 시장 단위 캐시에서 (모드 바뀌어도 재호출 안 함)
-    bundle = await _fetch_market_data(market)
+    # v5.200: refresh=True("다시 스캔")면 force=True로 넘겨 휴장일 daykey
+    # 캐시 고정을 우회 — 아래 _fetch_market_data 참고.
+    bundle = await _fetch_market_data(market, force=refresh)
     if bundle is None:
         return _pending_scan_result(market, mode)
     if mode == "earnings":
@@ -7342,7 +7396,7 @@ async def scan(market: str = "all", mode: str = "imminent", refresh: bool = Fals
         fresh = (cached.get("daykey") == daykey) if daykey else (time.time() - cached["ts"] < CACHE_TTL)
         if fresh:
             return JSONResponse(_clean_nan({**cached, "favorites": favs, "cached": True}))
-    result = await run_scan(market, mode)
+    result = await run_scan(market, mode, refresh=refresh)
     if result.get("pending"):
         # v5.12: 준비 중 응답은 캐시에 저장하면 안 됨 — 안 그러면 실제 데이터가
         # 준비된 뒤에도 다음 요청이 이 pending 스냅샷을 계속 돌려주게 됨.
@@ -11574,6 +11628,24 @@ def _build_sector_flow(today: str) -> dict | None:
     }
 
 
+@app.post("/api/refresh-market")
+async def refresh_market(market: str = "all"):
+    """v5.200(사용자 지시 — 버그수정) — 캘린더 탭의 "다시 스캔" 전용.
+    get_calendar()는 원래 설계대로 새 fetch를 직접 안 하므로(무거운 홈
+    화면이 되면 안 됨, 위 get_calendar() docstring 참고), 캘린더에서
+    "다시 스캔"을 누르면 모드별 스캔(analyze_* 전체 순회) 없이 시장 데이터
+    번들만 강제 갱신한다. 휴장일엔 _market_session_key()가 "장 마감
+    확정" daykey를 만들어 버려서(실제 공휴일 여부는 안 봄) 이 번들이
+    캐시에 이미 있으면 보통은 그 캐시를 그대로 돌려주는데, force=True로
+    그 우선순위를 건너뛰고 무조건 재계산 경로를 태운다 — 재계산 과정에서
+    sector_snapshot.json(섹터 흐름 카드 원본)도 같이 갱신된다
+    (_fetch_market_data_inner 참고). 프론트는 이 호출 뒤 /api/calendar를
+    다시 불러오면 된다(같은 _data_cache를 그대로 읽으므로)."""
+    market = market if market in ("kr", "us", "all") else "all"
+    bundle = await _fetch_market_data(market, force=True)
+    return JSONResponse({"ok": bundle is not None, "market": market})
+
+
 @app.get("/api/calendar")
 async def get_calendar():
     """캘린더 탭 — 로그인 후 기본 화면(v5.108). v5.110(사용자 지시)에서
@@ -12179,6 +12251,14 @@ async def get_calendar():
             # (entry/stop/target_2r 감춤). 강한확인 배지(vol_mult>=2.0)는
             # 같은 무효 격자탐색이 근거였으므로 계산·표시 둘 다 제거.
             is_entry_candidate = rec["tab"] == "돌파임박" and rec.get("market") == "KR"
+            # v5.200 [2](사용자 지시 — 버그수정): auto_watch 출처도 pending_watch와
+            # 같은 섹션(🔎관심/🟡근접/🟠이미돌파)에 섞여 나오는데 시나리오가
+            # 안 붙어 있었다 — 출처 무관 동일 표시 원칙. df는 새로 안 받고
+            # _calendar_ticker_df(캐시 전용, _refresh_auto_watch가 이미 채워둔
+            # bundle 재사용)로.
+            _df_aw = _calendar_ticker_df(rec["ticker"])
+            _snap_aw = get_signal_snapshot(rec["ticker"], rec["tab"])
+            scenario_aw = _scenario_for(_df_aw, _snap_aw)
             if is_entry_candidate:
                 target_2r = round(entry + 2 * (entry - stop), 2)
                 # v5.175(사용자 지시 — 게이트→배지 전환) 원래 등록 게이트였던
@@ -12195,7 +12275,7 @@ async def get_calendar():
                     "rs": rec.get("rs"),
                     "verdict": "entry_candidate", "entry_method": "종가진입",
                     "strong_setup": strong_setup,
-                    "confirm_date": rec.get("confirmed_at"),
+                    "confirm_date": rec.get("confirmed_at"), "scenario": scenario_aw,
                     "reason": "돌파임박 진입 후보 (종가진입 0.157R z=2.37, 한계) · docs/confirm_entry_lookahead_2026-09-04.md",
                 })
             else:
@@ -12209,7 +12289,7 @@ async def get_calendar():
                     "source": "auto_watch", "key": f"auto_watch:{key}",
                     "ticker": rec["ticker"], "name": rec.get("name") or rec["ticker"],
                     "market": rec.get("market"), "tab": rec["tab"], "confirmed_at": rec.get("confirmed_at"),
-                    "close": entry, "pivot": pivot, "stop": stop,
+                    "close": entry, "pivot": pivot, "stop": stop, "scenario": scenario_aw,
                     "reason": f"{rec['tab']} 관심 — 확인됐으나 진입 근거 미유의 · docs/confirm_entry_lookahead_2026-09-04.md",
                 })
         elif rec.get("status") == "watching":
@@ -12226,6 +12306,11 @@ async def get_calendar():
                 close = _calendar_current_price(rec["ticker"])
                 if pivot and close is not None and close > pivot:
                     promoted_to_near = True
+                    # v5.200 [2]: 🟠이미돌파(near, dist_pct<=0)의 대다수가 이
+                    # 경로(watching→피벗 돌파) — 코스맥스엔비티 사례처럼
+                    # auto_watch 출처엔 시나리오가 아예 안 붙던 문제.
+                    _df_aw2 = _calendar_ticker_df(rec["ticker"])
+                    _snap_aw2 = get_signal_snapshot(rec["ticker"], rec["tab"])
                     near.append({
                         "source": "auto_watch", "key": f"auto_watch_wait:{key}",
                         "ticker": rec["ticker"], "name": rec.get("name") or rec["ticker"],
@@ -12235,6 +12320,7 @@ async def get_calendar():
                         "confirm_pending": True, "confirm_expired": False,
                         "vol_mult_required": CONFIRM_VOL_MULT_BY_TAB.get(rec["tab"], 1.5),
                         "atr_pct": rec.get("atr_pct"),
+                        "scenario": _scenario_for(_df_aw2, _snap_aw2),
                         "reason": f"{rec['tab']} 피벗 돌파 — 거래량 확인 대기",
                     })
             if not promoted_to_near:
