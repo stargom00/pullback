@@ -5,6 +5,26 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.198 [버그수정] "서버 배지 v5.194" 재확인(사용자 지시) — 실제 원인은
+        배포가 아니라 static/index.html의 #verBadge 정적 텍스트가
+        v5.194로 하드코딩된 채 안 바뀌고 있었던 것. 이 값은 페이지 첫
+        렌더 시 정적으로 박히고 API 응답(data.version)이 와야 JS가
+        덮어쓰는데(loadCalendar/load() 참고), v5.195~v5.197에서 VERSION은
+        올렸지만 이 정적 배지는 안 바꿔서 실제 배포 여부와 무관하게 화면엔
+        계속 v5.194가 보였음(grep으로 확인: app.py VERSION=v5.197,
+        static/index.html #verBadge=v5.194). #verBadge를 v5.198로 맞춤.
+        재발 방지: test_version_sync.py 신규 — app.py VERSION과 #verBadge
+        정적값이 다르면 테스트 실패(버전 올릴 때 하나 빠뜨리면 CI가 잡음).
+        [추가 발견] 이 배지는 load()(5탭 스캔)와 loadSectors()(📊섹터
+        탭)에서만 API 응답의 data.version으로 갱신됐고, 기본 진입 탭인
+        "📅 캘린더"(onEnterCalendarTab)는 이 로직 자체가 없었다 — 게다가
+        /api/calendar 응답엔 "version" 필드 자체가 없었음. 즉 캘린더
+        탭만 쓰는 사용자는 배포가 몇 번을 성공하든 페이지에 정적으로 박힌
+        텍스트를 영원히 계속 보게 되는 구조적 문제였다(v5.197에서 조사한
+        "배포 실패" 가설과는 별개 원인 — 배포 자체는 정상이었을 가능성이
+        높음). get_calendar() 응답에 "version": VERSION 추가 +
+        onEnterCalendarTab()도 load()/loadSectors()와 같은 패턴으로 배지
+        갱신하도록 수정.
 v5.197 [긴급 수정] v5.195/v5.196 배포 후 서버가 v5.194 그대로였던 문제
         조사(사용자 지시, 커밋명 us-industry-cache-boot-fix).
         [조사] (1) git log origin/main — 커밋 f6cc7b3까지 push 정상 확인
@@ -5129,7 +5149,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.197"
+VERSION = "v5.198"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -12350,6 +12370,7 @@ async def get_calendar():
         print(f"[calendar] sector_flow 조회 실패: {e}")
 
     return JSONResponse(_clean_nan({
+        "version": VERSION,   # v5.198: 캘린더(기본 진입 탭)도 verBadge 갱신 — 이전엔 이 필드가 없어 캘린더만 쓰면 배지가 안 바뀜
         "today": today,
         "today_decision": today_decision,
         "sector_flow": sector_flow,

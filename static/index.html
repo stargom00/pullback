@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.194</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.198</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3621,6 +3621,11 @@ async function onEnterCalendarTab() {
     const res = await fetch('/api/calendar');
     if (!res.ok) throw new Error('HTTP ' + res.status);
     _calendarData = await res.json();
+    // v5.198(사용자 지시 — 버전 배지 동기화): 캘린더 탭(기본 진입 탭)은
+    // 예전엔 이 배지를 안 건드려서, 캘린더 탭만 쓰는 사용자는 실제 배포
+    // 버전과 무관하게 페이지 로드 시 박힌 정적 텍스트를 계속 보고 있었다
+    // — load()/loadSectors()와 같은 패턴으로 통일.
+    if (_calendarData.version) { const vb = document.getElementById('verBadge'); if (vb) vb.textContent = _calendarData.version; }
     await _promoteConfirmCloseEntries(_calendarData.today_decision);
     await _archiveExpiredPending(_calendarData.today_decision);
     renderCalendar(_calendarData);
