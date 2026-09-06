@@ -5,6 +5,64 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.207 [긴급 수정] 월요일(US Labor Day 휴장) 🔴 즉시 행동에 US 눌림목
+        12건+ 노출(사용자 지시, 실제 사고일 2026-09-07 기준 조사).
+        [1] hit_date 조사: US 눌림목 히트 자체엔 "봉 날짜 vs 스캔실행일"
+        오염이 없었다 — _warm_market()이 is_trading_day()로 막혀 있어
+        휴장일엔 `_cache["us:pullback"]`을 아예 다시 안 씀(마지막 실제
+        거래일=금요일 09-04 값 그대로 보존, daykey도 정확히 "2026-09-04").
+        진짜 원인은 그 뒤 "표시" 단계: get_calendar()의 US 눌림목 즉시진입
+        블록이 이 캐시를 "오늘이 실제로 열렸는지" 전혀 확인 안 하고 캐시가
+        있으면 무조건 🔴로 올렸음.
+        [별도 발견 — 후속 조사 권고] `_fetch_market_data_inner()`(모든
+        /api/scan 요청·"다시 스캔"이 타는 경로)는 `_warm_market()`과 달리
+        is_trading_day()를 아예 안 봄 — `_market_session_key()`(요일/시각
+        휴리스틱, 공휴일 모름)만 본다. 즉 사용자가 스캔 탭을 열거나 "다시
+        스캔"을 누르면 휴장일에도 "오늘 확정"으로 잘못 라벨링된 재계산이
+        일어날 수 있다(이번 사고의 12건이 정확히 이 경로로 재계산된
+        결과인지, 아니면 금요일 원본 그대로인지는 Railway 쪽 캐시 상태를
+        직접 못 봐서 확정 못 함 — [5] 참고). 이번 긴급 패치는 "표시 시점
+        재확인"으로 증상을 막았고, 이 캐싱 레이어 자체(_market_session_key
+        전반)를 휴장일 인식하게 고치는 건 더 큰 변경이라 별도 후속 과제로
+        남김.
+        [2] 수정: get_calendar()에 us_trading_today/kr_trading_today
+        (is_trading_day 재사용) 추가. US 눌림목 즉시진입 블록 — US
+        휴장이면 🔴 대신 🔎 "US 휴장 — 다음 개장 시 확인"으로 강등.
+        돌파임박 KR 종가진입(pending_watch) — is_entry_candidate에
+        confirm_bar_date==today 조건 추가(대칭 적용), 휴장이 원인이면
+        같은 방식으로 🔎 "KR 휴장 — 다음 개장 시 확인" 강등. auto_watch
+        경로는 이미 confirmed_at==today 요구가 같은 역할을 해서 별도
+        수정 불필요(확인).
+        실측(오늘 실제 2026-09-07 Labor Day로 검증): 가짜 US 눌림목
+        캐시 2건 주입 후 get_calendar() 호출 — 수정 전 로직이면 🔴 2건,
+        수정 후 🔴 0건·🔎 2건("US 휴장…" 라벨) 확인. 정상 거래일(화요일
+        시뮬레이션)엔 회귀 없이 그대로 🔴 유지 확인.
+        [3] "$35.60 → $34.76 (-2.4%)" 출처 확인: 시세 아님, 정확히 지목한
+        게 맞음. 두 번째 숫자는 손절가(scanner.py analyze() — 현재가
+        아래 10/20/60일선 중 가장 가까운 것×0.99, 또는 significant_
+        support 중 더 가까운 쪽)이고 퍼센트는 todayDecisionRiskBadge()의
+        (entry-stop)/entry — 둘 다 정적 계산값. 종목마다 -2.4~-2.7%로
+        좁게 몰리는 건 "눌림목" 스크리닝 자체가 "가격이 지지 이평선에
+        붙어있어야" 통과되는 조건이라(정의상 손절폭이 좁게 나옴) 생기는
+        자연스러운 결과 — 실데이터로 재확인(XOM 3.25%, JNJ 2.98%, 나머지
+        18개 종목은 아예 미통과). 버그 아님, 다만 이 사실 자체를 화면에
+        설명 없이 보여주는 건 오해 소지가 있어 참고로 남김.
+        [4] decision_log.json 확인 — 로컬엔 파일 자체가 없음(Railway
+        서버 전용 런타임 파일, git에도 없음) → 실제 서버 파일을 못 열어
+        금/토/일 건수는 직접 확인 못 함. 대신 기록 메커니즘은 확인:
+        `_log_decision_snapshot()`은 `_warm_market()`의 is_trading_day
+        게이트 안에서만 호출되므로, 토/일(주말)은 이 시장 자체에 대해
+        로그 항목이 아예 안 생김("0건 기록"이 아니라 "그 날짜 키 자체가
+        없음"). 금요일 항목은 그날 EOD 시점 get_calendar() 결과를 그대로
+        반영하므로 있을 가능성이 높음 — Railway에서 해당 파일을 직접
+        열어 확인 필요.
+        [5] 12건이 금요일 원본과 동일 집합인지 — Railway의 실행 중
+        `_cache`를 직접 못 봐서 확정 못 함. 위 [1] 별도발견이 실제로
+        발동했다면(주말/휴장 중 스캔 탭 방문 또는 "다시 스캔" 클릭)
+        재계산으로 집합이 달라졌을 수 있고, 아무도 안 건드렸다면 금요일
+        원본과 동일할 것. Railway 로그에서 `[TIMING]` 라인 중 이번 주말/
+        오늘 새벽 `market: us`로 `n_fetched_us>0`인 게 있는지 확인하면
+        재계산 발생 여부를 판별 가능(로그 접근 권한 없어 직접 확인 못 함).
 v5.206 [UI 개선] 오늘의 메모 textarea 크기(사용자 지시) — 기본 5줄
         (rows=5), 내용이 늘어나면 scrollHeight 기준으로 최대 15줄까지
         자동 확장(그 이상은 내부 스크롤), resize:vertical은 그대로 둬서
@@ -5297,7 +5355,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.206"
+VERSION = "v5.207"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -11910,6 +11968,12 @@ async def get_calendar():
     비운다."""
     today_dt = datetime.now(KST)
     today = today_dt.strftime("%Y-%m-%d")
+    # v5.207(긴급 수정 — 사용자 지시): 🔴 즉시 행동 각 소스가 캐시(오늘
+    # 확정으로 잘못 라벨링될 수 있음, 아래 us_pullback 블록 주석 참고)를
+    # 그대로 믿고 보여주기 전에 "그 시장이 실제로 오늘 열렸는가"를 한 번
+    # 더 확인한다 — 휴장일엔 데이터가 안 바뀌어도 표시 문구를 강등.
+    us_trading_today = is_trading_day("us", today)
+    kr_trading_today = is_trading_day("kr", today)
 
     # ── 서로 독립적인 기존 엔드포인트 3개(게이트·포지션·종가베팅후보)는
     # 병렬로 호출 — 순차 호출 대비 캘린더 전체 응답 시간을 줄인다(사용자 지시:
@@ -12159,8 +12223,27 @@ async def get_calendar():
     # 프론트에서 사용(사용자 지시). US 눌림목 단독 즉시진입 EV +0.206R
     # (z=2.95, docs/pullback_ev_kr_us_regime_investigation.md) — KR과
     # 달리 US 눌림목은 확인 대기 없이 즉시진입 자체가 검증된 유일한 탭.
+    # v5.207(긴급 수정 — 사용자 지시): _cache["us:pullback"]은 US가 실제로
+    # 열린 마지막 거래일에 계산된 그대로 남아있을 수 있다(주말/휴장일엔
+    # _warm_market이 is_trading_day로 걸러 새로 안 씀 — 그런데 이 블록
+    # 자체는 그 사실을 확인 안 하고 캐시가 있으면 무조건 "오늘의 🔴 즉시
+    # 행동"으로 올렸다. 게다가 사용자가 직접 스캔 탭을 열거나 "다시 스캔"을
+    # 누르면 _fetch_market_data_inner()는 is_trading_day를 아예 안 봐서
+    # (_warm_market과 다른 함수 — 이 캐시가 휴장일에도 "오늘 확정"으로
+    # 잘못 재계산·재라벨링될 수 있다(별도 후속 조사 필요, 아래 참고). 여기
+    # 표시 시점에 실제 오늘이 US 거래일인지 다시 확인해 이중으로 막는다.
     us_pullback_cached = _cache.get("us:pullback")
-    if us_pullback_cached:
+    if us_pullback_cached and not us_trading_today:
+        for h in us_pullback_cached.get("hits", []):
+            interest.append({
+                "source": "us_pullback", "key": f"us_pullback:{h['ticker']}",
+                "ticker": h.get("ticker"), "name": h.get("name"), "market": "US",
+                "tab": "눌림목", "confirmed_at": None,
+                "close": h.get("close"), "pivot": h.get("pivot"), "stop": h.get("stop"),
+                "interest_label": "🔎 US 휴장 — 다음 개장 시 확인",
+                "reason": "US 시장이 오늘 휴장 — 마지막 거래일 스캔 결과 참고용, 다음 개장 후 재확인 필요",
+            })
+    elif us_pullback_cached:
         for h in us_pullback_cached.get("hits", []):
             close_ = h.get("close")
             stop_ = h.get("stop")
@@ -12314,7 +12397,6 @@ async def get_calendar():
             # 아예 안 보여주고 "관심"으로만 표시(entry/stop/target_2r=None).
             # 강한확인 배지(vol_mult>=2.0)는 같은 격자탐색(피벗진입 가정)이
             # 근거였으므로 배지 자체를 제거(계산도 안 함).
-            is_entry_candidate = tab == "돌파임박" and market == "KR"
             # v5.184(사용자 지시 — 확인일 버그): "확인일"은 스캔/캘린더를
             # 연 세션의 오늘(`today`)이 아니라 확인 조건을 실제로 충족시킨
             # 그 봉의 날짜(df의 마지막 행)여야 한다 — signal_date가 이미
@@ -12322,6 +12404,12 @@ async def get_calendar():
             # 경우만 today로 폴백(사실상 도달 안 함 — confirmed=True면
             # df가 이미 유효했다는 뜻).
             confirm_bar_date = str(df.index[-1].date()) if df is not None and len(df) else today
+            # v5.207(긴급 수정 — 사용자 지시, US 눌림목과 같은 문제의 KR
+            # 대칭형): confirm_bar_date==today를 추가로 요구 — 캐시된 df가
+            # 휴장일(또는 아직 안 갱신된 이전 거래일)의 마지막 봉을 그대로
+            # 물고 있으면 "확인됐다"는 판정 자체가 그날 봉 기준이라 오늘
+            # 실제로 일어난 일이 아닌데도 🔴로 뜰 수 있었다.
+            is_entry_candidate = tab == "돌파임박" and market == "KR" and confirm_bar_date == today
             if is_entry_candidate:
                 target_2r = round(close + 2 * (close - stop_f), 2) if stop_f and close > stop_f else None
                 immediate.append({
@@ -12339,13 +12427,19 @@ async def get_calendar():
                 # immediate에 안 들어간다 — "🔎 관심(확인됨)" 전용 버킷으로
                 # 분리. 진입가/손절/사이즈 없음, 종목·탭·확인일·종가 +
                 # 피벗·손절 기준값(참고용, "진입가" 아님)만.
-                interest.append({
+                # v5.207: 게이트 실패가 "휴장이라 오늘 확인 자체가 없었다"
+                # 때문이면 원래의 "관심(확인됨)" 문구 대신 명시적으로 안내.
+                interest_item = {
                     "source": "pending_watch", "key": f"pending:{r.get('id')}",
                     "ticker": ticker, "name": r.get("name") or ticker, "market": market,
                     "tab": tab, "confirmed_at": confirm_bar_date,
                     "close": close, "pivot": pivot_f, "stop": stop_f, "scenario": scenario_hit,
                     "reason": f"{tab} 관심 — 확인됐으나 진입 근거 미유의 · docs/confirm_entry_lookahead_2026-09-04.md",
-                })
+                }
+                if tab == "돌파임박" and market == "KR" and confirm_bar_date != today and not kr_trading_today:
+                    interest_item["interest_label"] = "🔎 KR 휴장 — 다음 개장 시 확인"
+                    interest_item["reason"] = "KR 시장이 오늘 휴장 — 마지막 거래일 확인 결과 참고용, 다음 개장 후 재확인 필요"
+                interest.append(interest_item)
         elif dist_pct <= 2:
             # v5.176(사용자 지시): KR 확인대기 UI — 이미 피벗 돌파(dist_pct<=0)
             # 했는데 확인규칙(rule)이 있는 탭에서 거래량 미충족인 KR 종목은
