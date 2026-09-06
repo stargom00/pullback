@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.203 [기능개선] 섹터 흐름 카드 종목명 링크(사용자 지시). 상위5·가속
+        블록의 대장 종목명을 트레이딩뷰 링크로 — 기존 5탭 카드 ↗ 링크와
+        같은 tvUrl() 그대로 재사용(KR: KRX:005830, US: 심볼만 줘도
+        트레이딩뷰 자동 해석), 새 탭(target="_blank"). 섹터명 클릭 시
+        구성종목 펼치기(5탭 히트 배지 포함)는 범위 밖 — 이번엔 링크만.
 v5.202 [기능개선] 섹터 흐름 가속 블록(사용자 지시).
         [1] sector_snapshot.compute()에 rs20_pct(20일 수익률 백분위) 추가
         — 기존 sector_rs_pct(60일)와 같은 방식(시장 내에서만, to_rs_rank
@@ -5250,7 +5255,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.202"
+VERSION = "v5.203"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
