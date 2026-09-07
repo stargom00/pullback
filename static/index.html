@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.211</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.212</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3851,8 +3851,11 @@ function todayDecisionRiskBadge(item) {
     const ok = riskPct <= limit;
     const color = ok ? '#8fd6ac' : '#f0c479';
     const warnPrefix = ok ? '' : '⚠️';
+    // v5.212(사용자 지시 — [3]): 시나리오 카드와 같은 배수 병기, item.atr_pct
+    // 재사용(새 계산 없음).
+    const atrMult = Math.round(riskPct / item.atr_pct * 10) / 10;
     if (_tdBadgeStats) _tdBadgeStats[ok ? 'green' : 'orange']++;
-    return ` <span class="mono" style="color:${color}" title="ATR ${item.atr_pct}% × ${ATR_STOP_MULT} = ${limit}% 기준">${warnPrefix}(-${riskPct}%)</span>`;
+    return ` <span class="mono" style="color:${color}" title="ATR ${item.atr_pct}% × ${ATR_STOP_MULT} = ${limit}% 기준">${warnPrefix}(-${riskPct}%, ${atrMult}ATR)</span>`;
   }
   if (_tdBadgeStats) _tdBadgeStats.gray++;
   const unknownTitle = 'ATR 데이터가 없어 손절폭 적정성을 판정하지 못했습니다.\n직접 확인하세요.';
@@ -3947,7 +3950,7 @@ function renderScenarioHtml(sc, market, domId, atrPct) {
   // 탭×시장 조합 전부에서 손절 도달률이 높았음(정식 EV z검정 재현은
   // 아니라 게이트는 무변경, 표시 경고만).
   const noiseWarn = atrMult => (atrMult != null && atrMult < 1.0)
-    ? ` <span style="color:#ff6b6b;font-weight:700">⚠️ 노이즈 손절 위험 — 손절 도달률 높음</span>`
+    ? ` <span style="color:#ff6b6b;font-weight:700">⚠️ 노이즈 손절 — 도달률 높음</span>`
     : '';
   // v5.210(사용자 지시 — [2]): ①은 "저항 돌파 시 진입"인데, 원래 pivot을
   // 이미 넘어서(resistance_broken_pivot) 다음 저항으로 넘어간 경우라면
