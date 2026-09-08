@@ -5,6 +5,44 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.218 [기능추가] 📌 내 추적 — 빈 상태 + 직접 추가(사용자 지시,
+        static/index.html만 변경 — 백엔드/게이트 무변경).
+        [1] 활성(트리거 있음)·미입력 둘 다 0건이어도 섹션 자체는 항상
+        표시 — 빈 상태 "추적 중인 종목 없음 — ➕ 종목 추가".
+        [2] "➕ 종목 추가" 버튼(헤더 우측, 항상 노출) → 최소 입력
+        모달(myTrackAddModal: 티커·종목명·트리거 가격) → 저널에
+        status='pending'+pivot_type='custom_trigger'+my_trigger_price로
+        기록. 기존 /api/watch/quick(피벗 필수, entry=피벗로 채워져 가격
+        도달 시 자동 '진입' 전환됨)은 재사용하지 않는다 — 이 레코드는
+        실제 매매 셋업이 아니라 순수 관찰이라 entry/pivot을 비워야
+        updateTracking()의 pending 자동승격/자동무산 로직이 애초에 안
+        걸린다(entry 없음 → 교차 판정 NaN, 항상 false) — 대신
+        saveManualAdd()류와 같은 패턴으로 저널에 직접 append. 티커는 KR
+        5~6자리 숫자코드(.KQ/.KS 접미사 자동 보정, saveManualAdd()와
+        동일 방식) 또는 US 심볼. 종목명은 /api/lookup(메인 검색과 동일
+        엔드포인트 재사용) 자동 조회, 실패하면 입력값(티커) 그대로.
+        현재가는 updateTracking() 다음 폴링에서 채워짐(그 전엔 "—").
+        [버그수정, [2] 구현 중 발견] my_trigger_price만 있고 entry/stop이
+        없는 레코드가 두 군데서 새는 걸 확인해 같이 고침 — 이 문제는
+        v5.216/v5.217에서 만든 트리거 입력 기능 전체에 이미 있던 것으로,
+        이번에 처음 생기는 케이스(엔트리 자체가 없는 레코드)를 만들며
+        발견: ① `_isPriceTrackable()`가 my_trigger_price 단독 보유
+        레코드를 못 잡아 last_price가 영영 안 채워짐 — my_trigger_price
+        존재+status pending/watch 조건 추가. ② `updateTracking()`의
+        pending 14일(캘린더일, WATCH_DAYS) 자동무산이 트리거 보유
+        레코드에도 걸려 v5.217에서 만든 30거래일 창(app.py
+        JOURNAL_PENDING_EXPIRE_DAYS_CUSTOM_TRIGGER, 서버가 판정)보다
+        먼저 무산 처리되는 경합이 있었음 — my_trigger_price 있으면 이
+        캘린더일 체크를 건너뛰도록 수정.
+        [3] 활성 행에도 미입력 행과 같은 "관찰 종료" 버튼 추가(트리거
+        수정은 이미 양쪽 다 가능했음 — 없던 건 종료뿐이었음).
+        myTrackCloseRow()를 트리거 유무 공용으로 일반화(사유 문구만
+        분기).
+        검증: node --check로 전체 인라인 스크립트 문법 확인,
+        `_isPriceTrackable`/entry=null NaN 비교 동작을 Node로 격리
+        테스트, `python3 -c "import app"`. 실제 조회 성공률(KR
+        접미사·미국 심볼 다양하게)은 로그인·시장데이터가 필요해
+        배포 후 확인 필요.
 v5.217 [UI 전면개편] 홈 탭(캘린더) 재배치 + 📌 정리(사용자 지시,
         static/index.html만 변경 — 백엔드/게이트 무변경).
         [A] 📌 내 추적 재설계 — 최초안의 "자동 등록('패턴' 등 시스템
@@ -5706,7 +5744,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.217"
+VERSION = "v5.218"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
