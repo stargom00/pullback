@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.213</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.214</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -1437,6 +1437,7 @@ function collapsedRowHtmlJongga(s) {
       <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
       <a class="cc-name-lg name-link" href="${tvUrl(s)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.name}</a>
       <span class="cc-mkt">KR</span>
+      ${s.outside_legacy_universe ? `<span class="merger-tag" style="background:rgba(242,179,61,.14);color:#f2b33d;border-color:rgba(242,179,61,.4)" title="거래대금 v2 순위 기준으로 새로 찾은 종목 — 기존 스캔 유니버스 밖이라 방금 개별 조회함(v5.214, 데이터 품질 확인용)">🆕 유니버스밖</span>` : ''}
       <span class="cc-chevron">▸</span>
     </div>
     <div class="cc-row2">
@@ -1457,7 +1458,7 @@ function jonggaCard(s) {
       <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="즐겨찾기">${fav ? '★' : '☆'}</button>
       <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
       <div>
-        <div class="name">🌆 <a class="name-link" href="${tvUrl(s)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.name}</a><span class="mkt">${s.market}</span>${s.price_frozen ? ` <span class="merger-tag" title="가격고정(M&A/특수상황) 의심: ${(s.price_frozen_reasons||[]).join(', ')}">⚠️ 가격고정</span>` : ''}</div>
+        <div class="name">🌆 <a class="name-link" href="${tvUrl(s)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.name}</a><span class="mkt">${s.market}</span>${s.price_frozen ? ` <span class="merger-tag" title="가격고정(M&A/특수상황) 의심: ${(s.price_frozen_reasons||[]).join(', ')}">⚠️ 가격고정</span>` : ''}${s.outside_legacy_universe ? ` <span class="merger-tag" style="background:rgba(242,179,61,.14);color:#f2b33d;border-color:rgba(242,179,61,.4)" title="거래대금 v2 순위 기준으로 새로 찾은 종목 — 기존 스캔 유니버스(get_universe(&quot;kr&quot;)) 밖이라 방금 개별 조회함(v5.214, 데이터 품질 확인용 — 섹터 정보 등 일부 부가 필드가 다른 히트보다 검증 이력이 짧음)">🆕 유니버스 밖</span>` : ''}</div>
         <div class="tick mono">${s.ticker ? `<a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a>` : ''}${s.sector && s.sector !== '기타' ? ` · ${s.sector}${s.sector_rank != null && s.sector_total != null ? ` ${s.sector_rank}/${s.sector_total}` : ''}${s.sector_rs_pct != null ? ` · 섹터RS ${s.sector_rs_pct}` : ''}` : ''}</div>
       </div>
       <div style="margin-left:auto;text-align:right">
@@ -3827,10 +3828,18 @@ function toggleTodayDecisionWaiting() {
 // 가능 건수(1~2건)의 여유분 — 실제 게이트 값이 바뀌어도 이 상수만
 // 조정하면 됨. 다른 접힘류(toggleSectorFlowExpanded 등)와 같은 패턴 —
 // 전역 상태 + renderCalendar 전체 재렌더.
-const IMMEDIATE_COLLAPSE_N = 5;
-let _immediateExpanded = false;
-function toggleImmediateExpanded() {
-  _immediateExpanded = !_immediateExpanded;
+// v5.215(사용자 지시 — [1]): 🔴 즉시 행동 안에서 US 눌림목만 과다하게
+// 쌓여(다른 소스보다 후보 pool이 훨씬 큼, 하루 40~100+건) 카드가
+// 넘치는 문제 — 예전 IMMEDIATE_COLLAPSE_N(전체 소스 합산 5건 컷,
+// v5.213)은 US 눌림목이 아닌 다른 소스(KR 돌파임박/종가베팅, 하루
+// 0~2건 수준)까지 같이 잘라버릴 수 있었다. US 눌림목에만 5건 컷을
+// 적용하고, 초과분은 별도 "🔎 눌림목 후보 N건" 섹션으로 강등(전체
+// 접힘/펼침 토글은 v5.213과 같은 패턴 — 전역 상태 + renderCalendar
+// 전체 재렌더).
+const US_PULLBACK_SHOW_N = 5;
+let _pullbackCandidatesExpanded = false;
+function togglePullbackCandidatesExpanded() {
+  _pullbackCandidatesExpanded = !_pullbackCandidatesExpanded;
   if (_calendarData) renderCalendar(_calendarData);
 }
 // v5.155(사용자 지시) — "오늘의 결정" 전용 손절폭 배지. v4.67 원칙
@@ -4080,7 +4089,12 @@ function renderTodayDecisionHtml(td) {
     const methodBadge = ENTRY_METHOD_LABEL[item.entry_method]
       ? ` <span style="color:#8fb3ff;font-weight:700">${ENTRY_METHOD_LABEL[item.entry_method]}</span>`
       : '';
-    const nameLine = `<div><b>${nameLink(item)}</b> <span class="mkt">${mkt}</span>${sourceBadge}${methodBadge}${strongSetupBadge}</div>`;
+    // v5.214(사용자 지시 — [3]): 종가베팅 유니버스 정합 — 구 유니버스
+    // 밖에서 v2 순위로 새로 찾은 종목 표시(데이터 품질 확인용).
+    const outsideUniverseBadge = item.outside_legacy_universe
+      ? ` <span class="merger-tag" style="background:rgba(242,179,61,.14);color:#f2b33d;border-color:rgba(242,179,61,.4)" title="거래대금 v2 순위 기준으로 새로 찾은 종목 — 기존 스캔 유니버스 밖이라 방금 개별 조회함(v5.214, 데이터 품질 확인용)">🆕 유니버스밖</span>`
+      : '';
+    const nameLine = `<div><b>${nameLink(item)}</b> <span class="mkt">${mkt}</span>${sourceBadge}${methodBadge}${strongSetupBadge}${outsideUniverseBadge}</div>`;
     // v5.181(사용자 지시 — [5] 공통 사이즈): 4종 검증된 진입의 손절폭
     // 정의가 서로 달라(종가베팅은 손절 자체가 없음) 실제 stop 기준
     // 사이즈를 쓰면 종목마다 리스크 배분이 들쭉날쭉해진다 — 게이트

@@ -5,6 +5,54 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.215 [UI 개선] 🔴 즉시 행동 — US 눌림목 과다·정렬(사용자 지시,
+        static/index.html만 변경 — 백엔드/게이트 무변경).
+        [1] US 눌림목만 US_PULLBACK_SHOW_N(5)건으로 컷 — 예전
+        IMMEDIATE_COLLAPSE_N(전체 소스 합산 5건 컷, v5.213)은 US
+        눌림목 히트 pool이 다른 소스(KR 돌파임박/종가베팅, 하루 0~2건)
+        보다 훨씬 커서 US 눌림목이 🔴를 통째로 채우면 다른 소스가
+        같이 잘릴 수 있었다. 초과분은 🔴 밖으로 빼서 별도 "🔎 눌림목
+        후보 N건" 섹션으로 강등(기본 접힘, 클릭해 펼치기 — v5.213과
+        같은 전역상태+renderCalendar 전체 재렌더 패턴).
+        [2] US 눌림목 정렬 기준을 손절폭 %(오름차순) 단일 기준에서
+        ATR 배수 기준으로 교체 — 2026-09-07 측정("손절폭(ATR 배수)과
+        손절 도달률의 관계")에서 1.0ATR 미만은 손절 도달률이 높았던
+        것과 일관되게, 1.0~2.0ATR(적당히 여유 있는 손절)을 최우선,
+        2.0ATR+는 중간, 1.0ATR 미만(노이즈 손절 위험, v5.211 경고와
+        같은 기준)은 맨 아래로. 각 구간 안에서는 손절폭 % 좁은 순
+        (기존 방식 그대로 2차 기준으로 유지).
+        [3] 미장(US) 개장 중엔 🔴/🔎 카드의 진입가 옆에 "(전일 종가
+        기준)" 표시 — 스캐너 데이터가 일봉(전일 종가) 기준이라 장중엔
+        실시간가가 아니라는 걸 명시(신설 `isUsMarketOpen()`, 기존
+        `timeBasedDefaultMarket()`의 ET 장중 판정 로직과 동일 기준을
+        공용 함수로 승격해 재사용 — 새 판정식 없음).
+v5.214 [버그 수정] 종가베팅 스캔 모집단 정합(사용자 지시, "JONGGA
+        스캔이 구 유니버스 안에서만 거래대금 상위100을 매김 — z=3.54
+        백테스트는 전종목 기준, 모집단 불일치" 조사 후속 — 위 v5.213의
+        "종가베팅 히트 0건" 재조사 중 재확인된 갭을 이번에 실제로 고침).
+        [1] `_run_scan_jongga()`가 v2 순위(`_load_jongga_turnover_v2_
+        rank()`, 전종목 기준 진짜 거래대금 순위) 상위 100 중 구
+        유니버스(`get_universe("kr")`, 91% 시총폴백) 밖 종목을 `_fetch()`
+        로 개별 보충 — `bundle["data"]`/`universe`(다른 탭 공유 원본)는
+        무변경, 이 함수의 로컬 사본만 확장(다른 탭 무영향).
+        `_load_jongga_turnover_v2_rank()`를 `(rank_map, name_map)`
+        튜플 반환으로 확장(유일한 호출부라 영향 범위 그대로) — 구
+        유니버스 밖 종목의 표시명을 얻을 방법이 없었던 문제 해결.
+        [2] 실데이터 검증(2026-09-08): v2 상위100 중 구 유니버스 밖
+        1종목 확인·정상 fetch. 30일 전체 재현은 v2 API가 오늘 시점
+        값만 줘서 소급 불가(정직하게 명시, docs/kr_jongga_betting_
+        backtest.md "v5.214" 절) — 오늘 실측만 0건→0건(이 종목이
+        base는 통과했지만 나머지 4조건 중 하나에서 탈락, 모집단만
+        정확해졌을 뿐 다른 조건은 그대로).
+        [3] 각 히트에 `outside_legacy_universe`(bool) 필드 추가,
+        종가베팅 탭 카드(펼침/접힘)·캘린더 "🎯 오늘의 결정" 카드에
+        "🆕 유니버스밖" 배지 표시(데이터 품질 확인용).
+        [4] docs/kr_jongga_betting_backtest.md에 갭 재확인·수정 내용
+        기록.
+        검증: `app._fetch_market_data("kr", wait_for_fresh=True)` →
+        `app._run_scan_jongga(bundle)` 실데이터 직접 호출 —
+        `diag.turnover_rank_source=="v2"`, `turnover_v2_extra_
+        candidates=1`, `turnover_v2_extra_fetched=1` 확인.
 v5.213 [버그/근거 재검토] entrySignal 🟡주의 배지 제거 — US 눌림목
         즉시행동(사용자 지시, "🔴즉시행동에 US 눌림목 12건이 전부
         🟡주의" 조사 후속). static/index.html만 변경 — 백엔드/게이트
@@ -5291,7 +5339,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, analyze_inverse, analyze_breakdown, analyze_pattern, analyze_stage2, rs_score_stage2, analyze_ibd9_cheap, analyze_ibd9_full, analyze_jongga, rs_raw_score, to_rs_rank, climax_warning, inverse_score, price_frozen_check
+from scanner import analyze, analyze_turnaround, analyze_leader, analyze_super, analyze_breakout, analyze_surge, analyze_imminent, analyze_boxbreak, analyze_inverse, analyze_breakdown, analyze_pattern, analyze_stage2, rs_score_stage2, analyze_ibd9_cheap, analyze_ibd9_full, analyze_jongga, JONGGA_CONFIG, rs_raw_score, to_rs_rank, climax_warning, inverse_score, price_frozen_check
 from inverse_universe import inverse_universe
 from sectors import get_sector
 try:
@@ -5591,7 +5639,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.213"
+VERSION = "v5.215"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6428,13 +6476,20 @@ def _jongga_turnover_v2_cache_path(daykey: str) -> str:
     return _resolve_persistent_path(f"kr_turnover_v7_jongga_{daykey}.json")
 
 
-def _load_jongga_turnover_v2_rank() -> "dict | None":
+def _load_jongga_turnover_v2_rank() -> "tuple[dict, dict] | tuple[None, None]":
     """오늘자 캐시(하루 1회, 콜드스타트 44회 요청·약 62초라 캐시 필수)가
     있으면 그대로 쓰고, 없으면 naver_kr.fetch_top_turnover_v2()를 호출해
     캐시에 저장한다. 실패했거나 stats.incomplete=True(일부 페이지 요청
-    실패로 부분 유니버스)면 None을 반환해 호출부가 v1으로 폴백하게 한다
-    — 조용히 부분 유니버스로 넘어가지 않는다(사용자 지시, except:pass
-    금지 — 아래 모든 실패 경로가 로그를 남긴다)."""
+    실패로 부분 유니버스)면 (None, None)을 반환해 호출부가 v1으로
+    폴백하게 한다 — 조용히 부분 유니버스로 넘어가지 않는다(사용자 지시,
+    except:pass 금지 — 아래 모든 실패 경로가 로그를 남긴다).
+
+    반환: (rank_map: {ticker: 순위(1부터)}, name_map: {ticker: 종목명}).
+    v5.214(사용자 지시 — [1] 종가베팅 유니버스 정합): name_map을 추가
+    반환 — 상위100 중 get_universe("kr")(구 유니버스) 밖의 종목을 별도
+    fetch로 보충할 때(_run_scan_jongga 참고) 그 종목의 표시명이
+    필요해서다(bundle["universe"]엔 애초에 없는 이름이라 기존 rank만
+    반환하던 방식으로는 못 얻음)."""
     daykey = datetime.now(KST).strftime("%Y-%m-%d")
     cache_path = _jongga_turnover_v2_cache_path(daykey)
     if os.path.exists(cache_path):
@@ -6443,7 +6498,7 @@ def _load_jongga_turnover_v2_rank() -> "dict | None":
                 cached = _json.load(f)
             cached_universe = cached.get("universe")
             if isinstance(cached_universe, dict) and cached_universe:
-                return {t: i + 1 for i, t in enumerate(cached_universe.keys())}
+                return {t: i + 1 for i, t in enumerate(cached_universe.keys())}, cached_universe
             print(f"[jongga] turnover v2 캐시가 비어있음({cache_path}) — 새로 받는다")
         except (OSError, ValueError) as e:
             print(f"[jongga] turnover v2 캐시 읽기 실패({cache_path}): {e} — 새로 받는다")
@@ -6451,14 +6506,14 @@ def _load_jongga_turnover_v2_rank() -> "dict | None":
         fetched_universe, stats = naver_kr.fetch_top_turnover_v2()
     except Exception as e:
         print(f"[jongga] turnover v2 fetch 예외 발생, v1로 폴백: {type(e).__name__}: {e}")
-        return None
+        return None, None
     if stats.get("incomplete"):
         print(f"[jongga] turnover v2 결과 incomplete(일부 페이지 요청 실패로 "
               f"부분 유니버스) — v1로 폴백, 캐시 저장 안 함. stats={stats}")
-        return None
+        return None, None
     if not fetched_universe:
         print(f"[jongga] turnover v2 결과가 비어있음 — v1로 폴백. stats={stats}")
-        return None
+        return None, None
     try:
         _save_json_atomic(cache_path, {
             "universe": fetched_universe, "stats": stats,
@@ -6466,7 +6521,7 @@ def _load_jongga_turnover_v2_rank() -> "dict | None":
         })
     except OSError as e:
         print(f"[jongga] turnover v2 캐시 저장 실패(이번 호출 결과는 그대로 사용): {e}")
-    return {t: i + 1 for i, t in enumerate(fetched_universe.keys())}
+    return {t: i + 1 for i, t in enumerate(fetched_universe.keys())}, fetched_universe
 
 
 def _jongga_session_state(now_kst: datetime) -> dict:
@@ -6571,9 +6626,37 @@ async def _run_scan_jongga(bundle: dict) -> dict:
     turnover_source = os.environ.get(JONGGA_TURNOVER_SOURCE_ENV, "v2").lower()
     turnover_rank = None
     turnover_rank_source = "v1"
+    outside_legacy_universe: set[str] = set()
     if turnover_source == "v2":
-        v2_rank = _load_jongga_turnover_v2_rank()
+        v2_rank, v2_names = _load_jongga_turnover_v2_rank()
         if v2_rank is not None:
+            # v5.214(사용자 지시 — [1] 종가베팅 유니버스 정합): 예전엔
+            # v2 순위가 있어도 kr_data(get_universe("kr") 기반 구
+            # 유니버스, 91% 시총폴백)에 없는 종목이면 그냥 스킵됐다 —
+            # z=3.54 백테스트는 "전종목 기준 진짜 거래대금 상위100"인데
+            # 실행은 "구 유니버스 안에서의 상위100"이라 모집단이
+            # 달랐다(사용자 지적, docs/kr_jongga_betting_backtest.md
+            # "종가베팅 유니버스 갭" 절). v2 랭크 자체에서 상위
+            # turnover_rank_max(100)에 든 종목 중 kr_data에 없는 것만
+            # naver_kr.fetch()로 개별 보충 — bundle["data"]/universe는
+            # 그대로 두고(다른 탭 무영향) 이 함수의 로컬 kr_data/universe
+            # 사본만 확장한다.
+            top_n = JONGGA_CONFIG["turnover_rank_max"]
+            missing = [t for t, rank in v2_rank.items() if rank <= top_n and t not in kr_data]
+            diag["turnover_v2_extra_candidates"] = len(missing)
+            if missing:
+                universe = dict(universe)
+                loop = asyncio.get_event_loop()
+                fetched = await asyncio.gather(*[
+                    loop.run_in_executor(_executor, _fetch, t) for t in missing
+                ], return_exceptions=True)
+                for t, df_extra in zip(missing, fetched):
+                    if isinstance(df_extra, BaseException) or df_extra is None or df_extra.empty:
+                        continue
+                    kr_data[t] = df_extra
+                    universe[t] = v2_names.get(t, t)
+                    outside_legacy_universe.add(t)
+            diag["turnover_v2_extra_fetched"] = len(outside_legacy_universe)
             turnover_rank = {t: v2_rank[t] for t in kr_data if t in v2_rank}
             turnover_rank_source = "v2"
     if turnover_rank is None:
@@ -6599,6 +6682,11 @@ async def _run_scan_jongga(bundle: dict) -> dict:
             "ticker": t, "name": universe.get(t, t), "market": "KR",
             **_sector_fields(t, bundle), "backtest_note": JONGGA_BACKTEST_NOTE,
             "sell_rule": JONGGA_SELL_RULE,
+            # v5.214(사용자 지시 — [3]): 구 유니버스 밖에서 새로 잡힌
+            # 종목은 데이터 품질 확인용으로 표시(섹터 정보 등 일부
+            # 부가 필드가 bundle 기반 캐시 없이 방금 fetch한 데이터라
+            # 다른 히트보다 검증 이력이 짧다는 뜻).
+            "outside_legacy_universe": t in outside_legacy_universe,
             **r,
         })
         diag["kr_hits"] += 1
@@ -12461,6 +12549,9 @@ async def get_calendar():
                 "ticker": h["ticker"], "name": h.get("name", h["ticker"]), "market": "KR", "mode": "jongga",
                 "entry": h.get("close"), "stop": None, "target_2r": None,
                 "close": h.get("close"), "pivot": h.get("close"), "sector": h.get("sector"),
+                # v5.214(사용자 지시 — [3]): 구 유니버스 밖에서 새로 잡힌
+                # 종목 표시(데이터 품질 확인용) — jongga 탭 카드와 동일 필드.
+                "outside_legacy_universe": h.get("outside_legacy_universe", False),
                 # v5.147: 종가베팅 탭 자체의 📸 스냅샷 배너와 같은 정보를 카드에도
                 # 표기(사용자 지시) — 이 분기는 이미 snapshot_date==today로 걸러져
                 # 있어 "오늘" 고정이지만, 표시 자체가 없다는 지적(9/1 종가인데
