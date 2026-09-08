@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.212</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.213</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3822,6 +3822,17 @@ function toggleTodayDecisionWaiting() {
   const el = document.getElementById('tdWaitingDetail');
   if (el) el.style.display = _tdWaitingOpen ? '' : 'none';
 }
+// v5.213(사용자 지시 — [3]): 🔴 즉시 행동 기본 5건 + "나머지 펼치기".
+// N=5 근거: 게이트 🟡(조정 압박, max_open_r=1.5R) 상한에서 하루 진입
+// 가능 건수(1~2건)의 여유분 — 실제 게이트 값이 바뀌어도 이 상수만
+// 조정하면 됨. 다른 접힘류(toggleSectorFlowExpanded 등)와 같은 패턴 —
+// 전역 상태 + renderCalendar 전체 재렌더.
+const IMMEDIATE_COLLAPSE_N = 5;
+let _immediateExpanded = false;
+function toggleImmediateExpanded() {
+  _immediateExpanded = !_immediateExpanded;
+  if (_calendarData) renderCalendar(_calendarData);
+}
 // v5.155(사용자 지시) — "오늘의 결정" 전용 손절폭 배지. v4.67 원칙
 // (risk_pct > ATR×ATR_STOP_MULT면 부적격) 그대로, 단 riskPctMiniHtml과
 // 달리 ATR 무효 시 고정%(12/8)로 폴백하지 않는다 — v4.67은 정확히 그
@@ -4023,19 +4034,27 @@ function renderTodayDecisionHtml(td) {
     `<div style="border:1px solid ${borderCol};background:${bgCol};border-radius:8px;padding:10px 12px;
       display:flex;flex-direction:column;min-height:148px">${inner}</div>`;
 
-  // v5.181(사용자 지시 — [5]): entrySignal 'ok'(🟢 진입 양호, 종목 단위
-  // 6항목 체크)는 필터가 아니라 🔴 안에서의 정렬 우선순위 + 배지로만 쓴다
-  // (US 눌림목 한정 — market-wide 지수 게이트와는 다른 개념, 그건 US
-  // 눌림목에 한해 EV와 역방향이라 필터로 안 씀). Array.sort는 안정
-  // 정렬(stable)이라 이 비교자는 ok 항목을 앞으로 당기고 나머지는 백엔드가
-  // 이미 정렬해둔(손절폭 좁은순) 순서를 그대로 보존한다.
+  // v5.213(사용자 지시 — 버그/근거 재검토, 정렬·배지 제거): entrySignal
+  // 'ok' 우선 정렬을 v5.181에서 도입했으나, 근거로 삼았던 RS 90/80~89
+  // 구간 EV 직접 비교가 문서 어디에도 없고(entrySignal이 눌림목에서 RS
+  // 단일 판정만 쓰는 근거였던 Script A 원본 데이터 자체도 v5.67 노트에서
+  // "재현 안 됨 — 방향성만 참고"로 격하된 상태) — 검증 안 된 기준으로
+  // US 눌림목 12건이 전부 🟡로 뜨는 걸 사용자가 지적. 근거 재정비 전까지
+  // us_pullback만 손절폭(진입가 대비 %) 오름차순 단일 정렬로 되돌린다
+  // (다른 소스는 비교자가 0을 반환해 배열 내 기존 상대 순서 그대로 —
+  // Array.sort는 안정 정렬이라 서로 다른 소스끼리는 원 순서 보존).
   const immediateOrdered = (td.immediate || []).slice().sort((a, b) => {
-    const aOk = (a.source === 'us_pullback' && entrySignal(a).level === 'ok') ? 0 : 1;
-    const bOk = (b.source === 'us_pullback' && entrySignal(b).level === 'ok') ? 0 : 1;
-    return aOk - bOk;
+    if (a.source === 'us_pullback' && b.source === 'us_pullback') {
+      const riskOf = it => (it.entry != null && it.stop != null && it.entry > it.stop)
+        ? (it.entry - it.stop) / it.entry : Infinity;
+      return riskOf(a) - riskOf(b);
+    }
+    return 0;
   });
   const ENTRY_METHOD_LABEL = { '종가진입': '📈종가진입', 'buy-stop': '🎯buy-stop', '즉시': '⚡즉시' };
-  const immediateHtml = immediateOrdered.map(item => {
+  const immediateVisible = _immediateExpanded ? immediateOrdered : immediateOrdered.slice(0, IMMEDIATE_COLLAPSE_N);
+  const immediateHiddenCount = immediateOrdered.length - immediateVisible.length;
+  const immediateHtml = immediateVisible.map(item => {
     const mkt = mktOf(item);
     // v5.175(사용자 지시 — 게이트→배지 전환): RS>=80 & 손절≤ATR×1.5는
     // v5.173에선 auto_watch 등록 자체를 막는 게이트였으나, 감사 결과
@@ -4046,11 +4065,8 @@ function renderTodayDecisionHtml(td) {
     const strongSetupBadge = item.strong_setup
       ? ` <span title="강한 셋업 — RS 80+ & 손절폭 ATR×1.5 이하(2026-09-04 격자탐색+확인율 실측 근거), 진입 근거는 아니고 우선순위 참고만" style="color:#4fc3f7;font-weight:700">💪강한셋업</span>`
       : '';
-    // v5.181(사용자 지시): US 눌림목 카드에 entrySignal 배지 — 필터 아님,
-    // 정렬 우선(위 immediateOrdered)과 참고 표시만.
-    const entrySigBadge = item.source === 'us_pullback'
-      ? (() => { const sig = entrySignal(item); return ` <span title="개별 신호등(진입 게이트 아님, 정렬 참고만) — ${sig.label}" style="color:${sig.level === 'ok' ? '#7fe0a7' : sig.level === 'warn' ? '#e6aa28' : '#FF5A6E'};font-weight:700">${sig.label}</span>`; })()
-      : '';
+    // v5.213(사용자 지시): entrySignal 배지 제거 — 위 정렬 변경과 같은
+    // 이유(근거 미검증). item.source==='us_pullback' 카드에서 완전히 뺌.
     // v5.173(사용자 지시): 자동 감시(auto_watch, 5탭 히트 전부를 시스템이
     // 알아서 등록·확인, v5.175부터 RS/손절 필터 없음)는 🤖, 사용자가 직접
     // ⚡감시로 등록한 pending_watch는 👤 — 재점화·종가베팅·돌파임박참고는
@@ -4064,7 +4080,7 @@ function renderTodayDecisionHtml(td) {
     const methodBadge = ENTRY_METHOD_LABEL[item.entry_method]
       ? ` <span style="color:#8fb3ff;font-weight:700">${ENTRY_METHOD_LABEL[item.entry_method]}</span>`
       : '';
-    const nameLine = `<div><b>${nameLink(item)}</b> <span class="mkt">${mkt}</span>${sourceBadge}${methodBadge}${entrySigBadge}${strongSetupBadge}</div>`;
+    const nameLine = `<div><b>${nameLink(item)}</b> <span class="mkt">${mkt}</span>${sourceBadge}${methodBadge}${strongSetupBadge}</div>`;
     // v5.181(사용자 지시 — [5] 공통 사이즈): 4종 검증된 진입의 손절폭
     // 정의가 서로 달라(종가베팅은 손절 자체가 없음) 실제 stop 기준
     // 사이즈를 쓰면 종목마다 리스크 배분이 들쭉날쭉해진다 — 게이트
@@ -4212,8 +4228,16 @@ function renderTodayDecisionHtml(td) {
   // 다른 버킷(🔎/🟠/🟡)에 항목이 있는데 🔴만 비어있으면 헤더 자체가
   // 사라져서 "즉시 행동이 있는지 없는지" 조용히 안 보이는 사고를 막는다
   // — 진입 근거가 있는 항목이 하나도 없다는 사실 자체가 중요한 정보다.
+  // v5.213(사용자 지시 — [3]): 상위 IMMEDIATE_COLLAPSE_N건만 기본 노출,
+  // 나머지는 펼치기 전엔 아예 렌더 안 함(DOM 비용도 같이 줄임). 조건은
+  // 전체 건수 기준(immediateOrdered.length) — hiddenCount로 걸면 펼친
+  // 상태(hiddenCount=0)에서 "접기" 줄 자체가 사라져 되돌릴 수 없었음
+  // (버그, 구현 중 자체 발견·수정).
+  const immediateToggleHtml = immediateOrdered.length > IMMEDIATE_COLLAPSE_N
+    ? `<div style="grid-column:1/-1;font-size:12px;color:var(--muted);cursor:pointer;margin-top:2px" onclick="toggleImmediateExpanded()">${_immediateExpanded ? '▴ 접기' : `▾ 나머지 ${immediateHiddenCount}건 펼치기`}</div>`
+    : '';
   const immediateSection = immediateHtml
-    ? sectionHeader('🔴 즉시 행동', '#ff9b9b') + immediateHtml
+    ? sectionHeader('🔴 즉시 행동', '#ff9b9b') + immediateHtml + immediateToggleHtml
     : sectionHeader('🔴 즉시 행동 — 없음', '#666');
   return `<div>
     <div class="mf-toolbar"><b>🎯 오늘의 결정</b> ${TODAY_DECISION_INFO_ICON}</div>
