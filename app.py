@@ -5,6 +5,32 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.219 [기능개선] 📌 추적 종목 추가 — 이름으로 검색(사용자 지시,
+        static/index.html만 변경 — 백엔드/게이트 무변경, 새 API 없음).
+        [1] "➕ 종목 추가" 모달의 티커 칸을 "종목명 또는 티커" 통합
+        검색으로 — 기존 상단 진단검색(#cardSearch/triggerLookup())이
+        쓰는 `/api/lookup/{query}`를 그대로 재사용. 한글 등으로 검색해
+        이름 부분일치가 여러 개면(resolve_name_to_ticker() candidates)
+        입력칸 아래 드롭다운에 종목명+티커를 같이 보여주고, 클릭하면
+        티커 칸에 확정 티커를 채운다. 단일 매치(주로 정확한 티커
+        입력)면 드롭다운 없이 바로 이름을 채운다 — 이때 티커 칸도
+        lookup이 이미 KR 접미사(.KS/.KQ)까지 확정한 값으로 같이
+        갱신해서, myTrackSaveAdd()의 접미사 추정 폴백(v5.218, /api/prices
+        로 KQ/KS 둘 다 찔러봄)이 이 lookup 실패시에만 도는 순수 안전망이
+        되게 함(중복 추정 방지).
+        [2] 종목명 칸(mtaName)을 readonly로 — 자동 채워지는 값만 쓰고
+        수동 입력 경로 자체를 없앰(값은 여전히 JS로 프로그램적 설정,
+        readonly는 사용자 타이핑만 막음).
+        [3] 티커 직접 입력(미국 심볼 등)은 그대로 지원 — lookup이
+        candidates 없이 바로 단일 매치를 반환하면 드롭다운 없이 진행.
+        [버그수정, 구현 중 발견] 이름 검색 후보가 여러 개 뜬 채로(하나도
+        선택 안 하고) 바로 저장을 누르면 mtaTicker.value가 원본 검색어
+        (한글 등) 그대로 "티커"로 저장돼버리는 경로가 있었다 —
+        myTrackSaveAdd()에 후보 미확정(_mtaCandidates 비어있지 않음)
+        가드를 추가해 저장 전에 선택을 강제.
+        검증: node --check로 전체 인라인 스크립트 문법 확인. 실제 한글
+        검색 후보 품질(조회 성공률 등)은 로그인·시장데이터가 필요해
+        배포 후 확인 필요.
 v5.218 [기능추가] 📌 내 추적 — 빈 상태 + 직접 추가(사용자 지시,
         static/index.html만 변경 — 백엔드/게이트 무변경).
         [1] 활성(트리거 있음)·미입력 둘 다 0건이어도 섹션 자체는 항상
@@ -5744,7 +5770,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.218"
+VERSION = "v5.219"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
