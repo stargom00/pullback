@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.214</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.215</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -4049,21 +4049,60 @@ function renderTodayDecisionHtml(td) {
   // 단일 판정만 쓰는 근거였던 Script A 원본 데이터 자체도 v5.67 노트에서
   // "재현 안 됨 — 방향성만 참고"로 격하된 상태) — 검증 안 된 기준으로
   // US 눌림목 12건이 전부 🟡로 뜨는 걸 사용자가 지적. 근거 재정비 전까지
-  // us_pullback만 손절폭(진입가 대비 %) 오름차순 단일 정렬로 되돌린다
-  // (다른 소스는 비교자가 0을 반환해 배열 내 기존 상대 순서 그대로 —
-  // Array.sort는 안정 정렬이라 서로 다른 소스끼리는 원 순서 보존).
+  // us_pullback만 별도 정렬 기준을 쓴다(다른 소스는 비교자가 0을 반환해
+  // 배열 내 기존 상대 순서 그대로 — Array.sort는 안정 정렬이라 서로
+  // 다른 소스끼리는 원 순서 보존).
+  // v5.215(사용자 지시 — [2]): 손절폭 %(오름차순) 단일 기준에서 ATR
+  // 배수 기준으로 교체 — 2026-09-07 측정("손절폭(ATR 배수)과 손절
+  // 도달률의 관계")에서 1.0ATR 미만이 손절 도달률이 높았던 것과
+  // 일관되게, 1.0~2.0ATR 구간(적당히 여유 있는 손절)을 최우선으로,
+  // 1.0ATR 미만(노이즈 손절 위험, v5.211 경고와 같은 기준)은 맨
+  // 아래로 내린다. 2.0ATR+(넓은 손절)는 중간. 각 구간 안에서는
+  // 손절폭 % 좁은 순(기존 방식 그대로 2차 기준).
+  const usPullbackTier = atrMult => {
+    if (atrMult == null) return 2;   // ATR 미확보 — 판정 불가, 보수적으로 하단
+    if (atrMult < 1.0) return 2;     // 노이즈 손절 위험
+    if (atrMult < 2.0) return 0;     // 1.0~2.0ATR 최우선
+    return 1;                        // 2.0ATR+
+  };
   const immediateOrdered = (td.immediate || []).slice().sort((a, b) => {
     if (a.source === 'us_pullback' && b.source === 'us_pullback') {
-      const riskOf = it => (it.entry != null && it.stop != null && it.entry > it.stop)
-        ? (it.entry - it.stop) / it.entry : Infinity;
-      return riskOf(a) - riskOf(b);
+      const riskOf = it => {
+        if (it.entry == null || it.stop == null || it.entry <= it.stop) return { riskPct: Infinity, atrMult: null };
+        const riskPct = (it.entry - it.stop) / it.entry * 100;
+        const atrMult = (it.atr_pct != null && it.atr_pct > 0) ? riskPct / it.atr_pct : null;
+        return { riskPct, atrMult };
+      };
+      const ra = riskOf(a), rb = riskOf(b);
+      const ta = usPullbackTier(ra.atrMult), tb = usPullbackTier(rb.atrMult);
+      return ta !== tb ? ta - tb : ra.riskPct - rb.riskPct;
     }
     return 0;
   });
   const ENTRY_METHOD_LABEL = { '종가진입': '📈종가진입', 'buy-stop': '🎯buy-stop', '즉시': '⚡즉시' };
-  const immediateVisible = _immediateExpanded ? immediateOrdered : immediateOrdered.slice(0, IMMEDIATE_COLLAPSE_N);
-  const immediateHiddenCount = immediateOrdered.length - immediateVisible.length;
-  const immediateHtml = immediateVisible.map(item => {
+  // v5.215(사용자 지시 — [1]): US 눌림목만 US_PULLBACK_SHOW_N건으로
+  // 컷하고 초과분은 별도 "🔎 눌림목 후보" 섹션으로 뺀다(다른 소스는
+  // 컷 없음 — 위 US_PULLBACK_SHOW_N 선언부 참고). immediateOrdered를
+  // 한 번만 순회해 나눈다.
+  const immediateShown = [];
+  const usPullbackDemoted = [];
+  {
+    let usPullbackSeen = 0;
+    for (const item of immediateOrdered) {
+      if (item.source === 'us_pullback') {
+        usPullbackSeen++;
+        (usPullbackSeen <= US_PULLBACK_SHOW_N ? immediateShown : usPullbackDemoted).push(item);
+      } else {
+        immediateShown.push(item);
+      }
+    }
+  }
+  // v5.215(사용자 지시 — [3]): 미장 개장 중엔 스캐너 데이터가 여전히
+  // 전일 종가 기준(일봉)이라 실시간가로 오해하지 않도록 카드 가격 옆에
+  // 명시. isUsMarketOpen()은 timeBasedDefaultMarket()의 ET 장중 판정과
+  // 동일 로직을 공용 함수로 승격한 것(새 판정식 아님, 아래
+  // timeBasedDefaultMarket() 정의부 참고 — function 선언이라 호이스팅됨).
+  const renderImmediateCard = item => {
     const mkt = mktOf(item);
     // v5.175(사용자 지시 — 게이트→배지 전환): RS>=80 & 손절≤ATR×1.5는
     // v5.173에선 auto_watch 등록 자체를 막는 게이트였으나, 감사 결과
@@ -4118,19 +4157,25 @@ function renderTodayDecisionHtml(td) {
     const pivotGapLine = (item.pivot != null && item.entry != null && item.pivot !== item.entry)
       ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">피벗 ${fmtPrice(item.pivot, mkt)} / 진입 ${fmtPrice(item.entry, mkt)}</div>`
       : '';
+    // v5.215(사용자 지시 — [3]).
+    const priceBasisNote = (mkt === 'US' && isUsMarketOpen())
+      ? ` <span style="font-size:10px;color:var(--muted);font-weight:400">(전일 종가 기준)</span>`
+      : '';
     return cardShell('#6b2b2b', '#2a1414', `
       ${nameLine}
       <!-- v5.208(사용자 지시 — 버그수정): "$35.60 → $34.76 (-2.4%)"는
            화살표 때문에 시세 변동(진입가에서 지금 가격으로 움직인 것)
            처럼 오해할 수 있었다 — 둘 다 정적 계산값(진입가·손절가)일
            뿐이라 라벨로 명시하고 화살표를 뺀다. -->
-      <div style="font-size:15px;font-weight:700;margin-top:4px">진입 ${fmtPrice(item.entry, mkt)} · 손절 ${stopStr}</div>
+      <div style="font-size:15px;font-weight:700;margin-top:4px">진입 ${fmtPrice(item.entry, mkt)}${priceBasisNote} · 손절 ${stopStr}</div>
       ${pivotGapLine}
       <div style="font-size:11px;color:var(--muted);margin-top:4px;${descClamp}">${descParts.join(' · ')}</div>
       ${item.scenario ? renderScenarioHtml(item.scenario, mkt, 'sc_td_' + item.key, item.atr_pct) : ''}
       ${actions(item, false)}
     `);
-  }).join('');
+  };
+  const immediateHtml = immediateShown.map(renderImmediateCard).join('');
+  const pullbackCandidatesHtml = _pullbackCandidatesExpanded ? usPullbackDemoted.map(renderImmediateCard).join('') : '';
 
   // v5.137(사용자 지시): 근접(🟡)에 "아직 피벗 아래"와 "이미 피벗 위(확인
   // 대기)"가 섞여 있었다 — 성격이 다른 신호라 돌파% 부호로 그룹 분리.
@@ -4242,21 +4287,21 @@ function renderTodayDecisionHtml(td) {
   // 다른 버킷(🔎/🟠/🟡)에 항목이 있는데 🔴만 비어있으면 헤더 자체가
   // 사라져서 "즉시 행동이 있는지 없는지" 조용히 안 보이는 사고를 막는다
   // — 진입 근거가 있는 항목이 하나도 없다는 사실 자체가 중요한 정보다.
-  // v5.213(사용자 지시 — [3]): 상위 IMMEDIATE_COLLAPSE_N건만 기본 노출,
-  // 나머지는 펼치기 전엔 아예 렌더 안 함(DOM 비용도 같이 줄임). 조건은
-  // 전체 건수 기준(immediateOrdered.length) — hiddenCount로 걸면 펼친
-  // 상태(hiddenCount=0)에서 "접기" 줄 자체가 사라져 되돌릴 수 없었음
-  // (버그, 구현 중 자체 발견·수정).
-  const immediateToggleHtml = immediateOrdered.length > IMMEDIATE_COLLAPSE_N
-    ? `<div style="grid-column:1/-1;font-size:12px;color:var(--muted);cursor:pointer;margin-top:2px" onclick="toggleImmediateExpanded()">${_immediateExpanded ? '▴ 접기' : `▾ 나머지 ${immediateHiddenCount}건 펼치기`}</div>`
-    : '';
+  // v5.215(사용자 지시 — [1]): US 눌림목 초과분(usPullbackDemoted)만
+  // 별도 "🔎 눌림목 후보 N건" 섹션으로 — 기본 접힘, 클릭하면 펼침(카드는
+  // 펼치기 전엔 렌더 안 함, v5.213의 DOM 비용 절감 원칙 그대로).
   const immediateSection = immediateHtml
-    ? sectionHeader('🔴 즉시 행동', '#ff9b9b') + immediateHtml + immediateToggleHtml
+    ? sectionHeader('🔴 즉시 행동', '#ff9b9b') + immediateHtml
     : sectionHeader('🔴 즉시 행동 — 없음', '#666');
+  const pullbackCandidatesHeader = usPullbackDemoted.length
+    ? `<div style="grid-column:1/-1;font-size:12px;color:#8fb3ff;font-weight:700;margin-top:4px;cursor:pointer" onclick="togglePullbackCandidatesExpanded()">🔎 눌림목 후보 ${usPullbackDemoted.length}건 ${_pullbackCandidatesExpanded ? '▴ 접기' : '▾ 펼치기'}</div>`
+    : '';
+  const pullbackCandidatesSection = pullbackCandidatesHeader + pullbackCandidatesHtml;
   return `<div>
     <div class="mf-toolbar"><b>🎯 오늘의 결정</b> ${TODAY_DECISION_INFO_ICON}</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;max-width:1400px;margin:0 auto">
       ${immediateSection}
+      ${pullbackCandidatesSection}
       ${interestHtml ? sectionHeader('🔎 관심(확인됨)', '#8fb3ff') + interestHtml : ''}
       ${crossedHtml ? sectionHeader('🟠 이미 돌파(확인 필요)', '#ffb27a') + crossedHtml : ''}
       ${nearHtml ? sectionHeader('🟡 근접', '#ffd98a') + nearHtml : ''}
@@ -4690,13 +4735,19 @@ function setMarket(newMarket) {
 // 더 이상 덮어쓰지 않는다.
 let userMarketOverride = false;
 const MARKET_FILTER_KEY = 'marketFilterLast';
+// v5.215(사용자 지시 — [3]): timeBasedDefaultMarket()의 US 장중 판정
+// 로직을 공용 함수로 승격(새 판정식 아님, 그대로 재사용) — 🔴/🔎 카드의
+// "(전일 종가 기준)" 표시에도 같은 기준이 필요해서다.
+function isUsMarketOpen() {
+  const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const etMin = et.getHours() * 60 + et.getMinutes();
+  return et.getDay() >= 1 && et.getDay() <= 5 && etMin >= 9 * 60 + 30 && etMin <= 16 * 60;
+}
 function timeBasedDefaultMarket() {
   const kst = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
   const kstMin = kst.getHours() * 60 + kst.getMinutes();
   if (kst.getDay() >= 1 && kst.getDay() <= 5 && kstMin >= 9 * 60 && kstMin <= 15 * 60 + 30) return 'kr';
-  const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  const etMin = et.getHours() * 60 + et.getMinutes();
-  if (et.getDay() >= 1 && et.getDay() <= 5 && etMin >= 9 * 60 + 30 && etMin <= 16 * 60) return 'us';
+  if (isUsMarketOpen()) return 'us';
   return localStorage.getItem(MARKET_FILTER_KEY) || 'all';
 }
 document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('click', () => {
