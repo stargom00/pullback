@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.216</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.217</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -712,14 +712,21 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <!-- v5.108: 📅 캘린더 탭 — 로그인 후 기본 화면. 오늘 요약(게이트 신호등+
      돈의흐름 한 문장) + D+14 매크로 일정/휴장일/보유·즐겨찾기 실적일. -->
+<!-- v5.217(사용자 지시 — [B] 홈 탭 재배치): renderCalendar가 만드는 본문을
+     calendarDocTop(1~4번: 📌 내 추적/🔴 즉시행동/🔎 후보/📊 섹터흐름)과
+     calendarDocBottom(6번: 📅 D+14 일정)으로 나누고, 그 사이에 5번(📝
+     메모)를 끼운다. 메모는 여전히 그 둘과 별도 DOM(아래 이유 그대로) —
+     "안에 두면 필터 클릭마다 textarea가 재생성돼 포커스가 끊긴다"는
+     v5.205의 이유가 그대로 적용되므로, 위치만 옮기고 분리 원칙은 유지. -->
 <div class="jrnl-wrap" id="calendarView" style="display:none">
-  <!-- v5.205(사용자 지시): 오늘의 메모 — #calendarDoc(renderCalendar가
-       market 필터 클릭마다도 통째로 다시 그림) 밖에 별도로 둔다. 안에
-       두면 필터를 누를 때마다 textarea가 통째로 재생성돼 입력 중 커서/
-       포커스가 끊긴다. renderCalendar가 아니라 onEnterCalendarTab에서
-       탭 진입 시 1회만 채움. -->
+  <div id="calendarDocTop">불러오는 중…</div>
+  <!-- v5.205(사용자 지시): 오늘의 메모 — renderCalendar(market 필터
+       클릭마다도 통째로 다시 그림) 밖에 별도로 둔다. 안에 두면 필터를
+       누를 때마다 textarea가 통째로 재생성돼 입력 중 커서/포커스가
+       끊긴다. renderCalendar가 아니라 onEnterCalendarTab에서 탭 진입 시
+       1회만 채움. -->
   <div id="dailyNoteBox"></div>
-  <div id="calendarDoc">불러오는 중…</div>
+  <div id="calendarDocBottom"></div>
 </div>
 
 <div class="modal-bg" id="journalModal">
@@ -3661,7 +3668,7 @@ async function _promoteConfirmCloseEntries(td) {
 // /api/refresh-market으로 번들 자체를 먼저 강제 갱신(force=True)한 뒤
 // 캘린더를 다시 불러온다 — 같은 _data_cache를 읽으므로 이후엔 최신 반영.
 async function refreshCalendarTab() {
-  const doc = document.getElementById('calendarDoc');
+  const doc = document.getElementById('calendarDocTop');
   doc.innerHTML = '<div class="loading"><div class="spinner"></div>다시 스캔 중… (휴장일에도 강제로 재계산 — 몇 분 걸릴 수 있어요)</div>';
   try {
     await fetch('/api/refresh-market?market=all', { method: 'POST' });
@@ -3673,8 +3680,8 @@ async function refreshCalendarTab() {
 // v5.205(사용자 지시): 캘린더 탭 자유 메모 — textarea, 입력 1초 후 자동
 // 저장(/api/daily-note), 오늘 메모 + "어제 메모" 접힘. 서버(daily_notes.json,
 // 날짜 키 단일 필드 덮어쓰기)가 진실원이라 기기를 바꿔도 유지되고, 병합
-// 가드가 필요 없다(충돌 개념 자체가 없음). #calendarDoc 밖의 별도
-// #dailyNoteBox에 렌더(이유는 static HTML 쪽 주석 참고) — onEnterCalendarTab
+// 가드가 필요 없다(충돌 개념 자체가 없음). calendarDocTop/Bottom 밖의
+// 별도 #dailyNoteBox에 렌더(이유는 static HTML 쪽 주석 참고) — onEnterCalendarTab
 // 에서 탭 진입 시 1회만 채우고, renderCalendar()의 market 필터 재렌더는
 // 안 건드린다(그래야 필터를 눌러도 입력 중인 textarea가 안 끊김).
 let _dailyNoteDate = null;
@@ -3724,6 +3731,25 @@ function toggleDailyNoteYesterday() {
   if (caret) caret.textContent = _dailyNoteYesterdayOpen ? '▾' : '▸';
 }
 
+// v5.217(사용자 지시 — [B]-5): 기본 접힘 — 오늘 메모 첫 줄만 미리보기로
+// 보여주고, 클릭해야 편집용 textarea가 펼쳐진다(어제 메모 접힘은 기존
+// 그대로 유지). 미리보기/본문 둘 다 매번 DOM에 만들어두고 display만
+// 토글(toggleDailyNoteYesterday와 같은 가벼운 패턴) — textarea 자체를
+// 없앴다 다시 만들면 v5.205가 피하려던 포커스 끊김이 재발하므로, 펼친
+// 상태에서는 절대 다시 그리지 않는다(renderDailyNoteBox는 탭 진입 시
+// 1회만 불림, 펼침/접힘은 이 함수 재호출 없이 토글만).
+let _dailyNoteExpanded = false;
+function toggleDailyNoteExpanded() {
+  _dailyNoteExpanded = !_dailyNoteExpanded;
+  const preview = document.getElementById('dailyNotePreview');
+  const full = document.getElementById('dailyNoteFull');
+  if (preview) preview.style.display = _dailyNoteExpanded ? 'none' : '';
+  if (full) full.style.display = _dailyNoteExpanded ? '' : 'none';
+  if (_dailyNoteExpanded) {
+    const ta = document.getElementById('dailyNoteText');
+    if (ta) { _dailyNoteAutoGrow(ta); ta.focus(); }
+  }
+}
 function renderDailyNoteBox(d) {
   const box = document.getElementById('dailyNoteBox');
   if (!box) return;
@@ -3731,10 +3757,15 @@ function renderDailyNoteBox(d) {
     ? `<div class="jongga-forward-sub" style="cursor:pointer;margin-top:6px" onclick="toggleDailyNoteYesterday()"><span id="dailyNoteYesterdayCaret">▸</span> 어제(${d.yesterday}) 메모</div>
        <div id="dailyNoteYesterdayBody" style="display:none;font-size:12px;color:var(--muted);white-space:pre-wrap;padding:4px 0 0 14px">${_escapeHtml(d.yesterday_note)}</div>`
     : '';
+  const previewLine = (d.today_note || '').split('\n')[0].trim().slice(0, 60) || '(메모 없음 — 클릭해 작성)';
+  _dailyNoteExpanded = false;   // 탭 진입마다(=이 함수 호출마다) 접힘으로 시작
   box.innerHTML = `<div style="margin-bottom:14px">
-    <textarea id="dailyNoteText" rows="5" placeholder="오늘의 메모 — 자유롭게" style="width:100%;font-size:13px;line-height:1.5;padding:8px;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:8px;resize:vertical;box-sizing:border-box;overflow-y:hidden">${_escapeHtml(d.today_note)}</textarea>
-    <div id="dailyNoteStatus" style="font-size:10px;color:var(--muted);margin-top:2px;height:12px"></div>
-    ${yesterdayHtml}
+    <div id="dailyNotePreview" onclick="toggleDailyNoteExpanded()" style="cursor:pointer;font-size:13px;color:var(--muted);padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📝 ${_escapeHtml(previewLine)}</div>
+    <div id="dailyNoteFull" style="display:none;margin-top:6px">
+      <textarea id="dailyNoteText" rows="5" placeholder="오늘의 메모 — 자유롭게" style="width:100%;font-size:13px;line-height:1.5;padding:8px;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:8px;resize:vertical;box-sizing:border-box;overflow-y:hidden">${_escapeHtml(d.today_note)}</textarea>
+      <div id="dailyNoteStatus" style="font-size:10px;color:var(--muted);margin-top:2px;height:12px"></div>
+      ${yesterdayHtml}
+    </div>
   </div>`;
   const ta = document.getElementById('dailyNoteText');
   if (ta) {
@@ -3746,6 +3777,8 @@ function renderDailyNoteBox(d) {
     const status = document.getElementById('dailyNoteStatus');
     if (status) status.textContent = '';
     _dailyNoteSaveTimer = setTimeout(() => saveDailyNote(e.target.value), 1000);
+    const preview = document.getElementById('dailyNotePreview');
+    if (preview) preview.textContent = '📝 ' + ((e.target.value || '').split('\n')[0].trim().slice(0, 60) || '(메모 없음 — 클릭해 작성)');
   });
 }
 
@@ -3767,7 +3800,7 @@ async function saveDailyNote(text) {
 
 async function onEnterCalendarTab() {
   loadDailyNoteBox();   // 캘린더 본문과 독립 — 실패해도 본문 로드는 계속
-  const doc = document.getElementById('calendarDoc');
+  const doc = document.getElementById('calendarDocTop');
   doc.innerHTML = '<div class="loading"><div class="spinner"></div>불러오는 중…</div>';
   try {
     const res = await fetch('/api/calendar');
@@ -3780,6 +3813,9 @@ async function onEnterCalendarTab() {
     if (_calendarData.version) { const vb = document.getElementById('verBadge'); if (vb) vb.textContent = _calendarData.version; }
     await _promoteConfirmCloseEntries(_calendarData.today_decision);
     await _archiveExpiredPending(_calendarData.today_decision);
+    // v5.217(사용자 지시 — [A]-2): 📌 내 추적 보드 대상(pending/watch) 중
+    // 같은 티커 중복을 최신 1건만 남기고 접는다 — 같은 타이밍/경로.
+    await _archiveDuplicateTrackers();
     renderCalendar(_calendarData);
   } catch (e) {
     doc.innerHTML = '<p class="mf-err">불러오기 실패 — 새로고침 해보세요.</p>';
@@ -3817,29 +3853,23 @@ const GATE_LABEL = { confirmed: '확인된 상승', pressure: '조정 압박', c
 // 그 외 근접은 🟡, 나머지는 개수만 ⚪ — /api/calendar의 today_decision을
 // 그대로 렌더(집계는 서버에서 끝, 여기선 표시+액션 버튼만).
 const _tdWaitingLabel = { reignition: '재점화 창', pending_watch: '감시 대기', imminent: '돌파임박 후보', auto_watch: '🤖자동감시 대기' };
-let _tdWaitingOpen = false;
-function toggleTodayDecisionWaiting() {
-  _tdWaitingOpen = !_tdWaitingOpen;
-  const el = document.getElementById('tdWaitingDetail');
-  if (el) el.style.display = _tdWaitingOpen ? '' : 'none';
-}
 // v5.213(사용자 지시 — [3]): 🔴 즉시 행동 기본 5건 + "나머지 펼치기".
 // N=5 근거: 게이트 🟡(조정 압박, max_open_r=1.5R) 상한에서 하루 진입
 // 가능 건수(1~2건)의 여유분 — 실제 게이트 값이 바뀌어도 이 상수만
-// 조정하면 됨. 다른 접힘류(toggleSectorFlowExpanded 등)와 같은 패턴 —
-// 전역 상태 + renderCalendar 전체 재렌더.
+// 조정하면 됨.
 // v5.215(사용자 지시 — [1]): 🔴 즉시 행동 안에서 US 눌림목만 과다하게
 // 쌓여(다른 소스보다 후보 pool이 훨씬 큼, 하루 40~100+건) 카드가
-// 넘치는 문제 — 예전 IMMEDIATE_COLLAPSE_N(전체 소스 합산 5건 컷,
-// v5.213)은 US 눌림목이 아닌 다른 소스(KR 돌파임박/종가베팅, 하루
-// 0~2건 수준)까지 같이 잘라버릴 수 있었다. US 눌림목에만 5건 컷을
-// 적용하고, 초과분은 별도 "🔎 눌림목 후보 N건" 섹션으로 강등(전체
-// 접힘/펼침 토글은 v5.213과 같은 패턴 — 전역 상태 + renderCalendar
-// 전체 재렌더).
+// 넘치는 문제 — US 눌림목에만 5건 컷을 적용하고, 초과분은 후보 풀로.
 const US_PULLBACK_SHOW_N = 5;
-let _pullbackCandidatesExpanded = false;
-function togglePullbackCandidatesExpanded() {
-  _pullbackCandidatesExpanded = !_pullbackCandidatesExpanded;
+// v5.217(사용자 지시 — [B]-3): "🎯 오늘의 결정"을 "🔴 즉시 행동"(검증된
+// 진입) + "🔎 후보"(관심·근접·이미돌파·눌림목후보·대기 통합, 접힘)로
+// 분리 — 예전엔 각자 독립 토글(대기=_tdWaitingOpen, 눌림목후보=
+// _pullbackCandidatesExpanded, 관심/이미돌파/근접은 토글 없이 항상
+// 렌더)이었으나 하나의 접힘 섹션으로 합치면서 토글도 하나로 통일한다
+// (전역 상태 + renderCalendar 전체 재렌더, 다른 접힘류와 같은 패턴).
+let _candidatesExpanded = false;
+function toggleCandidatesExpanded() {
+  _candidatesExpanded = !_candidatesExpanded;
   if (_calendarData) renderCalendar(_calendarData);
 }
 // v5.155(사용자 지시) — "오늘의 결정" 전용 손절폭 배지. v4.67 원칙
@@ -3929,7 +3959,7 @@ function reignitionChecklistTooltip(item) {
 // 아니라 "매매 전에 미리 정해두는" 사전 결정 도구 — 라벨은 항상
 // sc.label("재량 시나리오")을 그대로 노출해 판정처럼 보이지 않게 한다.
 // 카드마다 독립적으로 접고 펼 수 있게 고유 DOM id로 직접 토글한다
-// (toggleTodayDecisionWaiting()과 같은 가벼운 패턴 — 전체 재렌더 없음).
+// (toggleMyTrackExpand()와 같은 가벼운 패턴 — 전체 재렌더 없음).
 function toggleScenarioBox(id) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -4005,7 +4035,10 @@ function scenarioMemoText(sc, market) {
 }
 
 function renderTodayDecisionHtml(td) {
-  if (!td) return '';
+  // v5.217: 문자열 대신 {immediateHtml, candidateHtml, immediateCount,
+  // candidateCount} 객체를 반환 — renderCalendar가 🔴/🔎를 독립된 홈
+  // 섹션으로 배치하고, 상단 스트립이 immediateCount를 재사용한다.
+  if (!td) return { immediateHtml: '', candidateHtml: '', immediateCount: 0, candidateCount: 0 };
   _tdBadgeStats = { green: 0, orange: 0, gray: 0, none: 0 };
   const mktOf = item => (item.market || '').toUpperCase() === 'KR' || /\.(KS|KQ)$/.test(item.ticker || '') ? 'KR' : 'US';
   // v5.199(사용자 지시 — 버그수정): 캘린더 상단 시장 필터(전체/한국/미국,
@@ -4175,7 +4208,11 @@ function renderTodayDecisionHtml(td) {
     `);
   };
   const immediateHtml = immediateShown.map(renderImmediateCard).join('');
-  const pullbackCandidatesHtml = _pullbackCandidatesExpanded ? usPullbackDemoted.map(renderImmediateCard).join('') : '';
+  // v5.217(사용자 지시 — [B]-3): 눌림목후보/관심/근접/이미돌파는 이제
+  // "🔎 후보" 통합 섹션 안에 있어 그 섹션이 접혀 있으면(기본값) 카드
+  // 자체를 안 만든다 — v5.213/v5.215의 DOM 비용 절감 원칙을 통합 토글
+  // (_candidatesExpanded)로 그대로 이어받음.
+  const pullbackCandidatesHtml = _candidatesExpanded ? usPullbackDemoted.map(renderImmediateCard).join('') : '';
 
   // v5.137(사용자 지시): 근접(🟡)에 "아직 피벗 아래"와 "이미 피벗 위(확인
   // 대기)"가 섞여 있었다 — 성격이 다른 신호라 돌파% 부호로 그룹 분리.
@@ -4223,8 +4260,8 @@ function renderTodayDecisionHtml(td) {
   };
   const nearBelow = (td.near || []).filter(item => (item.dist_pct ?? 1) > 0);
   const nearCrossed = (td.near || []).filter(item => (item.dist_pct ?? 1) <= 0);
-  const nearHtml = nearBelow.map(renderNearRow).join('');
-  const crossedHtml = nearCrossed.map(renderNearRow).join('');
+  const nearHtml = _candidatesExpanded ? nearBelow.map(renderNearRow).join('') : '';
+  const crossedHtml = _candidatesExpanded ? nearCrossed.map(renderNearRow).join('') : '';
 
   // v5.180(사용자 지시 — 버킷 재정의 [1]): "🔎 관심(확인됨)" 신설 —
   // verdict==='watch_interest'(확인은 됐지만 진입 근거 미유의)만 여기로.
@@ -4235,7 +4272,7 @@ function renderTodayDecisionHtml(td) {
   // app.py 참고) — 다른 소스(pending_watch/auto_watch)는 필드가 없어
   // 기존 기본 문구 그대로. source==='reignition'이면 재량 체크리스트
   // ⓘ 툴팁도 붙인다(reignitionChecklistTooltip).
-  const interestHtml = (td.interest || []).map(item => {
+  const renderInterestCard = item => {
     const mkt = mktOf(item);
     const labelText = item.interest_label || '🔎 관심 — 진입 근거 미유의';
     const checklistIcon = item.source === 'reignition'
@@ -4252,11 +4289,14 @@ function renderTodayDecisionHtml(td) {
       ${item.scenario ? renderScenarioHtml(item.scenario, mkt, 'sc_td_' + item.key, item.atr_pct) : ''}
       ${actions(item, false)}
     `);
-  }).join('');
+  };
+  const interestHtml = _candidatesExpanded ? (td.interest || []).map(renderInterestCard).join('') : '';
 
   // v5.158: 배지 판정 결과 집계 로그 — "조용히 안 뜬다"를 콘솔에서 바로
   // 확인 가능하게(사용자 지시, entry undefined로 배지 전체가 안 뜨던
-  // 사고 재발 시 즉시 알아채기 위함).
+  // 사고 재발 시 즉시 알아채기 위함). v5.217: 🔎 후보가 접혀 있으면
+  // 그 안의 카드들은 애초에 안 만들어져 배지 집계에도 안 잡힌다 —
+  // 의도된 동작(펼쳐야 실제로 판정이 도는 카드가 생김).
   {
     const s = _tdBadgeStats, total = s.green + s.orange + s.gray + s.none;
     console.log(`[오늘의결정] 손절폭 배지 ${total}건 중 초록 ${s.green} · 주황 ${s.orange} · 회색(판정불가) ${s.gray} · 미표시 ${s.none}`);
@@ -4265,50 +4305,50 @@ function renderTodayDecisionHtml(td) {
   const waiting = td.waiting || {};
   const waitingParts = Object.entries(waiting).filter(([, n]) => n > 0)
     .map(([k, n]) => `${_tdWaitingLabel[k] || k} ${n}건`);
-  const waitingHtml = td.waiting_total
-    ? `<div style="font-size:12px;color:var(--muted);margin-top:8px;cursor:pointer" onclick="toggleTodayDecisionWaiting()">⚪ 대기 ${td.waiting_total}건 — 클릭해서 펼치기</div>
-       <div id="tdWaitingDetail" style="display:${_tdWaitingOpen ? '' : 'none'};font-size:11px;color:var(--muted);margin-top:2px">${waitingParts.join(' · ')}</div>`
-    : '';
 
-  if (!(td.immediate || []).length && !(td.interest || []).length && !(td.near || []).length) {
-    return `<div>
-      <div class="mf-toolbar"><b>🎯 오늘의 결정</b> ${TODAY_DECISION_INFO_ICON}</div>
-      <div style="font-size:13px;color:var(--muted);margin-bottom:10px">오늘 행동할 것 없음${td.waiting_total ? ` — 대기 ${td.waiting_total}건` : ''}. 방금 배포했다면 캐시 워밍 중이라 몇 분 뒤 다시 채워집니다.</div>
-      ${waitingHtml}
-    </div>`;
-  }
-
-  // v5.142: 그리드 하나에 그룹헤더+카드를 전부 넣고 헤더만 grid-column:1/-1로
-  // 전체 폭 차지 — auto-fill이 와이드 화면 3~4열/노트북 2~3열/모바일
-  // 1열로 자동 조정(사용자 지시).
+  // v5.217(사용자 지시 — [B]-2): 그리드 하나에 그룹헤더+카드를 전부 넣고
+  // 헤더만 grid-column:1/-1로 전체 폭 차지(v5.142 그대로).
   const sectionHeader = (label, color) =>
     `<div style="grid-column:1/-1;font-size:12px;color:${color};font-weight:700;margin-top:4px">${label}</div>`;
   // v5.180(사용자 지시 — 검증 항목 "🔴 비어있으면 비어있다고 표시"):
-  // 다른 버킷(🔎/🟠/🟡)에 항목이 있는데 🔴만 비어있으면 헤더 자체가
-  // 사라져서 "즉시 행동이 있는지 없는지" 조용히 안 보이는 사고를 막는다
-  // — 진입 근거가 있는 항목이 하나도 없다는 사실 자체가 중요한 정보다.
-  // v5.215(사용자 지시 — [1]): US 눌림목 초과분(usPullbackDemoted)만
-  // 별도 "🔎 눌림목 후보 N건" 섹션으로 — 기본 접힘, 클릭하면 펼침(카드는
-  // 펼치기 전엔 렌더 안 함, v5.213의 DOM 비용 절감 원칙 그대로).
-  const immediateSection = immediateHtml
-    ? sectionHeader('🔴 즉시 행동', '#ff9b9b') + immediateHtml
-    : sectionHeader('🔴 즉시 행동 — 없음', '#666');
-  const pullbackCandidatesHeader = usPullbackDemoted.length
-    ? `<div style="grid-column:1/-1;font-size:12px;color:#8fb3ff;font-weight:700;margin-top:4px;cursor:pointer" onclick="togglePullbackCandidatesExpanded()">🔎 눌림목 후보 ${usPullbackDemoted.length}건 ${_pullbackCandidatesExpanded ? '▴ 접기' : '▾ 펼치기'}</div>`
-    : '';
-  const pullbackCandidatesSection = pullbackCandidatesHeader + pullbackCandidatesHtml;
-  return `<div>
-    <div class="mf-toolbar"><b>🎯 오늘의 결정</b> ${TODAY_DECISION_INFO_ICON}</div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;max-width:1400px;margin:0 auto">
-      ${immediateSection}
-      ${pullbackCandidatesSection}
-      ${interestHtml ? sectionHeader('🔎 관심(확인됨)', '#8fb3ff') + interestHtml : ''}
-      ${crossedHtml ? sectionHeader('🟠 이미 돌파(확인 필요)', '#ffb27a') + crossedHtml : ''}
-      ${nearHtml ? sectionHeader('🟡 근접', '#ffd98a') + nearHtml : ''}
-    </div>
-    ${waitingHtml}
-    <div style="margin-bottom:6px"></div>
+  // 다른 버킷에 항목이 있는데 🔴만 비어있으면 헤더 자체가 사라져서
+  // "즉시 행동이 있는지 없는지" 조용히 안 보이는 사고를 막는다 — 진입
+  // 근거가 있는 항목이 하나도 없다는 사실 자체가 중요한 정보다.
+  // v5.217(사용자 지시 — [B]): "🎯 오늘의 결정" 단일 컨테이너를 "🔴 즉시
+  // 행동"과 "🔎 후보"(관심·근접·이미돌파·눌림목후보·대기 통합, 기본
+  // 접힘) 두 개의 독립 홈 섹션으로 분리 — renderCalendar가 각자 자기
+  // 위치(2번/3번)에 넣을 수 있게 객체로 반환한다(문자열 하나 반환하던
+  // 기존 방식에서 변경).
+  const immediateSectionHtml = `<div>
+    <div class="mf-toolbar"><b>🔴 즉시 행동</b> ${TODAY_DECISION_INFO_ICON}</div>
+    ${immediateHtml
+      ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;max-width:1400px;margin:0 auto">${immediateHtml}</div>`
+      : `<div style="font-size:13px;color:var(--muted)">오늘 검증된 즉시 진입 없음. 방금 배포했다면 캐시 워밍 중이라 몇 분 뒤 다시 채워집니다.</div>`}
   </div>`;
+
+  const candidateCount = usPullbackDemoted.length + (td.interest || []).length
+    + nearCrossed.length + nearBelow.length + (td.waiting_total || 0);
+  let candidateSectionHtml = '';
+  if (candidateCount > 0) {
+    const candidateBodyHtml = _candidatesExpanded ? `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;max-width:1400px;margin:8px auto 0">
+        ${usPullbackDemoted.length ? sectionHeader(`🔎 눌림목 후보 ${usPullbackDemoted.length}건`, '#8fb3ff') + pullbackCandidatesHtml : ''}
+        ${interestHtml ? sectionHeader(`🔎 관심(확인됨) ${(td.interest || []).length}건`, '#8fb3ff') + interestHtml : ''}
+        ${crossedHtml ? sectionHeader(`🟠 이미 돌파(확인 필요) ${nearCrossed.length}건`, '#ffb27a') + crossedHtml : ''}
+        ${nearHtml ? sectionHeader(`🟡 근접 ${nearBelow.length}건`, '#ffd98a') + nearHtml : ''}
+      </div>
+      ${td.waiting_total ? `<div style="font-size:11px;color:var(--muted);margin-top:8px">⚪ 대기 ${td.waiting_total}건 — ${waitingParts.join(' · ')}</div>` : ''}
+    ` : '';
+    candidateSectionHtml = `<div style="margin-top:14px">
+      <div class="mf-toolbar" style="cursor:pointer" onclick="toggleCandidatesExpanded()">
+        <b>🔎 후보 (${candidateCount}건)</b> <span style="font-size:11px;color:var(--muted)">${_candidatesExpanded ? '▴ 접기' : '▾ 펼치기'}</span>
+      </div>
+      ${candidateBodyHtml}
+    </div>`;
+  }
+
+  return { immediateHtml: immediateSectionHtml, candidateHtml: candidateSectionHtml,
+           immediateCount: immediateShown.length, candidateCount };
 }
 
 // v5.195(사용자 지시 — 섹터 층 1단계 [4]): "🎯 오늘의 결정" 바로 아래
@@ -4399,6 +4439,19 @@ function toggleSectorFlowExpanded() {
   _sectorFlowExpanded = !_sectorFlowExpanded;
   if (_calendarData) renderCalendar(_calendarData);
 }
+// v5.217(사용자 지시 — [B] 상단 스트립): 게이트 상세(기존 riskbar 3행)를
+// 클릭해야 펼쳐지는 토글로 — 다른 접힘류와 같은 패턴.
+let _homeStripExpanded = false;
+function toggleHomeStripExpanded() {
+  _homeStripExpanded = !_homeStripExpanded;
+  if (_calendarData) renderCalendar(_calendarData);
+}
+// v5.217(사용자 지시 — [B]-6): D+14 일정 기본 접힘.
+let _eventsExpanded = false;
+function toggleEventsExpanded() {
+  _eventsExpanded = !_eventsExpanded;
+  if (_calendarData) renderCalendar(_calendarData);
+}
 function _sectorFlowColumnHtml(flagLabel, marketCode, topRows, accelRows, hotSectors, n) {
   if ((!topRows || !topRows.length) && (!accelRows || !accelRows.length)) return '';
   const hotBadge = (hotSectors && hotSectors.length)
@@ -4438,8 +4491,8 @@ function renderSectorFlowHtml(sf) {
 }
 
 function renderCalendar(data) {
-  const doc = document.getElementById('calendarDoc');
-  const isKrTicker = t => /\.(KS|KQ)$/.test(t || '');
+  const docTop = document.getElementById('calendarDocTop');
+  const docBottom = document.getElementById('calendarDocBottom');
 
   // ── v5.111: 오늘 KR·US 둘 다 휴장(주말 포함)이면 "왜 조용한지" 상단에 설명 ──
   const mc = data.market_closed;
@@ -4447,86 +4500,82 @@ function renderCalendar(data) {
     ? `<div style="font-size:12px;color:var(--muted);margin-bottom:10px">🛌 오늘 KR·US 휴장${mc.next_open ? ` — 다음 개장 ${mc.next_open}` : ''}</div>`
     : '';
 
-  // ── ① 🔴 D-day 경고(전 섹션 중 유일하게 없으면 완전히 숨김 — 경고는 있을 때만 의미, 사용자 지시) ──
+  // ── 🔴 D-day 경고(전 섹션 중 유일하게 없으면 완전히 숨김 — 경고는 있을 때만 의미, 사용자 지시) ──
   const ddayHtml = (data.dday_warnings || []).map(e =>
     `<div style="background:#3a1f1f;border:1px solid #6b2b2b;border-radius:8px;padding:10px 14px;margin-bottom:8px;font-size:13px;color:#ff9b9b">
       ⚠️ ${e.ticker} 실적 D-${e.d_minus} — 갭 리스크, 포지션 판단 필요
     </div>`).join('');
 
-  // ── ② 💼 포지션 요약 — v5.111: 한 줄 텍스트 → 미니 카드 칩으로 승격(사용자 지시,
-  // 시각적 무게 부여) ──
-  let positionsSummaryHtml = '';
+  // v5.217(사용자 지시 — [B] 삭제/이동): "💼 포지션" 카드(칩 목록)를 홈에서
+  // 제거 — 아래 homeStripHtml 요약("포지션 N (+x.xxR)") + 포지션 탭으로
+  // 대체. posS/posItems는 그 요약 계산에 재사용.
   const posS = data.positions_summary;
-  if (posS && posS.items && posS.items.length) {
-    const chips = posS.items.map(it => {
-      const r = it.r_progress;
-      const rStr = r != null ? `${r >= 0 ? '+' : ''}${r}R` : '-';
-      const rCol = r != null && r >= 0 ? 'var(--px-up)' : r != null ? 'var(--px-down)' : 'var(--muted)';
-      const dtsp = it.dist_to_stop_pct;
-      const distStr = dtsp == null ? '-' : dtsp >= 0 ? `-${dtsp}%` : `이미 이탈(${Math.abs(dtsp)}%)`;
-      return `<div style="display:inline-flex;align-items:center;gap:6px;border:1px solid ${it.near_stop ? '#8c2b2b' : 'var(--line)'};
-        background:${it.near_stop ? '#2a1414' : 'var(--card)'};border-radius:8px;padding:6px 10px;font-size:12px;white-space:nowrap">
-        <b>${it.name || it.ticker}</b><span style="color:${rCol}">${rStr}</span><span style="color:var(--line)">|</span>
-        <span style="color:${it.near_stop ? '#ff6b6b' : 'var(--muted)'}">손절까지 ${distStr}</span>
-      </div>`;
-    }).join('');
-    const risk = posS.open_risk || {};
-    const riskParts = ['KRW', 'USD'].filter(c => (risk[c] || 0) !== 0).map(c => `${Math.round(risk[c]).toLocaleString()}${c}`);
-    const riskStr = riskParts.length ? riskParts.join(' / ') : '0';
-    const missingStr = posS.missing_stop_count ? ` · ⚠️ 손절 미설정 ${posS.missing_stop_count}개` : '';
-    positionsSummaryHtml = `<div style="margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <b style="font-size:13px">💼 포지션</b>
-        <span onclick="document.querySelector('[data-mode=positions]').click()"
-              style="font-size:11px;color:var(--muted);cursor:pointer" title="포지션 탭으로 이동">전체 보기 →</span>
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px">${chips}</div>
-      <div style="font-size:11px;color:var(--muted);margin-top:6px">열린 리스크 ${riskStr}${missingStr}</div>
-    </div>`;
-  }
-
-  // ── ③ 📋 오늘의 액션 큐(대기 피벗 근접·종가베팅 후보·대장관찰 전환) ──
-  const aq = data.action_queue || {};
-  const queueLines = [];
-  (aq.near_pivot || []).forEach(p => {
-    const mkt = isKrTicker(p.ticker) ? 'KR' : 'US';
-    queueLines.push(`<div>🎯 ${p.name} 피벗 근접(-${p.dist_pct}%) — ${fmtPrice(p.close, mkt)} → ${fmtPrice(p.pivot, mkt)}</div>`);
-  });
-  if (aq.jongga_today && aq.jongga_today.count) {
-    queueLines.push(`<div>🌆 오늘 종가베팅 후보 ${aq.jongga_today.count}개 발생 — 15:20 동시호가 전 확인</div>`);
-  }
-  (aq.leader_converted || []).forEach(c => {
-    queueLines.push(`<div>👑→📉 ${c.name} 대장관찰 → 눌림목 전환 감지</div>`);
-  });
-  const actionQueueHtml = `<div class="mf-toolbar" style="margin-top:14px"><b>📋 오늘의 액션 큐</b></div>` +
-    (queueLines.length
-      ? `<div style="font-size:13px;display:flex;flex-direction:column;gap:4px;margin-bottom:8px">${queueLines.join('')}</div>`
-      : `<div style="font-size:13px;color:var(--muted);margin-bottom:8px">대기 항목 없음 · 개장일에 피벗 근접/종가베팅 후보가 여기 떠요. 방금 배포했다면 캐시 워밍 중이라 몇 분 뒤 다시 채워집니다.</div>`);
+  const posItems = (posS && posS.items) || [];
 
   const gate = data.gate;
   const gateRow = (label, g) => `<div class="rb-item"><span class="rb-t">${label}</span>` +
     `<span class="rb-v">${GATE_EMOJI[g] || '⚪'} ${GATE_LABEL[g] || '판정불가'}</span></div>`;
-  const gateHtml = gate
+  const gateDetailHtml = gate
     ? gateRow('🇰🇷 KR', gate.gate_kr) + gateRow('🇺🇸 US', gate.gate_us) + gateRow('종합', gate.suggest)
     : `<div class="rb-item"><span class="rb-t">시장 게이트</span><span class="rb-v">불러오기 실패</span></div>`;
-
-  const mfLines = ['kr', 'us'].map(mkt => {
+  // v5.217(사용자 지시 — [B] 삭제/이동): "미국 요약 문장"(돈의흐름
+  // final_sentence)은 별도 상세 블록이 아니라 게이트 스트립의 hover
+  // 툴팁으로 옮긴다.
+  const mfTitleText = ['kr', 'us'].map(mkt => {
     const m = data.moneyflow && data.moneyflow[mkt];
-    if (!m || !m.final_sentence) return '';
-    return `<div style="margin-top:4px">${mkt === 'kr' ? '🇰🇷' : '🇺🇸'} ${m.final_sentence}</div>`;
-  }).filter(Boolean).join('');
+    return (m && m.final_sentence) ? `${mkt === 'kr' ? 'KR' : 'US'}: ${m.final_sentence}` : null;
+  }).filter(Boolean).join('\n').replace(/"/g, '&quot;');
 
-  // ── ⑤ 🔥 강세테마 × 스캐너 교집합 — v5.111: 골격은 항상 표시, 매칭
-  // 없으면 회색 한 줄(사용자 지시 — "숨기기/표시" 균형 재조정) ──
-  const themeHits = data.theme_scanner_hits || [];
-  const themeHitsHtml = `<div class="mf-toolbar" style="margin-top:14px"><b>🔥 강세테마 × 스캐너</b></div>` +
-    (themeHits.length
-      ? `<div style="font-size:13px;display:flex;flex-direction:column;gap:4px;margin-bottom:8px">
-           ${themeHits.map(t => `<div>🔥 <b>${t.theme}</b> × ${t.tab}: ${t.stocks.join(', ')}</div>`).join('')}
-         </div>`
-      : `<div style="font-size:13px;color:var(--muted);margin-bottom:8px">오늘 매칭 없음 (개장일 장중 갱신)</div>`);
+  _todayDecisionMap = {};
+  // v5.216/v5.217(사용자 지시): 📌 내 추적 보드 — 홈 1번 자리.
+  // journalCache(getJournal())에서 직접 계산하므로 data(서버 캘린더
+  // 페이로드)와 독립 — 저널이 바뀔 때마다(예: updateTracking) 같이
+  // 다시 그려야 최신 상태가 보인다(updateTracking()의 mode==='calendar'
+  // 재렌더 분기 참고).
+  const myTrackBoardHtml = renderMyTrackBoard();
+  // v5.217: renderTodayDecisionHtml이 이제 문자열이 아니라
+  // {immediateHtml, candidateHtml, immediateCount, candidateCount}를
+  // 반환 — 🔴(2번)와 🔎 후보(3번)를 독립 섹션으로 배치하기 위함.
+  const td = renderTodayDecisionHtml(data.today_decision);
+  const sectorFlowHtml = renderSectorFlowHtml(data.sector_flow);
 
-  // 이벤트 통합: 매크로 + 휴장일 + 실적 → 날짜별로 묶어서 하루씩 표시
+  // v5.217(사용자 지시 — [B] 상단 고정 스트립): 한 줄, 스크롤 안 됨
+  // (position:sticky) — 게이트/포지션/📌도달/🔴 요약, 클릭하면 게이트
+  // 상세(기존 riskbar 3행)가 펼쳐진다. top은 header(이미 position:sticky)
+  // 실제 렌더 높이를 매번 측정해서 그 바로 아래에 붙인다 — 반응형으로
+  // header 높이가 바뀌어도(모바일 줄바꿈 등) 픽셀 하드코딩 없이 안전.
+  const headerEl = document.querySelector('header');
+  const headerH = headerEl ? headerEl.offsetHeight : 0;
+  const posRSum = posItems.reduce((s, it) => s + (it.r_progress || 0), 0);
+  const posStripPart = posItems.length
+    ? ` <span>· 포지션 ${posItems.length} (${posRSum >= 0 ? '+' : ''}${posRSum.toFixed(2)}R)</span>` : '';
+  const reachedStripCount = myTrackReachedCount();
+  const homeStripHtml = `<div id="homeStripBar" style="position:sticky;top:${headerH}px;z-index:90;background:var(--bg);border-bottom:1px solid var(--line);padding:8px 4px;margin-bottom:10px">
+    <div style="display:flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap;overflow-x:auto">
+      <span style="cursor:pointer" title="${mfTitleText}" onclick="toggleHomeStripExpanded()">게이트 KR${GATE_EMOJI[gate && gate.gate_kr] || '⚪'} US${GATE_EMOJI[gate && gate.gate_us] || '⚪'} 종합${GATE_EMOJI[gate && gate.suggest] || '⚪'}</span>${posStripPart}
+      <span>· 📌 도달 ${reachedStripCount}</span>
+      <span>· 🔴 ${td.immediateCount}</span>
+      <span style="margin-left:auto;color:var(--muted);cursor:pointer" onclick="toggleHomeStripExpanded()">${_homeStripExpanded ? '▴' : '▾'}</span>
+    </div>
+    <div id="homeStripDetail" style="display:${_homeStripExpanded ? '' : 'none'};margin-top:8px">
+      <div class="riskbar">${gateDetailHtml}</div>
+    </div>
+  </div>`;
+
+  // v5.217(사용자 지시 — [B] 홈 순서): 1.내추적 2.🔴즉시행동 3.🔎후보
+  // 4.📊섹터흐름 — 여기까지가 "첫 화면 목표"(검증 [C]). 5.메모/6.D+14는
+  // calendarDocBottom(아래) + 그 사이 #dailyNoteBox(static HTML)로.
+  docTop.innerHTML = `
+    ${homeStripHtml}
+    ${marketClosedHtml}
+    ${ddayHtml}
+    ${myTrackBoardHtml}
+    ${td.immediateHtml}
+    ${td.candidateHtml}
+    ${sectorFlowHtml}
+  `;
+
+  // ── 📅 D+14 일정(6번) — 이벤트 통합: 매크로 + 휴장일 + 실적 → 날짜별로 묶어서 하루씩 표시 ──
   const byDate = {};
   const addEvent = (date, html) => { (byDate[date] = byDate[date] || []).push(html); };
   (data.macro_events || []).forEach(e => {
@@ -4561,7 +4610,20 @@ function renderCalendar(data) {
   const macroErr = (!data.macro_events || !data.macro_events.length) && data.macro_error
     ? `<div style="font-size:11px;color:#ff9b9b;margin-top:4px">⚠️ 매크로 일정 갱신 실패(이전 캐시 유지 중): ${data.macro_error}</div>` : '';
 
-  // ── ⑦ 📊 종가베팅 포워드 성적(맨 아래) — v5.111: 0건이어도 항상 표시 ──
+  // v5.217(사용자 지시 — [B]-6): 기본 접힘 — 오늘/내일 High중요도 일정만
+  // 접힌 채로도 미리보기로 보인다.
+  const tomorrowStr = (() => {
+    const d = new Date((data.today || '') + 'T00:00:00'); d.setDate(d.getDate() + 1);
+    return d.toISOString().slice(0, 10);
+  })();
+  const peekEvents = (data.macro_events || []).filter(e =>
+    e.importance === 'high' && (e.date === data.today || e.date === tomorrowStr));
+  const peekHtml = peekEvents.length
+    ? `<div style="font-size:12px;margin-top:6px">${peekEvents.map(e =>
+        `<div>${e.country === 'KR' ? '🇰🇷' : '🇺🇸'} ${e.date === data.today ? '오늘' : '내일'} <b>${e.event}</b></div>`).join('')}</div>`
+    : '';
+
+  // ── 📊 종가베팅 포워드 성적(맨 아래) — v5.111: 0건이어도 항상 표시 ──
   const fwd = data.jongga_forward || {};
   const fwdN = fwd.total_resolved || 0;
   let forwardHtml;
@@ -4573,33 +4635,16 @@ function renderCalendar(data) {
     forwardHtml = `<div style="font-size:11px;color:var(--muted);margin-top:16px;text-align:center">📊 종가베팅 포워드 누적 ${fwdN}건 · 평균갭 ${cb.mean_gap_pct >= 0 ? '+' : ''}${cb.mean_gap_pct}% (백테스트 ${bt.mean_gap_pct >= 0 ? '+' : ''}${bt.mean_gap_pct}%)</div>`;
   }
 
-  _todayDecisionMap = {};
-  // v5.216(사용자 지시): 📌 내 추적 보드 — "🎯 오늘의 결정" 바로 위, 매일
-  // 첫 화면에서 가장 먼저 보이는 자리. journalCache(getJournal())에서
-  // 직접 계산하므로 data(서버 캘린더 페이로드)와 독립 — 저널이 바뀔
-  // 때마다(예: updateTracking) 같이 다시 그려야 최신 상태가 보인다
-  // (updateTracking()의 mode==='calendar' 재렌더 분기 참고).
-  const myTrackBoardHtml = renderMyTrackBoard();
-  const todayDecisionHtml = renderTodayDecisionHtml(data.today_decision);
-  const sectorFlowHtml = renderSectorFlowHtml(data.sector_flow);
-
-  doc.innerHTML = `
-    ${myTrackBoardHtml}
-    ${todayDecisionHtml}
-    ${sectorFlowHtml}
-    ${marketClosedHtml}
-    ${ddayHtml}
-    ${positionsSummaryHtml}
-    ${actionQueueHtml}
-    <div class="riskbar">${gateHtml}</div>
-    ${mfLines ? `<div style="font-size:13px;color:var(--muted);margin-top:8px">${mfLines}</div>` : ''}
-    ${themeHitsHtml}
-    <div class="mf-toolbar" style="justify-content:space-between;margin-top:14px">
-      <b>📅 오늘 ~ D+14 일정</b>
-      <button onclick="runMacroCalendarNow(this)" title="매크로 일정만 다시 생성(주 1회 자동 갱신, 필요하면 수동으로도)">🔄 매크로 새로고침</button>
+  docBottom.innerHTML = `
+    <div class="mf-toolbar" style="justify-content:space-between;cursor:pointer;margin-top:14px" onclick="toggleEventsExpanded()">
+      <b>📅 D+14 일정 (${dates.length}일)</b>
+      <span style="display:flex;align-items:center;gap:8px">
+        <button onclick="event.stopPropagation();runMacroCalendarNow(this)" title="매크로 일정만 다시 생성(주 1회 자동 갱신, 필요하면 수동으로도)">🔄</button>
+        <span style="font-size:11px;color:var(--muted)">${_eventsExpanded ? '▴ 접기' : '▾ 펼치기'}</span>
+      </span>
     </div>
-    ${eventsHtml}
-    ${macroNote}${macroErr}
+    ${peekHtml}
+    ${_eventsExpanded ? eventsHtml + macroNote + macroErr : ''}
     ${forwardHtml}
   `;
 }
@@ -4762,8 +4807,8 @@ document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('clic
   localStorage.setItem(MARKET_FILTER_KEY, t.dataset.market);
   setMarket(t.dataset.market);
   // v5.199(사용자 지시 — 버그수정): 캘린더 탭은 #content가 아니라
-  // #calendarDoc을 쓰므로 renderCards()를 불러도 화면에 아무 변화가
-  // 없었다(숨겨진 #content만 갱신) — renderCalendar()를 직접 다시 불러야
+  // #calendarDocTop/Bottom을 쓰므로 renderCards()를 불러도 화면에 아무
+  // 변화가 없었다(숨겨진 #content만 갱신) — renderCalendar()를 직접 다시 불러야
   // 오늘의 결정 등 캘린더 자체 섹션에 시장 필터가 반영된다.
   if (mode === 'moneyflow') { loadMoneyflowDate(null); }
   else if (mode === 'calendar') { if (_calendarData) renderCalendar(_calendarData); }
@@ -7073,70 +7118,81 @@ function isWatchResolved(r) {
   return isTriggerConfirmed(r);
 }
 
-// ── v5.216(사용자 지시) — 📌 내 추적 보드 ────────────────────────────────
-// 저널 대기(pending) + 감시 등록분(watch) 전체를 한 곳에 모아 "오늘 기준
-// 뭘 봐야 하는지"를 계산해 보여준다. 캘린더 "🎯 오늘의 결정" 바로 위에
-// 렌더(renderCalendar 참고) — 매일 첫 화면에서 가장 먼저 보이는 자리.
+// ── v5.216/v5.217(사용자 지시) — 📌 내 추적 보드 ─────────────────────────
+// 캘린더 "🎯 오늘의 결정" 바로 위에 렌더(renderCalendar 참고).
 //
-// [3] 트리거 가격: r.my_trigger_price(신규 필드, 사용자가 보드에서 직접
-// 입력·선택)가 있으면 그걸, 없으면 r.pivot(등록 시점 스냅샷)을 기준으로
-// 쓴다. leader_conversion 관찰은 애초에 가격 기준 자체가 없는 신호(RS·
-// 20일선 위치)라 baseline이 항상 null — 별도로 leader_converted 여부로만
-// "도달" 판정한다.
-function myTrackBaseline(r) {
-  return r.my_trigger_price != null ? parseFloat(r.my_trigger_price)
-    : (r.pivot != null ? parseFloat(r.pivot) : null);
-}
-// [6](사용자 지시): my_trigger_price를 직접 입력한 pending은 30거래일,
-// 자동 등록분(대기, 트리거=피벗)은 기존 10거래일 — app.py
-// JOURNAL_PENDING_EXPIRE_DAYS_CUSTOM_TRIGGER/JOURNAL_PENDING_EXPIRE_DAYS와
-// 동일 규칙(실제 자동 아카이브는 서버가 판정, 여기는 표시용 재현).
-// watch(status)는 기존 watchExpiryDays(r) 그대로 — leader_conversion(26)/
-// 트리거관찰(3)은 백테스트로 근거를 잡아둔 값이라 트리거를 직접
-// 입력했다고 임의로 늘리지 않는다(범위를 pending에만 한정).
+// v5.217 [A] 재설계(사용자 확인 완료 — 최초안의 "자동 등록('패턴' 등
+// 시스템 관찰)은 숨김" 조건은 폐기): journal_user.json에 pending/watch가
+// 생기는 경로는 전부 사용자 클릭이 필요(⚡감시/👁관찰/+일지/수동추가) —
+// 서버가 혼자 저널에 pending/watch를 만드는 경로가 없다(auto_watch·
+// 재점화는 별도 파일이라 애초에 이 보드 대상이 아님). 그래서 "시스템
+// 관찰"을 가려낼 필드가 없다 — 대신 my_trigger_price 유무로 나눈다:
+//   있음 → 활성 보드(최대 MY_TRACK_ACTIVE_SHOW_N행, 아래 상태 판정)
+//   없음 → "▾ 트리거 미입력 N건" 접힘, 상태 판정 없음(피벗 폴백 폐기 —
+//          트리거 없이는 "도달"을 판단할 근거 자체가 없다는 사용자
+//          판단). 펼치면 행마다 트리거 입력칸 + 개별 "관찰 종료" +
+//          상단 일괄 "전체 관찰 종료".
+// leader_conversion(👁, 가격 기준 자체가 없는 신호)은 my_trigger_price가
+// 있을 수 없어 자연히 "미입력" 그룹에 들어간다 — 별도 분기 불필요.
 function myTrackExpiryDays(r) {
-  if ((r.status || 'entered') === 'pending') {
-    return r.my_trigger_price != null ? PENDING_EXPIRE_DAYS_CUSTOM_TRIGGER : PENDING_EXPIRE_DAYS;
-  }
+  // 이 함수는 my_trigger_price가 있는(활성) 행에만 호출된다 — pending은
+  // 항상 30거래일(app.py JOURNAL_PENDING_EXPIRE_DAYS_CUSTOM_TRIGGER와
+  // 동일 규칙, [6]). watch는 기존 watchExpiryDays(r) 그대로 — leader_
+  // conversion(26)/트리거관찰(3)은 백테스트 근거값이라 트리거 직접
+  // 입력으로 임의로 늘리지 않는다(범위를 pending에만 한정, [6]).
+  if ((r.status || 'entered') === 'pending') return PENDING_EXPIRE_DAYS_CUSTOM_TRIGGER;
   return watchExpiryDays(r);
 }
 function myTrackAnchorDate(r) {
   return (r.status || 'entered') === 'pending' ? r.date : watchStartDate(r);
 }
-const MY_TRACK_APPROACH_PCT = 0.03;      // [2]: 트리거까지 3% 이내 = 👀접근중
-const MY_TRACK_EXPIRE_WARN_RATIO = 0.8;  // [2]: 만료 기간의 80% 경과 = ⌛만료임박
-// [2] 행 하나의 오늘자 상태 — 4택1(우선순위: 도달>접근중>만료임박>대기).
-// leader_conversion처럼 baseline이 없는 관찰은 도달=leader_converted로만
-// 판정하고 접근중은 계산 안 함(가격 기준이 없어 "3% 이내"를 정의할 수 없음).
+const MY_TRACK_APPROACH_PCT = 0.03;      // 트리거까지 3% 이내 = 👀접근중
+const MY_TRACK_EXPIRE_WARN_RATIO = 0.8;  // 만료 기간의 80% 경과 = ⌛만료임박
+const MY_TRACK_DATA_CHECK_DEV = 0.5;     // [A]-4: 트리거-현재가 괴리 50% 초과 = ⚠️데이터확인(판정 제외)
+const MY_TRACK_ACTIVE_SHOW_N = 5;        // [A]-5: 활성 보드 최대 행 수
+// 행 하나의 오늘자 상태(my_trigger_price가 있는 행 전용). 괴리 50%
+// 초과면 도달/접근중 판정 자체를 안 하고 데이터확인으로 뺀다(오래된
+// 스냅샷·액면분할 등으로 트리거가 현재가와 자릿수부터 다른 경우 방지).
 function myTrackState(r) {
-  const isLeaderWatch = r.watch_kind === 'leader_conversion';
-  const baseline = isLeaderWatch ? null : myTrackBaseline(r);
+  const baseline = parseFloat(r.my_trigger_price);
   const price = r.last_price != null ? parseFloat(r.last_price) : null;
+  const elapsed = businessDaysSince(myTrackAnchorDate(r));
+  const total = myTrackExpiryDays(r);
+  if (!(baseline > 0)) return { state: 'waiting', pct: null, elapsed, total, baseline: null, price };
+  if (price != null && Math.abs(price - baseline) / baseline > MY_TRACK_DATA_CHECK_DEV) {
+    return { state: 'data_check', pct: null, elapsed, total, baseline, price };
+  }
   let reached = false, approaching = false, pct = null;
-  if (isLeaderWatch) {
-    reached = !!r.leader_converted;
-  } else if (baseline != null && baseline > 0 && price != null) {
+  if (price != null) {
     pct = (baseline - price) / baseline;   // 0 이하 = 이미 도달/돌파
     reached = pct <= 0;
     approaching = !reached && pct <= MY_TRACK_APPROACH_PCT;
   }
-  const elapsed = businessDaysSince(myTrackAnchorDate(r));
-  const total = myTrackExpiryDays(r);
   const expiring = !reached && total > 0 && elapsed >= total * MY_TRACK_EXPIRE_WARN_RATIO;
   const state = reached ? 'reached' : approaching ? 'approaching' : expiring ? 'expiring' : 'waiting';
   return { state, pct, elapsed, total, baseline, price };
 }
 const MY_TRACK_STATE_LABEL = {
-  reached: '📍 조건 도달', approaching: '👀 접근 중',
+  reached: '📍 조건 도달', data_check: '⚠️ 데이터 확인', approaching: '👀 접근 중',
   expiring: '⌛ 만료 임박', waiting: '💤 대기',
 };
 const MY_TRACK_STATE_COLOR = {
-  reached: '#4ade80', approaching: '#ffd98a', expiring: '#ff9b9b', waiting: 'var(--muted)',
+  reached: '#4ade80', data_check: '#ff9b9b', approaching: '#ffd98a', expiring: '#ffb27a', waiting: 'var(--muted)',
 };
-const MY_TRACK_STATE_PRIORITY = { reached: 0, approaching: 1, expiring: 2, waiting: 3 };
+const MY_TRACK_STATE_PRIORITY = { reached: 0, data_check: 1, approaching: 2, expiring: 3, waiting: 4 };
+// v5.217(사용자 지시 — [B] 상단 스트립): "📌 도달 N" 요약용 — 활성(트리거
+// 있음) 행 중 도달 개수만 필요할 때 renderMyTrackBoard 전체를 다시
+// 그리지 않고 이것만 계산.
+function myTrackReachedCount() {
+  const rows = getJournal().filter(r => {
+    const st = r.status || 'entered';
+    return (st === 'pending' || st === 'watch') && r.my_trigger_price != null;
+  });
+  return rows.filter(r => myTrackState(r).state === 'reached').length;
+}
 
-// [3] 보드에서 직접 트리거 가격 입력/수정. 빈칸으로 지우면 다시 pivot
-// 폴백으로 돌아간다(등록 시 강제 입력이 아니라 언제든 선택적으로 편집).
+// 트리거 입력/수정 — 활성 행·미입력 행 공용(빈칸으로 지우면 미입력
+// 그룹으로 다시 내려간다).
 async function setMyTriggerPrice(id, raw) {
   const j = getJournal();
   const r = j.find(x => x.id === id);
@@ -7146,15 +7202,47 @@ async function setMyTriggerPrice(id, raw) {
   await setJournal(j);
   if (_calendarData) renderCalendar(_calendarData);
 }
-// [4] 행 클릭 시 시나리오/링크 영역 펼침·접힘 — toggleScenarioBox와 같은
-// 패턴(DOM만 토글, 전체 재렌더 없음).
+// [A]-1: 트리거 미입력 행을 더 안 지켜볼 때 — 개별/일괄 공용 사유만 구분.
+async function myTrackCloseRow(id) {
+  const j = getJournal();
+  const r = j.find(x => x.id === id);
+  if (!r) return;
+  r.status = 'missed';
+  r.tracking = false;
+  r.closed_reason = '관찰종료(트리거 미입력 — 직접 종료)';
+  r.closed_date = kstStr();
+  await setJournal(j);
+  if (_calendarData) renderCalendar(_calendarData);
+}
+async function myTrackCloseAllNoTrigger() {
+  const rows = getJournal().filter(r => {
+    const st = r.status || 'entered';
+    return (st === 'pending' || st === 'watch') && r.my_trigger_price == null;
+  });
+  if (!rows.length) return;
+  if (!confirm(`트리거 미입력 관찰 ${rows.length}건을 전부 종료할까요?`)) return;
+  const j = getJournal();
+  const ids = new Set(rows.map(r => r.id));
+  const today = kstStr();
+  for (const r of j) {
+    if (!ids.has(r.id)) continue;
+    r.status = 'missed';
+    r.tracking = false;
+    r.closed_reason = '관찰종료(트리거 미입력 — 일괄 종료)';
+    r.closed_date = today;
+  }
+  await setJournal(j);
+  if (_calendarData) renderCalendar(_calendarData);
+}
+// 행 클릭 시 시나리오/링크 영역 펼침·접힘 — toggleScenarioBox와 같은 패턴
+// (DOM만 토글, 전체 재렌더 없음).
 function toggleMyTrackExpand(id) {
   const el = document.getElementById('mytrack_exp_' + id);
   if (!el) return;
   el.style.display = el.style.display === 'none' ? '' : 'none';
 }
-// [4] "+ 일지" — 이미 저널에 있는 레코드라 새로 만들지 않고 내 일지 탭의
-// 해당 행으로 이동해 바로 편집 모드를 연다(editRow, editingId 재사용).
+// "+ 일지" — 이미 저널에 있는 레코드라 새로 만들지 않고 내 일지 탭의 해당
+// 행으로 이동해 바로 편집 모드를 연다(editRow, editingId 재사용).
 function myTrackOpenJournal(id) {
   const r = getJournal().find(x => x.id === id);
   if (!r) return;
@@ -7165,15 +7253,62 @@ function myTrackOpenJournal(id) {
   editingId = r.id;
   applyTabViewState();
 }
+let _myTrackActiveExpanded = false;
+function toggleMyTrackActiveExpanded() {
+  _myTrackActiveExpanded = !_myTrackActiveExpanded;
+  if (_calendarData) renderCalendar(_calendarData);
+}
+let _myTrackNoTriggerExpanded = false;
+function toggleMyTrackNoTriggerExpanded() {
+  _myTrackNoTriggerExpanded = !_myTrackNoTriggerExpanded;
+  if (_calendarData) renderCalendar(_calendarData);
+}
+
+// [A]-2: 같은 티커로 pending/watch가 여러 건 쌓이면 최신 1건만 남기고
+// 나머지는 archived로 접는다 — _archiveExpiredPending과 같은 타이밍
+// (onEnterCalendarTab)에 같은 journalCache 경유 안전 경로로 호출.
+async function _archiveDuplicateTrackers() {
+  const j = getJournal();
+  const groups = {};
+  for (const r of j) {
+    const st = r.status || 'entered';
+    if (st !== 'pending' && st !== 'watch') continue;
+    (groups[r.ticker] = groups[r.ticker] || []).push(r);
+  }
+  let changed = false;
+  for (const ticker in groups) {
+    const rows = groups[ticker];
+    if (rows.length < 2) continue;
+    rows.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.id || 0) - (a.id || 0));
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      r.status = 'archived';
+      r.tracking = false;
+      r.closed_reason = '중복(같은 티커 최신 레코드로 통합)';
+      r.archived_at = kstStr(new Date());
+      changed = true;
+    }
+  }
+  if (changed) await setJournal(j);
+}
+
+function _myTrackTriggerInputHtml(r) {
+  return `<input type="number" inputmode="decimal" value="${r.my_trigger_price != null ? r.my_trigger_price : ''}"
+    title="내 트리거 가격" onclick="event.stopPropagation()" onchange="setMyTriggerPrice(${r.id}, this.value)"
+    style="width:78px;background:var(--card);border:1px solid var(--line);border-radius:4px;color:inherit;font-size:11px;padding:2px 4px">`;
+}
 // [1][5] 보드 본체. 대상 없으면(펜딩/감시 전부 0건) 아무것도 안 그림 —
 // positionsSummaryHtml과 같은 관례(빈 섹션을 굳이 "없음"으로 채우지 않음).
 function renderMyTrackBoard() {
-  const rows = getJournal().filter(r => {
+  const all = getJournal().filter(r => {
     const st = r.status || 'entered';
     return st === 'pending' || st === 'watch';
   });
-  if (!rows.length) return '';
-  const withState = rows.map(r => ({ r, st: myTrackState(r) }));
+  if (!all.length) return '';
+  const withTrigger = all.filter(r => r.my_trigger_price != null);
+  const noTrigger = all.filter(r => r.my_trigger_price == null);
+
+  const withState = withTrigger.map(r => ({ r, st: myTrackState(r) }));
   withState.sort((a, b) => {
     const pa = MY_TRACK_STATE_PRIORITY[a.st.state], pb = MY_TRACK_STATE_PRIORITY[b.st.state];
     if (pa !== pb) return pa - pb;
@@ -7182,45 +7317,66 @@ function renderMyTrackBoard() {
   });
   const reachedCount = withState.filter(x => x.st.state === 'reached').length;
   const titleText = reachedCount > 0 ? `📌 내 추적 (${reachedCount}건 도달)` : '📌 내 추적';
-  const rowsHtml = withState.map(({ r, st }) => {
+
+  const activeVisible = _myTrackActiveExpanded ? withState : withState.slice(0, MY_TRACK_ACTIVE_SHOW_N);
+  const activeHiddenCount = withState.length - activeVisible.length;
+  const activeRowsHtml = activeVisible.map(({ r, st }) => {
     const mkt = r.market || (/\.(KS|KQ)$/i.test(r.ticker || '') ? 'KR' : 'US');
     const priceStr = st.price != null ? fmtPrice(st.price, mkt) : '-';
-    const baselineStr = st.baseline != null ? fmtPrice(st.baseline, mkt) : '-';
-    const pctStr = (st.state !== 'reached' && st.pct != null)
+    const pctStr = (st.pct != null && st.state !== 'reached')
       ? ` <span style="opacity:.75">(${st.pct >= 0 ? '-' : '+'}${Math.abs(st.pct * 100).toFixed(1)}%)</span>` : '';
     const stateColor = MY_TRACK_STATE_COLOR[st.state];
     const stateHtml = `<span style="color:${stateColor};font-weight:700">${MY_TRACK_STATE_LABEL[st.state]}</span>${pctStr}`;
-    const triggerInput = `<input type="number" inputmode="decimal" value="${r.my_trigger_price != null ? r.my_trigger_price : ''}"
-      placeholder="${r.pivot != null ? Math.round(r.pivot) : '피벗없음'}" title="내 트리거 — 비우면 스냅샷 피벗(${baselineStr}) 사용"
-      onclick="event.stopPropagation()" onchange="setMyTriggerPrice(${r.id}, this.value)"
-      style="width:78px;background:var(--card);border:1px solid var(--line);border-radius:4px;color:inherit;font-size:11px;padding:2px 4px">`;
     const expandedHtml = `<div id="mytrack_exp_${r.id}" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:12px" onclick="event.stopPropagation()">
       ${r.scenario ? renderScenarioHtml(r.scenario, mkt, 'sc_mt_' + r.id, null) : '<div style="color:var(--muted)">저장된 시나리오 없음</div>'}
       <div style="display:flex;gap:8px;margin-top:6px">
-        <a href="${tvUrl(r.ticker, mkt)}" target="_blank" rel="noopener" class="journal-btn" style="padding:4px 12px;font-size:11px;text-decoration:none;display:inline-block">📈 차트</a>
-        <button class="journal-btn" style="padding:4px 12px;font-size:11px" onclick="myTrackOpenJournal(${r.id})">+ 일지</button>
+        <a href="${tvUrl(r.ticker, mkt)}" target="_blank" rel="noopener" class="journal-btn" style="width:auto;padding:4px 12px;font-size:11px;text-decoration:none;display:inline-block">📈 차트</a>
+        <button class="journal-btn" style="width:auto;padding:4px 12px;font-size:11px" onclick="myTrackOpenJournal(${r.id})">+ 일지</button>
       </div>
     </div>`;
+    // [A]-5 한 줄 포맷: 종목 · 현재가 · 트리거[입력] · 상태 · D+n.
     return `<div style="border:1px solid var(--line);border-left:3px solid ${stateColor};background:var(--card);
         border-radius:6px;padding:8px 10px;margin-bottom:6px;cursor:pointer" onclick="toggleMyTrackExpand(${r.id})">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-        <div style="display:flex;align-items:center;gap:6px;min-width:0;flex-shrink:1">
-          <b style="white-space:nowrap">${r.name || r.ticker}</b><span class="mkt">${mkt}</span>
-          <span style="font-size:11px;color:var(--muted);white-space:nowrap">${r.tab || ''}</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;font-size:12px;flex-wrap:wrap">
-          <span>현재 <b>${priceStr}</b></span>
-          <span>트리거 ${triggerInput}</span>
-          <span style="opacity:.6;font-size:11px">D+${st.elapsed}/${st.total}</span>
-          ${stateHtml}
-        </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px">
+        <b style="white-space:nowrap">${r.name || r.ticker}</b><span class="mkt">${mkt}</span>
+        <span>${priceStr}</span>
+        <span>트리거 ${_myTrackTriggerInputHtml(r)}</span>
+        ${stateHtml}
+        <span style="opacity:.6;font-size:11px">D+${st.elapsed}/${st.total}</span>
       </div>
       ${expandedHtml}
     </div>`;
   }).join('');
+  const activeToggleHtml = withState.length > MY_TRACK_ACTIVE_SHOW_N
+    ? `<div style="font-size:12px;color:var(--muted);cursor:pointer;margin-top:2px" onclick="toggleMyTrackActiveExpanded()">${_myTrackActiveExpanded ? '▴ 접기' : `▾ 나머지 ${activeHiddenCount}건 펼치기`}</div>`
+    : '';
+
+  const noTriggerHeader = noTrigger.length
+    ? `<div style="font-size:12px;color:var(--muted);cursor:pointer;margin-top:10px" onclick="toggleMyTrackNoTriggerExpanded()">${_myTrackNoTriggerExpanded ? '▴' : '▾'} 트리거 미입력 ${noTrigger.length}건</div>`
+    : '';
+  const noTriggerBulkBtn = (noTrigger.length && _myTrackNoTriggerExpanded)
+    ? `<div style="margin:4px 0"><button onclick="myTrackCloseAllNoTrigger()" style="background:var(--amber);color:#000;border:none;font-weight:600;border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">전체 관찰 종료 (${noTrigger.length}건)</button></div>` : '';
+  const noTriggerRowsHtml = _myTrackNoTriggerExpanded ? noTrigger.map(r => {
+    const mkt = r.market || (/\.(KS|KQ)$/i.test(r.ticker || '') ? 'KR' : 'US');
+    const priceStr = r.last_price != null ? fmtPrice(parseFloat(r.last_price), mkt) : '-';
+    return `<div style="border:1px solid var(--line);background:var(--card);border-radius:6px;padding:8px 10px;margin-bottom:6px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px">
+        <b style="white-space:nowrap">${r.name || r.ticker}</b><span class="mkt">${mkt}</span>
+        <span style="color:var(--muted)">${priceStr}</span>
+        <span>트리거 ${_myTrackTriggerInputHtml(r)}</span>
+        <span style="opacity:.6;font-size:11px">${r.tab || ''}</span>
+        <button onclick="myTrackCloseRow(${r.id})" title="더 안 지켜본다" style="color:#FF6B6B;background:none;border:1px solid #FF6B6B;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer">관찰 종료</button>
+      </div>
+    </div>`;
+  }).join('') : '';
+
   return `<div style="margin-bottom:14px">
     <div class="mf-toolbar"><b>${titleText}</b></div>
-    ${rowsHtml}
+    ${activeRowsHtml}
+    ${activeToggleHtml}
+    ${noTriggerHeader}
+    ${noTriggerBulkBtn}
+    ${noTriggerRowsHtml}
   </div>`;
 }
 // 확인/전환 기간이 지난 관찰을 일괄로 '관찰종료(자동정리)' 처리.
