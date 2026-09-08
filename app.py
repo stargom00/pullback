@@ -5,6 +5,43 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.221 [UI 개선] 🔴 카드 가독성(사용자 지시).
+        [1] 진입/손절을 별도 줄로 분리 — 예전엔 " · "로 한 줄에 붙어있어
+        종목명이 길면 줄바꿈이 임의의 자리에서 일어났다.
+        [2] 섹터 표시 신설 — 종목명 아래 "섹터명 · 순위/전체 · 섹터RS
+        N" 한 줄, 가속 섹터(sector_flow.accel_kr/us)면 🚀. 5탭 카드가
+        이미 쓰는 sector/sector_rank/sector_total/sector_rs_pct 필드
+        재사용(새 계산 없음) — 단, td.immediate 각 소스(jongga/
+        auto_watch/pending_watch/us_pullback)가 이 필드를 실제로
+        내려주고 있었는지 소스별로 달라서 이번에 맞춤:
+          · us_pullback: 이미 `**h`(원 스캔 히트 전체) spread라 그대로 있었음 — 무변경.
+          · jongga: h(스캔 히트)엔 있었는데 td.immediate 항목 조립 시
+            sector만 복사하고 sector_rank/sector_rs_pct는 빠뜨리고
+            있었다 — 추가.
+          · auto_watch: 별도 영속 파일(auto_watch.json)에 저장되는데
+            _refresh_auto_watch() 등록 시점에 sector_rank/sector_rs_pct를
+            애초에 안 저장했다 — 등록 시점(h가 이미 갖고 있는 값)과
+            get_calendar()의 표시 시점 둘 다에 추가. v5.221 이전에 이미
+            등록된 기존 auto_watch.json 엔트리는 이 필드가 없을 수
+            있음(자연 소멸 전까지 순위/RS 없이 섹터명만 표시).
+          · pending_watch: 저널 레코드(journal_user.json) 자체에
+            sector_rank가 애초에 저장되지 않는다(quickWatch/`/api/watch/
+            quick`이 sector조차 안 저장) — 새 계산 없이는 채울 수 없어
+            이번엔 보류, 프론트가 sector 자체가 없으면 섹터 줄을 통째로
+            생략(레이아웃 안 깨짐).
+        [3] 카드 6행 재정리 — 1행 종목명(말줄임)+시장배지+진입법배지
+        (항상 한 줄, flex+ellipsis) 2행 섹터 3행 진입(큰 글씨) 4행
+        손절+(%,ATR) 5행 수량·2R목표 6행 근거(1줄 말줄임, title 툴팁에
+        전문) — 시나리오/+일지는 그대로 하단.
+        [4] 종목명 13px < 진입가 16px — 예전엔 종목명이 기본 크기로 제일
+        커서 가격 정보가 시각적으로 밀렸다.
+        범위: 🔴 즉시 행동 카드(renderImmediateCard)만 — 🔎 후보의 근접/
+        관심 카드(renderNearRow/renderInterestCard)는 이번 범위 밖(안
+        건드림).
+        검증: node --check로 전체 인라인 스크립트 문법 확인,
+        `python3 -m py_compile app.py`, 섹터 표시 문자열 조립을 Node로
+        직접 실행해 예시("Oil & Gas Refining · 2/12 · 섹터RS 99")와
+        일치 확인.
 v5.220 [기능추가] 📌 내 추적 — 트리거 방향(사용자 지시, static/
         index.html만 변경 — 백엔드/게이트 무변경).
         [1] 트리거 가격 입력 옆에 방향 토글 신설(select, ▲이상/▼이하,
@@ -5790,7 +5827,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.220"
+VERSION = "v5.221"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -11794,6 +11831,9 @@ async def _refresh_auto_watch(bundle: dict, market: str, daykey: str):
                 "ticker": ticker, "tab": tab, "name": h.get("name") or ticker,
                 "market": h.get("market") or ("KR" if market == "kr" else "US"),
                 "sector": h.get("sector"),
+                # v5.221(사용자 지시 — [2] 카드 섹터 표시): h(원 스캔 히트)가
+                # 이미 _sector_fields()로 채운 값 — 새 계산 없이 그대로 저장.
+                "sector_rank": h.get("sector_rank"), "sector_rs_pct": h.get("sector_rs_pct"),
                 "status": "watching",
                 "signal_date": snap["signal_date"], "stop": snap["stop"], "pivot": snap["pivot"],
                 "signal_high": snap["signal_high"], "signal_low": snap.get("signal_low"),
@@ -12706,6 +12746,10 @@ async def get_calendar():
                 "ticker": h["ticker"], "name": h.get("name", h["ticker"]), "market": "KR", "mode": "jongga",
                 "entry": h.get("close"), "stop": None, "target_2r": None,
                 "close": h.get("close"), "pivot": h.get("close"), "sector": h.get("sector"),
+                # v5.221(사용자 지시 — [2] 카드 섹터 표시): jongga 스캔이
+                # _sector_fields()로 이미 h에 넣어둔 값 그대로 pass-through
+                # (새 계산 없음) — static/index.html 🔴 카드 섹터 줄용.
+                "sector_rank": h.get("sector_rank"), "sector_rs_pct": h.get("sector_rs_pct"),
                 # v5.214(사용자 지시 — [3]): 구 유니버스 밖에서 새로 잡힌
                 # 종목 표시(데이터 품질 확인용) — jongga 탭 카드와 동일 필드.
                 "outside_legacy_universe": h.get("outside_legacy_universe", False),
@@ -13131,6 +13175,12 @@ async def get_calendar():
                     "source": "auto_watch", "key": f"auto_watch:{key}",
                     "ticker": rec["ticker"], "name": rec.get("name") or rec["ticker"],
                     "market": rec.get("market"), "mode": None, "sector": rec.get("sector"),
+                    # v5.221(사용자 지시 — [2] 카드 섹터 표시): _refresh_auto_watch()가
+                    # 등록 시점에 이미 저장해둔 값 pass-through(새 계산 없음).
+                    # 이 필드가 저장되기 전(v5.221 이전)에 등록된 기존
+                    # auto_watch.json 엔트리는 None으로 나올 수 있음 — 프론트가
+                    # None이면 섹터 줄에서 순위/RS 부분만 생략하고 정상 표시.
+                    "sector_rank": rec.get("sector_rank"), "sector_rs_pct": rec.get("sector_rs_pct"),
                     "entry": entry, "stop": stop, "target_2r": target_2r,
                     "close": entry, "pivot": pivot, "atr_pct": rec.get("atr_pct"),
                     "rs": rec.get("rs"),
