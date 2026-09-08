@@ -5,6 +5,26 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.220 [기능추가] 📌 내 추적 — 트리거 방향(사용자 지시, static/
+        index.html만 변경 — 백엔드/게이트 무변경).
+        [1] 트리거 가격 입력 옆에 방향 토글 신설(select, ▲이상/▼이하,
+        신규 기본 ▲) — ▲는 현재가≥트리거로 도달(돌파 대기), ▼는
+        현재가≤트리거로 도달(눌림 대기). 신규 필드 my_trigger_dir
+        ('above'|'below').
+        [2] 👀접근중도 방향 반영 — myTrackState()의 pct를 방향별로
+        다르게 계산(above: (트리거-현재가)/트리거, below: (현재가-
+        트리거)/트리거) — 두 경우 다 "0 이하=도달, 작을수록 근접"으로
+        표준화해서 기존 표시 로직(부호/퍼센트 포맷)은 그대로 재사용,
+        방향별 분기가 필요 없게 함.
+        [3] my_trigger_dir이 없는 기존 레코드는 항상 'above'로 취급
+        (myTrackDir() 헬퍼가 읽을 때 기본값 적용 — 물리적 데이터
+        마이그레이션 없음, 다른 신규 필드류와 같은 방식). 행의 트리거
+        입력 옆 select에서 언제든 방향 변경 가능(setMyTriggerDir()).
+        [4] "➕ 종목 추가" 모달에도 방향 select 추가(기본 ▲),
+        myTrackSaveAdd()가 my_trigger_dir까지 같이 저장.
+        검증: node --check로 전체 인라인 스크립트 문법 확인, above/
+        below/구버전(필드없음) 8케이스 도달·접근중·대기 판정을 Node로
+        격리 테스트(전부 통과).
 v5.219 [기능개선] 📌 추적 종목 추가 — 이름으로 검색(사용자 지시,
         static/index.html만 변경 — 백엔드/게이트 무변경, 새 API 없음).
         [1] "➕ 종목 추가" 모달의 티커 칸을 "종목명 또는 티커" 통합
@@ -5770,7 +5790,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.219"
+VERSION = "v5.220"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
