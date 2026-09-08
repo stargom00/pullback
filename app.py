@@ -5,6 +5,35 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.216 [신규] 📌 내 추적 보드(사용자 지시) — 캘린더 "🎯 오늘의 결정" 바로
+        위 신설, 매일 첫 화면에서 가장 먼저 보이는 자리.
+        [1] 대상: 저널 status가 pending(대기) 또는 watch(감시 등록,
+        돌파임박/눌림목 트리거 관찰 + 대장후보→눌림목 전환 관찰 전부
+        포함) 전체 — journalCache에서 직접 계산(static/index.html
+        `renderMyTrackBoard()`), 이 항목은 static만 변경.
+        [2] 행별 오늘자 상태 4택1: 📍조건 도달(가격이 트리거 이상) /
+        👀접근 중(트리거까지 3% 이내) / ⌛만료 임박(만료 기간의 80%
+        경과) / 💤대기(그 외). leader_conversion 관찰처럼 가격 기준이
+        없는 신호는 leader_converted 여부로만 도달 판정. 정렬 우선순위
+        도달>접근중>만료임박>대기, 동순위는 트리거까지 남은 % → 경과
+        영업일 순.
+        [3] 트리거 가격: 신규 필드 `my_trigger_price`(레코드에 없으면
+        null) — 보드 각 행에 숫자 입력칸으로 직접 편집 가능(선택,
+        비우면 등록 시점 스냅샷 pivot으로 폴백). "한미사이언스 53,300"
+        처럼 적어두면 매일 재계산 때 자동 비교됨.
+        [4] 행 클릭 → 시나리오(r.scenario 재사용, renderScenarioHtml)
+        · 트레이딩뷰 링크 · "+ 일지" 펼침. "+ 일지"는 이미 저널에 있는
+        레코드라 새로 만들지 않고 내 일지 탭의 해당 행으로 이동해
+        editRow 편집모드를 바로 연다(myTrackOpenJournal).
+        [5] 조건 도달 건이 있으면 헤더가 "📌 내 추적 (N건 도달)"로,
+        없으면 "📌 내 추적"만.
+        [6] my_trigger_price를 직접 입력한 pending은 만료 30거래일,
+        자동 등록분(트리거=피벗)은 기존 10거래일 유지 — 서버
+        JOURNAL_PENDING_EXPIRE_DAYS_CUSTOM_TRIGGER(신설, 30)/
+        JOURNAL_PENDING_EXPIRE_DAYS(기존, 10)로 실제 자동 아카이브
+        (`get_calendar`의 expired_pending_ids) 판정도 같이 갈라짐 —
+        범위는 pending만(watch의 leader_conversion 26일/트리거관찰
+        3일은 백테스트 근거값이라 그대로 유지, 임의로 안 늘림).
 v5.215 [UI 개선] 🔴 즉시 행동 — US 눌림목 과다·정렬(사용자 지시,
         static/index.html만 변경 — 백엔드/게이트 무변경).
         [1] US 눌림목만 US_PULLBACK_SHOW_N(5)건으로 컷 — 예전
@@ -5639,7 +5668,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.215"
+VERSION = "v5.216"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -11507,6 +11536,12 @@ AUTO_WATCH_CONFIRM_WINDOW_DAYS = 3  # 신호일 다음 최대 3거래일(안C �
 # AUTO_WATCH_CONFIRM_WINDOW_DAYS(안C 백테스트 정의에 묶인 값, 3)와는
 # 다른, 저널 하우스키핑 전용 값이라 절대 같이 바꾸지 않는다.
 JOURNAL_PENDING_EXPIRE_DAYS = 10
+# v5.216(사용자 지시 — "내 추적 보드" [6]): 사용자가 my_trigger_price를
+# 직접 입력한 pending 레코드는 자동 등록분(피벗=트리거)보다 더 오래
+# 지켜볼 여지를 준다 — 스캐너 피벗은 "지금 셋업"이라 빨리 터지지 않으면
+# 식지만, 사용자가 직접 적어둔 가격은 더 긴 호흡의 관심가일 수 있다는
+# 판단. my_trigger_price가 없는(자동 등록) pending은 기존 10거래일 그대로.
+JOURNAL_PENDING_EXPIRE_DAYS_CUSTOM_TRIGGER = 30
 
 
 def _is_auto_watch_strong_setup(rs, risk_pct, atr_pct) -> bool:
@@ -12676,19 +12711,25 @@ async def get_calendar():
         # (조용히 통과 안 시킴, 사용자 지시).
         df = _calendar_ticker_df(ticker)
         # v5.186(사용자 지시 — [2] 저널 대기 만료): 등록(신호일 기준) 후
-        # JOURNAL_PENDING_EXPIRE_DAYS(10)거래일이 지나도 확인이 안 되면
-        # 이 레코드는 근접/관심 카드 생성에서 제외하고 id만 모아둔다 —
+        # pending_expire_days(자동등록 10 / 직접 트리거 입력 30거래일, 아래
+        # 계산)가 지나도 확인이 안 되면 이 레코드는 근접/관심 카드 생성에서
+        # 제외하고 id만 모아둔다 —
         # get_calendar()는 GET 전용이라 저널에 직접 쓰지 않고(v5.184의
         # confirm_date 안전 원칙과 동일 이유), 프론트가 다음 로드에서
         # journalCache를 통해 실제로 "관찰 종료"로 접는다(삭제 아님).
         reg_date = r.get("date")
+        # v5.216(사용자 지시 — "내 추적 보드" [6]): my_trigger_price를 직접
+        # 입력한 pending은 30거래일, 자동 등록분(트리거=피벗)은 기존 10거래일.
+        pending_expire_days = (JOURNAL_PENDING_EXPIRE_DAYS_CUSTOM_TRIGGER
+                                if r.get("my_trigger_price") is not None
+                                else JOURNAL_PENDING_EXPIRE_DAYS)
         if df is not None and len(df) and reg_date:
             try:
                 import pandas as pd
                 reg_ts = pd.Timestamp(reg_date)
                 if reg_ts in df.index:
                     days_since_reg = (len(df) - 1) - df.index.get_loc(reg_ts)
-                    if days_since_reg >= JOURNAL_PENDING_EXPIRE_DAYS and r.get("id") is not None:
+                    if days_since_reg >= pending_expire_days and r.get("id") is not None:
                         expired_pending_ids.append(r["id"])
                         continue
             except Exception:

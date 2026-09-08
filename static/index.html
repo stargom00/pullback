@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.215</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.216</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -4574,10 +4574,17 @@ function renderCalendar(data) {
   }
 
   _todayDecisionMap = {};
+  // v5.216(사용자 지시): 📌 내 추적 보드 — "🎯 오늘의 결정" 바로 위, 매일
+  // 첫 화면에서 가장 먼저 보이는 자리. journalCache(getJournal())에서
+  // 직접 계산하므로 data(서버 캘린더 페이로드)와 독립 — 저널이 바뀔
+  // 때마다(예: updateTracking) 같이 다시 그려야 최신 상태가 보인다
+  // (updateTracking()의 mode==='calendar' 재렌더 분기 참고).
+  const myTrackBoardHtml = renderMyTrackBoard();
   const todayDecisionHtml = renderTodayDecisionHtml(data.today_decision);
   const sectorFlowHtml = renderSectorFlowHtml(data.sector_flow);
 
   doc.innerHTML = `
+    ${myTrackBoardHtml}
     ${todayDecisionHtml}
     ${sectorFlowHtml}
     ${marketClosedHtml}
@@ -5220,6 +5227,14 @@ const WATCH_DAYS = 14;   // 대기 유효기간 (돌파 셋업은 이 안에 터
 // 와 성격이 달라(RS95+ 리스트 소속이 핵심인 느린 신호) p90 채택 — p75로 하면
 // 실제 전환의 22.5%를 만료 전에 놓침. docs/leader_to_pullback_watch.md 참고.
 const LEADER_WATCH_EXPIRY_DAYS = 26;
+// v5.216(사용자 지시 — "내 추적 보드"): pending(대기) 만료 — app.py의
+// JOURNAL_PENDING_EXPIRE_DAYS(자동등록)/JOURNAL_PENDING_EXPIRE_DAYS_
+// CUSTOM_TRIGGER(사용자가 my_trigger_price 직접 입력)와 동기화되는 값.
+// 실제 자동 아카이브 판정 자체는 서버(get_calendar → expired_pending_ids)가
+// 하므로 여기 숫자가 안 맞아도 만료 동작 자체는 안 틀어지지만, 보드의
+// "⌛ 만료 임박" 배지가 서버 판정과 어긋나 보이지 않도록 같은 값 유지할 것.
+const PENDING_EXPIRE_DAYS = 10;
+const PENDING_EXPIRE_DAYS_CUSTOM_TRIGGER = 30;
 // 트레이딩뷰 차트 URL — 한국주는 KRX, 미국주는 거래소 자동판별 대신 심볼만
 function tvUrl(tickerOrObj, market) {
   // 카드는 객체(s)를, 일지는 (ticker, market)을 넘김 — 둘 다 처리
@@ -5549,6 +5564,12 @@ async function updateTracking(prefetched, prefetchedClosed) {
   if (changed) {
     setJournal(j);
     if (document.getElementById('journalView').style.display !== 'none') renderJournal();
+    // v5.216(사용자 지시): 📌 내 추적 보드가 journalCache(r.last_price 등)를
+    // 직접 읽으므로, 캘린더 탭이 열려 있을 때 가격 갱신이 반영되게 같이
+    // 다시 그린다 — journalView와 같은 "보이는 뷰만" 조건.
+    if (mode === 'calendar' && _calendarData && document.getElementById('calendarView').style.display !== 'none') {
+      renderCalendar(_calendarData);
+    }
   }
   await checkLeaderConversions(active);
 }
@@ -6696,7 +6717,10 @@ async function _archiveExpiredPending(td) {
     if (!r || (r.status || 'entered') !== 'pending') continue;
     r.status = 'archived';
     r.tracking = false;
-    r.closed_reason = '대기만료(10거래일 내 확인 안 됨)';
+    // v5.216(사용자 지시 — "내 추적 보드" [6]): my_trigger_price 직접 입력분은
+    // 창이 30거래일이라 메시지도 그에 맞게(app.py의 실제 판정 기준과 동일).
+    const _win = r.my_trigger_price != null ? PENDING_EXPIRE_DAYS_CUSTOM_TRIGGER : PENDING_EXPIRE_DAYS;
+    r.closed_reason = `대기만료(${_win}거래일 내 확인 안 됨)`;
     r.archived_at = kstStr(new Date());
     changed = true;
   }
@@ -6714,7 +6738,7 @@ function renderArchivedPendingSection(all) {
   const rowHtml = r => r.id === editingId ? editRow(r) : viewRow(r);
   const head = `<tr onclick="archivedPendingOpen=!archivedPendingOpen;renderJournal()" style="cursor:pointer;background:var(--surface)">
     <td colspan="8" style="padding:9px 12px;font-weight:700">
-      ${archivedPendingOpen ? '▾' : '▸'} 🗄️ 관찰 종료(대기 만료) <span style="font-weight:400;color:var(--muted);font-size:12px">— ${rows.length}건, 10거래일 내 확인 안 됨 · 삭제 아님, 복구 가능</span>
+      ${archivedPendingOpen ? '▾' : '▸'} 🗄️ 관찰 종료(대기 만료) <span style="font-weight:400;color:var(--muted);font-size:12px">— ${rows.length}건, 등록 후 10거래일(내 트리거 직접 입력분은 30거래일) 내 확인 안 됨 · 삭제 아님, 복구 가능</span>
     </td></tr>`;
   return head + (archivedPendingOpen ? rows.map(rowHtml).join('') : '');
 }
@@ -7047,6 +7071,157 @@ function watchExpiryDays(r) {
 function isWatchResolved(r) {
   if (r.watch_kind === 'leader_conversion') return !!r.leader_converted;
   return isTriggerConfirmed(r);
+}
+
+// ── v5.216(사용자 지시) — 📌 내 추적 보드 ────────────────────────────────
+// 저널 대기(pending) + 감시 등록분(watch) 전체를 한 곳에 모아 "오늘 기준
+// 뭘 봐야 하는지"를 계산해 보여준다. 캘린더 "🎯 오늘의 결정" 바로 위에
+// 렌더(renderCalendar 참고) — 매일 첫 화면에서 가장 먼저 보이는 자리.
+//
+// [3] 트리거 가격: r.my_trigger_price(신규 필드, 사용자가 보드에서 직접
+// 입력·선택)가 있으면 그걸, 없으면 r.pivot(등록 시점 스냅샷)을 기준으로
+// 쓴다. leader_conversion 관찰은 애초에 가격 기준 자체가 없는 신호(RS·
+// 20일선 위치)라 baseline이 항상 null — 별도로 leader_converted 여부로만
+// "도달" 판정한다.
+function myTrackBaseline(r) {
+  return r.my_trigger_price != null ? parseFloat(r.my_trigger_price)
+    : (r.pivot != null ? parseFloat(r.pivot) : null);
+}
+// [6](사용자 지시): my_trigger_price를 직접 입력한 pending은 30거래일,
+// 자동 등록분(대기, 트리거=피벗)은 기존 10거래일 — app.py
+// JOURNAL_PENDING_EXPIRE_DAYS_CUSTOM_TRIGGER/JOURNAL_PENDING_EXPIRE_DAYS와
+// 동일 규칙(실제 자동 아카이브는 서버가 판정, 여기는 표시용 재현).
+// watch(status)는 기존 watchExpiryDays(r) 그대로 — leader_conversion(26)/
+// 트리거관찰(3)은 백테스트로 근거를 잡아둔 값이라 트리거를 직접
+// 입력했다고 임의로 늘리지 않는다(범위를 pending에만 한정).
+function myTrackExpiryDays(r) {
+  if ((r.status || 'entered') === 'pending') {
+    return r.my_trigger_price != null ? PENDING_EXPIRE_DAYS_CUSTOM_TRIGGER : PENDING_EXPIRE_DAYS;
+  }
+  return watchExpiryDays(r);
+}
+function myTrackAnchorDate(r) {
+  return (r.status || 'entered') === 'pending' ? r.date : watchStartDate(r);
+}
+const MY_TRACK_APPROACH_PCT = 0.03;      // [2]: 트리거까지 3% 이내 = 👀접근중
+const MY_TRACK_EXPIRE_WARN_RATIO = 0.8;  // [2]: 만료 기간의 80% 경과 = ⌛만료임박
+// [2] 행 하나의 오늘자 상태 — 4택1(우선순위: 도달>접근중>만료임박>대기).
+// leader_conversion처럼 baseline이 없는 관찰은 도달=leader_converted로만
+// 판정하고 접근중은 계산 안 함(가격 기준이 없어 "3% 이내"를 정의할 수 없음).
+function myTrackState(r) {
+  const isLeaderWatch = r.watch_kind === 'leader_conversion';
+  const baseline = isLeaderWatch ? null : myTrackBaseline(r);
+  const price = r.last_price != null ? parseFloat(r.last_price) : null;
+  let reached = false, approaching = false, pct = null;
+  if (isLeaderWatch) {
+    reached = !!r.leader_converted;
+  } else if (baseline != null && baseline > 0 && price != null) {
+    pct = (baseline - price) / baseline;   // 0 이하 = 이미 도달/돌파
+    reached = pct <= 0;
+    approaching = !reached && pct <= MY_TRACK_APPROACH_PCT;
+  }
+  const elapsed = businessDaysSince(myTrackAnchorDate(r));
+  const total = myTrackExpiryDays(r);
+  const expiring = !reached && total > 0 && elapsed >= total * MY_TRACK_EXPIRE_WARN_RATIO;
+  const state = reached ? 'reached' : approaching ? 'approaching' : expiring ? 'expiring' : 'waiting';
+  return { state, pct, elapsed, total, baseline, price };
+}
+const MY_TRACK_STATE_LABEL = {
+  reached: '📍 조건 도달', approaching: '👀 접근 중',
+  expiring: '⌛ 만료 임박', waiting: '💤 대기',
+};
+const MY_TRACK_STATE_COLOR = {
+  reached: '#4ade80', approaching: '#ffd98a', expiring: '#ff9b9b', waiting: 'var(--muted)',
+};
+const MY_TRACK_STATE_PRIORITY = { reached: 0, approaching: 1, expiring: 2, waiting: 3 };
+
+// [3] 보드에서 직접 트리거 가격 입력/수정. 빈칸으로 지우면 다시 pivot
+// 폴백으로 돌아간다(등록 시 강제 입력이 아니라 언제든 선택적으로 편집).
+async function setMyTriggerPrice(id, raw) {
+  const j = getJournal();
+  const r = j.find(x => x.id === id);
+  if (!r) return;
+  const v = parseFloat(raw);
+  r.my_trigger_price = (raw === '' || isNaN(v)) ? null : v;
+  await setJournal(j);
+  if (_calendarData) renderCalendar(_calendarData);
+}
+// [4] 행 클릭 시 시나리오/링크 영역 펼침·접힘 — toggleScenarioBox와 같은
+// 패턴(DOM만 토글, 전체 재렌더 없음).
+function toggleMyTrackExpand(id) {
+  const el = document.getElementById('mytrack_exp_' + id);
+  if (!el) return;
+  el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+// [4] "+ 일지" — 이미 저널에 있는 레코드라 새로 만들지 않고 내 일지 탭의
+// 해당 행으로 이동해 바로 편집 모드를 연다(editRow, editingId 재사용).
+function myTrackOpenJournal(id) {
+  const r = getJournal().find(x => x.id === id);
+  if (!r) return;
+  mode = 'journal';
+  document.querySelectorAll('[data-mode]').forEach(x => x.classList.toggle('active', x.dataset.mode === 'journal'));
+  if ((r.category || '') === '관찰') { journalCatFilter = '관찰'; }
+  else { journalTab = 'pending'; journalCatFilter = 'all'; }
+  editingId = r.id;
+  applyTabViewState();
+}
+// [1][5] 보드 본체. 대상 없으면(펜딩/감시 전부 0건) 아무것도 안 그림 —
+// positionsSummaryHtml과 같은 관례(빈 섹션을 굳이 "없음"으로 채우지 않음).
+function renderMyTrackBoard() {
+  const rows = getJournal().filter(r => {
+    const st = r.status || 'entered';
+    return st === 'pending' || st === 'watch';
+  });
+  if (!rows.length) return '';
+  const withState = rows.map(r => ({ r, st: myTrackState(r) }));
+  withState.sort((a, b) => {
+    const pa = MY_TRACK_STATE_PRIORITY[a.st.state], pb = MY_TRACK_STATE_PRIORITY[b.st.state];
+    if (pa !== pb) return pa - pb;
+    if (a.st.pct != null && b.st.pct != null && a.st.pct !== b.st.pct) return a.st.pct - b.st.pct;
+    return (b.st.elapsed || 0) - (a.st.elapsed || 0);
+  });
+  const reachedCount = withState.filter(x => x.st.state === 'reached').length;
+  const titleText = reachedCount > 0 ? `📌 내 추적 (${reachedCount}건 도달)` : '📌 내 추적';
+  const rowsHtml = withState.map(({ r, st }) => {
+    const mkt = r.market || (/\.(KS|KQ)$/i.test(r.ticker || '') ? 'KR' : 'US');
+    const priceStr = st.price != null ? fmtPrice(st.price, mkt) : '-';
+    const baselineStr = st.baseline != null ? fmtPrice(st.baseline, mkt) : '-';
+    const pctStr = (st.state !== 'reached' && st.pct != null)
+      ? ` <span style="opacity:.75">(${st.pct >= 0 ? '-' : '+'}${Math.abs(st.pct * 100).toFixed(1)}%)</span>` : '';
+    const stateColor = MY_TRACK_STATE_COLOR[st.state];
+    const stateHtml = `<span style="color:${stateColor};font-weight:700">${MY_TRACK_STATE_LABEL[st.state]}</span>${pctStr}`;
+    const triggerInput = `<input type="number" inputmode="decimal" value="${r.my_trigger_price != null ? r.my_trigger_price : ''}"
+      placeholder="${r.pivot != null ? Math.round(r.pivot) : '피벗없음'}" title="내 트리거 — 비우면 스냅샷 피벗(${baselineStr}) 사용"
+      onclick="event.stopPropagation()" onchange="setMyTriggerPrice(${r.id}, this.value)"
+      style="width:78px;background:var(--card);border:1px solid var(--line);border-radius:4px;color:inherit;font-size:11px;padding:2px 4px">`;
+    const expandedHtml = `<div id="mytrack_exp_${r.id}" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:12px" onclick="event.stopPropagation()">
+      ${r.scenario ? renderScenarioHtml(r.scenario, mkt, 'sc_mt_' + r.id, null) : '<div style="color:var(--muted)">저장된 시나리오 없음</div>'}
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <a href="${tvUrl(r.ticker, mkt)}" target="_blank" rel="noopener" class="journal-btn" style="padding:4px 12px;font-size:11px;text-decoration:none;display:inline-block">📈 차트</a>
+        <button class="journal-btn" style="padding:4px 12px;font-size:11px" onclick="myTrackOpenJournal(${r.id})">+ 일지</button>
+      </div>
+    </div>`;
+    return `<div style="border:1px solid var(--line);border-left:3px solid ${stateColor};background:var(--card);
+        border-radius:6px;padding:8px 10px;margin-bottom:6px;cursor:pointer" onclick="toggleMyTrackExpand(${r.id})">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:6px;min-width:0;flex-shrink:1">
+          <b style="white-space:nowrap">${r.name || r.ticker}</b><span class="mkt">${mkt}</span>
+          <span style="font-size:11px;color:var(--muted);white-space:nowrap">${r.tab || ''}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;font-size:12px;flex-wrap:wrap">
+          <span>현재 <b>${priceStr}</b></span>
+          <span>트리거 ${triggerInput}</span>
+          <span style="opacity:.6;font-size:11px">D+${st.elapsed}/${st.total}</span>
+          ${stateHtml}
+        </div>
+      </div>
+      ${expandedHtml}
+    </div>`;
+  }).join('');
+  return `<div style="margin-bottom:14px">
+    <div class="mf-toolbar"><b>${titleText}</b></div>
+    ${rowsHtml}
+  </div>`;
 }
 // 확인/전환 기간이 지난 관찰을 일괄로 '관찰종료(자동정리)' 처리.
 // 이미 해소된(🟢확인·🎯전환) 건은 대상에서 제외 — 사용자가 직접 판단할 몫.
