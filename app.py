@@ -5,6 +5,36 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.222 [기능비활성화] 토스 동기화 일시 중단(사용자 지시). 상세 근거·
+        재개 조건은 docs/toss_sync_disabled_2026-09.md 신규.
+        [1] `TOSS_SYNC_ENABLED` 플래그(기본 false) 신설 — `POST /api/
+        positions/sync`가 유효 토큰이어도 disabled 응답만 주고
+        positions.json은 안 건드림(코드는 그대로, 로직 삭제 없음). 끈
+        이유: Railway 아웃바운드 IP 미고정 문제가 여전한 데다(원래
+        아키텍처가 그래서 로컬 우회를 씀), 그 로컬 우회(맥 sync_toss.py)
+        조차 지금 토스 API 자체가 403(IP 미허용)을 내서 막혀있음 — 이
+        엔드포인트까지 도달하기 전에 실패하는 문제라 서버 쪽에서 고칠
+        수 있는 게 없었음.
+        [2] 홈 스트립엔 원래 토스 관련 경고가 없었음(확인 완료, 고칠 것
+        없음). 포지션 탭의 "⚠️ 스냅샷 오래됨"(빨간 경고, 24시간 기준)은
+        비활성 상태에선 영원히 뜨게 되므로 "🔕 자동 동기화 비활성화"
+        중립 배지로 교체 — `GET /api/positions`가 `sync_enabled` 필드로
+        노출한 값을 프론트가 읽어 분기(renderPositions).
+        [3] 저널 실체결가 자동채움(`entry_source='toss'`, positions_sync()
+        안)은 위 [1]이 그 앞에서 막아서 자연히 안 돎 — 코드 삭제는 안
+        했음, 수동 입력 경로만 계속 씀.
+        [4] docs/toss_sync_disabled_2026-09.md: 원인·2026-09-08 Railway
+        Static Outbound IPs 조사 결과(Pro $20/월, IP 3개 로드밸런싱,
+        완전전용 아님) 요약 + QuotaGuard/소형VPS 대안 비교 + 재개 조건
+        (실체결 30건 누적 시 재검토) 기록. 기존
+        docs/toss_position_sync_setup.md 상단에도 비활성 상태 안내
+        추가(설정 방법 자체는 재개 시 유효해서 안 지움).
+        범위: app.py 3곳(TOSS_SYNC_ENABLED 정의, positions_sync() 게이트,
+        get_positions() 응답 필드 추가) + static/index.html
+        renderPositions()만. 스캔·게이트 로직 무관.
+        검증: `python3 -m py_compile app.py`, `import app`로
+        TOSS_SYNC_ENABLED 기본값 False 확인, node --check로 인라인
+        스크립트 문법 확인.
 v5.221 [UI 개선] 🔴 카드 가독성(사용자 지시).
         [1] 진입/손절을 별도 줄로 분리 — 예전엔 " · "로 한 줄에 붙어있어
         종목명이 길면 줄바꿈이 임의의 자리에서 일어났다.
@@ -5827,7 +5857,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.221"
+VERSION = "v5.222"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -14029,6 +14059,15 @@ async def batch_prices(request: Request):
 # 저장해두고, GET 요청마다 "가격만" 새로 조회해 결합한다 — 수량·평단은
 # 동기화 지연을 허용하지만 가격은 항상 최신이어야 손익이 의미있기 때문.
 POSITIONS_STALE_HOURS = 24
+# v5.222(사용자 지시) — 토스 동기화 일시 비활성화. 위 아키텍처 노트의
+# "Railway는 배포마다 아웃바운드 IP가 안 고정" 문제는 여전히 유효하고
+# (Railway 고정 IP 조사 결과는 docs/toss_sync_disabled_2026-09.md에
+# 정리해둠), 맥 로컬 우회로도 지금은
+# Toss API 자체가 403(IP 미허용)을 낸다(sync_toss.py가 client.get_holdings()
+# 단계에서 실패 — 이 서버 엔드포인트까지 도달하기도 전). 코드는 전부
+# 남겨두고 이 플래그로만 끈다 — 재개 조건은 위 문서 참고. 기본값 false
+# (Railway 환경변수 TOSS_SYNC_ENABLED=true로만 켜짐).
+TOSS_SYNC_ENABLED = os.environ.get("TOSS_SYNC_ENABLED", "false").strip().lower() == "true"
 
 
 def _verify_sync_token(request: Request):
@@ -14089,6 +14128,14 @@ async def positions_sync(request: Request):
     영향 없음."""
     if not _verify_sync_token(request):
         return JSONResponse({"ok": False, "error": "인증 실패 (SYNC_TOKEN)"}, status_code=401)
+    # v5.222(사용자 지시 — [1]): 플래그로만 끔, 로직은 그대로 아래에 남겨둠.
+    # 200으로 응답(sync_toss.py가 비정상 종료로 로그를 남기지 않게) —
+    # "실패"가 아니라 "의도적으로 꺼짐"이라는 걸 구분해야 해서 ok는 True,
+    # disabled로만 표시. 기존 스냅샷(positions.json)은 안 건드림 — 마지막
+    # 동기화 시점 그대로 남아 GET /api/positions가 계속 서빙.
+    if not TOSS_SYNC_ENABLED:
+        return JSONResponse({"ok": True, "disabled": True,
+                              "message": "토스 동기화 비활성화됨(TOSS_SYNC_ENABLED=false) — 저널 실체결가는 직접 입력하세요."})
     body = await request.json()
     items = body.get("positions", []) if isinstance(body, dict) else []
     if not isinstance(items, list):
@@ -14279,7 +14326,7 @@ async def get_positions():
             pass
 
     if not positions:
-        return JSONResponse({"synced_at": synced_at, "stale": stale, "positions": [], "summary": None, "sync_error": sync_error})
+        return JSONResponse({"synced_at": synced_at, "stale": stale, "positions": [], "summary": None, "sync_error": sync_error, "sync_enabled": TOSS_SYNC_ENABLED})
 
     bundle = await _fetch_market_data("all")
     rs_ranks = bundle["rs_ranks"] if bundle else {}
@@ -14416,7 +14463,7 @@ async def get_positions():
         if r.get("stop_suggested"):
             summary["positions_missing_stop"] += 1
 
-    return JSONResponse({"synced_at": synced_at, "stale": stale, "positions": results, "summary": summary, "sync_error": sync_error})
+    return JSONResponse({"synced_at": synced_at, "stale": stale, "positions": results, "summary": summary, "sync_error": sync_error, "sync_enabled": TOSS_SYNC_ENABLED})
 
 
 _NO_CACHE_HEADERS = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"}

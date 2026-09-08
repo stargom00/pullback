@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.221</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.222</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -4727,21 +4727,33 @@ function _posFmtMoney(v, cur) {
                         : '$' + v.toLocaleString('en-US', {maximumFractionDigits: 0});
 }
 
+// v5.222(사용자 지시 — [2]): 토스 동기화를 의도적으로 꺼둔 동안엔
+// "실패/오래됨" 경고가 아니라 "꺼짐" 중립 배지만 — 실제로는 아무 문제도
+// 아닌데 24시간 지날 때마다 빨간 ⚠️가 뜨는 걸 막는다. data.sync_enabled는
+// GET /api/positions가 app.py TOSS_SYNC_ENABLED 그대로 내려준 값.
 function renderPositions(data) {
   const doc = document.getElementById('positionsDoc');
+  const syncEnabled = data.sync_enabled !== false;   // 구버전 응답(필드 없음) 폴백은 켜짐으로 간주
   const syncCmd = 'cd ~/pullback && python3 sync_toss.py --force';
-  const syncHint = `<span class="badge" style="cursor:help;opacity:.75" title="맥 터미널에서 실행:\n${syncCmd}\n(docs/toss_position_sync_setup.md 참고)">🔄 지금 동기화하려면?</span>`;
+  const syncHint = syncEnabled
+    ? `<span class="badge" style="cursor:help;opacity:.75" title="맥 터미널에서 실행:\n${syncCmd}\n(docs/toss_position_sync_setup.md 참고)">🔄 지금 동기화하려면?</span>`
+    : `<span class="badge" style="opacity:.6" title="TOSS_SYNC_ENABLED=false — docs/toss_sync_disabled_2026-09.md 참고. 재개 조건이 거기 적혀있음">🔕 자동 동기화 비활성화</span>`;
 
   if (!data.synced_at) {
-    doc.innerHTML = `<div class="jrnl-empty">아직 동기화된 잔고가 없어요.<br>
+    doc.innerHTML = syncEnabled
+      ? `<div class="jrnl-empty">아직 동기화된 잔고가 없어요.<br>
       맥 로컬에서 <code>python3 sync_toss.py</code>를 한 번 실행하거나 launchd 등록을 마쳐주세요.<br>
-      ${syncHint}<br>설정 방법: docs/toss_position_sync_setup.md</div>`;
+      ${syncHint}<br>설정 방법: docs/toss_position_sync_setup.md</div>`
+      : `<div class="jrnl-empty">토스 자동 동기화가 꺼져있어요(토스 API IP 미허용 문제, docs/toss_sync_disabled_2026-09.md 참고).<br>
+      포지션은 저널(내 일지)에서 직접 관리하세요.<br>${syncHint}</div>`;
     return;
   }
 
   const syncedStr = new Date(data.synced_at).toLocaleString('ko-KR', {hour12: false});
-  const staleWarn = data.stale
-    ? `<span class="badge" style="background:#3a2a2a;color:#ff9b9b" title="24시간 이상 동기화가 안 됐어요 — 맥이 꺼져있었거나 launchd가 안 돌았을 수 있어요">⚠️ 스냅샷 오래됨</span>` : '';
+  const staleWarn = !syncEnabled
+    ? `<span class="badge" style="opacity:.6" title="자동 동기화가 꺼져있어 이 스냅샷 이후로는 안 갱신돼요 — 마지막 스냅샷 시점 그대로">🔕 이후 동기화 없음</span>`
+    : data.stale
+      ? `<span class="badge" style="background:#3a2a2a;color:#ff9b9b" title="24시간 이상 동기화가 안 됐어요 — 맥이 꺼져있었거나 launchd가 안 돌았을 수 있어요">⚠️ 스냅샷 오래됨</span>` : '';
 
   const s = data.summary || {};
   const curRow = (label, obj, colorize) => {
