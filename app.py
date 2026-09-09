@@ -5,6 +5,34 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.228 [기능추가] 🔥 급등 관찰 탭 신설(사용자 지시 — 임시 2주 실험).
+        상세 근거·종료 조건은 docs/surge_observe_experiment_2026-09.md.
+        [1] 상단 탭(종가베팅 오른쪽)에 "🔥 급등" 신설. 기존 "⋯실험"
+        드롭다운의 ⚡급등(data-mode="surge", analyze_surge 판정형 스캔)
+        과는 완전히 다른 기능이라 별도 mode 키(surge_observe) 사용 —
+        기존 탭은 미변경.
+        [2] 조회: 당일 +15%↑ & 거래량 20일평균 10배↑ KR 종목
+        (`_compute_surge_observe_today()`) — 이미 캐시된 일봉(`_data_cache`)
+        만 사용, 새 fetch 없음. 판정/EV/진입가 계산 없음.
+        [3] 카드: 종목명·현재가·등락률·거래량배수·RS·ATR·200MA 이격·섹터·
+        차트링크(전부 이미 계산되는 값 재사용). "관찰 전용 — 진입 근거
+        없음" 배너 상단 고정.
+        [4] EOD 저장: `_warm_market()`의 KR EOD 확정 분기(기존 종가베팅/
+        재점화 갱신과 같은 타이밍)에서 `_record_surge_observe_eod()`가
+        하루 1회(멱등) `/data/surge_observe.json`에 날짜별 저장 — 스키마
+        `{날짜: [{ticker, name, close, chg_pct, vol_mult, rs, atr_pct,
+        ma200_pct}]}`(사용자 지정 그대로, sector는 정적 매핑이라 저장
+        안 하고 조회 시점에 `_sector_of()`로 매번 재조회).
+        [5] "과거 관찰" 섹션: 저장된 관찰 종목의 관찰일 위치를 캐시된
+        df에서 찾아 D+n(실제 거래일)·당시종가→현재가(변화%)·관찰일
+        이후 최고가 대비 현재 괴리%(고점대비)를 계산(`_surge_observe_
+        history_row()`, 전부 캐시 조회만).
+        [6] 탭 라벨에 "2주 실험" 배지, 탭 진입 시 헤더 서술에 "🔥 급등
+        (실험 · 2주 관찰)" 명시. 실험 시작일 2026-09-09, 종료 예정일
+        2026-09-23(docs 참고).
+        신규: `GET /api/surge/observe` → {today, today_date, history,
+        banner, criteria}.
+        검증: python3 -m py_compile app.py, node --check.
 v5.227 [기능추가] 재점화 감시를 📌 내 추적에 노출(사용자 지시, v5.226과
         한 배치로 묶어 배포 — "번들 수정 선호" 원칙).
         [1] 🔁 재점화 watching 항목 중 buy-stop(v5.226에서 개명)까지
@@ -5934,7 +5962,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.227"
+VERSION = "v5.228"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -8613,6 +8641,12 @@ async def _warm_market(market: str):
                     await _refresh_reignition_watch(bundle)
                 except Exception as e2:
                     print(f"[reignition] EOD 갱신 실패: {e2}")
+                # v5.228(사용자 지시 — 🔥 급등 관찰, 임시 2주 실험): EOD 확정
+                # 시점에 하루 1회 오늘자 급등 종목을 기록.
+                try:
+                    _record_surge_observe_eod(daykey, bundle)
+                except Exception as e2:
+                    print(f"[surge-observe] EOD 기록 실패: {e2}")
             # v5.173: 5탭 자동 감시(auto_watch) — reignition과 달리 KR
             # 전용이 아니라 이 시장(KR이면 KR, US면 US) 자체 EOD마다 갱신.
             # CONFIRM_RULE_BY_TAB이 KR/US 공통 규칙이라 US도 대상.
@@ -8870,6 +8904,12 @@ DECISION_LOG_PATH = _resolve_persistent_path("decision_log.json")  # v5.189 "오
 # alert()로만 보여주면 복사해서 공유하기 불편하고 휘발된다 — 파일로도 남긴다.
 REIGNITION_REFRESH_LOG_PATH = _resolve_persistent_path("reignition_refresh_log.json")
 REIGNITION_REFRESH_LOG_MAX = 50  # 최근 50회분만 보관(무한 증식 방지)
+# v5.228(사용자 지시 — 🔥 급등 관찰 탭, 임시 2주 실험): docs/surge_observe_
+# experiment_2026-09.md 참고. 판정/EV/진입가 없음 — 당일 급등 종목을 저장해
+# 이후 D+n 추적만 보여주는 순수 관찰 기록.
+SURGE_OBSERVE_PATH = _resolve_persistent_path("surge_observe.json")
+SURGE_OBSERVE_CHG_MIN_PCT = 15.0
+SURGE_OBSERVE_VOL_MULT_MIN = 10.0
 
 
 def _load_reignition_refresh_log() -> list:
@@ -8894,6 +8934,149 @@ def _append_reignition_refresh_log(entry: dict):
         os.replace(tmp, REIGNITION_REFRESH_LOG_PATH)
     except OSError as e:
         print(f"[reignition-refresh-log] 저장 실패: {e}")
+
+
+# ── 🔥 급등 관찰 (v5.228, 사용자 지시, 임시 2주 실험) ───────────────────────
+# docs/surge_observe_experiment_2026-09.md 참고. 판정/EV/진입가 없음 — 당일
+# +15%↑ & 거래량 20일평균 10배↑ KR 종목을 그날 그대로 기록해두고, 이후
+# D+n 시점의 가격이 어떻게 됐는지만 보여준다("그날 급등한 게 그 뒤 어떻게
+# 됐나" 관찰이 핵심 — 사용자 지시). 저장 스키마는 사용자가 지정한 필드만
+# ({ticker, name, close, chg_pct, vol_mult, rs, atr_pct, ma200_pct}) — sector는
+# 정적 매핑이라 저장 안 하고 조회 시점에 _sector_of()로 매번 다시 붙인다.
+def _load_surge_observe() -> dict:
+    if os.path.exists(SURGE_OBSERVE_PATH):
+        try:
+            with open(SURGE_OBSERVE_PATH, encoding="utf-8") as f:
+                data = _json.load(f)
+                return data if isinstance(data, dict) else {}
+        except (ValueError, OSError):
+            return {}
+    return {}
+
+
+def _save_surge_observe(data: dict):
+    try:
+        tmp = SURGE_OBSERVE_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(data, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, SURGE_OBSERVE_PATH)
+    except OSError as e:
+        print(f"[surge-observe] 저장 실패: {e}")
+
+
+def _compute_surge_observe_today(data: dict, rs_ranks: dict, universe: dict) -> list:
+    """당일 +15%↑ & 거래량 20일평균 10배↑ KR 종목 — 이미 받은 캐시된 일봉
+    (data)만 사용, 새 fetch 없음. 판정/EV/진입가 계산 없음(순수 필터 +
+    지표 스냅샷)."""
+    from scanner import atr as _atr_fn
+    out = []
+    for t, df in data.items():
+        if not naver_kr.is_kr(t):
+            continue
+        if df is None or len(df) < 22:
+            continue
+        try:
+            c, h, lo, v = df["Close"], df["High"], df["Low"], df["Volume"]
+            close = float(c.iloc[-1])
+            prev = float(c.iloc[-2])
+            if prev <= 0:
+                continue
+            chg_pct = (close / prev - 1) * 100
+            if chg_pct < SURGE_OBSERVE_CHG_MIN_PCT:
+                continue
+            vol_avg20 = float(v.iloc[-21:-1].mean())
+            if vol_avg20 <= 0:
+                continue
+            vol_mult = float(v.iloc[-1]) / vol_avg20
+            if vol_mult < SURGE_OBSERVE_VOL_MULT_MIN:
+                continue
+            atr_pct = round(_atr_fn(h, lo, c) / close * 100, 1) if close > 0 else None
+            ma200 = float(c.rolling(200).mean().iloc[-1]) if len(c) >= 200 else None
+            ma200_pct = round((close - ma200) / ma200 * 100, 1) if ma200 else None
+            rs = rs_ranks.get(t)
+            out.append({
+                "ticker": t, "name": universe.get(t, t),
+                "close": round(close), "chg_pct": round(chg_pct, 1),
+                "vol_mult": round(vol_mult, 1),
+                "rs": round(rs) if rs is not None else None,
+                "atr_pct": atr_pct, "ma200_pct": ma200_pct,
+            })
+        except Exception:
+            continue
+    out.sort(key=lambda x: -x["chg_pct"])
+    return out
+
+
+def _record_surge_observe_eod(daykey: str, bundle: dict):
+    """EOD 확정 시점 1회 저장(_warm_market KR 분기에서 호출) — 하루 여러 번
+    다시 불려도 같은 daykey면 스킵(멱등)."""
+    store = _load_surge_observe()
+    if daykey in store:
+        return
+    items = _compute_surge_observe_today(bundle.get("data", {}), bundle.get("rs_ranks", {}), bundle.get("universe", {}))
+    store[daykey] = items
+    _save_surge_observe(store)
+    print(f"[surge-observe] {daykey} 기록 {len(items)}건")
+
+
+def _surge_observe_history_row(date: str, it: dict) -> dict:
+    """저장된 관찰 1건에 '지금' 시점 상태를 붙인다 — 전부 캐시 조회만
+    (_calendar_ticker_df/_calendar_current_price, 새 fetch 없음)."""
+    t = it.get("ticker")
+    df = _calendar_ticker_df(t)
+    current_close = _calendar_current_price(t)
+    days_since = None
+    chg_since_pct = None
+    off_high_pct = None
+    if df is not None and len(df):
+        try:
+            dates = [d.strftime("%Y-%m-%d") for d in df.index]
+            if date in dates:
+                pos = dates.index(date)
+                days_since = len(dates) - 1 - pos
+                obs_close = it.get("close")
+                if current_close is not None and obs_close:
+                    chg_since_pct = round((current_close / obs_close - 1) * 100, 1)
+                high_since = float(df["High"].iloc[pos:].max())
+                if current_close is not None and high_since > 0:
+                    off_high_pct = round((current_close / high_since - 1) * 100, 1)
+        except Exception:
+            pass
+    return {
+        **it, "sector": _sector_of(t), "date": date,
+        "days_since": days_since,
+        "current_close": round(current_close) if current_close is not None else None,
+        "chg_since_pct": chg_since_pct, "off_high_pct": off_high_pct,
+    }
+
+
+@app.get("/api/surge/observe")
+async def surge_observe():
+    """🔥 급등 관찰(임시 2주 실험, v5.228) — docs/surge_observe_experiment_
+    2026-09.md. 오늘 후보는 캐시된 데이터로 실시간 계산(새 fetch 없음),
+    과거 관찰은 EOD 저장분(surge_observe.json)에 현재 상태를 붙여 반환.
+    판정/EV/진입가 없음 — 순수 관찰용."""
+    bundle = _data_cache.get("data:all") or _data_cache.get("data:kr")
+    today_list = []
+    if bundle:
+        today_list = [
+            {**it, "sector": _sector_of(it["ticker"])}
+            for it in _compute_surge_observe_today(bundle.get("data", {}), bundle.get("rs_ranks", {}), bundle.get("universe", {}))
+        ]
+    store = _load_surge_observe()
+    today_key = _confirmed_daykey("kr") or datetime.now(KST).strftime("%Y-%m-%d")
+    history_dates = sorted((d for d in store if d != today_key), reverse=True)
+    history = []
+    for d in history_dates:
+        for it in store.get(d, []):
+            history.append(_surge_observe_history_row(d, it))
+    return JSONResponse(_clean_nan({
+        "ok": True, "today": today_list, "today_date": today_key,
+        "history": history,
+        "banner": "관찰 전용 — 진입 근거 없음",
+        "criteria": f"당일 +{SURGE_OBSERVE_CHG_MIN_PCT:.0f}%↑ & 거래량 20일평균 {SURGE_OBSERVE_VOL_MULT_MIN:.0f}배↑ (KR)",
+    }))
+
 
 # v5.189(사용자 지시): "🔴 즉시 행동"이 실제로 하루 몇 건 뜨는지 화면 없이
 # 로그만 쌓는다(일주일치 모아 "하루 평균 몇 건" 파악용). immediate 항목의

@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.227</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.228</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -577,6 +577,11 @@ tr.editing{background:rgba(242,179,61,.06)}
     <button class="tab" data-mode="breakout">돌파</button>
     <button class="tab" data-mode="turnaround">추세전환</button>
     <button class="tab" data-mode="jongga" title="T일 종가매수→T+1일 시가매도, 단기 오버나이트 전략(v5.97)">종가베팅</button>
+    <!-- v5.228(사용자 지시): 🔥 급등 관찰 — 임시 2주 실험. 기존 ⋯실험
+         드롭다운의 "⚡급등"(data-mode="surge", analyze_surge 게이트 스캔)과
+         완전히 다른 기능이라 별도 mode 키(surge_observe) 사용 — 판정 없이
+         당일 급등 종목을 저장해두고 이후 가격을 관찰만 한다. -->
+    <button class="tab" data-mode="surge_observe" title="당일 +15%↑ & 거래량 20일평균 10배↑ KR — 판정/EV/진입가 없음, 순수 관찰(2주 실험)">🔥 급등<span class="exp-tag">2주 실험</span></button>
     <span class="tab-group-sep"></span>
     <button class="tab" data-mode="eod">📋 마감정리</button>
     <button class="tab" data-mode="positions">💼 포지션</button>
@@ -708,6 +713,12 @@ tr.editing{background:rgba(242,179,61,.06)}
      입력/R진행률) 전용 뷰로 분리. -->
 <div class="jrnl-wrap" id="positionsView" style="display:none">
   <div id="positionsDoc">불러오는 중…</div>
+</div>
+
+<!-- v5.228(사용자 지시): 🔥 급등 관찰 — 임시 2주 실험. docs/surge_observe_
+     experiment_2026-09.md. 판정/EV/진입가 없음, 순수 관찰용. -->
+<div class="jrnl-wrap" id="surgeObserveView" style="display:none">
+  <div id="surgeObserveDoc">불러오는 중…</div>
 </div>
 
 <!-- v5.108: 📅 캘린더 탭 — 로그인 후 기본 화면. 오늘 요약(게이트 신호등+
@@ -3673,6 +3684,66 @@ async function onEnterPositionsTab() {
   }
 }
 
+// ════════════════ v5.228(사용자 지시): 🔥 급등 관찰 탭 (임시 2주 실험) ════
+// docs/surge_observe_experiment_2026-09.md. 판정/EV/진입가 없음 — 당일
+// +15%↑ & 거래량 20일평균 10배↑ KR 종목을 EOD에 기록해두고, 그 뒤 가격이
+// 어떻게 됐는지("과거 관찰")만 보여준다. /api/surge/observe 응답을 그대로
+// 렌더 — 새 계산은 프론트에서 하지 않음(서버가 이미 다 계산해서 줌).
+function _surgeTodayRowHtml(it) {
+  const chgStr = `+${it.chg_pct}%`;
+  const rsStr = it.rs != null ? it.rs : '-';
+  const atrStr = it.atr_pct != null ? `${it.atr_pct}%` : '-';
+  const maStr = it.ma200_pct != null ? `${it.ma200_pct > 0 ? '+' : ''}${it.ma200_pct}%` : '-';
+  return `<div class="jongga-forward-sub" style="padding:6px 0;border-bottom:1px solid var(--line)">
+    <div><b><a class="name-link" href="${tvUrl(it.ticker, 'kr')}" target="_blank" rel="noopener">${_escapeHtml(it.name)}</a></b>
+      <span class="mkt">KR</span> · ${fmtPrice(it.close, 'KR')} ·
+      <span style="color:#4ade80;font-weight:700">${chgStr}</span> · 거래량 ${it.vol_mult}배
+    </div>
+    <div style="opacity:.75;font-size:11px">${it.sector ? `${_escapeHtml(it.sector)} · ` : ''}RS ${rsStr} · ATR ${atrStr} · 200MA ${maStr}</div>
+  </div>`;
+}
+function _surgeHistoryRowHtml(it) {
+  const chgColor = it.chg_since_pct == null ? 'var(--muted)' : (it.chg_since_pct >= 0 ? '#4ade80' : '#f87171');
+  const chgStr = it.chg_since_pct != null ? `${it.chg_since_pct > 0 ? '+' : ''}${it.chg_since_pct}%` : '-';
+  const offHighStr = it.off_high_pct != null ? `${it.off_high_pct}%` : '-';
+  const currentStr = it.current_close != null ? fmtPrice(it.current_close, 'KR') : '-';
+  return `<div class="jongga-forward-sub" style="padding:5px 0;border-bottom:1px solid var(--line)">
+    <b><a class="name-link" href="${tvUrl(it.ticker, 'kr')}" target="_blank" rel="noopener">${_escapeHtml(it.name)}</a></b>
+    <span class="mkt">KR</span> <span style="opacity:.6;font-size:11px">${it.date}</span> ·
+    D+${it.days_since != null ? it.days_since : '?'} · ${fmtPrice(it.close, 'KR')} → ${currentStr}
+    <span style="color:${chgColor}">(${chgStr})</span> · 고점대비 ${offHighStr}
+  </div>`;
+}
+function renderSurgeObserve(d) {
+  const doc = document.getElementById('surgeObserveDoc');
+  if (!doc) return;
+  const today = d.today || [];
+  const history = d.history || [];
+  const banner = `<div class="mf-warn-banner">🔥 급등 (실험 · 2주 관찰) — ${_escapeHtml(d.banner || '관찰 전용 — 진입 근거 없음')}</div>`;
+  const todayBox = `<div class="jongga-forward-box" style="margin-bottom:12px">
+    <div class="jongga-forward-title">오늘 급등 (${today.length}건)${d.criteria ? ` · ${_escapeHtml(d.criteria)}` : ''}</div>
+    ${today.length ? today.map(_surgeTodayRowHtml).join('') : '<div style="font-size:13px;color:var(--muted)">오늘 조건 충족 종목 없음(또는 캐시 로딩 전 — 다른 탭을 한 번 열어보세요)</div>'}
+  </div>`;
+  const historyBox = `<div class="jongga-forward-box">
+    <div class="jongga-forward-title">과거 관찰 (${history.length}건)</div>
+    <div class="jongga-forward-sub" style="opacity:.7;margin-bottom:4px">그날 급등한 종목이 이후 어떻게 됐는지 — 판정 아님, 참고만</div>
+    ${history.length ? history.map(_surgeHistoryRowHtml).join('') : '<div style="font-size:13px;color:var(--muted)">아직 쌓인 과거 관찰 없음(매일 장마감 후 1회씩 쌓임)</div>'}
+  </div>`;
+  doc.innerHTML = banner + todayBox + historyBox;
+}
+async function onEnterSurgeObserveTab() {
+  const doc = document.getElementById('surgeObserveDoc');
+  doc.innerHTML = '<div class="loading"><div class="spinner"></div>불러오는 중…</div>';
+  try {
+    const res = await fetch('/api/surge/observe');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    renderSurgeObserve(d);
+  } catch (e) {
+    doc.innerHTML = '<p class="mf-err">불러오기 실패 — 새로고침 해보세요.</p>';
+  }
+}
+
 // ════════════════ v5.108: 📅 캘린더 탭 ════════════════
 // 로그인 후 기본 화면. 오늘 요약(게이트 신호등 3개 + 돈의흐름 오늘 한 문장)
 // + D+14 매크로 일정(주 1회 Claude 생성, 서버 캐시)/휴장일/보유·즐겨찾기
@@ -5093,12 +5164,14 @@ function applyTabViewState() {
   const isMoneyflow = mode === 'moneyflow';
   const isPositions = mode === 'positions';
   const isCalendar = mode === 'calendar';
-  const isCustomView = isJournal || isMoneyflow || isPositions || isCalendar;
+  const isSurgeObserve = mode === 'surge_observe';
+  const isCustomView = isJournal || isMoneyflow || isPositions || isCalendar || isSurgeObserve;
   document.getElementById('content').style.display = isCustomView ? 'none' : '';
   document.getElementById('journalView').style.display = isJournal ? 'block' : 'none';
   document.getElementById('moneyflowView').style.display = isMoneyflow ? 'block' : 'none';
   document.getElementById('positionsView').style.display = isPositions ? 'block' : 'none';
   document.getElementById('calendarView').style.display = isCalendar ? 'block' : 'none';
+  document.getElementById('surgeObserveView').style.display = isSurgeObserve ? 'block' : 'none';
   document.getElementById('searchBar').style.display = isCustomView ? 'none' : '';
   document.getElementById('diagBar').style.display = isCustomView ? 'none' : '';
   document.getElementById('patternSubTabs').style.display = (mode === 'pattern') ? 'flex' : 'none';
@@ -5106,11 +5179,13 @@ function applyTabViewState() {
     ? '🔥/추세전환 신호를 기록하고 결과(R)를 추적 — 주말에 CSV로 내보내 구글시트에 백업'
     : isMoneyflow ? '💰 돈의 흐름 — 관찰용 정보(진입 신호 아님), KR/US는 위 시장 필터로 전환'
     : isCalendar ? '📅 오늘 요약 + D+14 매크로 일정·휴장일·실적 — 참고용, 실제 일정은 바뀔 수 있어요'
+    : isSurgeObserve ? '🔥 급등 (실험 · 2주 관찰) — 당일 +15%↑ & 거래량 10배↑ KR, 판정 없음. 그 뒤 어떻게 됐는지만 관찰'
     : DESC[mode];
   if (isJournal) { renderJournal(); }
   else if (isMoneyflow) { onEnterMoneyflowTab(); }
   else if (isPositions) { onEnterPositionsTab(); }
   else if (isCalendar) { onEnterCalendarTab(); }
+  else if (isSurgeObserve) { onEnterSurgeObserveTab(); }
   else { load(); }
 }
 document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click', () => {
