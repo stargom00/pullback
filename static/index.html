@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.231</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.232</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -4177,6 +4177,12 @@ async function onEnterCalendarTab() {
     // 버전과 무관하게 페이지 로드 시 박힌 정적 텍스트를 계속 보고 있었다
     // — load()/loadSectors()와 같은 패턴으로 통일.
     if (_calendarData.version) { const vb = document.getElementById('verBadge'); if (vb) vb.textContent = _calendarData.version; }
+    // v5.232(사용자 지시): 기본 시장 필터 — 서버가 매 로드마다 계산해주는
+    // market_session을 그대로 적용(탭 재진입마다 갱신되므로, 브라우저를
+    // 오래 열어둬도 다음 재진입 시 최신 KST 기준으로 자동 반영됨 — 예전
+    // "페이지 최초 로드 시 딱 한 번" 문제의 근본 수정). 수동 클릭 이후엔
+    // userMarketOverride가 서버 기본값을 덮어쓰지 않게 막는다.
+    if (!userMarketOverride && _calendarData.market_session) setMarket(_calendarData.market_session);
     await _promoteConfirmCloseEntries(_calendarData.today_decision);
     await _archiveExpiredPending(_calendarData.today_decision);
     // v5.217(사용자 지시 — [A]-2): 📌 내 추적 보드 대상(pending/watch) 중
@@ -4501,11 +4507,10 @@ function renderTodayDecisionHtml(td, sectorFlow) {
       }
     }
   }
-  // v5.215(사용자 지시 — [3]): 미장 개장 중엔 스캐너 데이터가 여전히
-  // 전일 종가 기준(일봉)이라 실시간가로 오해하지 않도록 카드 가격 옆에
-  // 명시. isUsMarketOpen()은 timeBasedDefaultMarket()의 ET 장중 판정과
-  // 동일 로직을 공용 함수로 승격한 것(새 판정식 아님, 아래
-  // timeBasedDefaultMarket() 정의부 참고 — function 선언이라 호이스팅됨).
+  // v5.232(사용자 지시 — [4]): 가격 기준 표기는 이제 item.is_live/
+  // market_open_now(서버 계산, get_calendar() 참고)로만 판단 — 클라이언트
+  // 시간 판정 함수(isUsMarketOpen 등)는 전부 제거됨(v5.215는 여기서
+  // 그 함수를 썼으나 v5.232에서 대체).
   const renderImmediateCard = item => {
     const mkt = mktOf(item);
     // v5.175(사용자 지시 — 게이트→배지 전환): RS>=80 & 손절≤ATR×1.5는
@@ -4583,9 +4588,14 @@ function renderTodayDecisionHtml(td, sectorFlow) {
     const pivotGapLine = (item.pivot != null && item.entry != null && item.pivot !== item.entry)
       ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">피벗 ${fmtPrice(item.pivot, mkt)} / 진입 ${fmtPrice(item.entry, mkt)}</div>`
       : '';
-    // v5.215(사용자 지시 — [3]).
-    const priceBasisNote = (mkt === 'US' && isUsMarketOpen())
-      ? ` <span style="font-size:10px;color:var(--muted);font-weight:400">(전일 종가 기준)</span>`
+    // v5.232(사용자 지시 — [4] 장전/캐시 표기 확장): "카드 가격이 현재가가
+    // 아닐 때 전부" 적용 — 서버가 준 is_live/market_open_now 두 불리언만
+    // 보고 문구만 고른다(시간 계산 자체는 여기서 안 함, get_calendar()의
+    // _calendar_default_market_session() 옆 주석 참고). 이 필드가 아예
+    // 없는 소스(종가진입류)는 애초에 "지금 가격" 표기 대상이 아니라서
+    // priceBasisNote가 그냥 빈 문자열.
+    const priceBasisNote = (item.is_live === false)
+      ? ` <span style="font-size:10px;color:var(--muted);font-weight:400">${item.market_open_now ? '(전일 종가 기준)' : '(전 거래일 종가 · 장전)'}</span>`
       : '';
     // v5.221 [1][3]: 진입·손절 별도 줄(예전엔 " · "로 붙어있어 종목명이
     // 길 때 줄바꿈이 이상한 자리에서 일어났다).
@@ -5193,32 +5203,22 @@ function setMarket(newMarket) {
   market = newMarket;
   document.querySelectorAll('[data-market]').forEach(x => x.classList.toggle('active', x.dataset.market === newMarket));
 }
-// v5.166: 시간대별 기본 시장 필터 — KR 장중(평일 KST 09:00~15:30)엔 한국,
-// US 장중(평일 ET 09:30~16:00)엔 미국. 그 외 애매 구간(예: 15:30~22:30
-// KST — 한국장 마감 후 복기하거나 미장 준비하는 시간)엔 "마지막에 쓰던
-// 필터 유지"(사용자 지시) — 이 구간에 "전체"로 튀면 방금 보던 게
-// 사라진다는 이유. localStorage(MARKET_FILTER_KEY)에 수동 클릭마다
-// 저장, 저장된 값이 없으면(첫 방문) "전체"로 폴백.
-// 사용자가 시장 버튼을 수동 클릭하면 userMarketOverride=true가 되어 이
-// 세션(새로고침 전까지, expTabsExpanded와 같은 패턴) 동안 자동판정을
-// 더 이상 덮어쓰지 않는다.
+// v5.232(사용자 지시 — 즉시행동 카드 시장 전환 버그 수정): 시간대별
+// 기본 시장 필터를 프론트에서 직접 계산하던 v5.166/v5.215의
+// timeBasedDefaultMarket()/isUsMarketOpen()을 제거했다. 근본 원인은
+// NZ 등 비KST 타임존 자체가 아니라(왕복 파싱 트릭 자체는 정확했음,
+// TZ=Pacific/Auckland로 직접 재현해 확인) ① 이 계산이 페이지 최초
+// 로드 시점 딱 한 번만 실행되고 브라우저 탭을 오래 열어둬도 재평가가
+// 전혀 없었던 것 ② 미장 마감~한국장 개장 사이(약 05~09시 KST)에
+// "마지막 필터 유지"로 빠지는 애매 구간이 있어 그 시간대엔 직전 미장
+// 필터가 그대로 남았던 것 — 이제 서버가 매 캘린더 로드마다(탭 재진입
+// 포함) `_calendar_default_market_session()`으로 단일 계산해 응답에
+// 실어주고(`onEnterCalendarTab()` 참고), 프론트는 그 값을 그대로
+// setMarket()에 넘기기만 한다(판단 지점 1곳).
+// userMarketOverride: 사용자가 시장 버튼을 수동 클릭하면 true가 되어
+// 이 세션(새로고침 전까지) 동안 서버 기본값이 더 이상 덮어쓰지 않는다.
 let userMarketOverride = false;
 const MARKET_FILTER_KEY = 'marketFilterLast';
-// v5.215(사용자 지시 — [3]): timeBasedDefaultMarket()의 US 장중 판정
-// 로직을 공용 함수로 승격(새 판정식 아님, 그대로 재사용) — 🔴/🔎 카드의
-// "(전일 종가 기준)" 표시에도 같은 기준이 필요해서다.
-function isUsMarketOpen() {
-  const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  const etMin = et.getHours() * 60 + et.getMinutes();
-  return et.getDay() >= 1 && et.getDay() <= 5 && etMin >= 9 * 60 + 30 && etMin <= 16 * 60;
-}
-function timeBasedDefaultMarket() {
-  const kst = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
-  const kstMin = kst.getHours() * 60 + kst.getMinutes();
-  if (kst.getDay() >= 1 && kst.getDay() <= 5 && kstMin >= 9 * 60 && kstMin <= 15 * 60 + 30) return 'kr';
-  if (isUsMarketOpen()) return 'us';
-  return localStorage.getItem(MARKET_FILTER_KEY) || 'all';
-}
 document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('click', () => {
   userMarketOverride = true;
   localStorage.setItem(MARKET_FILTER_KEY, t.dataset.market);
@@ -8608,9 +8608,9 @@ async function loadIndices() {
 loadIndices();
 setInterval(loadIndices, 300000);   // 5분마다 갱신 (레짐 포함)
 
-// v5.165: 시간대별 기본 시장 필터 적용 — KR 장중이면 한국, US 장중이면
-// 미국, 그 외엔 전체(userMarketOverride 없을 때만, 즉 항상 첫 로드 시점).
-if (!userMarketOverride) setMarket(timeBasedDefaultMarket());
+// v5.232: 기본 시장 필터는 이제 onEnterCalendarTab()이 /api/calendar
+// 응답의 market_session을 받아 매번 다시 적용한다(위 v5.232 주석 참고) —
+// 여기서 더 이상 동기 계산하지 않음.
 loadJournalFromServer();   // 서버에서 일지 로드 + 구 localStorage 이전
 loadRSettings();           // R 시스템 설정 로드 (v4.47)
 loadGateSuggest();         // 시장 게이트 자동 제안 (v4.50)

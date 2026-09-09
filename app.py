@@ -5,6 +5,56 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.232 [버그수정] 🔴 즉시행동 카드 시장 전환 버그(사용자 지시, NZ 사용자
+        보고 — KST 07시 이후에도 미장 종목이 계속 표시됨).
+        [1] 근본원인(패치 전 확정): `grep -rn "getHours|toLocale|Asia/
+        Seoul|timezone|market_session"` 결과 프론트 `timeBasedDefaultMarket()`
+        /`isUsMarketOpen()`(static/index.html, v5.166/v5.215)이
+        `new Date(new Date().toLocaleString('en-US',{timeZone:...}))`
+        왕복 파싱으로 KST/ET를 계산하던 게 유일한 후보 — 그런데 이
+        트릭 자체를 NZ 타임존으로 직접 재현(`TZ=Pacific/Auckland node`)
+        해보니 KST 08:30을 정확히 추출해 **왕복 파싱 자체는 버그가
+        아니었음**. 진짜 원인 둘: ① 이 계산이 페이지 최초 로드 시점
+        (스크립트 최하단 동기 호출) 딱 한 번만 실행되고 이후 전혀
+        재평가되지 않아 브라우저 탭을 열어두면 그대로 굳음 ② 기존
+        스케줄(KR 09:00~15:30 장중/US ET 장중만 정의)에 07:00 같은
+        명확한 KR 시작 시각이 없어서 미장 마감~한국장 개장 사이(약
+        05~09시 KST)가 "마지막에 쓰던 필터 유지"로 빠졌고, 그 시간대
+        직전은 보통 US 장중이라 US가 그대로 남음. 서버(`_market_session_
+        key`, `KST = timezone(timedelta(hours=9))` 고정 오프셋 — 한국은
+        DST 없어 이 자체로 항상 정확)는 무관함을 확인.
+        [2] 원칙 전환: 판단 지점을 서버 1곳으로 — `_calendar_default_
+        market_session()`(신규)이 KST 기준으로 계산해 `/api/calendar`
+        응답에 `market_session` 필드로 실어주고, 프론트(`onEnterCalendarTab()`)
+        는 매 캘린더 로드마다(탭 재진입 포함, 오래 열어둔 탭도 다음
+        재진입 시 자동 갱신) 그 값을 `setMarket()`에 그대로 적용만 한다
+        — `timeBasedDefaultMarket()`/`isUsMarketOpen()` 완전 삭제.
+        [3] 전환 스케줄(사용자 지시로 확정, 위에서부터 먼저 걸리면 종료):
+        ① 토·일→US ② `is_trading_day('kr')==False`(KR 휴장)→US
+        ③ 07:00≤KST<19:00→KR ④ 그 외(19:00~익일07:00)→US. 19:00 경계
+        근거: KR 종가베팅 확정(18:20~18:30) 이후. "금19:00~월07:00
+        전체 US"는 ①·④에서 자동 충족돼 별도 분기 불필요.
+        [4] 가격 기준 표기 확장(후보 (a) 채택 + "현재가 아닐 때 전부"
+        일반화): 기존엔 `mkt==='US' && isUsMarketOpen()`(클라이언트
+        판단)일 때만 "(전일 종가 기준)"을 붙였음(대상은 사실상
+        `entry_method==='즉시'`인 us_pullback 카드뿐 — 종가진입류는
+        가격이 원래 종가 기준이라 대상 아님, 확인 결과 KR 즉시진입
+        카드는 현재 immediate에 존재하지 않아 이 케이스는 지금은
+        공집합이지만 로직은 시장 무관하게 일반화해둠). 이제
+        `us_pullback_cached`(스캔 캐시)의 기존 `daykey`/`ts` +
+        `_is_market_open_now()`(기존 함수 재사용, 새 판정식 아님)로
+        서버가 `is_live`/`market_open_now` 두 불리언을 계산해 각
+        즉시진입 아이템에 실어주고, 프론트는 `item.is_live===false`일
+        때만 `market_open_now`로 문구만 고른다(장 미개장="전 거래일
+        종가 · 장전", 개장중인데 캐시 스테일="전일 종가 기준") — 시간
+        계산은 프론트에서 완전히 제거.
+        전제였던 "서버가 가격마다 as_of 포함해야 함"은 이미 있던
+        `daykey`/`ts`(스캔 캐시가 EOD/장중 워밍 시점에 항상 채워옴,
+        `_warm_market()`)를 재사용해 충족 — 새 타임스탬프 필드 발명 안 함.
+        [5] 범위: static/index.html·app.py만(docs/scripts는 다른 세션
+        소관, 미건드림). VERSION·verBadge 동시 갱신.
+        검증: python3 -m py_compile app.py, node --check로 인라인
+        스크립트 전체 문법 확인.
 v5.231 [버그수정] 시총 허용목록(_mcap_allowed) 장중 재갱신(사용자 지시
         [c] — 삼미금속 012210이 급등 관찰에 안 잡히는 사고 조사 결과
         채택). 상세 근거·변경 전후 검증 수치는
@@ -6029,7 +6079,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.231"
+VERSION = "v5.232"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6224,6 +6274,43 @@ def _is_market_open_now(is_kr: bool) -> bool:
     if is_kr:
         return 9 * 60 <= hm < 15 * 60 + 30
     return hm >= 22 * 60 or hm < 6 * 60 + 30
+
+
+def _calendar_default_market_session() -> str:
+    """v5.232(사용자 지시 — 즉시행동 카드 시장 전환 버그 수정): 캘린더
+    탭 진입 시 기본으로 보여줄 시장('kr'|'us')을 서버가 KST 기준으로
+    단일 계산한다. 기존엔 프론트(`timeBasedDefaultMarket()`)가
+    `new Date(new Date().toLocaleString('en-US',{timeZone:...}))` 왕복
+    파싱으로 KST를 흉내냈는데 — 이 트릭 자체는 실제로 정확했음(NZ
+    타임존으로 직접 재현해 확인, TZ=Pacific/Auckland에서 KST 08:30을
+    정확히 추출) — 진짜 버그는 ① 이 계산이 페이지 최초 로드 시점
+    딱 한 번만 실행되고 이후 절대 재평가되지 않았던 것(브라우저 탭을
+    오래 열어두면 그대로 굳음) ② 기존 스케줄에 07:00 같은 명확한
+    KR 시작 시각이 아예 없어서 미장 마감~한국장 개장 사이(약 05~09시
+    KST)가 "마지막에 쓰던 필터 유지"로 빠졌던 것(그 시간대엔 직전이
+    보통 US 장중이었으므로 US가 계속 남음) — 결과적으로 NZ 사용자가
+    지적한 "7시 이후에도 미장 종목 표시" 증상과 정확히 일치. 근본
+    수정: 판단 지점을 서버 하나로 모으고(이 함수), 프론트는 매
+    캘린더 로드마다(탭 재진입 포함, 탭을 열어둔 채 시간이 지나도
+    다음 재진입 시 자동 갱신) 이 값을 그대로 받아 렌더만 한다.
+
+    평가 순서(위에서부터, 먼저 걸리면 종료) — 사용자 지시로 확정:
+    ① 토·일 → US(주말 규칙이 07:00 진입보다 우선)
+    ② KR 휴장일(`is_trading_day`) → US
+    ③ 07:00 ≤ KST < 19:00 → KR
+    ④ 그 외(19:00~익일 07:00) → US
+    19:00 경계 근거: KR 종가베팅 확정(18:20~18:30) 이후. 미국 서머타임은
+    이 임계값에 영향 없음(ET 쪽이 아니라 KST 고정 시각 기준이라
+    DST 전환과 무관)."""
+    now = datetime.now(KST)
+    if now.weekday() >= 5:
+        return "us"
+    if not is_trading_day("kr", now.strftime("%Y-%m-%d")):
+        return "us"
+    hm = now.hour * 60 + now.minute
+    if 7 * 60 <= hm < 19 * 60:
+        return "kr"
+    return "us"
 
 
 # ── 개장일 판정 (v5.99, 사용자 지시) ──────────────────────────────────
@@ -13182,6 +13269,17 @@ async def get_calendar():
                 "reason": "US 시장이 오늘 휴장 — 마지막 거래일 스캔 결과 참고용, 다음 개장 후 재확인 필요",
             })
     elif us_pullback_cached:
+        # v5.232(사용자 지시 — [4] 장전/캐시 표기, "현재가가 아닐 때 전부
+        # 적용" 원칙): entry_method="즉시"인 카드만 "지금 이 가격에 살 수
+        # 있다"는 뜻이라 이 표기 대상 — 종가진입류(jongga 등)는 애초에
+        # 종가가 기준이라 대상 아님(아래 다른 소스는 이 필드를 안 채움).
+        # daykey가 있으면(EOD 확정 스냅샷) 확실히 라이브가 아니고,
+        # daykey가 없어도(장중 워밍) 그 시장이 지금 실제로 열려 있어야만
+        # 라이브 — 프론트는 이 두 불리언만 보고 렌더, 시간 계산은 안 함
+        # (판단 지점 1곳 원칙, 이 값은 이미 있는 daykey/_is_market_open_now
+        # 재사용이라 새 계산 아님).
+        us_market_open_now = _is_market_open_now(is_kr=False)
+        us_is_live = us_pullback_cached.get("daykey") is None and us_market_open_now
         for h in us_pullback_cached.get("hits", []):
             close_ = h.get("close")
             stop_ = h.get("stop")
@@ -13195,6 +13293,7 @@ async def get_calendar():
                 "entry": close_, "stop": stop_, "target_2r": target_2r,
                 "close": close_, "pivot": h.get("pivot"),
                 "verdict": "entry_candidate", "entry_method": "즉시",
+                "is_live": us_is_live, "market_open_now": us_market_open_now,
                 "reason": "눌림목 즉시진입 — US 단독 EV +0.206R(z=2.95) · "
                           "docs/pullback_ev_kr_us_regime_investigation.md",
             })
@@ -13766,6 +13865,9 @@ async def get_calendar():
 
     return JSONResponse(_clean_nan({
         "version": VERSION,   # v5.198: 캘린더(기본 진입 탭)도 verBadge 갱신 — 이전엔 이 필드가 없어 캘린더만 쓰면 배지가 안 바뀜
+        # v5.232(사용자 지시): 🔴 즉시행동 카드 기본 시장 필터 — 서버 단일
+        # 판단(_calendar_default_market_session), 프론트는 판단 안 함.
+        "market_session": _calendar_default_market_session(),
         "today": today,
         "today_decision": today_decision,
         "sector_flow": sector_flow,
