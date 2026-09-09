@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.229</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.230</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -7973,7 +7973,7 @@ function _myTrackReignitionRowHtml(it) {
       border-radius:6px;padding:8px 10px;margin-bottom:6px">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px">
       <span style="color:#ff9b6b;font-weight:700">🔥 재점화</span>
-      <b style="white-space:nowrap">${it.name || it.ticker}</b><span class="mkt">KR</span>
+      <b style="white-space:nowrap"><a class="name-link" href="${tvUrl(it.ticker, 'kr')}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기">${_escapeHtml(it.name || it.ticker)}</a></b><span class="mkt">KR</span>
       <span>현재 ${fmtPrice(close, 'KR')}</span>
       <span>트리거 ${fmtPrice(pivot, 'KR')}▲ <span style="opacity:.6;font-size:10px" title="재점화 시스템이 계산한 buy-stop — 수정 불가">(시스템)</span></span>
       <span style="color:${stateColor};font-weight:700">${stateLabel}</span>${pctStr}
@@ -8038,7 +8038,7 @@ function renderMyTrackBoard() {
     return `<div style="border:1px solid var(--line);border-left:3px solid ${stateColor};background:var(--card);
         border-radius:6px;padding:8px 10px;margin-bottom:6px;cursor:pointer" onclick="toggleMyTrackExpand(${r.id})">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px">
-        <b style="white-space:nowrap">${r.name || r.ticker}</b><span class="mkt">${mkt}</span>
+        <b style="white-space:nowrap"><a class="name-link" href="${tvUrl(r.ticker, mkt)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${_escapeHtml(r.name || r.ticker)}</a></b><span class="mkt">${mkt}</span>
         <span>${priceStr}</span>
         <span>트리거 ${_myTrackTriggerInputHtml(r)}</span>
         ${stateHtml}
@@ -8064,7 +8064,7 @@ function renderMyTrackBoard() {
     const priceStr = r.last_price != null ? fmtPrice(parseFloat(r.last_price), mkt) : '-';
     return `<div style="border:1px solid var(--line);background:var(--card);border-radius:6px;padding:8px 10px;margin-bottom:6px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px">
-        <b style="white-space:nowrap">${r.name || r.ticker}</b><span class="mkt">${mkt}</span>
+        <b style="white-space:nowrap"><a class="name-link" href="${tvUrl(r.ticker, mkt)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기">${_escapeHtml(r.name || r.ticker)}</a></b><span class="mkt">${mkt}</span>
         <span style="color:var(--muted)">${priceStr}</span>
         <span>트리거 ${_myTrackTriggerInputHtml(r)}</span>
         <span style="opacity:.6;font-size:11px">${r.tab || ''}</span>
