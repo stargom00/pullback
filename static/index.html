@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.222</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.224</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -719,6 +719,14 @@ tr.editing{background:rgba(242,179,61,.06)}
      "안에 두면 필터 클릭마다 textarea가 재생성돼 포커스가 끊긴다"는
      v5.205의 이유가 그대로 적용되므로, 위치만 옮기고 분리 원칙은 유지. -->
 <div class="jrnl-wrap" id="calendarView" style="display:none">
+  <div id="calendarDocStrip">불러오는 중…</div>
+  <!-- v5.224(사용자 지시 — [1][2]): 5탭 검색창(#cardSearch)과 동일한
+       API(/api/lookup, /api/debug)를 재사용하는 캘린더 전용 검색 —
+       게이트 스트립 바로 아래, 📌 내 추적 위. dailyNoteBox와 같은 이유로
+       별도 정적 DOM(renderCalendar가 자주 다시 그리는 calendarDocTop
+       안에 두면 입력 중이던 검색어가 재렌더마다 날아감). onEnterCalendarTab
+       에서 탭 진입 시 1회만 채움 — loadCalSearchBox(). -->
+  <div id="calSearchBox"></div>
   <div id="calendarDocTop">불러오는 중…</div>
   <!-- v5.205(사용자 지시): 오늘의 메모 — renderCalendar(market 필터
        클릭마다도 통째로 다시 그림) 밖에 별도로 둔다. 안에 두면 필터를
@@ -3838,8 +3846,143 @@ async function saveDailyNote(text) {
   }
 }
 
+// ── v5.224(사용자 지시) — 캘린더 탭 종목 검색 ────────────────────────────
+// [2] 기존 검색 API 그대로 재사용(/api/lookup, /api/debug — 5탭 상단
+// #cardSearch/triggerLookup()/runDiag()과 완전히 동일한 엔드포인트, 새
+// API 없음). 결과 렌더만 캘린더 전용 압축 뷰로 새로 만든다(사용자 지시
+// 후속 메시지 — 5탭 각 줄 요약 + 통과 탭만 펼침 + 탈락은 사유 한 줄).
+// [1] dailyNoteBox와 같은 이유로 별도 정적 DOM(#calSearchBox) — 탭 진입
+// 시 1회만 채우고 renderCalendar()의 잦은 재렌더는 안 건드림(안 그러면
+// 입력 중이던 검색어가 지워짐).
+function loadCalSearchBox() {
+  const box = document.getElementById('calSearchBox');
+  if (!box) return;
+  box.innerHTML = `<div style="margin-bottom:14px">
+    <div style="display:flex;gap:8px">
+      <input id="calSearchInput" type="text" placeholder="🔍 종목명 또는 코드로 찾기 (예: 삼성, 005930) — Enter로 진단"
+        style="flex:1;box-sizing:border-box;padding:10px 14px;border-radius:10px;
+        background:var(--surface);border:1px solid var(--line);color:var(--text);font-size:14px;outline:none">
+      <button id="calSearchBtn" style="padding:10px 18px;border-radius:10px;background:#1d6b3a;color:#fff;
+        border:none;font-size:14px;cursor:pointer;white-space:nowrap">🔬 진단</button>
+    </div>
+    <div id="calSearchResult" style="margin-top:10px"></div>
+  </div>`;
+  const inp = document.getElementById('calSearchInput');
+  const btn = document.getElementById('calSearchBtn');
+  if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') calRunSearch(); });   // [3]
+  if (btn) btn.addEventListener('click', calRunSearch);
+}
+
+// [3] 5탭 검색의 triggerLookup()과 동일하게 /api/lookup 먼저(이름 검색이
+// 여러 개면 candidates), 단일 매치면 바로 진단으로.
+let _calSearchCandidates = [];
+async function calRunSearch() {
+  const inp = document.getElementById('calSearchInput');
+  const out = document.getElementById('calSearchResult');
+  if (!inp || !out) return;
+  const q = (inp.value || '').trim();
+  if (!q) { out.innerHTML = ''; return; }
+  out.innerHTML = '<div style="color:var(--muted);font-size:13px">검색 중…</div>';   // "응답 느리면 로딩 표시"
+  try {
+    const res = await fetch('/api/lookup/' + encodeURIComponent(q));
+    const d = await res.json();
+    if (d.candidates && d.candidates.length) {
+      _calSearchCandidates = d.candidates;
+      out.innerHTML = `<div style="font-size:12px;color:#9fd4ff;margin-bottom:6px">'${_escapeHtml(q)}'에 해당하는 종목이 여러 개예요 — 하나를 골라주세요.</div>` +
+        d.candidates.slice(0, 12).map((c, i) =>
+          `<div onclick="calPickCandidate(${i})" style="padding:8px 12px;cursor:pointer;display:flex;justify-content:space-between;gap:10px;border:1px solid var(--line);border-radius:8px;margin-bottom:4px;font-size:13px">
+             <span>${_escapeHtml(c.name)}</span><span style="color:var(--muted);font-size:11px">${_escapeHtml(c.ticker)}</span>
+           </div>`).join('');
+      return;
+    }
+    if (d.error) {
+      out.innerHTML = `<div style="color:#f87171;font-size:13px">${_escapeHtml(d.error)}</div>`;
+      return;
+    }
+    await calRunDiag(d.ticker);
+  } catch (e) {
+    out.innerHTML = `<div style="color:#f87171;font-size:13px">조회 중 오류가 났어요.</div>`;
+  }
+}
+function calPickCandidate(i) {
+  const c = _calSearchCandidates[i];
+  if (!c) return;
+  const inp = document.getElementById('calSearchInput');
+  if (inp) inp.value = c.ticker;
+  calRunDiag(c.ticker);
+}
+
+// [2] app.py debug_ticker()의 탈락_핵심사유는 "{라벨}: [게이트] 탈락 —
+// 상세 (이후 조건은 미검사)..." 형태 문장 목록(5탭 공용, 새 필드 아님) —
+// 압축뷰는 라벨로 그 문장을 찾아 상세 부분만 잘라 쓴다.
+function _calShortReason(label, reasons) {
+  const full = (reasons || []).find(r => r.startsWith(label + ':'));
+  if (!full) return '탈락(사유 없음)';
+  let s = full.slice(label.length + 1).trim();
+  const dash = s.indexOf('탈락 — ');
+  if (dash !== -1) {
+    s = s.slice(dash + '탈락 — '.length);
+  } else {
+    const err = s.indexOf('에러 — ');
+    if (err !== -1) s = s.slice(err + '에러 — '.length);
+  }
+  s = s.split('(이후')[0].split('[참고')[0].split('[⚠️')[0].trim();
+  return s || full;
+}
+const CAL_GATE_MODE_LABELS = { pullback: '눌림목', turnaround: '추세전환', breakout: '돌파', boxbreak: '박스돌파', imminent: '돌파임박' };
+async function calRunDiag(ticker) {
+  const out = document.getElementById('calSearchResult');
+  if (!out) return;
+  out.innerHTML = '<div style="color:var(--muted);font-size:13px">진단 중…</div>';
+  let d;
+  try {
+    const res = await fetch('/api/debug/' + encodeURIComponent(ticker));
+    d = await res.json();
+  } catch (e) {
+    out.innerHTML = '<div style="color:#f87171;font-size:13px">진단 실패</div>';
+    return;
+  }
+  if (d.error) {
+    out.innerHTML = `<div style="color:#f87171;font-size:13px">${_escapeHtml(d.error)} (${_escapeHtml(d.ticker || ticker)})</div>`;
+    return;
+  }
+  const mkt = d.market;
+  const reasons = d['탈락_핵심사유'] || [];
+  const realPivots = d['게이트기준_실제피벗'] || {};
+  const rows = Object.entries(CAL_GATE_MODE_LABELS).map(([key, label]) => ({ key, label, pass: d.modes && d.modes[key] === '통과' }));
+  const passCount = rows.filter(r => r.pass).length;
+  const safeId = (d.ticker || ticker).replace(/[^a-zA-Z0-9]/g, '_');
+  const header = `<div style="font-size:15px;font-weight:700;margin-bottom:8px">
+    <a class="name-link" href="${tvUrl(d.ticker || ticker, mkt)}" target="_blank" rel="noopener">${_escapeHtml(d.ticker || ticker)}</a>
+    <span class="mkt">${mkt}</span> · ${fmtPrice(d.close, mkt)}
+    ${d.sector ? ` <span style="color:var(--muted);font-size:12px">· ${_escapeHtml(d.sector)}</span>` : ''}
+  </div>`;
+  // "하나도 안 걸리면" — 5줄 압축뷰 대신 최소 정보만(현재가·섹터·차트링크는 위 header에 이미 있음).
+  const bodyHtml = passCount === 0
+    ? `<div style="color:var(--muted);font-size:13px">5탭 미해당 — 현재가·섹터·차트링크만</div>`
+    : rows.map(r => {
+        if (!r.pass) {
+          return `<div style="font-size:13px;color:var(--muted);margin-bottom:4px">❌ ${r.label} — ${_escapeHtml(_calShortReason(r.label, reasons))}</div>`;
+        }
+        const rp = realPivots[r.label];
+        const detail = rp
+          ? `피벗 ${fmtPrice(rp['피벗'], mkt)}(${rp['종류'] || '-'})${rp['risk_pct(카드기준)'] != null ? ` · 손절폭 ${rp['risk_pct(카드기준)']}%` : ''}`
+          : '상세 없음';
+        const detailId = `calDiagDetail_${r.key}_${safeId}`;
+        return `<div style="margin-bottom:4px">
+          <div style="cursor:pointer;font-size:13px;color:#4ade80" onclick="const e=document.getElementById('${detailId}');e.style.display=e.style.display==='none'?'':'none'">✅ ${r.label} 히트 <span style="color:var(--muted);font-size:11px">▾ 상세</span></div>
+          <div id="${detailId}" style="display:none;font-size:12px;color:var(--muted);padding:2px 0 2px 18px">${detail}</div>
+        </div>`;
+      }).join('');
+  out.innerHTML = `${header}${bodyHtml}
+    <div style="margin-top:10px">
+      <button class="journal-btn" style="width:auto;padding:6px 14px;font-size:12px" onclick="openMyTrackAddModal('${d.ticker || ticker}')">📌 추적 추가</button>
+    </div>`;
+}
+
 async function onEnterCalendarTab() {
   loadDailyNoteBox();   // 캘린더 본문과 독립 — 실패해도 본문 로드는 계속
+  loadCalSearchBox();   // v5.224: 검색창도 dailyNoteBox와 같은 독립 로드
   const doc = document.getElementById('calendarDocTop');
   doc.innerHTML = '<div class="loading"><div class="spinner"></div>불러오는 중…</div>';
   try {
@@ -4563,6 +4706,7 @@ function renderSectorFlowHtml(sf) {
 }
 
 function renderCalendar(data) {
+  const docStrip = document.getElementById('calendarDocStrip');
   const docTop = document.getElementById('calendarDocTop');
   const docBottom = document.getElementById('calendarDocBottom');
 
@@ -4634,11 +4778,17 @@ function renderCalendar(data) {
     </div>
   </div>`;
 
+  // v5.224(사용자 지시 — [1]): 게이트 스트립만 별도 정적 컨테이너
+  // (calendarDocStrip)로 분리 — 그 사이 #calSearchBox(static HTML)가
+  // "게이트 스트립 바로 아래"에 고정 위치할 수 있게. 스트립 자체는
+  // 입력 요소가 없어(그냥 표시용 div) 매번 다시 그려도 무해 — 검색창처럼
+  // 별도 DOM 보존이 필요한 건 아님.
+  docStrip.innerHTML = homeStripHtml;
+
   // v5.217(사용자 지시 — [B] 홈 순서): 1.내추적 2.🔴즉시행동 3.🔎후보
   // 4.📊섹터흐름 — 여기까지가 "첫 화면 목표"(검증 [C]). 5.메모/6.D+14는
   // calendarDocBottom(아래) + 그 사이 #dailyNoteBox(static HTML)로.
   docTop.innerHTML = `
-    ${homeStripHtml}
     ${marketClosedHtml}
     ${ddayHtml}
     ${myTrackBoardHtml}
@@ -7360,12 +7510,20 @@ async function myTrackCloseAllNoTrigger() {
 // updateTracking()의 pending 자동승격/자동무산 로직이 애초에 안
 // 걸린다(entry 없음 → 교차 판정 불가, NaN 비교는 항상 false). 대신
 // saveJournal()/saveManualAdd()와 같은 패턴으로 저널에 직접 append.
-function openMyTrackAddModal() {
+// v5.224(사용자 지시 — 캘린더 검색 "📌 추적 추가" 버튼): prefillTicker를
+// 주면 티커 칸을 채우고 mtaOnTickerChange()를 그대로 재사용해 이름까지
+// 자동 조회(새 로직 아님, v5.219 그대로) — 기존 "➕ 종목 추가" 흐름과
+// 완전히 같은 경로, 시작 값만 다름.
+function openMyTrackAddModal(prefillTicker) {
   ['mtaTicker', 'mtaName', 'mtaTrigger'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   const dirEl = document.getElementById('mtaTriggerDir'); if (dirEl) dirEl.value = 'above';   // v5.220 [4]: 기본 ▲
   const hint = document.getElementById('mtaHint'); if (hint) hint.textContent = '';
   mtaHideDropdown();
   document.getElementById('myTrackAddModal').classList.add('open');
+  if (prefillTicker) {
+    const tEl = document.getElementById('mtaTicker');
+    if (tEl) { tEl.value = prefillTicker; mtaOnTickerChange(); }
+  }
 }
 function closeMyTrackAddModal() {
   document.getElementById('myTrackAddModal').classList.remove('open');

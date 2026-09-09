@@ -5,6 +5,40 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.224 [기능추가] 캘린더 탭에 종목 검색(사용자 지시 — "v5.223"은 얼마냐봇
+        레포(stargom00/stock-alert, 내 추적 트리거 알림 v2.26)에서만
+        작업해 이 레포 버전은 건너뜀).
+        [1] 5탭 상단 검색창(#cardSearch/#diagBtn)과 같은 UX를 캘린더
+        탭에도 — 위치는 게이트 스트립 바로 아래, 📌 내 추적 위. 이를
+        위해 renderCalendar()가 쓰던 calendarDocTop을 게이트 스트립
+        전용 `calendarDocStrip`(재렌더 잦아도 무해 — 입력요소 없음)과
+        나머지(📌/🔴/🔎/📊)로 나누고, 그 사이에 새 정적 컨테이너
+        `#calSearchBox`를 끼웠다 — dailyNoteBox(v5.205)와 동일한 이유로
+        static HTML에 고정하고 탭 진입 시 1회만 채움(loadCalSearchBox,
+        renderCalendar 재렌더가 안 건드림 — 안 그러면 입력 중이던
+        검색어가 지워짐).
+        [2] 새 API 없음 — `/api/lookup/{q}`(이름 검색·후보 목록,
+        cardSearch가 쓰는 것과 완전히 동일)와 `/api/debug/{ticker}`
+        (5탭 진단, runDiag()가 쓰는 것과 동일)만 재사용. `/api/debug`에
+        `sector`(`_sector_of()`, 기존 정적 매핑 조회 — 새 계산 없음)
+        필드 하나만 추가 — "5탭 미해당" 폴백에 섹터를 보여주려면
+        필요했음(기존 응답엔 없었음).
+        결과 렌더는 캘린더 전용 압축 뷰로 새로 만듦(사용자 후속 지시):
+        5탭 각 한 줄(❌은 사유 한 줄, ✅는 클릭해 펼치면 피벗/손절폭 상세
+        — 둘 다 `/api/debug`가 이미 반환하는 탈락_핵심사유/게이트기준_
+        실제피벗을 그대로 씀, 재계산 없음), 5탭 전부 탈락이면 5줄
+        대신 "5탭 미해당 — 현재가·섹터·차트링크만"으로 축약, 응답
+        대기 중엔 "검색 중…"/"진단 중…" 로딩 표시.
+        결과 하단에 "📌 추적 추가" 버튼 — `openMyTrackAddModal(ticker)`
+        (v5.218/219)에 티커를 프리필로 넘겨 그대로 열고, 이름은
+        `mtaOnTickerChange()`(기존 로직 그대로) 재호출로 자동 채움.
+        [3] Enter(또는 🔬진단 버튼)에서 동일하게 동작 — 입력 debounce
+        없이 `#cardSearch`의 keydown Enter → runDiag() 패턴을 그대로
+        재현.
+        검증: `python3 -m py_compile app.py`, node --check로 전체
+        인라인 스크립트 문법 확인, 탈락_핵심사유 문자열 파싱
+        (_calShortReason)을 백엔드 실제 포맷 4가지 패턴으로 Node에서
+        직접 테스트해 정상 추출 확인.
 v5.222 [기능비활성화] 토스 동기화 일시 중단(사용자 지시). 상세 근거·
         재개 조건은 docs/toss_sync_disabled_2026-09.md 신규.
         [1] `TOSS_SYNC_ENABLED` 플래그(기본 false) 신설 — `POST /api/
@@ -5857,7 +5891,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.222"
+VERSION = "v5.224"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -9956,6 +9990,10 @@ async def debug_ticker(ticker: str):
         "ticker": ticker,
         "market": "KR" if is_kr else "US",
         "close": round(close),
+        # v5.224(사용자 지시 — 캘린더 검색 압축뷰): _sector_of()는 이미
+        # 있는 정적 매핑 조회라 새 계산 없음 — 5탭 미해당일 때 "현재가·
+        # 섹터·차트링크만" 표시용으로 추가.
+        "sector": _sector_of(ticker),
         "modes": modes,
         "rs_percentile": rs_used,
         "rs_percentile_is_approx": rs_is_approx,
