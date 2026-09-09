@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.225</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.227</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -1721,6 +1721,10 @@ async function loadReignitionPullbackStatus() {
     reignitionPullbackData = null;
   }
   if (mode === 'pullback') renderCards();
+  // v5.227(사용자 지시 — 재점화 감시를 📌에 노출): 캘린더 탭 진입 시에도
+  // 이 데이터를 받아 📌 내 추적 보드가 렌더할 수 있게(onEnterCalendarTab
+  // 참고) — 도착 시점에 이미 캘린더 탭이면 다시 그려서 반영.
+  if (mode === 'calendar' && _calendarData) renderCalendar(_calendarData);
 }
 function toggleReignitionPullbackExpired() {
   reignitionPullbackExpiredOpen = !reignitionPullbackExpiredOpen;
@@ -1883,7 +1887,14 @@ function reignitionPullbackSectionHtml() {
     const confirmed = it.status === 'confirmed';
     const pivot = confirmed ? (it.confirm || {}).pivot : (it.exec || {}).pivot;
     const stop = confirmed ? (it.confirm || {}).stop : (it.exec || {}).atr_stop;
-    const priceTxt = pivot != null ? `고가 ${fmtPrice(pivot, 'KR')}` : '고가 -';
+    // v5.226(사용자 지시): "고가"는 오해 소지(pivot이지 그날 고가가 아님)라
+    // buy-stop으로 개명 + 현재가(it.close, 새 fetch 없음) 병기 + 현재가
+    // 대비 괴리% 추가.
+    const closeTxt = it.close != null ? `현재 ${fmtPrice(it.close, 'KR')} · ` : '';
+    const pivotPct = (pivot != null && it.close) ? Math.round((pivot - it.close) / it.close * 1000) / 10 : null;
+    const priceTxt = pivot != null
+      ? `buy-stop ${fmtPrice(pivot, 'KR')}${pivotPct != null ? ` (${pivotPct > 0 ? '+' : ''}${pivotPct}%)` : ''}`
+      : 'buy-stop -';
     const stopTxt = stop != null ? `손절 ${fmtPrice(stop, 'KR')}` : '손절 -';
     const nameLink = `<a class="name-link" href="${tvUrl(it.ticker, 'kr')}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기">${it.name}</a>`;
     // v5.190([6]): 체결 행에만 재량 체크리스트 ⓘ — confirm 스냅샷에
@@ -1907,7 +1918,7 @@ function reignitionPullbackSectionHtml() {
       ? renderScenarioHtml(it.exec.scenario, 'KR', 'sc_reig_' + it.ticker, it.exec.atr_pct)
       : '';
     return `<div class="jongga-forward-sub" style="padding:3px 0;${dimStyle}">
-      <div>${st.icon} <b>${nameLink}</b> <span style="opacity:.7">(${it.theme})</span> · ${priceTxt} · ${stopTxt}${checklistIcon}${failTag}</div>
+      <div>${st.icon} <b>${nameLink}</b> <span style="opacity:.7">(${it.theme})</span> · ${closeTxt}${priceTxt} · ${stopTxt}${checklistIcon}${failTag}</div>
       <div style="opacity:.75;font-size:10px;padding-left:20px">${reignitionStatusLine(it, confirmWindowDays)}</div>
       ${scenarioHtml}
     </div>`;
@@ -3997,6 +4008,7 @@ async function calRunDiag(ticker) {
 async function onEnterCalendarTab() {
   loadDailyNoteBox();   // 캘린더 본문과 독립 — 실패해도 본문 로드는 계속
   loadCalSearchBox();   // v5.224: 검색창도 dailyNoteBox와 같은 독립 로드
+  loadReignitionPullbackStatus();   // v5.227: 📌 내 추적 보드의 🔥 재점화 노출용, 독립 로드
   const doc = document.getElementById('calendarDocTop');
   doc.innerHTML = '<div class="loading"><div class="spinner"></div>불러오는 중…</div>';
   try {
@@ -7763,6 +7775,51 @@ function _myTrackTriggerInputHtml(r) {
 function _myTrackCloseBtnHtml(id) {
   return `<button onclick="event.stopPropagation();myTrackCloseRow(${id})" title="더 안 지켜본다" style="color:#FF6B6B;background:none;border:1px solid #FF6B6B;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer">관찰 종료</button>`;
 }
+// v5.227(사용자 지시 — 재점화 감시를 📌에 노출): 눌림목 탭 상단 "🔥 재점화"
+// 요약과 같은 캐시(reignitionPullbackData, loadReignitionPullbackStatus가
+// 캘린더 탭 진입 시에도 채움)를 재사용 — 새 계산·새 API 없음.
+// [1] status='watching'만(터치는 됐지만 아직 close 확인 전인 것도 포함,
+// confirmed는 이미 체결이라 대상 아님) + buy-stop까지 거리 5% 이내.
+// [2] 재량 미달(⚠️, reignitionDiscretionFail — 재점화 섹션과 동일 조건)·
+// 만료는 제외(만료는 애초에 status가 watching이 아니라 자동 제외).
+// [3] 저널 레코드가 아니므로 관찰종료 버튼 대신 눌림목 탭 링크만.
+const MY_TRACK_REIGNITION_NEAR_PCT = 0.05;
+function myTrackReignitionCandidates() {
+  const d = reignitionPullbackData;
+  if (!d || !(d.items || []).length) return [];
+  return d.items.filter(it => {
+    if (it.status !== 'watching') return false;
+    if (reignitionDiscretionFail(it).fail) return false;
+    const pivot = (it.exec || {}).pivot;
+    const close = it.close;
+    if (pivot == null || close == null || close <= 0) return false;
+    return Math.abs(pivot - close) / close <= MY_TRACK_REIGNITION_NEAR_PCT;
+  });
+}
+function goToPullbackTab() {
+  const btn = document.querySelector('[data-mode="pullback"]');
+  if (btn) btn.click();
+}
+function _myTrackReignitionRowHtml(it) {
+  const pivot = (it.exec || {}).pivot;
+  const close = it.close;
+  const pct = (pivot - close) / close;   // 0 이하 = 이미 buy-stop 위(터치)
+  const reached = pct <= 0;
+  const stateColor = reached ? MY_TRACK_STATE_COLOR.reached : MY_TRACK_STATE_COLOR.approaching;
+  const stateLabel = reached ? MY_TRACK_STATE_LABEL.reached : MY_TRACK_STATE_LABEL.approaching;
+  const pctStr = ` <span style="opacity:.75">(${pct > 0 ? '+' : ''}${(pct * 100).toFixed(1)}%)</span>`;
+  return `<div style="border:1px solid var(--line);border-left:3px solid ${stateColor};background:var(--card);
+      border-radius:6px;padding:8px 10px;margin-bottom:6px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px">
+      <span style="color:#ff9b6b;font-weight:700">🔥 재점화</span>
+      <b style="white-space:nowrap">${it.name || it.ticker}</b><span class="mkt">KR</span>
+      <span>현재 ${fmtPrice(close, 'KR')}</span>
+      <span>트리거 ${fmtPrice(pivot, 'KR')}▲ <span style="opacity:.6;font-size:10px" title="재점화 시스템이 계산한 buy-stop — 수정 불가">(시스템)</span></span>
+      <span style="color:${stateColor};font-weight:700">${stateLabel}</span>${pctStr}
+      <button onclick="goToPullbackTab()" class="journal-btn" style="width:auto;padding:3px 10px;font-size:11px">눌림목 탭</button>
+    </div>
+  </div>`;
+}
 // [1][2][5] 보드 본체 — v5.218부터 대상이 0건이어도 항상 표시(빈 상태
 // 메시지 + "➕ 종목 추가" 버튼). "➕ 종목 추가"는 헤더 우측에 항상 노출.
 function renderMyTrackBoard() {
@@ -7785,10 +7842,17 @@ function renderMyTrackBoard() {
   const addBtnHtml = `<button onclick="openMyTrackAddModal()" style="width:auto;background:#2d6a4a;border:1px solid #40916c;color:#fff;border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer">➕ 종목 추가</button>`;
   const headerHtml = `<div class="mf-toolbar" style="justify-content:space-between"><b>${titleText}</b>${addBtnHtml}</div>`;
 
+  // v5.227: 저널 레코드가 아닌 재점화 감시 항목 — 위 all/withState와는
+  // 완전히 별개 소스(reignitionPullbackData)라 항상 별도로 계산해둔다.
+  const reignitionCandidates = myTrackReignitionCandidates();
+  const reignitionRowsHtml = reignitionCandidates.map(_myTrackReignitionRowHtml).join('');
+
   // v5.218 [1]: 활성·미입력 둘 다 0건이어도 섹션 자체는 항상 보이게.
+  // v5.227: 저널 쪽이 0건이어도 재점화 후보가 있으면 그건 보여준다.
   if (!all.length) {
     return `<div style="margin-bottom:14px">
       ${headerHtml}
+      ${reignitionRowsHtml}
       <div style="font-size:13px;color:var(--muted)">추적 중인 종목 없음 — <span style="cursor:pointer;text-decoration:underline" onclick="openMyTrackAddModal()">➕ 종목 추가</span></div>
     </div>`;
   }
@@ -7850,6 +7914,7 @@ function renderMyTrackBoard() {
 
   return `<div style="margin-bottom:14px">
     ${headerHtml}
+    ${reignitionRowsHtml}
     ${activeRowsHtml}${activeEmptyHtml}
     ${activeToggleHtml}
     ${noTriggerHeader}

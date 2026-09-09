@@ -5,6 +5,34 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.227 [기능추가] 재점화 감시를 📌 내 추적에 노출(사용자 지시, v5.226과
+        한 배치로 묶어 배포 — "번들 수정 선호" 원칙).
+        [1] 🔁 재점화 watching 항목 중 buy-stop(v5.226에서 개명)까지
+        거리 5% 이내(MY_TRACK_REIGNITION_NEAR_PCT)인 것을 "📌 내 추적"
+        보드에 "🔥 재점화" 배지로 노출. 트리거=buy-stop, 방향 ▲ 고정,
+        수정 불가(시스템 값 — journal.my_trigger_price/dir과 달리 입력칸
+        자체가 없음). 재사용: reignitionPullbackData(눌림목 탭 "🔥 재점화"
+        요약과 동일 캐시, 새 fetch 없음) — 캘린더 탭 진입 시에도 이
+        데이터를 로드하도록 onEnterCalendarTab()에 loadReignitionPullbackStatus()
+        호출 추가(원래 눌림목 탭 진입 시에만 로드하던 것), 도착 시점에
+        캘린더 탭이면 renderCalendar() 재호출로 반영.
+        [2] 재량 미달(⚠️, reignitionDiscretionFail — 재점화 섹션과 완전히
+        같은 조건 재사용)·만료는 제외(만료는 status가 애초에 'watching'이
+        아니라 자연 제외).
+        [3] 저널 레코드를 만들지 않음(순수 표시) — "관찰 종료" 버튼 대신
+        "눌림목 탭" 링크(goToPullbackTab, 실제 탭 버튼 클릭을 재현해 기존
+        탭 전환 로직 그대로 재사용).
+        검증: node --check로 인라인 스크립트 전체 문법 확인.
+v5.226 [UI 개선] 재점화 감시 현재가 표시 + "고가"→"buy-stop" 개명(사용자
+        지시). "고가"는 그날의 실제 고가처럼 읽히지만 실제로는 buy-stop
+        피벗이라 오해 소지 — 라벨을 buy-stop으로 교체.
+        각 행에 현재가 추가: 이미 캘린더 탭이 쓰는 `_calendar_current_price()`
+        헬퍼(캐시 조회만, 새 fetch 없음) 재사용 — /api/reignition/watchlist
+        응답의 각 item에 `close` 필드 추가(`_reignition_watchlist_view()`).
+        표시 예: "지엔씨에너지 (건설·데이터센터) · 현재 52,100원 ·
+        buy-stop 57,700원 (+10.7%) · 손절 52,675원" — %는 (buy-stop -
+        현재가)/현재가, 이미 있는 값들로 프론트에서 계산(새 계산 없음).
+        검증: python3 -m py_compile app.py, node --check.
 v5.225 [기능추가] 캘린더 탭 종목검색 — 5탭 미해당 사유 표시(사용자 지시,
         v5.224 압축뷰의 후속 개선).
         [1] 0/5 통과("5탭 미해당") 케이스에서 기존엔 "현재가·섹터·
@@ -5906,7 +5934,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.225"
+VERSION = "v5.227"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -11169,7 +11197,11 @@ def _reignition_watchlist_view(include_expired_today: bool = False) -> list:
               "window_end_date": r.get("window_end_date"),
               "pivot_touch_date": r.get("pivot_touch_date"), "days_since_touch": r.get("days_since_touch"),
               "compression": r.get("compression"), "confirm": r.get("confirm"),
-              "forward": r.get("forward"), "exec": r.get("exec")}
+              "forward": r.get("forward"), "exec": r.get("exec"),
+              # v5.226(사용자 지시): 현재가 — 이미 스캔 캐시에 있는 값
+              # (_calendar_current_price, /api/calendar가 쓰는 것과 동일
+              # 헬퍼 재사용, 새 fetch 없음). 캐시 콜드면 None.
+              "close": _calendar_current_price(r["ticker"])}
              for r in store.values()
              if r.get("status") in ("watching", "confirmed")
              or (include_expired_today and r.get("status") == "expired" and r.get("expired_at") == today)]
