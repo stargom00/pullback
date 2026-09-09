@@ -5,6 +5,27 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.233 [테스트추가] 가격기준 표기(v5.232 [4]) KR 분기 커버리지 구멍 메움
+        (사용자 지시 — "어제 test_trace_parity에서 커버리지 0건이 통과로
+        표시됐던 것과 같은 구멍"이라는 지적). KR 즉시진입(entry_method=
+        "즉시") 카드가 production에 하나도 없어서(US 눌림목만 이
+        entry_method를 씀) `priceBasisNoteText(item)`의 "market과 무관"
+        설계 의도가 KR 데이터로는 한 번도 검증된 적이 없었음.
+        [1] static/index.html: renderImmediateCard 클로저 안에 있던
+        판정 로직(is_live/market_open_now → 문구)을 최상위 순수 함수
+        `priceBasisNoteText(item)`로 분리(재구현 아님, 그대로 이동) —
+        테스트가 실제 production 함수를 직접 추출해 실행할 수 있게.
+        [2] 신규 test_price_basis_note.py: 정규식이 아니라 중괄호 깊이를
+        세어 이 함수를 static/index.html에서 텍스트 그대로 추출해 Node로
+        실행(이 레포 테스트 중 처음으로 추출된 JS를 실제로 실행 —
+        기존엔 node --check 문법 확인뿐). 가짜 데이터로 KR×US ·
+        장중(라이브)×장전×장중-stale 7조합을 만들어 검증 — 문구 하나라도
+        어긋나면 hard FAIL(경고 아님). market이 결과에 영향을 주면 안
+        된다는 설계 의도 자체도 KR/US 짝 비교로 별도 테스트
+        (test_price_basis_note_market_agnostic).
+        검증: 두 텍스트를 일부러 바꿔치기해 테스트가 실제로 FAIL하는지
+        확인 후 원복(타당성 자체 검증) — 이후 python3 -m pytest 386건
+        전체 통과.
 v5.232 [버그수정] 🔴 즉시행동 카드 시장 전환 버그(사용자 지시, NZ 사용자
         보고 — KST 07시 이후에도 미장 종목이 계속 표시됨).
         [1] 근본원인(패치 전 확정): `grep -rn "getHours|toLocale|Asia/
@@ -6079,7 +6100,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.232"
+VERSION = "v5.233"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
