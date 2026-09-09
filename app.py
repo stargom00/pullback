@@ -5,6 +5,27 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.229 [버그수정+기능개선] 메모 정리(사용자 지시).
+        [1] "지난 메모"(구 "어제 메모") 복구 + 14일 확장. 사라진 원인:
+        `get_daily_note()`는 계속 어제 메모를 주고 있었지만, 프론트가
+        v5.217 "기본 접힘" 개편 때 그 토글을 `#dailyNoteFull`(오늘 메모를
+        먼저 펼쳐야만 보이는 컨테이너) 안에 중첩시켜서 실질적으로 2단
+        클릭 없인 안 보이는 위치가 됐던 것 — 기능 자체가 빠진 건 아니고
+        노출 위치가 묻힌 회귀. `get_daily_note()`가 이제 최근 14일(오늘
+        이전) 중 내용 있는 날만 `history: [{date, text}]`로 반환(POST는
+        원래부터 임의 date를 받아 저장했어서 서버 쓰기 경로는 무변경).
+        프론트: "▾ 지난 메모 (N)" 토글을 메모칸 바로 아래 독립 위치로
+        옮겨 오늘 메모를 안 펼쳐도 항상 보이게, 날짜별 개별 접힘 +
+        textarea로 과거 날짜도 그대로 편집 가능(`saveDailyNote(text,
+        date, statusElId)`로 일반화 — 오늘/과거 편집이 같은 저장 경로).
+        [2] 자동저장 피드백: 성공 "✓ 저장됨 HH:MM"(3초 후 사라짐, 녹색),
+        실패 "⚠️ 저장 실패"(빨간색, 다음 입력 전까지 유지) — 기존엔 성공
+        "저장됨"만 1.5초 무색 표시, 실패는 문구만 있고 사라지는 시점이
+        불명확해 사용자가 저장 여부를 신뢰 못 하던 문제.
+        [3] "📋 전체 복사" 버튼 — 오늘+지난 메모(화면에 로드된 최근 14일,
+        입력 중인 값은 저장 완료 전이라도 즉시 반영)를 텍스트로 클립보드
+        복사.
+        검증: python3 -m py_compile app.py, node --check.
 v5.228 [기능추가] 🔥 급등 관찰 탭 신설(사용자 지시 — 임시 2주 실험).
         상세 근거·종료 조건은 docs/surge_observe_experiment_2026-09.md.
         [1] 상단 탭(종가베팅 오른쪽)에 "🔥 급등" 신설. 기존 "⋯실험"
@@ -5962,7 +5983,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.228"
+VERSION = "v5.229"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -12754,15 +12775,25 @@ def _save_daily_notes(notes: dict) -> None:
 
 @app.get("/api/daily-note")
 async def get_daily_note():
-    """오늘 메모 + 어제 메모(접힘 표시용) 반환. 태그·검색·서식 없음 — 순수
-    텍스트 한 덩어리."""
+    """오늘 메모 + 지난 메모(v5.229, 사용자 지시 — [1] "지난 메모" 복구+확장)
+    반환. 태그·검색·서식 없음 — 순수 텍스트 한 덩어리.
+    history: 오늘 이전 14일 중 내용 있는 날만, 날짜 역순(어제부터).
+    v5.205~228 사이엔 어제 하루치만("yesterday_note") 줬는데, 그게 프론트
+    쪽에서 "오늘 메모" 박스를 펼쳐야만 보이는 위치에 중첩돼 있어(v5.217
+    기본 접힘 개편 이후) 사실상 안 보이던 게 이번 조사에서 확인된 원인 —
+    프론트를 아예 메모칸 바로 아래 독립 토글로 재설계."""
     notes = _load_daily_notes()
     now = datetime.now(KST)
     today = now.strftime("%Y-%m-%d")
-    yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    history = []
+    for i in range(1, 15):
+        d = (now - timedelta(days=i)).strftime("%Y-%m-%d")
+        text = notes.get(d, "")
+        if text:
+            history.append({"date": d, "text": text})
     return JSONResponse({
         "today": today, "today_note": notes.get(today, ""),
-        "yesterday": yesterday, "yesterday_note": notes.get(yesterday, ""),
+        "history": history,
     })
 
 

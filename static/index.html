@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.228</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.229</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3816,7 +3816,13 @@ async function refreshCalendarTab() {
 // 안 건드린다(그래야 필터를 눌러도 입력 중인 textarea가 안 끊김).
 let _dailyNoteDate = null;
 let _dailyNoteSaveTimer = null;
-let _dailyNoteYesterdayOpen = false;
+// v5.229(사용자 지시 — [1] "지난 메모" 복구+확장): 서버가 이제 최근 14일치
+// (내용 있는 날만) history를 준다 — 오늘 텍스트/각 지난 날짜 텍스트를 여기
+// 실시간으로 함께 들고 있어야 copyAllDailyNotes()가 저장 완료를 안 기다리고도
+// 방금 입력한 값을 그대로 복사할 수 있다.
+let _dailyNoteData = { today: null, today_note: '', history: [] };
+let _dailyNotePastOpen = false;
+let _dailyNotePastSaveTimers = {};
 
 function _escapeHtml(s) {
   return String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -3847,27 +3853,84 @@ async function loadDailyNoteBox() {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const d = await res.json();
     _dailyNoteDate = d.today;
+    _dailyNoteData = { today: d.today, today_note: d.today_note || '', history: (d.history || []).map(h => ({ ...h })) };
     renderDailyNoteBox(d);
   } catch (e) {
     box.innerHTML = '';   // 조용히 생략 — 캘린더 본문 로드를 막지 않음
   }
 }
 
-function toggleDailyNoteYesterday() {
-  _dailyNoteYesterdayOpen = !_dailyNoteYesterdayOpen;
-  const body = document.getElementById('dailyNoteYesterdayBody');
-  if (body) body.style.display = _dailyNoteYesterdayOpen ? '' : 'none';
-  const caret = document.getElementById('dailyNoteYesterdayCaret');
-  if (caret) caret.textContent = _dailyNoteYesterdayOpen ? '▾' : '▸';
+// v5.229 [1]: "지난 메모" 전체 토글 — 메모칸(오늘 메모 미리보기) 바로
+// 아래, 오늘 메모를 펼치지 않아도 항상 보이는 위치(이전엔 #dailyNoteFull
+// 안에 중첩돼 있어 오늘 메모를 먼저 펼쳐야만 보였던 게 "사라진 것처럼
+// 보인" 원인 — get_daily_note() 주석 참고).
+function toggleDailyNotePast() {
+  _dailyNotePastOpen = !_dailyNotePastOpen;
+  const body = document.getElementById('dailyNotePastBody');
+  const caret = document.getElementById('dailyNotePastCaret');
+  if (body) body.style.display = _dailyNotePastOpen ? '' : 'none';
+  if (caret) caret.textContent = _dailyNotePastOpen ? '▾' : '▸';
+}
+// 지난 메모 목록 안에서 날짜별 개별 접힘/펼침.
+function toggleDailyNotePastDay(date) {
+  const body = document.getElementById('dailyNotePastBody_' + date);
+  const caret = document.getElementById('dailyNotePastCaret_' + date);
+  if (!body) return;
+  const open = body.style.display === 'none';
+  body.style.display = open ? '' : 'none';
+  if (caret) caret.textContent = open ? '▾' : '▸';
+}
+// [1] "과거 메모도 편집 가능" — 날짜별 textarea 입력을 1초 디바운스 후
+// saveDailyNote(text, date, ...)로 저장(오늘 메모와 같은 함수 재사용,
+// date만 다르게 넘김 — POST /api/daily-note는 원래부터 임의 date를
+// 받았음, 서버 변경 불필요).
+function _dailyNotePastInput(date, value) {
+  const entry = _dailyNoteData.history.find(h => h.date === date);
+  if (entry) entry.text = value;
+  clearTimeout(_dailyNotePastSaveTimers[date]);
+  const status = document.getElementById('dailyNotePastStatus_' + date);
+  if (status) status.textContent = '';
+  _dailyNotePastSaveTimers[date] = setTimeout(() => saveDailyNote(value, date, 'dailyNotePastStatus_' + date), 1000);
+}
+function _dailyNotePastRowHtml(item) {
+  const date = item.date;
+  const previewLine = (item.text || '').split('\n')[0].trim().slice(0, 50) || '(내용 없음)';
+  return `<div style="margin-bottom:4px">
+    <div style="cursor:pointer;font-size:12px;color:var(--muted)" onclick="toggleDailyNotePastDay('${date}')">
+      <span id="dailyNotePastCaret_${date}">▸</span> ${date} — ${_escapeHtml(previewLine)}
+    </div>
+    <div id="dailyNotePastBody_${date}" style="display:none;margin-top:4px;padding-left:14px">
+      <textarea rows="3" oninput="_dailyNotePastInput('${date}', this.value)"
+        style="width:100%;font-size:12px;line-height:1.5;padding:6px;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:6px;resize:vertical;box-sizing:border-box">${_escapeHtml(item.text)}</textarea>
+      <div id="dailyNotePastStatus_${date}" style="font-size:10px;margin-top:2px;height:12px"></div>
+    </div>
+  </div>`;
+}
+// [3] 오늘+지난 메모(현재 표시 중인 것 그대로, 실시간 입력값 포함) 전체를
+// 텍스트로 클립보드 복사.
+async function copyAllDailyNotes() {
+  const lines = [`${_dailyNoteData.today} (오늘)`, _dailyNoteData.today_note || '(메모 없음)', ''];
+  for (const h of _dailyNoteData.history) {
+    lines.push(h.date, h.text || '(메모 없음)', '');
+  }
+  const text = lines.join('\n').trim();
+  try {
+    await navigator.clipboard.writeText(text);
+    alert(`메모 ${1 + _dailyNoteData.history.length}일치를 복사했어요.`);
+  } catch (e) {
+    alert('복사 실패 — 브라우저 클립보드 권한을 확인해주세요.');
+  }
 }
 
 // v5.217(사용자 지시 — [B]-5): 기본 접힘 — 오늘 메모 첫 줄만 미리보기로
-// 보여주고, 클릭해야 편집용 textarea가 펼쳐진다(어제 메모 접힘은 기존
-// 그대로 유지). 미리보기/본문 둘 다 매번 DOM에 만들어두고 display만
-// 토글(toggleDailyNoteYesterday와 같은 가벼운 패턴) — textarea 자체를
+// 보여주고, 클릭해야 편집용 textarea가 펼쳐진다. 미리보기/본문 둘 다
+// 매번 DOM에 만들어두고 display만 토글(가벼운 패턴) — textarea 자체를
 // 없앴다 다시 만들면 v5.205가 피하려던 포커스 끊김이 재발하므로, 펼친
 // 상태에서는 절대 다시 그리지 않는다(renderDailyNoteBox는 탭 진입 시
 // 1회만 불림, 펼침/접힘은 이 함수 재호출 없이 토글만).
+// v5.229: "지난 메모" 토글은 이 오늘-메모 펼침과 별개로 항상 보이는
+// 위치로 옮겨졌다(toggleDailyNotePast 참고) — 여기 주석은 오늘 메모
+// 펼침 자체의 이유만 남김.
 let _dailyNoteExpanded = false;
 function toggleDailyNoteExpanded() {
   _dailyNoteExpanded = !_dailyNoteExpanded;
@@ -3883,19 +3946,27 @@ function toggleDailyNoteExpanded() {
 function renderDailyNoteBox(d) {
   const box = document.getElementById('dailyNoteBox');
   if (!box) return;
-  const yesterdayHtml = d.yesterday_note
-    ? `<div class="jongga-forward-sub" style="cursor:pointer;margin-top:6px" onclick="toggleDailyNoteYesterday()"><span id="dailyNoteYesterdayCaret">▸</span> 어제(${d.yesterday}) 메모</div>
-       <div id="dailyNoteYesterdayBody" style="display:none;font-size:12px;color:var(--muted);white-space:pre-wrap;padding:4px 0 0 14px">${_escapeHtml(d.yesterday_note)}</div>`
+  const history = d.history || [];
+  // v5.229 [1]: "지난 메모" 토글 — #dailyNoteFull 밖(오늘 메모를 안 펼쳐도
+  // 항상 보임)에 배치. 내용 있는 날만 오므로 history가 이미 그 조건으로
+  // 걸러져 온다(get_daily_note()).
+  const pastToggleHtml = history.length
+    ? `<div style="cursor:pointer;font-size:12px;color:var(--muted);margin-top:6px" onclick="toggleDailyNotePast()"><span id="dailyNotePastCaret">▸</span> 지난 메모 (${history.length})</div>
+       <div id="dailyNotePastBody" style="display:none;margin-top:4px">${history.map(_dailyNotePastRowHtml).join('')}</div>`
     : '';
   const previewLine = (d.today_note || '').split('\n')[0].trim().slice(0, 60) || '(메모 없음 — 클릭해 작성)';
   _dailyNoteExpanded = false;   // 탭 진입마다(=이 함수 호출마다) 접힘으로 시작
+  _dailyNotePastOpen = false;
   box.innerHTML = `<div style="margin-bottom:14px">
-    <div id="dailyNotePreview" onclick="toggleDailyNoteExpanded()" style="cursor:pointer;font-size:13px;color:var(--muted);padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📝 ${_escapeHtml(previewLine)}</div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div id="dailyNotePreview" onclick="toggleDailyNoteExpanded()" style="flex:1;min-width:0;cursor:pointer;font-size:13px;color:var(--muted);padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📝 ${_escapeHtml(previewLine)}</div>
+      <button onclick="copyAllDailyNotes()" title="오늘+지난 메모 전체를 텍스트로 복사" style="flex-shrink:0;background:none;border:1px solid var(--line);color:var(--muted);border-radius:6px;padding:6px 10px;font-size:11px;cursor:pointer">📋 전체 복사</button>
+    </div>
     <div id="dailyNoteFull" style="display:none;margin-top:6px">
       <textarea id="dailyNoteText" rows="5" placeholder="오늘의 메모 — 자유롭게" style="width:100%;font-size:13px;line-height:1.5;padding:8px;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:8px;resize:vertical;box-sizing:border-box;overflow-y:hidden">${_escapeHtml(d.today_note)}</textarea>
-      <div id="dailyNoteStatus" style="font-size:10px;color:var(--muted);margin-top:2px;height:12px"></div>
-      ${yesterdayHtml}
+      <div id="dailyNoteStatus" style="font-size:11px;margin-top:2px;height:14px"></div>
     </div>
+    ${pastToggleHtml}
   </div>`;
   const ta = document.getElementById('dailyNoteText');
   if (ta) {
@@ -3906,25 +3977,40 @@ function renderDailyNoteBox(d) {
     clearTimeout(_dailyNoteSaveTimer);
     const status = document.getElementById('dailyNoteStatus');
     if (status) status.textContent = '';
+    _dailyNoteData.today_note = e.target.value;   // [3]: 복사 버튼이 저장 완료 전에도 최신 입력을 반영하게
     _dailyNoteSaveTimer = setTimeout(() => saveDailyNote(e.target.value), 1000);
     const preview = document.getElementById('dailyNotePreview');
     if (preview) preview.textContent = '📝 ' + ((e.target.value || '').split('\n')[0].trim().slice(0, 60) || '(메모 없음 — 클릭해 작성)');
   });
 }
 
-async function saveDailyNote(text) {
-  const status = document.getElementById('dailyNoteStatus');
+// v5.229 [2](사용자 지시 — 자동저장 피드백): 성공 "✓ 저장됨 HH:MM"(3초 뒤
+// 사라짐), 실패 "⚠️ 저장 실패"(빨간색, 계속 유지 — 다음 입력이 오면 그때
+// 호출부가 textContent를 지움). date/statusElId를 생략하면 오늘 메모
+// 기본값(기존 동작과 동일) — 지난 메모 편집([1])은 명시적으로 넘겨서
+// 같은 함수를 재사용.
+async function saveDailyNote(text, date, statusElId) {
+  date = date || _dailyNoteDate;
+  const status = document.getElementById(statusElId || 'dailyNoteStatus');
   try {
-    await fetch('/api/daily-note', {
+    const res = await fetch('/api/daily-note', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date: _dailyNoteDate, text }),
+      body: JSON.stringify({ date, text }),
     });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     if (status) {
-      status.textContent = '저장됨';
-      setTimeout(() => { if (status) status.textContent = ''; }, 1500);
+      const hhmm = kstStr(new Date(), 16).slice(11, 16);
+      status.textContent = `✓ 저장됨 ${hhmm}`;
+      status.style.color = '#4ade80';
+      clearTimeout(status._clearTimer);
+      status._clearTimer = setTimeout(() => { if (status) status.textContent = ''; }, 3000);
     }
   } catch (e) {
-    if (status) status.textContent = '저장 실패 — 네트워크 확인';
+    if (status) {
+      clearTimeout(status._clearTimer);
+      status.textContent = '⚠️ 저장 실패';
+      status.style.color = '#f87171';
+    }
   }
 }
 
