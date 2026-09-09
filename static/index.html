@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.224</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.225</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3952,14 +3952,28 @@ async function calRunDiag(ticker) {
   const rows = Object.entries(CAL_GATE_MODE_LABELS).map(([key, label]) => ({ key, label, pass: d.modes && d.modes[key] === '통과' }));
   const passCount = rows.filter(r => r.pass).length;
   const safeId = (d.ticker || ticker).replace(/[^a-zA-Z0-9]/g, '_');
+  // v5.225: RS·ATR·200일선 이격 — 이미 응답에 있는 rs_percentile/atr_median_pct/
+  // indicators.close_vs_ma200_pct 재사용, 새 계산 없음.
+  const ind = d.indicators || {};
+  const metaBits = [];
+  if (d.rs_percentile != null) metaBits.push(`RS ${Math.round(d.rs_percentile)}`);
+  if (d.atr_median_pct != null) metaBits.push(`ATR ${d.atr_median_pct}%`);
+  if (ind.close_vs_ma200_pct != null) metaBits.push(`200MA ${ind.close_vs_ma200_pct > 0 ? '+' : ''}${ind.close_vs_ma200_pct}%`);
   const header = `<div style="font-size:15px;font-weight:700;margin-bottom:8px">
     <a class="name-link" href="${tvUrl(d.ticker || ticker, mkt)}" target="_blank" rel="noopener">${_escapeHtml(d.ticker || ticker)}</a>
     <span class="mkt">${mkt}</span> · ${fmtPrice(d.close, mkt)}
-    ${d.sector ? ` <span style="color:var(--muted);font-size:12px">· ${_escapeHtml(d.sector)}</span>` : ''}
+    ${d.sector ? ` · ${_escapeHtml(d.sector)}` : ''}
+    ${metaBits.length ? ` <span style="color:var(--muted);font-size:12px">· ${metaBits.join(' · ')}</span>` : ''}
   </div>`;
-  // "하나도 안 걸리면" — 5줄 압축뷰 대신 최소 정보만(현재가·섹터·차트링크는 위 header에 이미 있음).
+  // v5.225: 0/5여도 탭별 탈락 핵심사유 한 줄씩(접힘 기본, 클릭 시 펼침).
+  const failDetailId = `calDiagFail_${safeId}`;
   const bodyHtml = passCount === 0
-    ? `<div style="color:var(--muted);font-size:13px">5탭 미해당 — 현재가·섹터·차트링크만</div>`
+    ? `<div style="cursor:pointer;font-size:13px;color:var(--muted)" onclick="const e=document.getElementById('${failDetailId}');const collapsed=e.style.display==='none';e.style.display=collapsed?'':'none';this.querySelector('.tgl').textContent=collapsed?'▴':'▾'">
+        <span class="tgl">▾</span> 탈락 사유 (0/5)
+      </div>
+      <div id="${failDetailId}" style="display:none;margin-top:4px">
+        ${rows.map(r => `<div style="font-size:13px;color:var(--muted);margin-bottom:4px">❌ ${r.label} — ${_escapeHtml(_calShortReason(r.label, reasons))}</div>`).join('')}
+      </div>`
     : rows.map(r => {
         if (!r.pass) {
           return `<div style="font-size:13px;color:var(--muted);margin-bottom:4px">❌ ${r.label} — ${_escapeHtml(_calShortReason(r.label, reasons))}</div>`;
