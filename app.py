@@ -5,6 +5,39 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.231 [버그수정] 시총 허용목록(_mcap_allowed) 장중 재갱신(사용자 지시
+        [c] — 삼미금속 012210이 급등 관찰에 안 잡히는 사고 조사 결과
+        채택). 상세 근거·변경 전후 검증 수치는
+        docs/surge_observe_experiment_2026-09.md "알려진 버그(수정 완료)"
+        절 참고.
+        [원인] `_mcap_allowed_cache`가 `"date"`(하루 1회) 키였음 —
+        시총 1000억 미만 KR 종목 제외 게이트가 그날 첫 요청 시점에
+        한 번만 스크랩되고 그날 안에서는 다시 안 돎. 이 게이트는
+        유니버스(`get_universe`)와 별개로 "어떤 종목의 일봉을 아예
+        받아올지"를 결정하는 fetch 단계에 있어서, 장중에 시총 문턱을
+        새로 넘는 종목은 다음날까지 눌림목/돌파/박스돌파/돌파임박
+        4탭 + 🔥급등 관찰 전부에서 누락됨(삼미금속 실사고 — 신선
+        조회 기준 시총 2,815억으로 문턱 통과 확정, 그런데 그날 스캐너
+        캐시엔 없었음).
+        [수정] `_mcap_allowed_cache` 키를 `universe._kr_cache_slot()`
+        (`load_kr_dynamic()`이 이미 쓰는 것과 동일 슬롯 — 장중
+        `KR_INTRADAY_REFRESH_MIN`분·기본 30분, 장외 하루 1회)로 통일 —
+        새 주기를 발명하지 않고 기존 값 재사용. `_scheduler_loop()`가
+        4분마다 `_ensure_mcap_allowed()`를 호출하므로 슬롯 전환 후
+        최대 4분 안에 재조회됨.
+        [검증] KR 유니버스 크기(1,505종목)는 이 수정으로 안 변함(mcap
+        게이트는 유니버스 구성이 아니라 fetch 대상 결정에만 관여).
+        유니버스∩시총1000억↑ 1,274종목(85%) — 예전에도 "그날 첫 조회
+        시점"에 동일 크기였을 값이라 자체 크기 급변 아님. 경계구간
+        (900~1100억) 내 유니버스 종목 87개가 슬롯당 이론상 최대
+        변동 상한 — "저시총 종목 대량 유입"은 아님(실측치, 요청받은
+        전후 비교 보고).
+        [삼미금속 개별 검증] mcap 게이트는 통과 확정. 단 거래량배수
+        조건(10배)은 이 종목이 며칠째 달리는 중이라 여전히 8.5배로
+        미달(vol_avg20 절 참고, 의도된 동작으로 유지 결정) — mcap 문제는
+        해결됐지만 오늘 이 종목이 실제로 탭에 뜨는지는 거래량 조건에
+        별도로 달려있음.
+        검증: python3 -m py_compile app.py.
 v5.230 [버그수정] 📌 내 추적 보드 종목명에 트레이딩뷰 링크 추가(사용자
         지시 — 🔥재점화 행에 링크가 없다는 신고로 시작해 다른 행도 전수
         확인). 3종 행 전부 이름이 그냥 `<b>텍스트</b>`였고 클릭 가능한
@@ -5791,7 +5824,7 @@ def _sector_fields(t: str, bundle: dict) -> dict:
     return {"sector": _sector_of(t), "sector_rank": None, "sector_total": None, "sector_rs_pct": None}
 
 
-from universe import get_universe, load_alerts
+from universe import get_universe, load_alerts, _kr_cache_slot
 import scanner as scanner_mod
 import naver_kr
 import fundamentals as fundamentals_mod
@@ -5996,7 +6029,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.230"
+VERSION = "v5.231"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -8730,23 +8763,34 @@ async def _warm_market(market: str):
 
 
 _MCAP_MIN_EOK = 1000  # 시총 1000억원 미만 국장 종목은 스캔 제외 (v4.91)
-_mcap_allowed_cache: dict = {}   # {"date": "YYYY-MM-DD", "tickers": set(...)}
+_mcap_allowed_cache: dict = {}   # {"slotkey": "...", "tickers": set(...)}
 _mcap_fetch_in_progress = False
 
 
 def _get_mcap_allowed() -> set:
-    """오늘자로 준비된 시총 허용목록. 아직 없으면 빈 set(필터 없이 통과 — fail-open)."""
-    today = datetime.now(KST).strftime("%Y-%m-%d")
-    if _mcap_allowed_cache.get("date") == today:
+    """이번 슬롯 기준으로 준비된 시총 허용목록. 아직 없으면 빈 set(필터
+    없이 통과 — fail-open).
+    v5.231(사용자 지시 [c] — 삼미금속 012210 사고): 예전엔 "date"(하루
+    1회) 키였다 — 장중에 시총 1000억 문턱을 새로 넘는 종목이 그날 다음날
+    까지 4탭(눌림목/돌파/박스돌파/돌파임박) + 🔥급등 관찰 전부에서
+    누락됐다(실사고, docs/surge_observe_experiment_2026-09.md 참고).
+    universe.load_kr_dynamic()이 이미 쓰는 것과 동일한 슬롯 함수
+    (_kr_cache_slot — 장중 KR_INTRADAY_REFRESH_MIN분·장외 하루 1회)로
+    맞춰 같은 주기로 갱신되게 통일."""
+    slotkey = _kr_cache_slot()
+    if _mcap_allowed_cache.get("slotkey") == slotkey:
         return _mcap_allowed_cache.get("tickers", set())
     return set()
 
 
 async def _ensure_mcap_allowed():
-    """시총 허용목록을 하루 1회 백그라운드로 채움 (블로킹 스크레이핑이라 executor에서)."""
+    """시총 허용목록을 슬롯당 1회 백그라운드로 채움(블로킹 스크레이핑이라
+    executor에서) — v5.231: 슬롯 갱신 여부는 _get_mcap_allowed()와 동일
+    기준(_kr_cache_slot). _scheduler_loop()가 4분마다 이 함수를 호출하니
+    슬롯이 바뀐 지 최대 4분 안에 실제로 다시 조회된다."""
     global _mcap_fetch_in_progress
-    today = datetime.now(KST).strftime("%Y-%m-%d")
-    if _mcap_allowed_cache.get("date") == today or _mcap_fetch_in_progress:
+    slotkey = _kr_cache_slot()
+    if _mcap_allowed_cache.get("slotkey") == slotkey or _mcap_fetch_in_progress:
         return
     _mcap_fetch_in_progress = True
     try:
@@ -8755,9 +8799,9 @@ async def _ensure_mcap_allowed():
             _executor, naver_kr.fetch_high_marketcap_allowed, _MCAP_MIN_EOK
         )
         if allowed:
-            _mcap_allowed_cache["date"] = today
+            _mcap_allowed_cache["slotkey"] = slotkey
             _mcap_allowed_cache["tickers"] = allowed
-            print(f"[mcap] {today} 시총 {_MCAP_MIN_EOK}억↑ 허용목록 {len(allowed)}종목")
+            print(f"[mcap] {slotkey} 시총 {_MCAP_MIN_EOK}억↑ 허용목록 {len(allowed)}종목")
     except Exception as e:
         print(f"[mcap] fetch failed: {e}")
     finally:
@@ -8870,7 +8914,7 @@ async def _scheduler_loop():
     await asyncio.sleep(20)  # 부팅 직후 잠깐 대기
     while True:
         try:
-            asyncio.create_task(_ensure_mcap_allowed())  # 하루 1회, 워밍과 별개로 진행
+            asyncio.create_task(_ensure_mcap_allowed())  # v5.231: 장중 슬롯(기본 30분)마다, 워밍과 별개로 진행
             asyncio.create_task(_ensure_us_industry_cache_fresh())  # v5.195: 월 1회, 워밍과 별개로 진행
             for market in ("kr", "us"):
                 await _warm_market(market)
