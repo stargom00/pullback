@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.239</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.240</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -5017,8 +5017,15 @@ function renderCalendar(data) {
   const headerEl = document.querySelector('header');
   const headerH = headerEl ? headerEl.offsetHeight : 0;
   const posRSum = posItems.reduce((s, it) => s + (it.r_progress || 0), 0);
+  // v5.240(사용자 지시 — 버그수정): posItems의 r_progress는 종목별로
+  // stop_suggested(손절 미입력 — 서버가 close-ATR×1.5로 대입한 제안값)로도
+  // 계산될 수 있다(계산 자체는 그대로 유지, app.py get_calendar() 참고) —
+  // 합산값(posRSum)에 그런 종목이 섞여 있으면 포지션 탭(posCard의
+  // stopLabelExtra)과 같은 문구로 표시해 "이 R엔 미확정 추정치가 섞여
+  // 있다"를 알린다. rs_approx가 "≈"로 근사치를 표시하는 기존 관례 재사용.
+  const posHasSuggested = posItems.some(it => it.stop_suggested);
   const posStripPart = posItems.length
-    ? ` <span>· 포지션 ${posItems.length} (${posRSum >= 0 ? '+' : ''}${posRSum.toFixed(2)}R)</span>` : '';
+    ? ` <span${posHasSuggested ? ' title="일부 종목 손절 미입력 — 제안값(미확정)으로 R 계산됨"' : ''}>· 포지션 ${posItems.length} (${posRSum >= 0 ? '+' : ''}${posRSum.toFixed(2)}R${posHasSuggested ? '≈' : ''})</span>` : '';
   const reachedStripCount = myTrackReachedCount();
   const homeStripHtml = `<div id="homeStripBar" style="position:sticky;top:${headerH}px;z-index:90;background:var(--bg);border-bottom:1px solid var(--line);padding:8px 4px;margin-bottom:10px">
     <div style="display:flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap;overflow-x:auto">

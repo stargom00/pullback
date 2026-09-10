@@ -5,6 +5,45 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.240 [버그수정] positions_summary의 stop_suggested 누락(사용자 지시,
+        실측 222800.KQ·AVGO 기반).
+        [확정된 원인] 손절 미입력 종목은 get_positions()가 close-ATR×1.5를
+        임시 손절가로 대입하고 stop_suggested=True를 세운다(app.py
+        _one()). r_progress/dist_to_stop_pct/open_risk 셋 다 이 같은
+        stop 값을 읽지만, open_risk만 stop_suggested를 검사해 걸러내고
+        (정확한 동작 — 미확정 리스크는 합산 안 함) 나머지 둘은 검사
+        없이 그대로 계산돼 노출된다(계산 자체는 정상, 참고값으로
+        유효). 문제는 get_calendar()가 이 stop_suggested 플래그를
+        positions_summary.items로 옮길 때 빠뜨렸다는 것 — get_positions()
+        원본엔 있고(app.py:_one()) 포지션 탭(index.html:5207,
+        "제안값(미확정)" 라벨)도 이걸로 구분 표시하는데, 캘린더 요약만
+        이 구분이 사라져 소비처가 추정치를 확정 손절가로 오해할 수
+        있었다(실측: 222800.KQ/AVGO 둘 다 positions_meta.json에 항목
+        없어 stop_suggested=True인데 dist_to_stop_pct=10.97/3.9,
+        r_progress=2.53/5.77이 나오고 open_risk만 0 — missing_stop_count
+        자체는 정확했음).
+        [수정] 계산은 전혀 안 바꿈(사용자 지시 — "값이 있다"가 문제가
+        아니라 "추정치인지 표시가 없다"가 문제). positions_summary.items
+        각 항목에 stop_suggested를 그대로 실어 보내도록 추가.
+        get_calendar() 안 인라인이던 이 변환 로직을 _positions_summary_
+        from_body(positions_body)로 추출(_price_basis_fields()와 동일
+        원칙 — 단위 테스트 가능하게. get_calendar() 전체를 직접 호출해
+        테스트하려 했더니 journal/macro_calendar 등 무관한 의존성 때문에
+        응답 없이 멈추는 걸 실제로 확인, 그래서 추출). 프론트(index.html
+        홈 스트립, posStripPart)는 합산 R(posRSum)에 stop_suggested
+        포지션이 하나라도 섞여 있으면 "≈"를 붙이고(rs_approx가 이미 쓰는
+        근사치 표기 관례 재사용) 포지션 탭과 같은 문구("제안값(미확정)")로
+        툴팁 표시 — 포지션 탭(posCard)의 라벨과 동일하게 맞춤(사용자
+        지시: "같은 개념에 다른 말을 쓰면 혼란").
+        [검증] test_positions_summary_stop_suggested.py 신설 4건 — 핵심
+        산출물(stop_suggested 전파 확인) 포함 전부 수정 전 FAIL(sabotage로
+        필드 누락 재현) 확인 후 원복, PASS 전환 확인. 계산값 불변
+        회귀 테스트(test_calculations_unchanged) 별도 포함. v5.239 긴급
+        수정(별도 장애, KeyError 500) 이후 기존 410건 + 신규 4건 =
+        414건 전체 통과.
+        범위: docs/, scripts/measurements/ 미변경. positions.json/
+        positions_meta.json(Railway 볼륨에서 pull, 실 프로덕션 데이터)은
+        .gitignore 처리, 커밋 안 함.
 v5.239 [긴급 버그수정] GET /api/scan?market=all → 500(KeyError:
         'n_fetch_failed_us') 반복 장애(사용자 지시, 프로덕션 긴급 대응).
         [확정된 원인] v5.237의 _fetch_market_data_all() 병합 코드가
@@ -6339,7 +6378,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.239"
+VERSION = "v5.240"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6590,6 +6629,53 @@ def _price_basis_fields(cached_scan: dict | None, is_kr: bool) -> tuple[bool, bo
     market_open_now = _is_market_open_now(is_kr)
     is_live = bool(cached_scan) and cached_scan.get("daykey") is None and market_open_now
     return is_live, market_open_now
+
+
+def _positions_summary_from_body(positions_body: dict) -> dict | None:
+    """get_calendar()의 "② 포지션 요약 한 줄" — get_positions()(`/api/positions`)
+    응답 dict를 받아 캘린더용 condensed positions_summary를 만든다.
+    v5.240(사용자 지시 — 버그수정)에서 get_calendar() 안 인라인 코드였던
+    걸 이름 있는 함수로 뽑았다 — _price_basis_fields()와 같은 이유
+    (test_price_basis_fields.py류로 직접 테스트 가능하게, get_calendar()
+    전체를 부르면 journal/macro_calendar/auto_watch 등 무관한 의존성
+    때문에 무겁고 느려서 단위 테스트로 못 씀 — 실제로 이 함수 추출 전
+    get_calendar()를 직접 호출하는 테스트를 시도했다가 응답 없이
+    멈추는 걸 확인).
+
+    로직 자체는 그대로(재구현 아님) — 종목별 pass-through(v5.152 KR만
+    name 표시, v5.111 dist_to_stop_pct 노출, near_stop = dist_to_stop_pct
+    <=3) + v5.240에서 stop_suggested 추가. get_positions()의 stop_suggested
+    (app.py _one(), "stop" 미입력 시 close-ATR×1.5로 대입한 임시값인지
+    사용자가 실제 입력한 값인지)가 예전엔 여기서 빠져 있었다 —
+    r_progress/dist_to_stop_pct는 이 임시값으로도 그대로 계산되는데
+    (계산 자체는 정상, 참고값으로 유효) get_positions()의 open_risk만
+    이 플래그를 검사해 걸러내므로(app.py 15410 부근), 세 값이 같은
+    stop을 읽으면서도 "확정인지 추정인지" 구분이 캘린더 응답에만
+    사라져 소비처가 추정치를 확정 손절가로 오해할 수 있었다(실측:
+    222800.KQ/AVGO 둘 다 positions_meta.json에 항목 없어
+    stop_suggested=True인데 dist_to_stop_pct/r_progress는 값이 나오고
+    open_risk만 0). 계산은 그대로 두고 표시만 추가 — 포지션 탭
+    (index.html:5207)과 동일한 구분을 캘린더 요약에도 실어 보낸다.
+
+    positions가 비어있으면 None(기존 동작 그대로 — "포지션 자체가
+    없다"와 "요약을 못 만들었다"를 구분 안 함, 원래도 그랬음)."""
+    plist = positions_body.get("positions") or []
+    if not plist:
+        return None
+    items = [{
+        "ticker": p.get("ticker"),
+        "name": p.get("name") if p.get("market") == "KR" else None,
+        "r_progress": p.get("r_progress"),
+        "dist_to_stop_pct": p.get("dist_to_stop_pct"),
+        "near_stop": p.get("dist_to_stop_pct") is not None and p["dist_to_stop_pct"] <= 3,
+        "stop_suggested": p.get("stop_suggested", False),
+    } for p in plist]
+    s = positions_body.get("summary") or {}
+    return {
+        "items": items,
+        "open_risk": s.get("open_risk"),
+        "missing_stop_count": s.get("positions_missing_stop", 0),
+    }
 
 
 # ── 개장일 판정 (v5.99, 사용자 지시) ──────────────────────────────────
@@ -13540,31 +13626,8 @@ async def get_calendar():
     if not isinstance(positions_resp, Exception):
         try:
             positions_body = _json.loads(positions_resp.body)
-            plist = positions_body.get("positions") or []
-            position_tickers = {p.get("ticker") for p in plist if p.get("ticker")}
-            if plist:
-                items = [{
-                    "ticker": p.get("ticker"),
-                    # v5.152(사용자 지시): KR만 종목명 실어보냄(US는 티커가
-                    # 더 익숙하다는 사용자 판단 — 프론트가 `it.name ||
-                    # it.ticker`만 하면 US는 자동으로 티커 유지, market
-                    # 분기를 프론트에 둘 필요 없음). name은 /api/positions가
-                    # 이미 Toss명/유니버스 폴백까지 해결해서 내려준 값 그대로.
-                    "name": p.get("name") if p.get("market") == "KR" else None,
-                    "r_progress": p.get("r_progress"),
-                    # v5.111: 프론트 미니카드 칩("NVDA +2.16R | 손절까지 -4.9%")에
-                    # 표시할 실제 % 값 — near_stop 불리언만으론 숫자를 못 그림.
-                    "dist_to_stop_pct": p.get("dist_to_stop_pct"),
-                    # 손절선까지 -3% 이내(또는 이미 이탈) 강조 — dist_to_stop_pct는
-                    # (close-stop)/close*100라 작을수록/음수일수록 위험(사용자 지시).
-                    "near_stop": p.get("dist_to_stop_pct") is not None and p["dist_to_stop_pct"] <= 3,
-                } for p in plist]
-                s = positions_body.get("summary") or {}
-                positions_summary = {
-                    "items": items,
-                    "open_risk": s.get("open_risk"),
-                    "missing_stop_count": s.get("positions_missing_stop", 0),
-                }
+            position_tickers = {p.get("ticker") for p in (positions_body.get("positions") or []) if p.get("ticker")}
+            positions_summary = _positions_summary_from_body(positions_body)
         except Exception as e:
             print(f"[calendar] positions 파싱 실패: {e}")
     else:
