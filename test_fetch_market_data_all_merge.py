@@ -79,6 +79,30 @@ async def _fake_get_earnings_safe(ticker):
     return {}
 
 
+# v5.241(사용자 지시 — 재발방지 작업 [4]): 엔드포인트 스모크 테스트
+# (test_endpoints_smoke.py)가 이 fixture를 그대로 재사용(import)할 수
+# 있게 market_gate/get_positions/jongga_candidates 가짜 응답을 추가.
+# get_calendar()가 실제로 느려지는 지점은 이 셋이 아니라 그 뒤(포지션이
+# 있으면 걸리는 실적 D-3 조회) — get_positions()를 빈 포지션으로 고정하면
+# 그 경로 자체가 안 걸려서(코드 확인 + 직접 실행 확인) 추가 mock 없이도
+# get_calendar()가 수 ms 안에 끝난다.
+from fastapi.responses import JSONResponse
+
+
+async def _fake_market_gate():
+    return JSONResponse({"ok": True, "gate_kr": "neutral", "gate_us": "neutral",
+                          "suggest": "neutral", "why": ""})
+
+
+async def _fake_get_positions():
+    return JSONResponse({"synced_at": None, "stale": False, "positions": [], "summary": None,
+                          "sync_error": None, "sync_enabled": False})
+
+
+async def _fake_jongga_candidates():
+    return JSONResponse({"ok": True, "count": 0, "date": None, "hits": []})
+
+
 @pytest.fixture
 def mocked_env(monkeypatch):
     """네트워크 전부 차단 + 전역 캐시 상태 초기화. call_log에 실제 _fetch/
@@ -93,7 +117,13 @@ def mocked_env(monkeypatch):
     "us만 따로 fetch"할 때만 disk daykey가 마침 확정돼 있어서 mock이
     조용히 무시되고 실데이터(다른 행 수)가 섞이는 걸 직접 겪었다. 항상
     daykey=None으로 고정하면 순수 장중 TTL 경로(디스크 무관)로만 가서
-    실행 시각·로컬 디스크 상태와 완전히 무관한 결정론적 테스트가 된다."""
+    실행 시각·로컬 디스크 상태와 완전히 무관한 결정론적 테스트가 된다.
+
+    v5.241: market_gate/get_positions/jongga_candidates도 여기서 같이
+    막는다 — get_calendar() 스모크 테스트가 이 fixture를 그대로
+    재사용하기 위함(이 세 개는 이 파일의 기존 3개 테스트와는 무관 —
+    그 테스트들은 get_calendar()를 안 불러서 아무 영향 없음, 추가만
+    했지 기존 동작은 안 바꿈)."""
     call_log: list = []
     monkeypatch.setattr(app, "get_universe", _fake_get_universe)
     monkeypatch.setattr(app, "_fetch", _make_fetch(call_log))
@@ -110,6 +140,9 @@ def mocked_env(monkeypatch):
     monkeypatch.setattr(app, "_data_cache", {})
     monkeypatch.setattr(app, "_market_fetch_locks", {})
     monkeypatch.setattr(app, "_market_refreshing", {})
+    monkeypatch.setattr(app, "market_gate", _fake_market_gate)
+    monkeypatch.setattr(app, "get_positions", _fake_get_positions)
+    monkeypatch.setattr(app, "jongga_candidates", _fake_jongga_candidates)
     return call_log
 
 

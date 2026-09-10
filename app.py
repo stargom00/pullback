@@ -5,6 +5,68 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.241 [재발방지] 디스크 캐시 스키마 검증 + 엔드포인트 스모크 테스트
+        (사용자 지시, v5.238/v5.239 프로덕션 500 사고 재발 방지).
+        [배경] 오늘 KeyError 500 사고의 근본 원인은 "_timing 딕셔너리에
+        필드를 추가했는데 디스크 캐시 파일명 네임스페이스(_CACHE_NS)를
+        올리는 걸 깜빡함"이었다(v5.235). 이 규칙 자체는 이미 코드
+        주석으로 있었는데도(rs4→rs5/rs5→rs6 이력 존재) 사람이 잊어서
+        재발했다 — 사후 즉시수정(v5.239, .get(key,0))은 증상만 막았고,
+        같은 클래스의 실수(다음 필드 추가 때 또 깜빡함)를 막는 장치가
+        없었다. 또한 두 사고 모두 단위 테스트 414건이 전부 통과한
+        채로 실제 엔드포인트가 죽었다 — 응답 조립 경로 전체를 실제로
+        호출하는 테스트가 하나도 없었기 때문.
+        [1] _CACHE_NS: rs6→rs7. Railway 볼륨의 구형(필드 없는) pkl
+        전부를 즉시 무효화(원상복구). 이 범프의 근거는 코드 주석에
+        이미 있던 규칙("스키마/기간 바뀌면 이 값만 올린다") — git으로
+        확인 결과 v5.235가 이 규칙을 어겼음을 확인(rs5→rs6 이후 딱
+        이번 한 번만 범프 필요했던 v5.235 시점에 범프가 없었음).
+        **커밋만 하고 배포(push)는 보류 — 다음 배포 시 KR 400초+/
+        US 250초+ 콜드 fetch 1회가 즉시 발생함을 감안해 배포 타이밍은
+        별도 지시로 결정(사용자 지시).**
+        [2] `_BUNDLE_SCHEMA_KEYS`/`_TIMING_SCHEMA_KEYS`(app.py, _CACHE_NS
+        옆) 신설 — `_fetch_market_data_inner()`가 실제로 만드는
+        bundle/timing과 동기화 유지해야 하는 명시적 상수. `_load_disk_
+        cache()`가 언피클 직후 이 상수로 검증해, 스키마 안 맞으면
+        로그 남기고 None 반환(호출부는 기존 캐시미스 처리로 자연
+        폴백, 새 분기 불필요) — _CACHE_NS 범프를 또 깜빡해도 이제
+        로드 시점마다 자동으로 걸러짐. `_fetch_market_data_all()`의
+        기존 .get(key,0) 폴백(v5.239)은 2차 방어로 유지 + 실제로
+        발동하면("스키마 검증을 통과했는데도 필드 누락") 경고 로그를
+        남기도록 추가 — 1차 방어에 구멍이 생기면 그 자체가 카나리아로
+        드러나게 함(두 겹 방어인데 어느 쪽이 작동했는지 모르는 문제
+        해소).
+        [검증 — 이번 작업의 핵심 산출물] test_disk_cache_schema.py 신설:
+        (a) 실제로 방금 계산된 fresh bundle이 선언된 스키마 상수와
+        정확히 일치하는지(동기화 감지) — `_timing` 구성에 필드를
+        하나 실제로 추가하고(sabotage) 이 테스트가 그 자리에서
+        FAIL하는지 직접 확인 후 원복. (b) `_load_disk_cache()`가
+        오늘 사고 파일과 동일한 구형(8필드) pkl을 실제로 거르는지 —
+        정상/구형/파일없음 3가지 케이스 전부 커버.
+        [3] test_endpoints_smoke.py 신설 — GET /api/scan(market=all/
+        pullback, kr/imminent, us/pullback)·GET /api/calendar·GET
+        /api/watch/pending·GET /api/watch/positions 6개를 네트워크만
+        막고(mocked_env) 응답 조립 경로는 실제로 호출, 200 + 최소
+        필수 키 확인. 오늘 사고 재현 케이스 포함: kr/us 서브 bundle을
+        정상 채운 뒤 us 쪽 timing에서 n_fetch_failed_kr/us를 삭제(구형
+        스키마 재현)하고 market=all을 실제로 호출 — 현재(.get() 폴백
+        있는) 코드는 200, 폴백을 대괄호 인덱싱으로 되돌리면(sabotage)
+        정확히 같은 KeyError: 'n_fetch_failed_us'로 크래시함을 직접
+        실행해 확인 후 원복("확신한다"로 넘기지 않음, 사용자 지시).
+        6개 엔드포인트 합계 실행시간 실측 <0.1초(목표: 몇 초 이내) —
+        get_calendar()가 느려지는 유일한 원인(포지션 있으면 실적 D-3
+        조회가 실제 네트워크를 탐, 이전 조사에서 30초+ 확인)을
+        get_positions() mock(빈 포지션)으로 우회.
+        [4] mocked_env(test_fetch_market_data_all_merge.py)를 market_
+        gate/get_positions/jongga_candidates mock으로 확장해 스모크
+        테스트가 재사용(같은 fixture, 새로 안 만듦) — 확장 후 그
+        파일의 기존 4개 테스트가 여전히 전부 통과하는지 재확인 완료
+        (fixture 공유로 기존 테스트가 깨지지 않음, 사용자 지시).
+        기존 414건 + 신규 12건(disk_cache_schema 4 + endpoints_smoke 8)
+        = 426건 전체 통과.
+        범위: docs/, scripts/measurements/ 미변경. 배포는 사용자 지시
+        후 진행(_CACHE_NS 범프의 콜드 fetch 비용 때문에 타이밍 조율
+        필요).
 v5.240 [버그수정] positions_summary의 stop_suggested 누락(사용자 지시,
         실측 222800.KQ·AVGO 기반).
         [확정된 원인] 손절 미입력 종목은 get_positions()가 close-ATR×1.5를
@@ -6378,7 +6440,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.240"
+VERSION = "v5.241"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6876,8 +6938,39 @@ def _universe_sig(market: str) -> str:
 # 파일이 볼륨에 남는 하우스키핑 문제였음). rs3/rs4/rs5를 일일이 나열하는
 # 대신 "현재 네임스페이스(_CACHE_NS)가 아니면 전부 삭제"로 일반화해서
 # 다음 마이그레이션(rs7 등) 때 이 리스트를 또 손보지 않아도 되게 함.
-_CACHE_NS = "rs6"   # 현재 디스크캐시 네임스페이스 — 스키마/기간 등이 바뀌어 캐시버스트가
+# v5.241: rs6→rs7. v5.235가 _timing에 n_fetch_failed_kr/us 2개 필드를
+# 추가하면서 이 범프를 깜빡했다 — "스키마 바뀌면 이 값만 올린다"는 위
+# 규칙이 있는데도 사람이 잊어서, Railway 볼륨에 남아있던 구형(필드
+# 없는) pkl이 v5.238 배포 후 daykey 매칭으로 그대로 로드돼 프로덕션
+# 500(KeyError: 'n_fetch_failed_us')을 냈다(사용자 지시로 실측 확인,
+# datacache_rs6_us_u2120_2026-09-10.pkl의 timing엔 8개 필드만 존재).
+# 이번 범프는 그 사고의 즉시 원상복구(볼륨의 모든 구형 파일을 한
+# 번에 무효화) — 재발 방지 자체는 아래 스키마 키 집합과
+# _load_disk_cache()의 검증이 담당(사람이 이 상수를 또 깜빡 잊어도
+# 로드 시점에 걸러짐).
+_CACHE_NS = "rs7"   # 현재 디스크캐시 네임스페이스 — 스키마/기간 등이 바뀌어 캐시버스트가
                     # 필요하면 이 값만 올린다. _save_disk_cache가 자동으로 이전 네임스페이스를 정리한다.
+
+# v5.241(사용자 지시 — 재발방지 작업): _load_disk_cache()가 로드 시점에
+# 검증하는 "유효한 bundle/timing 최소 스키마". _fetch_market_data_inner()가
+# 실제로 만드는 bundle(app.py, "bundle = {...}")/_timing(app.py,
+# "_timing = {...}") 딕셔너리와 반드시 동기화 유지할 것 — 새 필드를
+# 추가하면 여기도 같이 늘려야 한다(CLAUDE.md "CONFIG 값 동기화" 원칙과
+# 동일한 이유). 이 동기화 자체가 사람 손에 달려있다는 한계는 여전히
+# 남지만, 여기서 깜빡하면(예: _timing에 필드 추가하고 이 상수를 안
+# 고치면) test_disk_cache_schema.py의 동기화 테스트가 그 자리에서 바로
+# FAIL한다 — _CACHE_NS 범프를 깜빡하는 것과 달리 "몇 달 뒤 프로덕션
+# 500"이 아니라 "커밋 전 테스트 실패"로 드러난다.
+# fetch_failed_sample은 조건부 필드(실패가 있을 때만 존재, v5.235)라
+# 필수 스키마에서 제외 — TIMING 쪽은 "항상 있어야 하는" 필드만 담는다.
+_BUNDLE_SCHEMA_KEYS = frozenset({
+    "universe", "data", "data_ts", "rs_ranks", "rs_moms",
+    "rs3_ranks", "rs_deltas", "sector_info", "ts", "daykey", "timing",
+})
+_TIMING_SCHEMA_KEYS = frozenset({
+    "market", "n_total", "n_reused", "n_fetched_kr", "n_fetched_us",
+    "kr_sec", "us_sec", "rs_sec", "n_fetch_failed_kr", "n_fetch_failed_us",
+})
 
 
 def _disk_cache_path(market: str, daykey: str) -> str:
@@ -6886,15 +6979,33 @@ def _disk_cache_path(market: str, daykey: str) -> str:
 
 
 def _load_disk_cache(market: str, daykey: str):
+    """v5.241(사용자 지시 — 재발방지 작업): 언피클 직후 스키마를 검증한다
+    — 프로덕션 500 사고(KeyError: 'n_fetch_failed_us')의 근본 원인이
+    "파일명 네임스페이스(_CACHE_NS)를 사람이 깜빡하면 구형 bundle이
+    그대로 로드된다"였다. _CACHE_NS 범프는 여전히 1차 방어(위 참고)지만,
+    또 깜빡해도 여기서 막는다 — 재등장 여부·범프 여부와 무관하게 로드할
+    때마다 항상 확인(판단 지점 1곳, 이 함수가 디스크 캐시를 읽는 유일한
+    경로). 스키마가 안 맞으면 조용히 넘기지 않고 로그를 남긴 뒤 None을
+    반환 — 호출부(_fetch_market_data_inner)는 이미 disk=None을
+    "캐시미스"로 취급해 정상적으로 실 fetch로 폴백한다(새 분기 불필요)."""
     import pickle
     path = _disk_cache_path(market, daykey)
     if not os.path.exists(path):
         return None
     try:
         with open(path, "rb") as f:
-            return pickle.load(f)
+            bundle = pickle.load(f)
     except Exception:
         return None
+    if not isinstance(bundle, dict):
+        return None
+    missing_bundle = _BUNDLE_SCHEMA_KEYS - set(bundle.keys())
+    missing_timing = _TIMING_SCHEMA_KEYS - set((bundle.get("timing") or {}).keys())
+    if missing_bundle or missing_timing:
+        print(f"[disk-cache] 스키마 불일치({path}) — bundle 누락:{sorted(missing_bundle)} "
+              f"timing 누락:{sorted(missing_timing)} → 무시하고 새로 fetch", flush=True)
+        return None
+    return bundle
 
 
 def _save_disk_cache(market: str, daykey: str, bundle: dict):
@@ -7164,6 +7275,19 @@ async def _fetch_market_data_all(wait_for_fresh: bool = False, force: bool = Fal
     # 코드가 필드 유무에 안 죽게 .get(key, 0)로 방어(loosen-only,
     # 정상 bundle의 값은 전혀 안 바뀜).
     kr_t, us_t = kr_bundle["timing"], us_bundle["timing"]
+    # v5.241(사용자 지시 — 재발방지 작업): 이 .get(key,0) 폴백은 이제
+    # 2차 방어다 — 1차 방어(_load_disk_cache()의 스키마 검증)가 제
+    # 역할을 하면 여기 도달하는 kr_t/us_t는 항상 _TIMING_SCHEMA_KEYS를
+    # 전부 갖고 있어야 정상이다. 그런데도 뭔가 빠져 있으면 폴백이
+    # 조용히 0을 채워 넘어가기만 해선 "폴백이 실제로 작동했다"는 사실
+    # 자체가 안 보인다(사용자 지시: "어느 쪽이 작동했는지 모르게 된다"
+    # 문제) — 1차 방어에 구멍이 있다는 신호이므로 카나리아로 로그를
+    # 남긴다. 정상 운영에선 이 로그가 평생 안 찍혀야 한다.
+    _missing_timing_fields = [k for k in _TIMING_SCHEMA_KEYS if k not in kr_t or k not in us_t]
+    if _missing_timing_fields:
+        print(f"[merge] 스키마 검증을 통과한 서브 bundle인데도 timing 필드 누락 — "
+              f"{_missing_timing_fields} — 0으로 대체. 1차 방어(_load_disk_cache 스키마 "
+              f"검증)에 구멍이 있다는 뜻이므로 재점검할 것", flush=True)
     merged_timing = {
         "market": "all",
         "n_total": kr_t.get("n_total", 0) + us_t.get("n_total", 0),
