@@ -5,6 +5,28 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.234 [테스트추가] 서버 is_live/market_open_now 계산 커버리지(사용자
+        지시 — "프론트 테스트(v5.233)가 가정한 '장중인데 캐시 stale'
+        조합을 서버가 실제로 만들어내는지 아직 확인 안 됐다"는 지적).
+        [1] app.py: get_calendar()의 us_pullback 블록에 인라인이던
+        `daykey/ts + _is_market_open_now()` 계산을 `_price_basis_
+        fields(cached_scan, is_kr)`로 분리(로직 동일, 재구현 아님) —
+        동작 무변화, 순수 리팩터.
+        [2] 신규 test_price_basis_fields.py: `_is_market_open_now`만
+        monkeypatch로 고정(현재 시각 의존 없이 결정론적)하고 daykey
+        유무×장중여부 4조합을 직접 실행. 특히 "EOD daykey가 남아있는데
+        시장이 이미 재개장"(장이 막 다시 열렸는데 첫 장중 재워밍이
+        아직 안 돈 좁은 창, `_warm_market()` 구조상 실제로 발생 가능한
+        상태 — 가상의 조합 아님)이 정확히 test_price_basis_note.py가
+        가정한 (is_live=False, market_open_now=True)를 만들어내는지
+        명시적으로 증명(`test_eod_daykey_but_market_reopened_is_stale_
+        while_open`).
+        [3] CLAUDE.md에 "텍스트 추출 + Node 실행" 패턴(v5.233에서 쓴
+        기법) 원칙으로 기록 — 프론트 판정 로직에 새 테스트가 필요할 때
+        재사용할 수 있게.
+        검증: 두 테스트 파일 모두 판정식을 일부러 부분적으로 바꿔치기해
+        FAIL하는지 확인 후 원복(타당성 자체 검증) — python3 -m pytest
+        392건 전체 통과.
 v5.233 [테스트추가] 가격기준 표기(v5.232 [4]) KR 분기 커버리지 구멍 메움
         (사용자 지시 — "어제 test_trace_parity에서 커버리지 0건이 통과로
         표시됐던 것과 같은 구멍"이라는 지적). KR 즉시진입(entry_method=
@@ -6100,7 +6122,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.233"
+VERSION = "v5.234"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6332,6 +6354,25 @@ def _calendar_default_market_session() -> str:
     if 7 * 60 <= hm < 19 * 60:
         return "kr"
     return "us"
+
+
+def _price_basis_fields(cached_scan: dict | None, is_kr: bool) -> tuple[bool, bool]:
+    """즉시진입(entry_method='즉시') 카드의 is_live/market_open_now 계산
+    — v5.232에서 get_calendar()의 us_pullback 블록에 인라인으로 있던
+    걸 v5.234(사용자 지시 — 서버 쪽도 프론트(test_price_basis_note.py)와
+    같은 방식으로 직접 테스트 가능하게)에서 이름 있는 함수로 뽑았다.
+    로직 자체는 그대로(재구현 아님) — cached_scan(`_cache[f"{market}:
+    {mode}"]` 형태, daykey/ts 필드)의 `daykey`가 있으면(EOD 확정
+    스냅샷 — `_warm_market()`의 EOD 분기가 채움) 무조건 stale이고,
+    daykey가 없어도(장중 워밍, ts만 있음) 그 시장이 지금 실제로 열려
+    있어야만(`_is_market_open_now`) 라이브.
+
+    반환: (is_live, market_open_now) — 둘 다 프론트에 그대로 실어 보내
+    문구만 고르게 한다(판단 지점 1곳 원칙). cached_scan이 아예 없으면
+    (스캔이 한 번도 안 돎) 라이브라고 주장하지 않고 보수적으로 False."""
+    market_open_now = _is_market_open_now(is_kr)
+    is_live = bool(cached_scan) and cached_scan.get("daykey") is None and market_open_now
+    return is_live, market_open_now
 
 
 # ── 개장일 판정 (v5.99, 사용자 지시) ──────────────────────────────────
@@ -13290,17 +13331,14 @@ async def get_calendar():
                 "reason": "US 시장이 오늘 휴장 — 마지막 거래일 스캔 결과 참고용, 다음 개장 후 재확인 필요",
             })
     elif us_pullback_cached:
-        # v5.232(사용자 지시 — [4] 장전/캐시 표기, "현재가가 아닐 때 전부
-        # 적용" 원칙): entry_method="즉시"인 카드만 "지금 이 가격에 살 수
-        # 있다"는 뜻이라 이 표기 대상 — 종가진입류(jongga 등)는 애초에
-        # 종가가 기준이라 대상 아님(아래 다른 소스는 이 필드를 안 채움).
-        # daykey가 있으면(EOD 확정 스냅샷) 확실히 라이브가 아니고,
-        # daykey가 없어도(장중 워밍) 그 시장이 지금 실제로 열려 있어야만
-        # 라이브 — 프론트는 이 두 불리언만 보고 렌더, 시간 계산은 안 함
-        # (판단 지점 1곳 원칙, 이 값은 이미 있는 daykey/_is_market_open_now
-        # 재사용이라 새 계산 아님).
-        us_market_open_now = _is_market_open_now(is_kr=False)
-        us_is_live = us_pullback_cached.get("daykey") is None and us_market_open_now
+        # v5.232/v5.234(사용자 지시 — [4] 장전/캐시 표기, "현재가가 아닐
+        # 때 전부 적용" 원칙): entry_method="즉시"인 카드만 "지금 이
+        # 가격에 살 수 있다"는 뜻이라 이 표기 대상 — 종가진입류(jongga
+        # 등)는 애초에 종가가 기준이라 대상 아님(아래 다른 소스는 이
+        # 필드를 안 채움). 실제 계산은 _price_basis_fields()(테스트
+        # 가능하게 분리, test_price_basis_fields.py) — 프론트는 이 두
+        # 불리언만 보고 렌더, 시간 계산은 안 함(판단 지점 1곳 원칙).
+        us_is_live, us_market_open_now = _price_basis_fields(us_pullback_cached, is_kr=False)
         for h in us_pullback_cached.get("hits", []):
             close_ = h.get("close")
             stop_ = h.get("stop")
