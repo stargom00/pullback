@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.243</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.244</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -5534,19 +5534,41 @@ function periodR() {
   return { week: Math.round(week * 100) / 100, month: Math.round(month * 100) / 100 };
 }
 
-// 게이트별 오픈 리스크 상한
-function effectiveCapR() {
-  if (rSettings.gate === 'correction') return 0;
-  if (rSettings.gate === 'pressure') return Math.min(rSettings.max_open_r || 3, 1.5);
+// 게이트별 오픈 리스크 상한.
+// v5.244(사용자 지시): ignoreGate=true면 시장게이트(조정=0/압박=1.5)로 인한
+// 축소를 건너뛰고 기본 cap을 그대로 반환 — "+직접 추가"(게이트 미적용
+// 모달)의 참고 경고줄에서, 시장게이트가 "오픈 리스크 상한 초과"로
+// 변장해 다시 나타나는 걸 막기 위함(entryGate() 쪽 주석 참고).
+function effectiveCapR(ignoreGate = false) {
+  if (!ignoreGate) {
+    if (rSettings.gate === 'correction') return 0;
+    if (rSettings.gate === 'pressure') return Math.min(rSettings.max_open_r || 3, 1.5);
+  }
   return rSettings.max_open_r || 3;
 }
 
+// v5.244(사용자 지시 — 게이트 차단 다이얼로그에 우회로 안내): saveJournal()
+// (신규 즉시진입)과 markEntered()(대기→진입) 둘 다 게이트에 막히면 이
+// 동일 문구를 붙인다 — "+직접 추가"는 게이트 미적용(v4.52.3 의도적 설계,
+// 이번 수정에서 안 건드림)이라 이미 실제로 매수한 종목은 그쪽으로 기록
+// 가능하다는 걸 알려준다. 상수로 공유해 두 곳 문구가 갈라지지 않게 함.
+const _ENTRY_GATE_BYPASS_HINT = "(이미 매수했다면 '+직접 추가'에서 '진입'으로 기록하세요)";
+
 // 진입 게이트: 신규 '진입(entered)'이 허용되는지. 관찰/대기 추가는 항상 허용.
-function entryGate(newR = 1) {
+// v5.244(사용자 지시 — "+직접 추가" 경고줄 오표시 수정): ignoreMarketGate:true면
+// 시장게이트(조정/압박) 사유만 건너뛰고, 월간/주간 서킷브레이커·오픈리스크
+// 상한은 그대로 평가한다 — 이 둘은 "시장 국면 판단"이 아니라 "내 포트폴리오
+// 객관적 상태"라 saveManualAdd()가 게이트를 안 타는 것과 무관하게 참고
+// 정보로서 유효(설계 보고, CLAUDE.md 개발원칙 "기록과 억제는 분리" 참고).
+// cap도 effectiveCapR(ignoreMarketGate)로 같이 넘겨야 한다 — 안 그러면
+// 압박/조정으로 줄어든 cap 때문에 "오픈 리스크 상한 초과"가 시장게이트의
+// 변장으로 다시 나타난다(이번에 발견한 함정, sabotage 테스트가 이 결합을
+// 검증).
+function entryGate(newR = 1, { ignoreMarketGate = false } = {}) {
   const open = openRiskR();
-  const cap = effectiveCapR();
+  const cap = effectiveCapR(ignoreMarketGate);
   const { week, month } = periodR();
-  if (rSettings.gate === 'correction')
+  if (!ignoreMarketGate && rSettings.gate === 'correction')
     return { allowed: false, reason: '🔴 시장 게이트: 조정 — 신규 진입 0, 현금 유지' };
   if (month <= -(rSettings.monthly_stop_r || 6))
     return { allowed: false, reason: `🔒 월간 서킷브레이커: ${month}R (한도 -${rSettings.monthly_stop_r}R) — 이 달 신규 진입 종료` };
@@ -5557,8 +5579,12 @@ function entryGate(newR = 1) {
   return { allowed: true, reason: '' };
 }
 
-// 진입 폼 실시간 계산줄 렌더
-function renderCalcLine(elId, entry, stop, market) {
+// 진입 폼 실시간 계산줄 렌더.
+// v5.244(사용자 지시): gateOpts를 entryGate()에 그대로 전달 — 호출부
+// (hookCalcInputs())가 자기 모달의 성격을 명시적으로 넘긴다("+직접 추가"는
+// {ignoreMarketGate:true}). elId 문자열로 암묵 분기하지 않는 이유: 모달이
+// 늘어날 때마다 이 함수를 또 고쳐야 하는 걸 피하기 위함(설계 보고 참고).
+function renderCalcLine(elId, entry, stop, market, gateOpts = {}) {
   const el = document.getElementById(elId);
   if (!el) return;
   el.classList.remove('warn', 'lock');
@@ -5579,11 +5605,19 @@ function renderCalcLine(elId, entry, stop, market) {
     else if (chasePct > 0.5) chase = ` · <span style="color:var(--amber)">피벗 +${chasePct.toFixed(1)}%</span>`;
   }
   const cut = c.reduced ? ` <span style="color:var(--amber)">⚠️ 연속 ${consecLosses()}패 → R 절반 축소</span>` : '';
-  const gate = entryGate();
+  const gate = entryGate(1, gateOpts);
   let gateLine = '';
   if (!gate.allowed) {
     el.classList.add('lock');
-    gateLine = `<div style="margin-top:4px;color:#ff9b9b">${gate.reason}<br>→ 저장은 <b style="color:#ffd98a">관찰(대기)</b>로만 가능</div>`;
+    // v5.244(사용자 지시): ignoreMarketGate 모달(="+직접 추가")은 저장을
+    // 실제로 막지 않으므로(saveManualAdd()가 entryGate()를 애초에 안 부름,
+    // v4.52.3 의도적 설계) "저장은 관찰(대기)로만 가능"이라는 문구를 붙이면
+    // 화면이 사실과 다른 말을 하게 된다(이번 수정의 원인) — 이 모달에서는
+    // 사유(오픈리스크/서킷브레이커)만 참고 정보로 보여주고 강제 문구는 뺀다.
+    const enforceNote = gateOpts.ignoreMarketGate
+      ? ''
+      : `<br>→ 저장은 <b style="color:#ffd98a">관찰(대기)</b>로만 가능`;
+    gateLine = `<div style="margin-top:4px;color:#ff9b9b">${gate.reason}${enforceNote}</div>`;
   }
   el.innerHTML =
     `1R = <b>${c.rKrw.toLocaleString()}원</b>${cut} · 리스크폭 ${c.riskPct}%${fx}${chase}<br>` +
@@ -5600,10 +5634,15 @@ function hookCalcInputs() {
     if (el) el.addEventListener('input', jm);
   });
   window._jmCalcRefresh = jm;
+  // v5.244(사용자 지시): "+직접 추가"는 saveManualAdd()가 entryGate()를
+  // 안 타므로(v4.52.3 의도적 설계, 게이트는 건드리지 않음) 시장게이트
+  // 사유는 참고 정보로도 부적절 — ignoreMarketGate:true로 그 사유만 숨김.
+  // 오픈리스크/서킷브레이커는 이 모달에서도 유효한 정보라 그대로 전달.
   const ma = () => renderCalcLine('maCalc',
     parseFloat(document.getElementById('maPivot').value),
     parseFloat(document.getElementById('maStop').value),
-    document.getElementById('maMarket').value);
+    document.getElementById('maMarket').value,
+    { ignoreMarketGate: true });
   ['maPivot', 'maStop'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', ma);
@@ -6776,7 +6815,7 @@ async function saveJournal() {
   if (wouldEnter && rSettings.equity) {
     const gate = entryGate();
     if (!gate.allowed) {
-      if (!confirm(`${gate.reason}\n\n진입 대신 '관찰(대기)'로 저장할까요?`)) return;
+      if (!confirm(`${gate.reason}\n\n진입 대신 '관찰(대기)'로 저장할까요?\n${_ENTRY_GATE_BYPASS_HINT}`)) return;
       forcePending = true;
     }
   }
@@ -7533,9 +7572,17 @@ async function markEntered(id) {
   const j = getJournal();
   const r = j.find(x => x.id === id); if (!r) return;
   // ── R 시스템: 대기→진입이 실질 진입 시점 → 게이트 검사 + 사이즈 확정 ──
+  // v5.244(사용자 지시): 여기서 막히면 "+직접 추가"로 새 진입 레코드를
+  // 만드는 안내를 붙인다(saveJournal()과 동일 문구, _ENTRY_GATE_BYPASS_HINT).
+  // 이 경우 기존 대기(pending) 레코드는 그대로 남고 "+직접 추가"가 만든
+  // 진입(entered) 레코드가 별개로 하나 더 생겨 같은 티커에 두 건이 남을
+  // 수 있다 — 다만 이 앱은 "같은 종목 복수 기록"을 이미 정상 패턴으로
+  // 지원한다(saveJournal() 상단의 "별개의 새 기록으로 추가할까요?" 확인창이
+  // 선례). 안내 문구에는 이 설명을 안 넣기로 함(사용자 판단 — UI 문구는
+  // 간결하게, 이 캐비엇은 코드/changelog에만 기록).
   if (rSettings.equity) {
     const gate = entryGate();
-    if (!gate.allowed) { alert(gate.reason + '\n\n대기 상태를 유지합니다.'); return; }
+    if (!gate.allowed) { alert(gate.reason + `\n\n대기 상태를 유지합니다.\n${_ENTRY_GATE_BYPASS_HINT}`); return; }
     const mkt = /\.(KS|KQ)$/i.test(r.ticker || '') ? 'KR' : 'US';
     const sized = calcShares(parseFloat(r.entry), parseFloat(r.stop), mkt);
     if (sized) {
