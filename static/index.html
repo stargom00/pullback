@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.242</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.243</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -6519,6 +6519,44 @@ function _maInferMarket(ticker) {
   if (/^\d{5,6}$/.test(ticker)) return 'KR';
   return 'US';
 }
+// v5.243(사용자 지시 — "+직접 추가" 오염 방지): "티커" 칸이 실제 심볼
+// 형태인지만 확인 — 이름 해석(resolve_name_to_ticker)은 붙이지 않는다
+// (saveManualAdd()는 티커/종목명이 독립 자유입력인 모달이라 이 함수의
+// 역할은 딱 "심볼로 불가능한 문자를 거른다"로 한정, 사용자 지시).
+// 허용: KR 5~6자리 숫자코드(접미사 없이도 허용 — 위 v4.96 .KQ/.KS
+// 자동보정 폴백이 이 형태를 전제로 함), KR 코드+.KS/.KQ, US 스타일
+// 심볼(영문 시작, 영숫자+.-^, 1~10자 — BRK-B/V/F 등 실제 유니버스
+// 형태 확인 완료, 아래 검증 절차 참고). 이 외(한글 포함, 공백 포함,
+// 그 외 비ASCII)는 전부 거부.
+// 검증: 프로덕션 journal_user.json 정상 레코드 150건(KR 90 + US 60)
+// 전수 통과 확인(거짓 배제 0건), BRK-B/단일문자(V/F/X 등, 유니버스에
+// 실존)/477850류 접미사 없는 KR코드까지 개별 확인 — test_ma_ticker_
+// format.py 참고.
+function _isValidTickerFormat(ticker) {
+  if (!ticker) return false;
+  if (/^\d{5,6}$/.test(ticker)) return true;
+  if (/^\d{5,6}\.(KS|KQ)$/.test(ticker)) return true;
+  if (/^[A-Z][A-Z0-9.\-^]{0,9}$/.test(ticker)) return true;
+  return false;
+}
+// v5.243(사용자 지시): saveManualAdd()의 저장 시점 검증을 DOM에서 분리한
+// 순수 함수 — node로 직접 실행해 테스트하기 위함(test_ma_ticker_format.py,
+// CLAUDE.md "텍스트 추출 + Node 실행" 레시피). ticker/nameVal 둘 다 이미
+// trim+대문자화된 값을 받는다(호출부 saveManualAdd()에서 처리).
+// 스왑 감지는 별도 상태·흐름 없이 이 메시지에 조건부로만 얹는다 — name
+// 칸 값이 티커 형식으로 "보여도" 그게 확정은 아니라서(휴리스틱), 저장
+// 차단 여부는 ticker 자체의 형식 하나로만 결정하고 이 힌트는 안내
+// 문구 추가일 뿐이다(사용자 지시 — 오탐이어도 해가 없어야 함).
+function _maTickerFormatCheck(ticker, nameVal) {
+  if (_isValidTickerFormat(ticker)) return { ok: true, message: null };
+  const swapHint = _isValidTickerFormat(nameVal)
+    ? `\n\n혹시 종목코드랑 종목명 칸이 바뀌지 않았나요? ("${nameVal}"가 종목명 칸에 있어요)`
+    : '';
+  return {
+    ok: false,
+    message: `종목코드 형식이 올바르지 않아요: "${ticker}"\n티커만 입력하세요 (예: AAPL, 005930.KS).${swapHint}`,
+  };
+}
 // 탭(5탭 중 하나)을 고르면 스캐너가 이미 잡아둔 신호 스냅샷(_signal_
 // snapshots)에서 피벗·손절을 자동채움 시도 — "재량" 탭은 스캐너 게이트를
 // 안 거치므로 스냅샷이 있을 수 없어(구조적으로 항상 없음) 조회 자체를
@@ -6561,6 +6599,13 @@ async function saveManualAdd() {
   const status = document.getElementById('maStatus').value;   // pending | entered | watch
   let pivot = parseFloat(document.getElementById('maPivot').value);
   if (!ticker) { alert('종목코드를 입력하세요'); return; }
+  // v5.243(사용자 지시 — 2026-09-10 "한미사이언스" 오염 사고 재발 방지):
+  // 티커 칸에 심볼로 불가능한 문자(한글 등)가 그대로 저장되던 경로를
+  // 막는다. 이름 해석(resolve_name_to_ticker)은 붙이지 않음 — 형식
+  // 검증만으로 이 사고 클래스는 전부 막힌다고 판단(설계 보고 참고).
+  const _maNameVal = (document.getElementById('maName').value || '').trim().toUpperCase();
+  const _maTickerCheck = _maTickerFormatCheck(ticker, _maNameVal);
+  if (!_maTickerCheck.ok) { alert(_maTickerCheck.message); return; }
   const isEntered = status === 'entered';
   const isWatch = status === 'watch';
 
