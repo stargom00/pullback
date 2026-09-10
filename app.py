@@ -5,6 +5,45 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.235 [조사+기능추가] 즉시행동 0건 조사(A) + 삼성SDI 근접 미표시 조사(B)
+        (사용자 지시 — "패치 전 원인 확정").
+        [A 결론] 실측(2026-09-10 09시대, 로컬에서 실데이터로 fetch+scan
+        직접 실행): KR pullback 27건, US pullback 94건 히트 — **오늘
+        시점 실제 신호는 0이 아님.** 확인된 구조적 문제 2가지(원인
+        후보였던 것):
+        ① `_fetch(ticker)`(KR 개별)/`_fetch_us_batch()`(US 배치, 최대
+        100종목)가 예외를 로그 없이 None/빈 dict로 흡수 — "데이터 없음"
+        과 "fetch 실패"가 구분 안 됐음(실측에서 12/2120 US 종목은 실제
+        상장폐지 확인됨 — 정상 손실, 매 실행마다 있을 수 있는 배경
+        노이즈이지 이번 사고 원인은 아니었음. 다만 이 경로 자체는 이번
+        실측과 무관하게 구조적으로 위험해 로그를 추가함).
+        ② get_calendar()는 설계상 새 fetch를 안 하고 캐시만 읽는다 —
+        스케줄러(_warm_market, 4분 주기)가 실패/지연되면 4개 즉시행동
+        소스가 전부 조용히 0건이 될 수 있음(로컬 재현 불가 — 실제
+        Railway 서버의 스케줄러 상태이므로 원격 확인 대상 아님, 구조만
+        확인).
+        [A 조치] `_fetch_market_data_inner()`가 이제 fetch 시도/실패
+        건수와 실패 티커 샘플(최대 10개)을 `[TIMING]` 로그에 남김(앞으로
+        Railway 로그에서 "성공 몇 건"을 바로 확인 가능). `/api/calendar`
+        에 `immediate_pipeline_health`(kr_data_bundle/us_data_bundle/
+        us_pullback_scan_cache 캐시 존재 여부, 새 계산 아님 — 이미
+        있는 `_data_cache`/`_cache` 조회) 신규 — 프론트가 즉시행동
+        0건일 때 이 값을 보고 "정상 0건"과 "캐시 비어있어 확인 불가"를
+        다른 문구·색으로 구분 표시(static/index.html).
+        [B 결론] 실측(006400.KS 실제 일봉 + `scanner.select_pivot()`
+        그대로 호출): 피벗 569,000원 — 09-08 종가 530,000원(pivot 대비
+        +6.85%) → 09-09 종가 574,000원(-0.88%, 이미 돌파). 근접 밴드
+        (0~2%)를 하루 만에 건너뜀 — **갭업(하루 변동폭 8%대)으로 인한
+        정상 동작, 수정 불필요**(사용자 확인). 근접 밴드 정의는 고정
+        %(`dist_pct=(pivot-close)/pivot*100`, 임계값 2) — ATR 배수
+        아님(3곳 모두 동일 정의: 13182/13489/13650행 부근).
+        [B 조치, 사용자 결정 — "표기 추가"] 🔎 후보 섹션의 🟡근접/🟠이미
+        돌파 둘 중 하나라도 있을 때 "ℹ️ 일봉 기준 1일 1회 스캔 — 장중
+        급변(갭업 등)으로 근접 구간을 건너뛰고 바로 '이미 돌파'로 잡힐
+        수 있어요" 안내 문구 추가(static/index.html) — 별도 pre-market류
+        상태 신설 없음.
+        검증: python3 -m py_compile app.py, node --check, python3 -m
+        pytest 392건 전체 통과.
 v5.234 [테스트추가] 서버 is_live/market_open_now 계산 커버리지(사용자
         지시 — "프론트 테스트(v5.233)가 가정한 '장중인데 캐시 stale'
         조합을 서버가 실제로 만들어내는지 아직 확인 안 됐다"는 지적).
@@ -6122,7 +6161,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.234"
+VERSION = "v5.235"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6861,9 +6900,22 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
                 data[t] = df
                 data_ts[t] = time.time()
     _dur_kr = time.time() - _t_kr
+    # v5.235(사용자 지시 — 즉시행동 0건 조사): _fetch()가 예외를 조용히
+    # None으로 흡수해서(위 함수 참고), 지금까지는 "몇 개 시도해서 몇 개
+    # 성공했는지"를 실패 건수 자체로는 로그에서 알 방법이 없었다(아래
+    # n_fetched_kr는 "시도한 개수"이지 "성공한 개수"가 아니었음 — 성공은
+    # len(data)로 역산해야 했는데 그 역산도 로그에 없었음). 시도/성공
+    # 개수를 명시적으로 따로 남긴다.
+    kr_fetch_failed = [t for t in kr_tickers if t not in data]
 
     # ── 미국: yf.download 배치 (100개씩) → 요청 수 1/100로 축소 ──
     _t_us = time.time()
+    # v5.235: _fetch_us_batch()는 배치 전체가 예외면 빈 dict를 조용히
+    # 반환한다(위 함수 참고) — 그 배치의 티커 최대 US_BATCH_SIZE개가 로그
+    # 한 줄 없이 통째로 사라질 수 있었다. 배치별로 반환된 티커 수를 원래
+    # 배치 크기와 대조해 실패분을 명시적으로 남긴다(us_tickers가 비어도
+    # 아래 _timing이 참조하니 루프 밖에서 초기화).
+    us_fetch_failed = []
     if us_tickers:
         batches = [us_tickers[i:i + US_BATCH_SIZE]
                    for i in range(0, len(us_tickers), US_BATCH_SIZE)]
@@ -6875,10 +6927,11 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
         for i in range(0, len(batches), 2):
             chunk = batches[i:i + 2]
             results = await asyncio.gather(*[fetch_us_batch(b) for b in chunk])
-            for r in results:
+            for batch, r in zip(chunk, results):
                 data.update(r)
                 for t in r:
                     data_ts[t] = time.time()
+                us_fetch_failed.extend(t for t in batch if t not in r)
     _dur_us = time.time() - _t_us
 
     # ── RS 등급: "지수 대비 초과성과" 기반 ──
@@ -6920,7 +6973,17 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
         "kr_sec": round(_dur_kr, 1),
         "us_sec": round(_dur_us, 1),
         "rs_sec": round(_dur_rs, 1),
+        # v5.235(사용자 지시 — 즉시행동 0건 조사): _fetch()/_fetch_us_batch()
+        # 둘 다 예외를 조용히 None/빈 dict로 흡수한다(각 함수 docstring
+        # 참고) — n_fetched_kr/us는 "시도한 개수"라 성공률이 로그에서 아예
+        # 안 보였다. 실패 개수 + 샘플 티커(최대 10개, 로그 폭주 방지)를
+        # 명시적으로 남겨 "0건이 진짜 0건인지 fetch 실패인지"를 이 로그
+        # 한 줄로 바로 구분할 수 있게 한다.
+        "n_fetch_failed_kr": len(kr_fetch_failed),
+        "n_fetch_failed_us": len(us_fetch_failed),
     }
+    if kr_fetch_failed or us_fetch_failed:
+        _timing["fetch_failed_sample"] = (kr_fetch_failed + us_fetch_failed)[:10]
     print(f"[TIMING] {_timing}", flush=True)
 
     # v5.195 [3]: 섹터 합성지표 — 위에서 이미 받은 data/rs_ranks 그대로 재사용
@@ -13922,11 +13985,26 @@ async def get_calendar():
     except Exception as e:
         print(f"[calendar] sector_flow 조회 실패: {e}")
 
+    # v5.235(사용자 지시 — 즉시행동 0건이 진짜 0건인지 파이프라인 실패인지
+    # 구분): get_calendar()는 새 fetch를 직접 안 하고 전부 기존 캐시만
+    # 읽는다(함수 docstring) — 그 캐시가 스케줄러 실패 등으로 비어있으면
+    # 즉시행동 4개 소스가 전부 조용히 0건이 될 수 있다("정말 후보가
+    # 없다"와 구분 불가). 이미 있는 캐시 존재 여부만 확인(새 계산 없음)
+    # — immediate가 0건일 때만 프론트가 이 값으로 "정상 0건" vs "캐시
+    # 비어있음" 문구를 갈라 보여준다(판단은 서버가 하고 프론트는 렌더만,
+    # v5.232와 동일 원칙).
+    immediate_pipeline_health = {
+        "kr_data_bundle": _data_cache.get("data:kr") is not None or _data_cache.get("data:all") is not None,
+        "us_data_bundle": _data_cache.get("data:us") is not None or _data_cache.get("data:all") is not None,
+        "us_pullback_scan_cache": _cache.get("us:pullback") is not None,
+    }
+
     return JSONResponse(_clean_nan({
         "version": VERSION,   # v5.198: 캘린더(기본 진입 탭)도 verBadge 갱신 — 이전엔 이 필드가 없어 캘린더만 쓰면 배지가 안 바뀜
         # v5.232(사용자 지시): 🔴 즉시행동 카드 기본 시장 필터 — 서버 단일
         # 판단(_calendar_default_market_session), 프론트는 판단 안 함.
         "market_session": _calendar_default_market_session(),
+        "immediate_pipeline_health": immediate_pipeline_health,
         "today": today,
         "today_decision": today_decision,
         "sector_flow": sector_flow,
