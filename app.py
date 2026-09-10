@@ -5,6 +5,57 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.238 [버그수정] signal_snapshot/auto_watch 영구 고정 결함 — 공통 헬퍼로
+        통합 수정(사용자 지시, 실측 728건+710건 기반).
+        [확정된 원인] `_signal_snapshots`(get_signal_snapshot)와
+        `_auto_watch`의 만료 판정(AUTO_WATCH_CONFIRM_WINDOW_DAYS=3거래일)
+        둘 다 그 종목의 df 봉 위치 차(len(df)-1 - df.index.get_loc(...))로
+        "경과 거래일"을 셌다 — 데이터 피드가 멈춘 종목(상장폐지·장기
+        거래정지)은 df가 더 이상 안 늘어나 경과일이 영원히 0으로
+        고정돼 만료가 영영 안 걸린다. 실측으로 확인(APGE|돌파임박,
+        signal_date/last_seen_date 둘 다 2026-07-17, yfinance 개별조회로
+        그 이후 가격 데이터 자체가 없음을 확인 — 2개월째 "watching"
+        고정). 또한 `_signal_snapshots`는 "재등장 시점에만" 리셋 조건을
+        평가해 애초에 스캔 히트에서 빠진 종목은 재등장 없이는 검사
+        자체가 안 돎(실측: 괴리 3%+ 80건 중 70건이 last_seen_date<오늘).
+        [수정] `_trading_days_since(market, date_str)` 신설(is_trading_day
+        기반, 가격 데이터 불필요) — 두 곳(get_signal_snapshot()의
+        last_seen_date 만료 판정, _refresh_auto_watch()의 signal_date
+        경과 판정)이 이 하나의 헬퍼를 공유. "두 곳을 따로 고치지 말고
+        공통 헬퍼 하나로" 원칙(사용자 지시). get_signal_snapshot()은
+        SIGNAL_SNAPSHOT_RESET_GAP_DAYS=5(출처 없는 임의값, 2단계 문턱값
+        재검토 대상 — 재사용만 하고 새 상수 안 만듦)를 재사용해 만료
+        시 None 반환. _refresh_auto_watch()는 AUTO_WATCH_CONFIRM_WINDOW_
+        DAYS=3 그대로, 경과일 계산만 봉위치→달력 기반으로 교체. df
+        의존은 확인 판정(_pending_watch_confirm_check, 실제 가격·거래량
+        필요)에만 남기고, 만료 판정 자체는 df 유무와 완전히 분리
+        (df가 None이어도 이제 만료는 정상 작동).
+        [영향] get_signal_snapshot() 소비처 7곳 전수 확인 — 전부 기존에
+        이미 None-safe(크래시 위험 없음). 다만 `_auto_watch`의 이미
+        등록된 레코드(signal_high/pivot이 등록 시점에 복사돼 저장,
+        get_signal_snapshot()을 재호출 안 함)는 이번 수정으로 표시값이
+        안 바뀜 — 006400.KS류 근접카드 표시 자체를 고치려면 별도 후속
+        작업 필요(사용자 승인 하에 이번 범위에서 제외, 향후 과제로
+        남김).
+        [검증] test_trading_days_since.py(달력 헬퍼 단위테스트, 주말/
+        공휴일/당일/미래날짜), test_signal_snapshot_expiry.py,
+        test_auto_watch_expiry.py(APGE·006400.KS 스타일 재현 포함) 신설
+        — 전부 수정 전 FAIL(결함 재현) 확인 후 수정 적용, PASS 전환
+        확인. 헬퍼를 일부러 0 고정으로 되돌려 재FAIL 확인 후 원복(탐지력
+        검증). 기존 395건 + 신규 14건 = 409건 전체 통과.
+        [배포 후 예상 영향] 실 프로덕션 데이터(auto_watch.json 710건,
+        signal_snapshot_cache.json 793건, Railway 볼륨에서 pull —
+        커밋 안 함)로 시뮬레이션: watching 427건 중 129건이 다음 EOD
+        틱에서 즉시 "watching 이탈"(expired 또는 confirmed) 후보 —
+        대부분(118건)은 US 종목 signal_date=09-04(Labor Day 공휴일
+        포함 실제 3거래일 경과, 예전 측정이 US 장 마감 전 시점이라
+        2거래일로 과소측정됐던 것) + APGE 1건(2개월치 밀린 만료) —
+        오랫동안 안 걸리던 만료가 배포 시점에 한 번에 해소되는
+        정상적인 백로그 처리. signal_snapshots는 793건 중 1건(APGE)만
+        즉시 None 전환.
+        범위: docs/, scripts/measurements/ 미변경(사용자 지시 — 다른
+        방 담당). `_auto_watch`의 signal_high/pivot 자체(근접카드 표시
+        원본) 개선은 사용자 승인으로 이번 범위 밖.
 v5.237 [리팩터/버그수정] "data:all" 캐시 슬롯 제거 — 1단계(사용자 지시,
         실측 기반).
         [확정된 원인] cache_key = f"data:{market}"라서 "data:kr"과
@@ -6253,7 +6304,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.237"
+VERSION = "v5.238"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6621,6 +6672,48 @@ def is_trading_day(market: str, date: "datetime | str | None" = None) -> bool:
         print(f"[is_trading_day] {market} {date_str} — 정적 휴장일 목록 확인 범위"
               f"({confirmed_years}) 밖, 주말만 체크됨(목록 갱신 필요, docs/trading_calendar.md)")
     return date_str not in holiday_set
+
+
+def _trading_days_since(market: str, date_str: str | None, today: datetime | None = None) -> int:
+    """v5.238(사용자 지시 — signal_snapshot/auto_watch 만료 결함 통합 수정):
+    date_str(YYYY-MM-DD)부터 오늘까지 그 시장이 실제로 열렸던 거래일
+    수를 센다. is_trading_day()만 쓰고 가격 데이터(df)는 전혀 필요 없다
+    — 이게 핵심. 기존 두 곳(_record_signal_snapshot의 gap, _refresh_
+    auto_watch의 days_since)은 둘 다 `(len(df)-1) - df.index.get_loc(...)`
+    처럼 그 종목의 실제 봉 위치 차로 경과를 셌는데, 데이터 피드가 멈춘
+    종목(상장폐지·장기 거래정지)은 df가 더 이상 안 늘어나 이 값이
+    영원히 0으로 고정된다 — 실측(APGE|돌파임박, 2026-07-17 이후 가격
+    데이터 자체가 없음)으로 확인된 실제 사고. 달력 기반으로 바꾸면 그
+    종목의 데이터 유무와 무관하게 "그 시장이 며칠 열렸는가"만으로
+    경과를 셀 수 있어 이 결함 자체가 구조적으로 사라진다.
+
+    반환 의미는 기존 봉위치 gap/days_since와 동일하게 맞췄다 — date_str
+    당일은 0, 그다음 거래일부터 1,2,3...(당일 자체를 카운트에 포함하지
+    않음). date_str이 없거나 오늘이거나 미래면 0(경과 없음, fail-safe로
+    "아직 안 지남" 취급 — 만료 오탐보다 미탐이 안전).
+
+    market: 'kr'|'us'(대소문자 무관, 내부에서 소문자로 정규화 — 호출부가
+    ticker suffix로 구한 'KR'/'US'를 그대로 넘겨도 되게).
+    today: 테스트용 주입 지점(생략 시 실제 현재 KST) — 이 함수 자체는
+    순수 날짜 연산이라 monkeypatch 없이 인자로 결정론적 테스트 가능."""
+    if not date_str:
+        return 0
+    if today is None:
+        today = datetime.now(KST)
+    try:
+        start = datetime.strptime(date_str, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return 0
+    if start.date() >= today.date():
+        return 0
+    market = market.lower()
+    count = 0
+    d = start + timedelta(days=1)
+    while d.date() <= today.date():
+        if is_trading_day(market, d.strftime("%Y-%m-%d")):
+            count += 1
+        d += timedelta(days=1)
+    return count
 
 
 def _disk_cache_dir() -> str:
@@ -12407,7 +12500,35 @@ _signal_snapshots = _load_signal_snapshots()  # {"ticker|tab": {signal_date, sto
 
 
 def get_signal_snapshot(ticker: str, tab: str) -> dict | None:
-    return _signal_snapshots.get(f"{ticker}|{tab}")
+    """v5.238(사용자 지시 — 실측 728건 기반 결함 수정): last_seen_date로부터
+    SIGNAL_SNAPSHOT_RESET_GAP_DAYS(5거래일) 이상 지났으면 만료로 보고
+    None을 반환한다 — 원래 존재하던 리셋 조건(a)(5거래일 부재 후
+    "재등장" 시점에만 평가)는 재등장이 없으면 영원히 평가 자체가 안
+    되는 구멍이 있었다(실측: 괴리 3%+ 80건 중 70건이 last_seen_date가
+    오늘보다 과거 — 재등장을 기다리다 리셋 검사 자체가 한 번도 안
+    돎). 여기서 "읽을 때마다" 매번 확인하면 재등장 여부와 무관하게
+    항상 정확하다 — 이 함수가 유일한 소비 경로(7곳 전부 이걸로만
+    읽음)라 한 곳만 고치면 됨.
+
+    _trading_days_since()(달력 기반, is_trading_day만 사용)로 계산 —
+    기존 _record_signal_snapshot()의 gap 판정처럼 그 종목의 df 봉
+    위치로 계산하지 않는다. 봉 위치 기반은 데이터 피드가 멈춘 종목
+    (상장폐지·장기 거래정지)에서 gap이 영원히 0으로 고정되는 결함이
+    있었다 — 실측으로 확인(APGE|돌파임박: signal_date/last_seen_date
+    둘 다 2026-07-17, 그 뒤로 가격 데이터 자체가 없음 — 이 함수를
+    고치기 전엔 경과일이 2개월째 계속 0으로 계산돼 영원히 살아있었다).
+
+    SIGNAL_SNAPSHOT_RESET_GAP_DAYS=5는 재사용 — 출처 없는 임의값(CLAUDE.md
+    "새 CONFIG 도입 시 출처 기록" 원칙 기준 미기록으로 이미 확인됨,
+    2단계 문턱값 재검토 대상). 여기서 새 상수를 또 만들지 않고 기존
+    값을 그대로 쓴다(같은 개념— "몇 거래일 부재해야 신뢰를 잃는가")."""
+    snap = _signal_snapshots.get(f"{ticker}|{tab}")
+    if snap is None:
+        return None
+    market = "kr" if ticker.endswith((".KS", ".KQ")) else "us"
+    if _trading_days_since(market, snap.get("last_seen_date")) >= SIGNAL_SNAPSHOT_RESET_GAP_DAYS:
+        return None
+    return snap
 
 
 def _record_signal_snapshot(ticker: str, tab: str, df, pivot, stop) -> bool:
@@ -12639,30 +12760,37 @@ async def _refresh_auto_watch(bundle: dict, market: str, daykey: str):
                 "expired_at": None,
             }
 
-    # ── ② 확인/만료 판정: watching 전부, 신호일 기준 거래일 카운트(bar 위치차 —
-    #    _record_signal_snapshot의 gap 판정과 동일 기법) ──
-    import pandas as pd
+    # ── ② 확인/만료 판정: watching 전부 ──
+    # v5.238(사용자 지시 — signal_snapshot/auto_watch 만료 결함 통합
+    # 수정): 경과일수(days_since)는 이제 _trading_days_since()(달력
+    # 기반, is_trading_day만 사용)로 구한다 — df 불필요. 기존엔 그
+    # 종목의 봉 위치 차(len(df)-1 - df.index.get_loc(sig_ts))로 셌는데,
+    # 데이터 피드가 멈춘 종목(상장폐지·장기 거래정지)은 df가 더 이상
+    # 안 늘어나 days_since가 영원히 0으로 고정돼 만료가 영영 안
+    # 걸렸다(실측: APGE|돌파임박, signal_date 2026-07-17 이후 가격
+    # 데이터 자체가 없어 2개월째 "watching" 고정으로 발견).
+    # get_signal_snapshot()의 만료 판정과 동일한 헬퍼를 재사용해 두
+    # 곳의 "경과일수"가 서로 다른 정의로 갈리지 않게 한다(CLAUDE.md
+    # "물리적으로 한 곳에만" 원칙).
+    # df는 확인 판정(_pending_watch_confirm_check, 실제 가격·거래량
+    # 필요 — 분리 불가능)에만 쓴다. df가 없어도(fetch 실패·데이터
+    # 정지) 만료 판정 자체는 그대로 진행된다 — 이게 이번 수정의 핵심
+    # ("만료 검사가 df 유무에 더 이상 안 걸림").
     paper_track_registered = False
     for key, rec in _auto_watch.items():
         if rec.get("status") != "watching":
             continue
         if rec.get("market") != ("KR" if market == "kr" else "US"):
             continue
-        df = data.get(rec["ticker"])
-        if df is None or df.empty:
-            continue
-        try:
-            sig_ts = pd.Timestamp(rec["signal_date"])
-            if sig_ts not in df.index:
-                continue
-            days_since = (len(df) - 1) - df.index.get_loc(sig_ts)
-        except Exception:
-            continue
+        days_since = _trading_days_since(market, rec.get("signal_date"))
         if days_since < 1:
             continue   # 신호 당일은 확인 판정 대상 아님(다음 거래일부터)
-        vol_mult_req = CONFIRM_VOL_MULT_BY_TAB.get(rec["tab"], 1.5)
-        confirmed, close, vol_mult = _pending_watch_confirm_check(
-            df, rec["signal_high"], vol_mult_required=vol_mult_req, base_vol50=rec.get("base_vol50"))
+        df = data.get(rec["ticker"])
+        confirmed, close, vol_mult = False, None, None
+        if df is not None and not df.empty:
+            vol_mult_req = CONFIRM_VOL_MULT_BY_TAB.get(rec["tab"], 1.5)
+            confirmed, close, vol_mult = _pending_watch_confirm_check(
+                df, rec["signal_high"], vol_mult_required=vol_mult_req, base_vol50=rec.get("base_vol50"))
         if confirmed:
             rec["status"] = "confirmed"
             # v5.184(사용자 지시 — 확인일 버그): daykey는 스케줄러가 이번
@@ -12695,8 +12823,10 @@ async def _refresh_auto_watch(bundle: dict, market: str, daykey: str):
         elif days_since >= AUTO_WATCH_CONFIRM_WINDOW_DAYS:
             rec["status"] = "expired"
             # v5.184: confirmed_at과 같은 이유로 daykey(스캔 실행일) 대신
-            # 실제 판정 시점 봉의 날짜.
-            rec["expired_at"] = str(df.index[-1].date())
+            # 실제 판정 시점 봉의 날짜. v5.238: df가 없을 수 있음(데이터
+            # 피드 정지 등, 이번 수정 이전엔 이 경로 자체가 df 없이는
+            # 도달 불가능이었음) — 그 경우 오늘 날짜로 폴백.
+            rec["expired_at"] = str(df.index[-1].date()) if df is not None and not df.empty else datetime.now(KST).strftime("%Y-%m-%d")
 
     # ── ③ 페이퍼 추적 갱신(진행중 레이스) — harness.race()와 동일 규칙:
     #    확인일 다음 봉부터, 그날 저가≤손절이면 손절 우선, 고가≥목표(2R)
@@ -12704,6 +12834,10 @@ async def _refresh_auto_watch(bundle: dict, market: str, daykey: str):
     #    harness.ev_summary()와 동일 관례). bars_held에 이미 검사한
     #    봉 수를 저장해두고 다음 갱신 때 그 다음 봉부터만 이어서 본다 —
     #    스케줄러가 하루 이틀 못 돌아도 순서대로 다 놓치지 않고 따라잡음.
+    # v5.238: import pandas as pd — 예전엔 ②의 봉위치 계산에 쓰던 걸
+    # 여기서도 같이 썼는데, ②가 달력 기반으로 바뀌며 그 import가
+    # 없어져서(위 diff) 여기(③, pd.Timestamp 여전히 필요)로 옮김.
+    import pandas as pd
     _mkt_label = "KR" if market == "kr" else "US"
     paper_changed = paper_track_registered
     for p in _paper_track:
