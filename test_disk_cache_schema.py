@@ -98,6 +98,10 @@ def test_load_disk_cache_accepts_current_schema(isolated_disk_cache_dir, monkeyp
             "n_fetched_kr": 0, "n_fetched_us": 0,
             "kr_sec": 0.0, "us_sec": 0.0, "rs_sec": 0.0,
             "n_fetch_failed_kr": 0, "n_fetch_failed_us": 0,
+            # v5.242: 데이터 소스 오염 방어 필드 — 이걸 빠뜨리면 이 테스트
+            # 자체가 "현재 스키마"를 못 만드는 것이니 함께 갱신.
+            "n_invalid_bars_dropped_kr": 0, "n_invalid_bars_dropped_us": 0,
+            "n_tickers_gap_truncated_kr": 0, "n_tickers_gap_truncated_us": 0,
         },
     }
     path = app._disk_cache_path(market, daykey)

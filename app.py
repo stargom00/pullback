@@ -5,6 +5,70 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.242 [방어] 데이터 소스(naver) 오염 방어 — 무효 OHLC 봉 배제 + 장기
+        거래정지 갭 트렁케이션 (사용자 지시, 2026-09-10 종가베팅
+        측정 중 발견).
+        [확정된 원인] naver siseJson API 자신이 무거래일(체결 0건)에
+        OHLC를 0으로, Close만 전일가로 이월해서 반환한다(실측 재현
+        확인, 우리 코드가 채워넣는 게 아님). 기존 방어(naver_kr.py의
+        "Close>0" 필터, 이 함수의 기존 "Close.notna()" 필터)는 Close만
+        봐서 이 케이스(Close는 0이 아님)를 못 걸렀다. KR 전수 감사(캐시
+        1504종목·730~1900일): zero_or_neg 9,907행/172종목(11.4%),
+        Volume=0은 18,674행 중 8,769행이 OHLC 전부 정상이라 신뢰 불가로
+        제외, close_out_of_range(반올림오차) 939행은 성격이 달라 별도
+        유지·이번 필터 미포함. 대표 사례: `007610.KS` 2022-03-22~
+        2026-04-28 약 4년치가 이 패턴(장기 거래정지 후 재개, 재개
+        시점이 "지금"과 가까워 RS/52주고점 계산에 실제 영향을 주는
+        현재진행형 오염).
+        [수정] `app.py`에 `_filter_invalid_bars()` 신설, `_downcast()`
+        (KR+US 공용, 유일한 적용 지점) 최상단에서 호출. 두 갈래로 분리
+        처리(같은 필터로 뭉개지 않음, 사용자 지시): 갈래A(연속 무효
+        구간 < `_GAP_TRUNCATE_MIN_RUN`=5거래일) = 그 행만 제거. 갈래B
+        (>=5거래일 연속, 장기 거래정지형) = 가장 최근 그런 구간 끝
+        이후만 남기고 그 이전 전부 트렁케이션 — 행만 제거하면 rolling/
+        lookback 계산이 구멍을 못 보고 여전히 틀린 값을 내기 때문.
+        트렁케이션 후 이력이 짧아진 종목은 각 `analyze_*()`가 이미
+        갖고 있는 `min_bars` 게이트가 신규 상장주와 동일 경로로 자동
+        처리(새 분기 없음). `_GAP_TRUNCATE_MIN_RUN=5`의 근거는
+        `scanner.select_pivot()`의 "베이스천장" 창(직전 2봉 제외 최근
+        5봉) — 이 앱이 실제로 쓰는 가장 짧은 lookback. 이 상수는
+        조정 여지가 있는 판단값이며, `SIGNAL_SNAPSHOT_RESET_PIVOT_PCT
+        =3%`가 출처 없는 임의값이라 나중에 반나절을 들여 근거를 다시
+        파야 했던 사고(사용자 지시로 재발 방지 명시)를 반복하지 않도록
+        근거 주석을 코드에 직접 유지한다(app.py `_GAP_TRUNCATE_MIN_RUN`
+        선언부 참고).
+        [적용 범위 밖 — 알려진 한계, 사용자 지시로 기록] `scripts/
+        measurements/harness.py`가 이번 방어를 공유받지 않는 자체
+        `_downcast()`를 따로 갖고 있다(app.py 미의존) — 이 세션에서는
+        harness.py를 고치지 않았다. **결과: 지금 프로덕션 스캔과
+        백테스트가 서로 다른 데이터를 본다.** 다음에 종가베팅류
+        백테스트를 재실행하는 세션은 harness.py의 `_downcast()`를
+        app.py와 동기화(또는 공유)하는 작업부터 먼저 해야 한다 — 상세는
+        CLAUDE.md "데이터 소스(naver siseJson) 오염 방어" 항목.
+        [로깅] `_timing`에 `n_invalid_bars_dropped_kr/us`(배제 행 수),
+        `n_tickers_gap_truncated_kr/us`(갈래B 트렁케이션 종목 수) 4개
+        신설, `_BUNDLE_SCHEMA_KEYS`/`_TIMING_SCHEMA_KEYS`(v5.241) 동기화
+        — 이 상수 갱신이 test_disk_cache_schema.py의 동기화 테스트를
+        실제로 통과시키는지로 v5.241 재발방지 장치 자체를 검증.
+        카드/배지 노출은 후속 작업으로 보류(사용자 지시).
+        [배포 영향 예상치 — 실측 시뮬레이션, 사용자 지시로 사전 공지]
+        오염 종목(전수 172개) 중 현재 KR 유니버스(1505개)에 남아있는
+        건 140개 — 갈래B(트렁케이션) 80개, 갈래A(행 제거만) 60개.
+        갈래B 80개 중 트렁케이션 후에도 min_bars=210 이상을 유지해
+        스캔 결과에 사실상 영향 없는 게 75개, min_bars 미달로 신규
+        "데이터 부족" 처리되는 게 4개(예: 033500.KQ 200봉/440110.KQ
+        148봉/006380.KS 3봉/082660.KQ 1봉), 완전 트렁케이션(0봉,
+        사실상 폐지·영구정지 추정)이 1개(042670.KS). 배포 후 이
+        범위에서 스캔 결과가 바뀌는 건 정상 동작이다.
+        [검증] 경계 테스트(4거래일 연속=트렁케이션 안 함/5거래일
+        연속=트렁케이션, off-by-one 특화) + 오탐없음(정상 데이터
+        0행 배제) + rolling 계산 생존 + 실제 007610.KS 캐시 데이터로
+        검증(트렁케이션 후 91봉, min_bars=210 게이트에 의해
+        `scanner.analyze()`가 실제로 None 반환 확인) —
+        test_filter_invalid_bars.py 10건 신설. 사보타지-복구 2회(임계값
+        `>=`→`>` off-by-one, "최근 구간"→"첫 구간" 선택 오류) 모두
+        해당 테스트가 정확히 FAIL하는 것을 확인 후 원복. 전체
+        테스트 436건 통과(기존 426 + 신규 10).
 v5.241 [재발방지] 디스크 캐시 스키마 검증 + 엔드포인트 스모크 테스트
         (사용자 지시, v5.238/v5.239 프로덕션 500 사고 재발 방지).
         [배경] 오늘 KeyError 500 사고의 근본 원인은 "_timing 딕셔너리에
@@ -6440,7 +6504,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.241"
+VERSION = "v5.242"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6462,12 +6526,112 @@ _executor = ThreadPoolExecutor(max_workers=8)  # v4.39.x 원복(동시성 과다
 _earnings_executor = ThreadPoolExecutor(max_workers=6)
 
 
-def _downcast(df):
-    """가격 정규화 + float32 다운캐스트 (v4.48.1 / v4.50.4).
-    ① Close가 NaN인 행 제거 — 모든 데이터 경로(야후 개별·배치·네이버)에서
+# v5.242(사용자 지시 — 데이터 소스 오염 방어): 이 앱이 실제로 쓰는 가장
+# 짧은 lookback 창 — scanner.select_pivot()의 "베이스천장" 창(직전 2봉
+# 제외 최근 5봉, scanner.py select_pivot() 참고). 5거래일 미만의 결측은
+# 이 앱의 어떤 지표(가장 짧은 것조차)에도 치명적이지 않지만(휴장일
+# 수준의 흔한 손실), 5거래일 이상이면 가장 짧은 지표조차 창 안에
+# 구멍이 생겨 신뢰 불가 — 이 앱이 실제로 쓰는 최단 lookback에 근거를
+# 둔 값. 조정 여지가 있는 판단값이라는 것도 명시해둔다(사용자 지시:
+# SIGNAL_SNAPSHOT_RESET_PIVOT_PCT=3%가 출처 없는 임의값이라 나중에
+# 근거를 다시 파야 했던 사고 재발 방지 — 이 상수는 반드시 이 주석과
+# 함께 유지할 것, 값을 바꾸더라도 근거 문장은 남길 것).
+_GAP_TRUNCATE_MIN_RUN = 5
+
+
+def _filter_invalid_bars(df):
+    """v5.242(사용자 지시 — 데이터 소스 오염 방어, 2026-09-10 종가베팅
+    측정 중 발견). naver siseJson이 무거래일(체결 0건)에 OHLC를 0으로,
+    Close만 전일종가로 이월해서 주는 걸 실측으로 확인(201490.KQ
+    2025-06-23/06-25, 007610.KS는 2022-03~2026-04 약 4년치가 이 패턴 —
+    장기 거래정지 후 재개). 기존 방어(naver_kr.py의 "Close>0" 필터,
+    이 함수 자신의 기존 "Close.notna()" 필터)는 Close만 봐서, Close가
+    전일가로 이월돼 0이 아닌 이 케이스를 못 걸렀다 — 이번 필터는 OHLC
+    4개 필드 전부를 본다.
+
+    Volume==0은 조건에서 뺐다 — 실측(KR 캐시 1500종목) 결과 Volume=0인
+    행 18,674건 중 8,769건(47%)이 OHLC는 전부 정상(예: 저유동성 고가주가
+    그날 체결 없이 전일가로 모든 필드가 동일하게 표시되는 흔한 패턴) —
+    Volume=0을 조건에 넣으면 정상 데이터를 대량 오탐 배제하게 된다.
+    반대로 OHLC=0인데 Volume은 0이 아닌 사례도 실측 2건 확인돼(예:
+    소액 체결 1건) Volume이 필요조건도 충분조건도 아님을 확인했다.
+
+    두 갈래를 다르게 처리한다(같은 필터로 뭉개지 않음, 사용자 지시):
+    - 갈래 A(산발적, 연속 무효 구간 < _GAP_TRUNCATE_MIN_RUN): 그 행만
+      제거. 짧은 결손은 어떤 지표도 안 깨짐(휴장일과 동급).
+    - 갈래 B(연속 무효 구간 >= _GAP_TRUNCATE_MIN_RUN, 예: 장기 거래정지):
+      해당 구간만 제거하면 시계열에 구멍이 뚫린 채로 남아 rolling/
+      lookback 계산이 구멍을 못 보고(같은 df 길이라 착각) 여전히 틀린
+      값을 낸다 — 가장 최근에 등장한 그런 구간의 끝 이후만 남기고 그
+      이전 전부를 버린다(트렁케이션). 재개 초반이라 유효 이력이 짧으면
+      df 길이 자체가 짧아지므로, analyze_*()가 이미 갖고 있는
+      min_bars 게이트가 손 안 대고 자동으로 "데이터 부족"으로 걸러준다
+      (신규 상장주와 동일한 기존 처리 경로 재사용 — 새 분기 안 만듦).
+
+    close_out_of_range(종가가 [저가,고가] 범위를 수정주가 반올림으로
+    1틱 정도 벗어나는 것, 실측 939건)는 이번 필터에 포함하지 않는다 —
+    성격이 다른(반올림 오차) 별개 사안(사용자 지시).
+
+    반환: (필터링된 df, {"n_dropped": int, "gap_truncated": bool})."""
+    empty_stats = {"n_dropped": 0, "gap_truncated": False}
+    if df is None or df.empty:
+        return df, empty_stats
+    try:
+        o, h, l, c = df["Open"], df["High"], df["Low"], df["Close"]
+    except KeyError:
+        return df, empty_stats
+
+    invalid = (o <= 0) | (h <= 0) | (l <= 0) | (c <= 0) | o.isna() | h.isna() | l.isna() | c.isna() | (h < l)
+    n_invalid = int(invalid.sum())
+    if n_invalid == 0:
+        return df, empty_stats
+
+    invalid_arr = invalid.to_numpy()
+    n = len(invalid_arr)
+    last_qualifying_end = None   # 가장 최근에 등장한 "긴" 무효 구간의 끝 인덱스(그 이후만 남김)
+    i = 0
+    while i < n:
+        if invalid_arr[i]:
+            j = i
+            while j < n and invalid_arr[j]:
+                j += 1
+            if j - i >= _GAP_TRUNCATE_MIN_RUN:
+                last_qualifying_end = j
+            i = j
+        else:
+            i += 1
+
+    if last_qualifying_end is not None:
+        truncated = df.iloc[last_qualifying_end:]
+        if truncated.empty:
+            return truncated, {"n_dropped": n_invalid, "gap_truncated": True}
+        # 트렁케이션 후 남은 구간 안에도(이론상 드물지만) 산발적 무효 행이
+        # 있을 수 있어 마저 제거 — 갈래 A 처리를 여기도 동일하게 적용.
+        o2, h2, l2, c2 = truncated["Open"], truncated["High"], truncated["Low"], truncated["Close"]
+        invalid2 = (o2 <= 0) | (h2 <= 0) | (l2 <= 0) | (c2 <= 0) | o2.isna() | h2.isna() | l2.isna() | c2.isna() | (h2 < l2)
+        return truncated[~invalid2], {"n_dropped": n_invalid, "gap_truncated": True}
+
+    return df[~invalid], {"n_dropped": n_invalid, "gap_truncated": False}
+
+
+def _downcast(df, stats_sink: list | None = None):
+    """가격 정규화 + float32 다운캐스트 (v4.48.1 / v4.50.4 / v5.242).
+    ① 무효 봉(OHLC 0 이하/NaN/high<low) 제거 + 장기 데이터갭 트렁케이션
+       — _filter_invalid_bars() 참고(v5.242, 데이터 소스 오염 방어).
+       stats_sink가 주어지면(리스트) 뭔가 실제로 걸러졌을 때만 그
+       결과 dict를 append — 호출부(_fetch_market_data_inner())가 이걸
+       모아 TIMING 로그에 남긴다. 스레드풀에서 병렬 호출되지만
+       list.append()는 CPython GIL 하에서 원자적이라 락 불필요.
+    ② Close가 NaN인 행 제거 — 모든 데이터 경로(야후 개별·배치·네이버)에서
        전일종가 자리에 결측이 끼어 유령 등락(+316% 등)이 나오는 걸 원천 차단.
-    ② float32 다운캐스트 — 유니버스 3,570개 float64는 300MB+라 절반으로.
+    ③ float32 다운캐스트 — 유니버스 3,570개 float64는 300MB+라 절반으로.
     """
+    try:
+        df, gap_stats = _filter_invalid_bars(df)
+        if stats_sink is not None and (gap_stats["n_dropped"] or gap_stats["gap_truncated"]):
+            stats_sink.append(gap_stats)
+    except Exception:
+        pass
     try:
         if "Close" in df.columns:
             df = df[df["Close"].notna()]
@@ -6482,14 +6646,16 @@ def _downcast(df):
     return df
 
 
-def _fetch(ticker: str):
+def _fetch(ticker: str, stats_sink: list | None = None):
     # 한국 종목(.KS/.KQ)은 네이버, 그 외는 yfinance
+    # v5.242: stats_sink는 _downcast()로 그대로 전달 — 무효봉 배제/
+    # 트렁케이션 통계를 호출부(_fetch_market_data_inner)가 모으는 용도.
     if naver_kr.is_kr(ticker):
         try:
             df = naver_kr.fetch(ticker)
             if df is None or df.empty:
                 return None
-            return _downcast(df)
+            return _downcast(df, stats_sink)
         except Exception:
             return None
     try:
@@ -6499,16 +6665,16 @@ def _fetch(ticker: str):
         df = yf.Ticker(ticker).history(period="2y", interval="1d", auto_adjust=True)
         if df is None or df.empty:
             return None
-        return _downcast(df)
+        return _downcast(df, stats_sink)
     except Exception:
         return None
 
 
-def _fetch_us_batch(tickers: list[str]) -> dict:
+def _fetch_us_batch(tickers: list[str], stats_sink: list | None = None) -> dict:
     """미국 종목을 yf.download로 한 번에 받아 {ticker: df}로 분해.
     종목당 1요청 → 배치당 1요청으로 줄여 야후 부하/차단을 크게 낮춤.
     개별 history()와 동일하게 auto_adjust=True, 2년치 일봉(v5.28, KR과 동일
-    lookback 기준으로 맞춤)."""
+    lookback 기준으로 맞춤). stats_sink는 _downcast()로 그대로 전달(v5.242)."""
     out: dict = {}
     if not tickers:
         return out
@@ -6547,7 +6713,7 @@ def _fetch_us_batch(tickers: list[str]) -> dict:
             df = df[df["Close"].notna()]
             if len(df) < 2:
                 continue
-            out[t] = _downcast(df)
+            out[t] = _downcast(df, stats_sink)
         except Exception:
             continue
     return out
@@ -6970,6 +7136,12 @@ _BUNDLE_SCHEMA_KEYS = frozenset({
 _TIMING_SCHEMA_KEYS = frozenset({
     "market", "n_total", "n_reused", "n_fetched_kr", "n_fetched_us",
     "kr_sec", "us_sec", "rs_sec", "n_fetch_failed_kr", "n_fetch_failed_us",
+    # v5.242(사용자 지시 — 데이터 소스 오염 방어): 이 4개를 추가하면서
+    # 바로 이 상수도 같이 고쳤다 — v5.235가 깜빡했던 바로 그 실수를
+    # 반복하지 않는지는 test_disk_cache_schema.py의 동기화 테스트가
+    # 이 커밋에서 실제로 통과하는지로 확인(설계 보고 참고).
+    "n_invalid_bars_dropped_kr", "n_invalid_bars_dropped_us",
+    "n_tickers_gap_truncated_kr", "n_tickers_gap_truncated_us",
 })
 
 
@@ -7299,6 +7471,13 @@ async def _fetch_market_data_all(wait_for_fresh: bool = False, force: bool = Fal
         "rs_sec": round(kr_t.get("rs_sec", 0.0) + us_t.get("rs_sec", 0.0), 1),
         "n_fetch_failed_kr": kr_t.get("n_fetch_failed_kr", 0),
         "n_fetch_failed_us": us_t.get("n_fetch_failed_us", 0),
+        # v5.242: kr 서브 bundle의 n_invalid_bars_dropped_kr(값 자체가
+        # "kr 시장의" 통계라 kr_t에서만, us_t에서는 절대 안 생김)만
+        # 읽는 식으로 n_fetched_kr/us와 동일한 패턴을 그대로 따름.
+        "n_invalid_bars_dropped_kr": kr_t.get("n_invalid_bars_dropped_kr", 0),
+        "n_invalid_bars_dropped_us": us_t.get("n_invalid_bars_dropped_us", 0),
+        "n_tickers_gap_truncated_kr": kr_t.get("n_tickers_gap_truncated_kr", 0),
+        "n_tickers_gap_truncated_us": us_t.get("n_tickers_gap_truncated_us", 0),
     }
     fetch_failed_sample = (kr_t.get("fetch_failed_sample", []) + us_t.get("fetch_failed_sample", []))[:10]
     if fetch_failed_sample:
@@ -7449,12 +7628,16 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
 
     # ── 한국: 네이버 개별 호출 (배치 API 없음), 동시성 제한 ──
     _t_kr = time.time()
+    # v5.242: _downcast()가 무효봉을 걸러낼 때마다 이 리스트에 결과를
+    # append — 스레드풀(_executor)에서 병렬 호출되지만 list.append()는
+    # CPython GIL 하에서 원자적이라 락 없이 안전(app.py _downcast() 참고).
+    kr_invalid_stats: list = []
     if kr_tickers:
         sem = asyncio.Semaphore(KR_MAX_CONCURRENT)
 
         async def fetch_kr(t):
             async with sem:
-                return await loop.run_in_executor(_executor, _fetch, t)
+                return await loop.run_in_executor(_executor, _fetch, t, kr_invalid_stats)
 
         kr_dfs = await asyncio.gather(*[fetch_kr(t) for t in kr_tickers])
         for t, df in zip(kr_tickers, kr_dfs):
@@ -7478,12 +7661,13 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
     # 배치 크기와 대조해 실패분을 명시적으로 남긴다(us_tickers가 비어도
     # 아래 _timing이 참조하니 루프 밖에서 초기화).
     us_fetch_failed = []
+    us_invalid_stats: list = []   # v5.242, kr_invalid_stats와 동일 원리
     if us_tickers:
         batches = [us_tickers[i:i + US_BATCH_SIZE]
                    for i in range(0, len(us_tickers), US_BATCH_SIZE)]
 
         async def fetch_us_batch(batch):
-            return await loop.run_in_executor(_executor, _fetch_us_batch, batch)
+            return await loop.run_in_executor(_executor, _fetch_us_batch, batch, us_invalid_stats)
 
         # 배치는 동시에 너무 많이 띄우지 않게 2개씩 (각 배치가 내부 threads=True)
         for i in range(0, len(batches), 2):
@@ -7543,6 +7727,17 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
         # 한 줄로 바로 구분할 수 있게 한다.
         "n_fetch_failed_kr": len(kr_fetch_failed),
         "n_fetch_failed_us": len(us_fetch_failed),
+        # v5.242(사용자 지시 — 데이터 소스 오염 방어): _downcast()가
+        # 실제로 걸러낸 무효봉 통계 — kr_invalid_stats/us_invalid_stats는
+        # _fetch()/_fetch_us_batch() 호출 시 stats_sink로 넘겨준 리스트,
+        # _downcast()가 뭔가 실제로 걸렀을 때만 항목을 append한다(위
+        # 참고). 갈래 A(행 단위 제거)와 갈래 B(종목 단위 트렁케이션)를
+        # 분리해서 남긴다 — 조용히 사라지면 오늘처럼 몇 달 뒤에나
+        # 발견된다(사용자 지시).
+        "n_invalid_bars_dropped_kr": sum(s["n_dropped"] for s in kr_invalid_stats),
+        "n_invalid_bars_dropped_us": sum(s["n_dropped"] for s in us_invalid_stats),
+        "n_tickers_gap_truncated_kr": sum(1 for s in kr_invalid_stats if s["gap_truncated"]),
+        "n_tickers_gap_truncated_us": sum(1 for s in us_invalid_stats if s["gap_truncated"]),
     }
     if kr_fetch_failed or us_fetch_failed:
         _timing["fetch_failed_sample"] = (kr_fetch_failed + us_fetch_failed)[:10]

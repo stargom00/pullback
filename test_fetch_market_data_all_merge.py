@@ -55,7 +55,10 @@ def _fake_get_universe(market):
 
 
 def _make_fetch(call_log: list):
-    def _fetch(ticker):
+    # v5.242: 실제 app._fetch(ticker, stats_sink=None)와 같은 시그니처로
+    # 맞춤 — app.py가 이제 run_in_executor(..., _fetch, t, kr_invalid_stats)
+    # 처럼 stats_sink를 항상 위치인자로 넘기므로, mock도 안 받으면 TypeError.
+    def _fetch(ticker, stats_sink=None):
         call_log.append(ticker)
         df = FIXTURE.get(ticker)
         return df.copy() if df is not None else None
@@ -63,7 +66,7 @@ def _make_fetch(call_log: list):
 
 
 def _make_fetch_us_batch(call_log: list):
-    def _fetch_us_batch(tickers):
+    def _fetch_us_batch(tickers, stats_sink=None):
         call_log.extend(tickers)
         return {t: FIXTURE[t].copy() for t in tickers if t in FIXTURE}
     return _fetch_us_batch
