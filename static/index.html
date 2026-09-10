@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.235</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.236</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -4446,6 +4446,10 @@ function renderTodayDecisionHtml(td, sectorFlow, pipelineHealth) {
       immediate: (td.immediate || []).filter(keep),
       interest: (td.interest || []).filter(keep),
       near: (td.near || []).filter(keep),
+      // v5.236: immediate_other_market도 같은 필터를 받아야 top-nav를
+      // "한국"으로 골랐는데 🔎에 US 카드가 그대로 남는 일이 없다(다른
+      // 섹션들과 동일하게 취급).
+      immediate_other_market: (td.immediate_other_market || []).filter(keep),
     };
   }
   const actions = (item, showWatch) => {
@@ -4749,22 +4753,48 @@ function renderTodayDecisionHtml(td, sectorFlow, pipelineHealth) {
     !pipelineHealth.us_data_bundle ? 'US 데이터' : null,
     !pipelineHealth.us_pullback_scan_cache ? 'US눌림목 캐시' : null,
   ].filter(Boolean) : [];
+  // v5.236(사용자 지시 — 🔴가 market_session을 무시하던 버그): immediate는
+  // 이제 서버가 이미 market_session 하나로 걸러 보낸다(get_calendar()의
+  // immediate_other_market 분리 참고) — 여기 top-nav 필터(위)는 그 위에
+  // 사용자가 한 번 더 좁힐 때만 작동. 0건일 때 문구는 서버가 준
+  // immediate_empty_reason(세션·게이트·종가베팅 시각 등 이미 아는 값으로
+  // 조립된 한 줄)을 그대로 쓴다 — 여기서 시간 계산 안 함(판단 지점 1곳).
   const immediateEmptyHtml = _degradedParts.length
     ? `<div style="font-size:13px;color:#ff9b6b">⚠️ ${_degradedParts.join('·')} 캐시가 비어있어요 — 0건이 아니라 확인 불가 상태일 수 있습니다. 새로고침하거나 잠시 후 다시 확인하세요.</div>`
-    : `<div style="font-size:13px;color:var(--muted)">오늘 검증된 즉시 진입 없음. 방금 배포했다면 캐시 워밍 중이라 몇 분 뒤 다시 채워집니다.</div>`;
+    : `<div style="font-size:13px;color:var(--muted)">${_escapeHtml(td.immediate_empty_reason || '오늘 검증된 즉시 진입 없음. 방금 배포했다면 캐시 워밍 중이라 몇 분 뒤 다시 채워집니다.')}</div>`;
   const immediateSectionHtml = `<div>
-    <div class="mf-toolbar"><b>🔴 즉시 행동</b> ${TODAY_DECISION_INFO_ICON}</div>
+    <div class="mf-toolbar"><b>🔴 즉시 행동${immediateHtml ? '' : ' — 없음'}</b> ${TODAY_DECISION_INFO_ICON}</div>
     ${immediateHtml
       ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;max-width:1400px;margin:0 auto">${immediateHtml}</div>`
       : immediateEmptyHtml}
   </div>`;
 
+  // v5.236(사용자 지시): market_session과 다른 시장이라 🔴에서 밀려난
+  // 항목("🔴에 들어갈 항목을 market_session으로 필터"의 반대쪽 절반) —
+  // 버리지 않고 🔎로, 시장별로 묶어서 "왜 여기 있는지"를 헤더에 명시.
+  // 시장이 지금 닫혀있다는 건 market_session 4분기 스케줄 자체가 보장
+  // 하는 사실이라(예: session=kr인 07~19시엔 US장은 정의상 항상 닫혀
+  // 있음) 여기서 새로 시간을 재는 게 아니라 단순 사실 서술.
+  const OTHER_MARKET_CLOSED_LABEL = { KR: '한국장 마감', US: '미장 마감' };
+  const otherMarketByMkt = { KR: [], US: [] };
+  for (const it of (td.immediate_other_market || [])) {
+    (otherMarketByMkt[mktOf(it)] || otherMarketByMkt.US).push(it);
+  }
+  const otherMarketSectionHtml = ['KR', 'US'].map(mkt => {
+    const items = otherMarketByMkt[mkt];
+    if (!items.length) return '';
+    return sectionHeader(`🔎 ${mkt} 눌림목 후보 ${items.length}건 (${OTHER_MARKET_CLOSED_LABEL[mkt]} · 전일 종가 기준)`, '#8fb3ff')
+      + items.map(renderImmediateCard).join('');
+  }).join('');
+  const otherMarketCount = (td.immediate_other_market || []).length;
+
   const candidateCount = usPullbackDemoted.length + (td.interest || []).length
-    + nearCrossed.length + nearBelow.length + (td.waiting_total || 0);
+    + nearCrossed.length + nearBelow.length + (td.waiting_total || 0) + otherMarketCount;
   let candidateSectionHtml = '';
   if (candidateCount > 0) {
     const candidateBodyHtml = _candidatesExpanded ? `
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;max-width:1400px;margin:8px auto 0">
+        ${otherMarketSectionHtml}
         ${usPullbackDemoted.length ? sectionHeader(`🔎 눌림목 후보 ${usPullbackDemoted.length}건`, '#8fb3ff') + pullbackCandidatesHtml : ''}
         ${interestHtml ? sectionHeader(`🔎 관심(확인됨) ${(td.interest || []).length}건`, '#8fb3ff') + interestHtml : ''}
         ${crossedHtml ? sectionHeader(`🟠 이미 돌파(확인 필요) ${nearCrossed.length}건`, '#ffb27a') + crossedHtml : ''}

@@ -5,6 +5,42 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.236 [버그수정] 🔴 즉시행동이 market_session을 안 보던 버그(사용자
+        지시 — KR 세션인데 source=us_pullback 80건이 그대로 뜸).
+        [원인] 상단 탭의 market 필터(전체/한국/미국, 프론트 v5.199)와
+        market_session(v5.232, "지금 실행 가능한 시장이 어디인가")은
+        서로 다른 개념인데, 즉시행동(`today_decision.immediate`)이
+        market_session은 전혀 안 보고 market 필터에만 의존했다 —
+        market='all'이면(또는 override로 '전체' 유지 중이면) KR 세션
+        중에도 US 눌림목이 섞여 그대로 노출됐음.
+        [수정] `get_calendar()`에서 `immediate.sort()` 직후, top-nav
+        market 필터와 독립적으로 서버가 market_session 기준으로 한 번
+        더 걸러 `immediate`를 세션에 맞는 시장만 남기고, 밀린 항목은
+        버리지 않고 `today_decision.immediate_other_market`으로 분리해
+        내보낸다(재계산 아님 — 이미 만들어진 항목을 두 리스트로 나누기만).
+        `market_session`은 함수 상단에서 한 번만 계산해 재사용(기존엔
+        반환부에서 따로 한 번 더 호출하던 걸 통합 — 같은 값이라 동작
+        차이는 없지만 "어디서는 이 값, 다른 데는 저 값" 불일치 가능성
+        자체를 없앰).
+        [프론트] static/index.html: immediate_other_market을 🔎 후보에
+        시장별로 묶어 "🔎 {시장} 눌림목 후보 N건 ({한국장/미장} 마감 ·
+        전일 종가 기준)" 헤더로 표시(기존 top-nav 필터도 동일하게 적용).
+        즉시행동이 세션 필터 후 0건이면 헤더가 "🔴 즉시 행동 — 없음"으로
+        바뀌고, 본문에 서버가 조립한 `immediate_empty_reason`(예: "오늘
+        KR 즉시진입 없음 · 종가베팅은 18:20 이후 · 게이트 🔴" — gate/
+        jongga_today 등 이미 계산된 값 재사용, 새 시간판정 없음)을 그대로
+        표시. "시장이 지금 닫혀있다"는 문구는 market_session 4분기
+        스케줄 자체가 보장하는 사실(예: session=kr인 07~19시엔 US장은
+        정의상 항상 닫혀있음)을 서술한 것 — 프론트가 별도로 시간을
+        재는 게 아님(v5.232 "판단 지점 1곳" 원칙 유지).
+        범위: 삼성SDI 피벗/missing_stop 등 다른 항목은 미변경(사용자
+        지시 — 별건).
+        검증: 로컬에서 get_calendar() 직접 호출 — market_session='kr'
+        상태에서 가짜 us:pullback 캐시(AAPL)를 넣어 immediate=0건·
+        immediate_other_market=1건(AAPL)로 정확히 갈리는지, 그리고
+        immediate_empty_reason이 실제 gate/jongga_today 값으로 올바르게
+        조립되는지 확인. python3 -m py_compile app.py, node --check,
+        python3 -m pytest 392건 전체 통과.
 v5.235 [조사+기능추가] 즉시행동 0건 조사(A) + 삼성SDI 근접 미표시 조사(B)
         (사용자 지시 — "패치 전 원인 확정").
         [A 결론] 실측(2026-09-10 09시대, 로컬에서 실데이터로 fetch+scan
@@ -6161,7 +6197,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.235"
+VERSION = "v5.236"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -13117,6 +13153,11 @@ async def get_calendar():
     # 더 확인한다 — 휴장일엔 데이터가 안 바뀌어도 표시 문구를 강등.
     us_trading_today = is_trading_day("us", today)
     kr_trading_today = is_trading_day("kr", today)
+    # v5.236(사용자 지시): 🔴 즉시행동 세션 필터에도 쓸 값 — 함수 안에서
+    # 한 번만 계산해 재사용(같은 요청 안에서 두 번 불러도 같은 순간이라
+    # 결과는 같지만, 값 하나로 통일해 "어디서는 이 값, 다른 데서는 저
+    # 값" 불일치 가능성 자체를 없앤다).
+    market_session = _calendar_default_market_session()
 
     # ── 서로 독립적인 기존 엔드포인트 3개(게이트·포지션·종가베팅후보)는
     # 병렬로 호출 — 순차 호출 대비 캘린더 전체 응답 시간을 줄인다(사용자 지시:
@@ -13897,6 +13938,41 @@ async def get_calendar():
         risk_pct = (entry - stop) / entry * 100 if entry and stop and entry > stop else None
         return risk_pct if risk_pct is not None else 999.0
     immediate.sort(key=_immediate_sort_key)
+    # v5.236(사용자 지시 — 🔴 즉시행동이 market_session을 안 보던 버그):
+    # KR 세션인데 US 눌림목(source=us_pullback)이 그대로 immediate에
+    # 섞여 있었다. 상단 탭의 market 필터(전체/한국/미국)는 "지금 화면에
+    # 뭘 보여줄까"를 사용자가 직접 고르는 것이고, market_session은
+    # "지금 실행 가능한 시장이 어디인가"라 서로 다른 개념 — market='all'
+    # 이어도 즉시행동은 세션과 다른 시장을 섞으면 안 된다. 그래서 top-nav
+    # market 필터(프론트, v5.199)와는 독립적으로 여기서 서버가 한 번 더
+    # market_session으로 걸러 즉시행동을 세션에 맞는 시장만 남기고, 밀린
+    # 항목은 immediate_other_market으로 따로 내보내 프론트가 🔎로
+    # 재표시한다(버리지 않음 — 정보 자체는 유효하니).
+    _session_mkt_upper = market_session.upper()
+    _immediate_all = immediate   # 재할당 전에 원본을 따로 잡아둠(그대로 for문 돌리면 자기참조 버그)
+    immediate, immediate_other_market = [], []
+    for _it in _immediate_all:
+        (immediate if (_it.get("market") or "").upper() == _session_mkt_upper else immediate_other_market).append(_it)
+    # v5.236: 즉시행동이 세션 필터로 0건이 된 이유를 한 줄로 — 이미 계산된
+    # gate/jongga_today 재사용(새 계산 아님). 18:20 경계는 JONGGA 스냅샷
+    # 확정 시각(14:40~15:00 자동 스냅샷과 별개로 프론트 카드 문구가
+    # 이미 "15:20 동시호가 전 진입"이라 쓰는 것과 같은 근거 — 종가베팅
+    # 후보 자체가 그 시각 이후에나 자연스럽게 나온다는 뜻이지 신규 판단
+    # 기준을 만든 게 아니다) 예시 문구는 사용자 지정 형식 그대로.
+    immediate_empty_reason = None
+    if not immediate:
+        _label = "KR" if _session_mkt_upper == "KR" else "US"
+        _reason_parts = [f"오늘 {_label} 즉시진입 없음"]
+        if _session_mkt_upper == "KR":
+            _now_hm = today_dt.hour * 60 + today_dt.minute
+            if not jongga_today and _now_hm < 18 * 60 + 20:
+                _reason_parts.append("종가베팅은 18:20 이후")
+            if (gate or {}).get("gate_kr") == "correction":
+                _reason_parts.append("게이트 🔴")
+        else:
+            if (gate or {}).get("gate_us") == "correction":
+                _reason_parts.append("게이트 🔴")
+        immediate_empty_reason = " · ".join(_reason_parts)
     # v5.180: interest는 확인일(오늘 고정, confirmed_at) 다음 티커명순 —
     # 전부 "오늘 확인된" 항목이라 시간순 의미가 없어 이름으로만 안정 정렬.
     interest.sort(key=lambda x: x.get("name") or x.get("ticker") or "")
@@ -13907,6 +13983,13 @@ async def get_calendar():
         # v5.186(사용자 지시 — [2] 저널 대기 만료): 프론트가 journalCache에서
         # 이 id들을 찾아 status를 "관찰종료"로 접는다.
         "expired_pending_ids": expired_pending_ids,
+        # v5.236(사용자 지시): market_session과 다른 시장이라 immediate에서
+        # 밀려난 항목(현재는 사실상 us_pullback만 해당 — jongga/KR확인진입
+        # 소스는 애초에 market='KR'로만 만들어져 세션=kr일 때 밀릴 일이
+        # 없음) — 버리지 않고 그대로 실어 보내 프론트가 🔎로 재표시.
+        "immediate_other_market": immediate_other_market,
+        # v5.236: immediate가 세션 필터 후 0건일 때만 채워지는 한 줄 사유.
+        "immediate_empty_reason": immediate_empty_reason,
     }
 
     # ── ⑤ 강세테마 × 스캐너 교집합 — KR 돈의흐름 확산(본격)/streak2+ 테마 소속
@@ -14003,7 +14086,7 @@ async def get_calendar():
         "version": VERSION,   # v5.198: 캘린더(기본 진입 탭)도 verBadge 갱신 — 이전엔 이 필드가 없어 캘린더만 쓰면 배지가 안 바뀜
         # v5.232(사용자 지시): 🔴 즉시행동 카드 기본 시장 필터 — 서버 단일
         # 판단(_calendar_default_market_session), 프론트는 판단 안 함.
-        "market_session": _calendar_default_market_session(),
+        "market_session": market_session,
         "immediate_pipeline_health": immediate_pipeline_health,
         "today": today,
         "today_decision": today_decision,
