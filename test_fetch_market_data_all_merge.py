@@ -26,6 +26,7 @@ market="all" 번들의 구조/값이 kr+us를 따로 fetch해 병합한 것과 �
 _benchmark_rs_scores/_get_earnings_safe를 monkeypatch로 대체한다."""
 import asyncio
 import pickle
+import time
 from pathlib import Path
 
 import pytest
@@ -192,4 +193,56 @@ def test_concurrent_kr_and_all_fetch_deduplicates(mocked_env):
     assert not dup, (
         f"KR 티커가 두 번 이상 fetch됨(중복 fetch, 실사고 재현): {dup}\n"
         f"전체 fetch 로그 길이: {len(call_log)} (기대: KR {len(FIXTURE_KR)}건, 중복 없으면 정확히 {len(FIXTURE_KR)})"
+    )
+
+
+def test_all_merge_survives_legacy_timing_schema(mocked_env):
+    """★ 긴급 수정 회귀 방지(v5.240, 프로덕션 500 장애: GET /api/scan?
+    market=all&mode=pullback → KeyError: 'n_fetch_failed_us', 20초마다
+    반복). 원인: _fetch_market_data_all()의 병합 코드가
+    kr_t["n_fetch_failed_kr"]/us_t["n_fetch_failed_us"]를 대괄호로 직접
+    읽어서, 이 필드가 생기기 전(v5.235 이전) 코드가 저장해둔 디스크
+    캐시(datacache_*.pkl, Railway 볼륨에 영구 보존 — 배포해도 안
+    지워짐)를 오늘 daykey로 그대로 읽어올 때 죽었다. 실제 프로덕션
+    datacache_rs6_us_u2120_2026-09-10.pkl의 timing을 그대로 재현
+    (n_fetch_failed_kr/us 필드 자체가 없는 8개 필드짜리 구형 스키마).
+
+    이 테스트가 처음부터 존재했다면 막을 수 있었던 사고다 — 기존
+    test_all_bundle_structure는 "새로 계산된" bundle의 timing 키
+    존재만 검증해서, "kr/us 서브 bundle 중 하나가 구형 스키마(디스크
+    캐시)일 때 병합이 죽는지"는 아예 검증 범위 밖이었다(전부 매번
+    fresh mock 계산이라 이 케이스 자체가 생성될 일이 없었음)."""
+    now_ts = time.time()
+
+    def _minimal_bundle(market, tickers, legacy_schema):
+        timing = {
+            "market": market, "n_total": len(tickers), "n_reused": 0,
+            "n_fetched_kr": len(tickers) if market == "kr" else 0,
+            "n_fetched_us": len(tickers) if market == "us" else 0,
+            "kr_sec": 0.0, "us_sec": 0.0, "rs_sec": 0.0,
+        }
+        if not legacy_schema:
+            timing["n_fetch_failed_kr"] = 0
+            timing["n_fetch_failed_us"] = 0
+        return {
+            "universe": {t: t for t in tickers},
+            "data": {t: FIXTURE[t] for t in tickers},
+            "data_ts": {t: now_ts for t in tickers},
+            "rs_ranks": {t: 50 for t in tickers}, "rs_moms": {t: 0 for t in tickers},
+            "rs3_ranks": {t: 50 for t in tickers}, "rs_deltas": {t: 0 for t in tickers},
+            "sector_info": {"by_ticker": {}, "by_sector": {}},
+            "ts": now_ts, "daykey": None, "timing": timing,
+        }
+
+    app._data_cache["data:kr"] = _minimal_bundle("kr", FIXTURE_KR, legacy_schema=False)
+    # v5.235 이전 스키마 재현 — 실제 프로덕션 사고를 일으킨 그 파일과
+    # 동일하게 n_fetch_failed_kr/us가 아예 없음.
+    app._data_cache["data:us"] = _minimal_bundle("us", FIXTURE_US, legacy_schema=True)
+
+    all_bundle = asyncio.run(app._fetch_market_data("all", wait_for_fresh=False))
+    assert all_bundle is not None, "구형 스키마 서브 bundle 때문에 병합 자체가 실패함(None)"
+    assert all_bundle["timing"]["n_fetch_failed_kr"] == 0
+    assert all_bundle["timing"]["n_fetch_failed_us"] == 0, (
+        "구형(pre-v5.235) 디스크 캐시 스키마의 us 서브 bundle과 병합할 때 "
+        "KeyError 없이 기본값(0)으로 채워져야 한다 — 실제 프로덕션 장애 재현"
     )

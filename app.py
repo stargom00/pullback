@@ -5,6 +5,41 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.239 [긴급 버그수정] GET /api/scan?market=all → 500(KeyError:
+        'n_fetch_failed_us') 반복 장애(사용자 지시, 프로덕션 긴급 대응).
+        [확정된 원인] v5.237의 _fetch_market_data_all() 병합 코드가
+        kr_t["n_fetch_failed_kr"]/us_t["n_fetch_failed_us"]를 대괄호로
+        직접 읽었다 — 이 필드는 v5.235에서 처음 생겼는데, Railway
+        볼륨의 디스크 캐시(datacache_*.pkl)는 배포해도 안 지워지고
+        스키마 버전 검증도 없어서, v5.235 이전 코드가 저장해둔 구형
+        bundle이 오늘 daykey와 매칭돼 그대로 로드될 수 있었다. 실측
+        확인: 프로덕션 datacache_rs6_us_u2120_2026-09-10.pkl(오늘 새벽
+        US EOD 저장, v5.235 배포 전 코드가 씀)의 timing엔 n_total/
+        n_reused/n_fetched_kr/n_fetched_us/kr_sec/us_sec/rs_sec
+        8개 필드만 있고 n_fetch_failed_kr/us 자체가 없음 — v5.238
+        배포(17:42) 이후 이 구형 bundle이 "us" 서브 bundle로 병합에
+        들어갈 때마다 KeyError로 500, 스케줄러/클라이언트 재시도
+        주기(20초)마다 반복.
+        [수정] merged_timing 조립의 8개 필드 전부를 대괄호 인덱싱에서
+        `.get(key, 0)`로 교체(loosen-only — 정상 bundle의 값은 전혀
+        안 바뀜, 필드가 없을 때만 0으로 기본값 채움). 디스크 캐시
+        자체의 스키마 버전 검증(근본 해결)은 이번 범위 밖 — 같은
+        클래스의 문제가 다음에 timing 필드를 추가할 때 다시 재발할
+        수 있다는 걸 인지하고 있음(추후 검토 대상).
+        [검증] test_fetch_market_data_all_merge.py에
+        test_all_merge_survives_legacy_timing_schema 신설 — 프로덕션
+        사고 파일의 실제 timing dict(8개 필드만)를 그대로 재현해 kr/us
+        서브 bundle 중 하나가 구형 스키마일 때도 병합이 안 죽는지
+        검증. 수정 전 sabotage(대괄호로 되돌림) 상태에서 먼저 FAIL(실제
+        KeyError 재현) 확인 후 원복, PASS 전환 확인. 기존
+        test_all_bundle_structure가 왜 이 사고를 못 잡았는지: 그 테스트는
+        "새로 계산된" bundle의 timing 키 존재만 검증해서, kr/us 서브
+        bundle 중 하나가 구형 스키마(디스크 캐시)일 때 병합이 죽는
+        케이스 자체를 생성한 적이 없었음(전부 매번 fresh mock 계산).
+        기존 413건 + 신규 1건 = 414건 전체 통과.
+        범위: docs/, scripts/measurements/ 미변경. 이번 커밋엔
+        positions_summary의 stop_suggested 수정(별도 작업, 배포 보류 중)은
+        포함하지 않음 — 긴급 수정만 우선 배포.
 v5.238 [버그수정] signal_snapshot/auto_watch 영구 고정 결함 — 공통 헬퍼로
         통합 수정(사용자 지시, 실측 728건+710건 기반).
         [확정된 원인] `_signal_snapshots`(get_signal_snapshot)와
@@ -6304,7 +6339,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.238"
+VERSION = "v5.239"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7028,18 +7063,32 @@ async def _fetch_market_data_all(wait_for_fresh: bool = False, force: bool = Fal
 
     merged_by_ticker = {**kr_bundle["sector_info"]["by_ticker"], **us_bundle["sector_info"]["by_ticker"]}
     merged_by_sector = {**kr_bundle["sector_info"]["by_sector"], **us_bundle["sector_info"]["by_sector"]}
+    # v5.240(긴급 수정 — 사용자 지시, 프로덕션 500 장애): kr_t/us_t를
+    # 대괄호(kr_t["n_fetch_failed_kr"] 등)로 직접 읽으면, 이 필드가
+    # 생기기 전(v5.235 이전) 코드가 저장해둔 디스크 캐시(datacache_*.pkl,
+    # Railway 볼륨에 영구 보존 — 배포해도 안 지워짐)를 오늘 daykey로
+    # 그대로 읽어올 때 KeyError로 죽는다. 실제 사고 확인: 프로덕션
+    # datacache_rs6_us_u2120_2026-09-10.pkl(오늘 새벽 US EOD 저장,
+    # v5.235 배포 전 코드가 씀)의 timing엔 n_fetch_failed_kr/us 자체가
+    # 없음 — 8개 필드만 존재({'market','n_total','n_reused',
+    # 'n_fetched_kr','n_fetched_us','kr_sec','us_sec','rs_sec'}).
+    # 디스크 캐시는 스키마 버전 검증이 없어(별도 과제) 이런 구형
+    # bundle이 새 필드 추가 이후에도 계속 그대로 로드될 수 있다 —
+    # 근본 해결(디스크 캐시 스키마 검증)은 범위 밖, 여기서는 병합
+    # 코드가 필드 유무에 안 죽게 .get(key, 0)로 방어(loosen-only,
+    # 정상 bundle의 값은 전혀 안 바뀜).
     kr_t, us_t = kr_bundle["timing"], us_bundle["timing"]
     merged_timing = {
         "market": "all",
-        "n_total": kr_t["n_total"] + us_t["n_total"],
-        "n_reused": kr_t["n_reused"] + us_t["n_reused"],
-        "n_fetched_kr": kr_t["n_fetched_kr"],
-        "n_fetched_us": us_t["n_fetched_us"],
-        "kr_sec": kr_t["kr_sec"],
-        "us_sec": us_t["us_sec"],
-        "rs_sec": round(kr_t["rs_sec"] + us_t["rs_sec"], 1),
-        "n_fetch_failed_kr": kr_t["n_fetch_failed_kr"],
-        "n_fetch_failed_us": us_t["n_fetch_failed_us"],
+        "n_total": kr_t.get("n_total", 0) + us_t.get("n_total", 0),
+        "n_reused": kr_t.get("n_reused", 0) + us_t.get("n_reused", 0),
+        "n_fetched_kr": kr_t.get("n_fetched_kr", 0),
+        "n_fetched_us": us_t.get("n_fetched_us", 0),
+        "kr_sec": kr_t.get("kr_sec", 0.0),
+        "us_sec": us_t.get("us_sec", 0.0),
+        "rs_sec": round(kr_t.get("rs_sec", 0.0) + us_t.get("rs_sec", 0.0), 1),
+        "n_fetch_failed_kr": kr_t.get("n_fetch_failed_kr", 0),
+        "n_fetch_failed_us": us_t.get("n_fetch_failed_us", 0),
     }
     fetch_failed_sample = (kr_t.get("fetch_failed_sample", []) + us_t.get("fetch_failed_sample", []))[:10]
     if fetch_failed_sample:
