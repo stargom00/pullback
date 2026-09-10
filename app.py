@@ -5,6 +5,62 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.237 [리팩터/버그수정] "data:all" 캐시 슬롯 제거 — 1단계(사용자 지시,
+        실측 기반).
+        [확정된 원인] cache_key = f"data:{market}"라서 "data:kr"과
+        "data:all"이 별개 키였고, _market_fetch_locks도 cache_key별로
+        별개 asyncio.Lock을 썼다. "all"은 KR+US 상위집합인데 캐시·락이
+        이 사실을 몰라, 스케줄러의 intraday "kr" 워밍(_warm_market)과
+        사용자 요청이 트리거한 "all" fetch가 서로를 인지 못 하고 같은
+        KR 종목을 동시에 중복 fetch했다. 실측(2026-09-10): 14:26:27
+        market='kr'(n_reused=0, n_fetched_kr=1505, kr_sec=429.4)와
+        14:27:01 market='all'(동일하게 n_reused=0, n_fetched_kr=1505,
+        kr_sec=426.4)이 34초 간격으로 같은 1505종목을 각각 전량
+        재fetch — app.py가 이미 경고해둔 v4.48.1 OOM 사고 패턴("콜드
+        스캔 중 중복 실행 → 메모리 2~3배 → OOM")과 동일.
+        [수정] "data:all" 슬롯 자체를 없앰. market="all" 요청은
+        `_fetch_market_data_all()`(신규)로 위임 — "kr"/"us"를 각각
+        `_fetch_market_data()`로 재호출해 병합 반환한다. 기존
+        cache_key별 락이 자동으로 "all"과 "kr"을 같은 자원으로
+        인식해 직렬화하므로 새 락 메커니즘은 만들지 않았다.
+        RS랭크/모멘텀/3개월RS/RS델타/섹터정보는 원래도
+        _compute_rs_ranks()/sector_snapshot.compute()가 내부에서
+        KR/US(섹터는 sector|market)로 나눠 계산하므로, 병합 결과는
+        기존 단일 "all" fetch와 값이 완전히 같다(코드 확인 +
+        test_fetch_market_data_all_merge.py로 실증). "data:all"을
+        읽던 나머지 폴백 지점(api/ma·vol·dist·pullback-signal·캘린더
+        현재가/df 조회, surge/observe, immediate_pipeline_health) 전부
+        "data:kr"/"data:us"만 보도록 정리. `_fetch_market_data_inner()`
+        내부의 `if market=="all": sector_snapshot.save_market_stats()`
+        분기(더 이상 market="all"로 호출 안 됨)는
+        `_fetch_market_data_all()`로 이전.
+        [순차 vs 병렬] kr_bundle을 먼저 기다린 뒤 us_bundle을 받는다
+        (asyncio.gather 병렬 아님) — 기존 "all" 콜드 fetch도 원래 함수
+        내부에서 KR 전량 fetch 후 US를 순차로 받았으므로 그 타이밍
+        프로파일을 그대로 보존. kr/us fetch가 전역
+        ThreadPoolExecutor(max_workers=8) 하나를 공유해 병렬화해도
+        체감 단축이 불확실한 반면 새 동시성 케이스만 늘어난다. "all"을
+        실제로 기다리는(force/wait_for_fresh) 경로는 사실상
+        refresh_market()의 "다시 스캔" 버튼 하나뿐(그 외 "all" 호출은
+        전부 stale-while-revalidate로 즉시 반환) — 저빈도 사용자
+        액션이라 완료 시간이 늘어도 감내 가능. 메모리 피크는 병합
+        시점에 kr_bundle+us_bundle이 동시에 필요해 순차/병렬 어느
+        쪽이든 동일(이번에 없앤 메모리 중복은 "같은 KR 데이터를 두 번
+        받는 것"이지 "kr과 us를 동시에 갖고 있는 것"이 아님).
+        [검증] test_fetch_market_data_all_merge.py 신설(네트워크 무의존,
+        test_fixtures/sample_tickers.pkl 재사용) — ①
+        test_all_bundle_structure: "all" 번들이 기존 11개 키 그대로
+        ② test_all_bundle_matches_kr_us_merge: "all" 값이 kr+us 개별
+        fetch 병합과 완전히 일치 ③ test_concurrent_kr_and_all_fetch_
+        deduplicates(핵심 산출물): 콜드 상태에서 "kr"과 "all"을
+        asyncio.gather로 동시 실행해도 같은 KR 티커가 두 번 fetch되지
+        않음 — 리팩터 전 코드에서 FAIL(중복 확인, 사고 재현)함을 먼저
+        확인 후 리팩터 적용, PASS로 전환됨을 검증. 판정 로직을 일부러
+        되돌려(if market=="all" and False) 위 ③ 테스트가 실제로 다시
+        FAIL하는지 확인 후 원복(테스트 탐지력 검증). 기존 392건 +
+        신규 3건 = 395건 전체 통과.
+        범위: docs/, scripts/measurements/는 미변경(사용자 지시 —
+        다른 방 담당). 2단계(추가 지시 필요)는 미착수.
 v5.236 [버그수정] 🔴 즉시행동이 market_session을 안 보던 버그(사용자
         지시 — KR 세션인데 source=us_pullback 80건이 그대로 뜸).
         [원인] 상단 탭의 market 필터(전체/한국/미국, 프론트 v5.199)와
@@ -6197,7 +6253,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.236"
+VERSION = "v5.237"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -6755,7 +6811,17 @@ async def _fetch_market_data(market: str, wait_for_fresh: bool = False, force: b
     건너뛰고 무조건 재계산 경로를 태운다 — 종목별 실제 재수집 여부는
     이 함수보다 안쪽(REUSE_TTL, 30분)이 그대로 판단하므로 시장이 닫혀
     있으면 네이버/야후를 헛되이 두들기지 않는다(가격은 동일, 재계산되는
-    건 RS·섹터 통계 등 파생값과 daykey 캐시 갱신 자체)."""
+    건 RS·섹터 통계 등 파생값과 daykey 캐시 갱신 자체).
+
+    v5.237(사용자 지시 — 리팩터 1단계): market="all"은 더 이상 자기
+    캐시 슬롯("data:all")을 갖지 않는다 — _fetch_market_data_all()로
+    위임해 "kr"/"us"를 각각 이 함수로 재귀 호출한 뒤 병합한다. 자세한
+    이유는 _fetch_market_data_all() 독스트링 참고(핵심: cache_key별
+    락이 자동으로 "all"과 "kr"을 같은 자원으로 인식해 직렬화하게
+    만들어, "all"이 진행 중인 "kr" fetch를 못 보고 같은 종목을 동시에
+    중복 fetch하던 실사고를 구조적으로 제거)."""
+    if market == "all":
+        return await _fetch_market_data_all(wait_for_fresh=wait_for_fresh, force=force)
     cache_key = f"data:{market}"
     if wait_for_fresh or force:
         _lock = _market_fetch_locks.setdefault(cache_key, asyncio.Lock())
@@ -6805,6 +6871,114 @@ async def _refresh_market_data_bg(market: str, cache_key: str):
         print(f"[bg-refresh] {market} failed: {e}")
     finally:
         _market_refreshing[cache_key] = False
+
+
+async def _fetch_market_data_all(wait_for_fresh: bool = False, force: bool = False) -> dict | None:
+    """market="all" 요청을 "kr"+"us" 개별 _fetch_market_data() 호출로 분해해
+    병합한다 (v5.237, 사용자 지시 — "data:all" 캐시 슬롯 제거 리팩터 1단계).
+
+    [배경] cache_key = f"data:{market}"라서 "data:kr"과 "data:all"이 서로
+    다른 키였고, _market_fetch_locks도 cache_key별로 별개 asyncio.Lock을
+    썼다. "all"은 KR+US의 상위집합인데 캐시·락이 이 사실을 몰라서,
+    스케줄러의 intraday "kr" 워밍(_warm_market)과 사용자 요청이 트리거한
+    "all" 워밍이 서로를 전혀 인지하지 못하고 같은 KR 종목을 동시에
+    중복 fetch하는 사고가 실측으로 확인됐다(2026-09-10, 14:26:27
+    market='kr'와 14:27:01 market='all'이 34초 간격으로 같은 KR
+    1505종목을 각각 전량 재fetch, 둘 다 n_reused=0 — app.py가 이미
+    경고해둔 v4.48.1 OOM 패턴과 동일: "콜드 스캔 중 재시도가 전체
+    유니버스 페치를 중복 실행 → 메모리 2~3배 → OOM").
+
+    [해결] "all"을 위한 별도 캐시/락을 새로 만드는 대신, "kr"과 "us"를
+    각각 _fetch_market_data()로 다시 호출한다 — 그러면 기존 cache_key별
+    락(_market_fetch_locks["data:kr"] 등)이 자동으로 "all"과 "kr"을 같은
+    자원으로 인식해 직렬화하므로, 동시에 들어온 "kr" 워밍과 "all" 요청은
+    둘 중 하나가 락을 먼저 잡고 실제 fetch를 마치면 나머지는 방금 채워진
+    캐시를 그대로 받는다(중복 fetch 0회) — test_fetch_market_data_all_merge.py
+    ::test_concurrent_kr_and_all_fetch_deduplicates로 실증.
+
+    [병합이 값을 안 바꾸는 이유] RS 랭크/모멘텀/3개월RS/RS델타/섹터 정보는
+    전부 _compute_rs_ranks()·sector_snapshot.compute()가 이미 함수 내부에서
+    KR/US(섹터는 sector|market 키로 한 번 더)를 나눠 각자 계산한다 — market
+    스코프가 kr/us/all 무엇이든 최종 값은 동일하다(코드 확인 +
+    test_fetch_market_data_all_merge.py::test_all_bundle_matches_kr_us_merge로
+    실증). 그래서 "따로 fetch해서 병합"해도 "한 번에 all로 fetch"와
+    수학적으로 같은 결과가 나온다.
+
+    [순차 실행, gather 병렬 아님] kr_bundle을 먼저 기다린 뒤 us_bundle을
+    받는다. 이유:
+      1) 기존 "all" 콜드 fetch도 원래 _fetch_market_data_inner() 내부에서
+         KR 전량을 먼저 받고(_dur_kr) US를 그 다음에 받았다(_dur_us) —
+         이미 순차였다. 그대로 유지하면 이번 리팩터가 "캐시 슬롯 제거"
+         외의 다른 동작(타이밍 프로파일)까지 바꾸는 걸 피할 수 있다.
+      2) KR fetch(asyncio.Semaphore(KR_MAX_CONCURRENT)+run_in_executor)와
+         US fetch(_fetch_us_batch, 배치당 run_in_executor)가 전역
+         ThreadPoolExecutor(_executor, max_workers=8) 하나를 공유한다 —
+         gather로 동시에 돌려도 결국 같은 8개 워커를 두 fetch가 나눠
+         써야 해서 체감 단축 효과가 불확실한 반면, 두 fetch가 스레드풀을
+         동시에 놓고 경쟁하는 새로운 동시성 케이스가 생겨 디버깅 부담만
+         는다.
+      3) "all"을 실제로 기다리는(force/wait_for_fresh) 경로는 사실상
+         refresh_market()의 "다시 스캔" 버튼 하나뿐(get_calendar 등 나머지
+         "all" 호출은 전부 wait_for_fresh 없이 stale-while-revalidate로
+         즉시 반환) — 사용자가 명시적으로 누른 저빈도 액션이라 완료
+         시간이 조금 늘어도(최악의 경우 kr_sec+us_sec) 감내 가능한
+         트레이드오프로 판단. 메모리 피크는 순차/병렬 어느 쪽이든 병합
+         시점엔 kr_bundle+us_bundle이 동시에 메모리에 있어야 하므로
+         차이가 없다(이번 리팩터가 없애는 메모리 중복은 "같은 KR 데이터를
+         두 번 받는 것"이지 "kr과 us를 동시에 갖고 있는 것"이 아니다).
+      단계2(추가 지시 필요)에서 실측으로 병렬이 유의미하게 빠르다고
+      확인되면 그때 gather로 바꿀 수 있다 — 지금은 최소 diff 우선."""
+    kr_bundle = await _fetch_market_data("kr", wait_for_fresh=wait_for_fresh, force=force)
+    us_bundle = await _fetch_market_data("us", wait_for_fresh=wait_for_fresh, force=force)
+    if kr_bundle is None or us_bundle is None:
+        return None
+
+    merged_by_ticker = {**kr_bundle["sector_info"]["by_ticker"], **us_bundle["sector_info"]["by_ticker"]}
+    merged_by_sector = {**kr_bundle["sector_info"]["by_sector"], **us_bundle["sector_info"]["by_sector"]}
+    kr_t, us_t = kr_bundle["timing"], us_bundle["timing"]
+    merged_timing = {
+        "market": "all",
+        "n_total": kr_t["n_total"] + us_t["n_total"],
+        "n_reused": kr_t["n_reused"] + us_t["n_reused"],
+        "n_fetched_kr": kr_t["n_fetched_kr"],
+        "n_fetched_us": us_t["n_fetched_us"],
+        "kr_sec": kr_t["kr_sec"],
+        "us_sec": us_t["us_sec"],
+        "rs_sec": round(kr_t["rs_sec"] + us_t["rs_sec"], 1),
+        "n_fetch_failed_kr": kr_t["n_fetch_failed_kr"],
+        "n_fetch_failed_us": us_t["n_fetch_failed_us"],
+    }
+    fetch_failed_sample = (kr_t.get("fetch_failed_sample", []) + us_t.get("fetch_failed_sample", []))[:10]
+    if fetch_failed_sample:
+        merged_timing["fetch_failed_sample"] = fetch_failed_sample
+
+    # 둘 다 확정 daykey이고 같은 날짜일 때만 "all"도 확정으로 본다 —
+    # _market_session_key("all")이 원래도 "kr_closed AND us_closed"를
+    # 요구했던 것과 동일한 기준(kr/us 각 daykey를 그대로 재사용).
+    daykey = kr_bundle["daykey"] if kr_bundle["daykey"] and kr_bundle["daykey"] == us_bundle["daykey"] else None
+
+    bundle = {
+        "universe": {**kr_bundle["universe"], **us_bundle["universe"]},
+        "data": {**kr_bundle["data"], **us_bundle["data"]},
+        "data_ts": {**kr_bundle["data_ts"], **us_bundle["data_ts"]},
+        "rs_ranks": {**kr_bundle["rs_ranks"], **us_bundle["rs_ranks"]},
+        "rs_moms": {**kr_bundle["rs_moms"], **us_bundle["rs_moms"]},
+        "rs3_ranks": {**kr_bundle["rs3_ranks"], **us_bundle["rs3_ranks"]},
+        "rs_deltas": {**kr_bundle["rs_deltas"], **us_bundle["rs_deltas"]},
+        "sector_info": {"by_ticker": merged_by_ticker, "by_sector": merged_by_sector},
+        "ts": min(kr_bundle["ts"], us_bundle["ts"]),
+        "daykey": daykey,
+        "timing": merged_timing,
+    }
+    # v5.195: 섹터 흐름 캘린더 카드의 원본 — kr/us 부분집합이 아닌 "all"
+    # 스코프에서만 그날 엔트리를 기록(부분 뷰가 하루 기록을 덮어쓰지 않게).
+    # 원래 _fetch_market_data_inner()의 `if market == "all":` 분기였으나,
+    # "all"이 더 이상 그 함수를 안 타므로 여기로 이전.
+    try:
+        sector_snapshot.save_market_stats(datetime.now(KST).strftime("%Y-%m-%d"), merged_by_sector)
+    except Exception as e:
+        print(f"[sector_snapshot] save_market_stats 실패: {e}", flush=True)
+    return bundle
 
 
 LEADER_MA200_MIN_BARS = 200
@@ -7051,13 +7225,10 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
     # 장 마감 후 fetch였다면 디스크에 저장 → 다음 거래일까지 재사용
     if daykey:
         _save_disk_cache(market, daykey, bundle)
-    # v5.195: 섹터 흐름 캘린더 카드의 원본 — kr/us 부분집합이 아닌 "all"
-    # 스코프에서만 그날 엔트리를 기록(부분 뷰가 하루 기록을 덮어쓰지 않게).
-    if market == "all":
-        try:
-            sector_snapshot.save_market_stats(datetime.now(KST).strftime("%Y-%m-%d"), sector_info["by_sector"])
-        except Exception as e:
-            print(f"[sector_snapshot] save_market_stats 실패: {e}", flush=True)
+    # v5.237: "all"의 sector_snapshot.save_market_stats() 호출은
+    # _fetch_market_data_all()로 이전(이 함수는 더 이상 market="all"로
+    # 호출되지 않음 — _fetch_market_data()가 "all"을 진입 시점에 그쪽으로
+    # 위임하므로 이 함수는 항상 market in ("kr","us")로만 호출된다).
     return bundle
 
 
@@ -9382,7 +9553,7 @@ async def surge_observe():
     2026-09.md. 오늘 후보는 캐시된 데이터로 실시간 계산(새 fetch 없음),
     과거 관찰은 EOD 저장분(surge_observe.json)에 현재 상태를 붙여 반환.
     판정/EV/진입가 없음 — 순수 관찰용."""
-    bundle = _data_cache.get("data:all") or _data_cache.get("data:kr")
+    bundle = _data_cache.get("data:kr")
     today_list = []
     if bundle:
         today_list = [
@@ -11426,7 +11597,7 @@ async def moving_averages(ticker: str):
     이평은 매일 바뀌므로 봇이 매번 최신값을 받아 현재가와 비교."""
     ticker = ticker.upper().strip()
     df = None
-    for key in ("data:all", "data:kr", "data:us"):   # v5.110[버그수정]: 실제 캐시 키는 소문자(_fetch_market_data의 f"data:{market}")
+    for key in ("data:kr", "data:us"):   # v5.110[버그수정]: 실제 캐시 키는 소문자(_fetch_market_data의 f"data:{market}") / v5.237: "data:all" 슬롯 제거(더 이상 안 씀)
         bundle = _data_cache.get(key)
         if bundle and ticker in bundle.get("data", {}):
             df = bundle["data"][ticker]
@@ -11912,7 +12083,7 @@ async def vol_reference(ticker: str):
     ticker = ticker.upper().strip()
     # 캐시된 전 시장 데이터에서 탐색 (없으면 개별 fetch)
     df = None
-    for key in ("data:all", "data:kr", "data:us"):   # v5.110[버그수정]: 실제 캐시 키는 소문자(_fetch_market_data의 f"data:{market}")
+    for key in ("data:kr", "data:us"):   # v5.110[버그수정]: 실제 캐시 키는 소문자(_fetch_market_data의 f"data:{market}") / v5.237: "data:all" 슬롯 제거(더 이상 안 씀)
         bundle = _data_cache.get(key)
         if bundle and ticker in bundle.get("data", {}):
             df = bundle["data"][ticker]
@@ -11951,7 +12122,7 @@ async def distribution_signal(ticker: str):
     캐시된 일봉으로 distribution_check 실행."""
     ticker = ticker.upper().strip()
     df = None
-    for key in ("data:all", "data:kr", "data:us"):   # v5.110[버그수정]: 실제 캐시 키는 소문자(_fetch_market_data의 f"data:{market}")
+    for key in ("data:kr", "data:us"):   # v5.110[버그수정]: 실제 캐시 키는 소문자(_fetch_market_data의 f"data:{market}") / v5.237: "data:all" 슬롯 제거(더 이상 안 씀)
         bundle = _data_cache.get(key)
         if bundle and ticker in bundle.get("data", {}):
             df = bundle["data"][ticker]
@@ -11988,7 +12159,7 @@ async def pullback_signal(ticker: str):
     ticker = ticker.upper().strip()
     df = None
     rs_rank = None
-    for key in ("data:all", "data:kr", "data:us"):   # v5.110[버그수정]: 실제 캐시 키는 소문자(_fetch_market_data의 f"data:{market}")
+    for key in ("data:kr", "data:us"):   # v5.110[버그수정]: 실제 캐시 키는 소문자(_fetch_market_data의 f"data:{market}") / v5.237: "data:all" 슬롯 제거(더 이상 안 씀)
         bundle = _data_cache.get(key)
         if bundle and ticker in bundle.get("data", {}):
             df = bundle["data"][ticker]
@@ -12838,7 +13009,7 @@ def _calendar_current_price(ticker: str):
     곳에 이미 4곳 있음)으로 이미 캐시된 일봉에서 현재가만 뽑는다. 캐시에
     없으면 None(여기서 새로 fetch는 안 함 — 캘린더 탭 로드를 무겁게 만들지
     않기 위해, 사용자 지시)."""
-    for key in ("data:all", "data:kr", "data:us"):   # v5.110[버그수정]: 실제 캐시 키는 소문자(_fetch_market_data의 f"data:{market}")
+    for key in ("data:kr", "data:us"):   # v5.110[버그수정]: 실제 캐시 키는 소문자(_fetch_market_data의 f"data:{market}") / v5.237: "data:all" 슬롯 제거(더 이상 안 씀)
         bundle = _data_cache.get(key)
         if bundle and ticker in bundle.get("data", {}):
             df = bundle["data"][ticker]
@@ -12854,7 +13025,7 @@ def _calendar_ticker_df(ticker: str):
     """_calendar_current_price와 동일 원칙(캐시만, 새 fetch 없음) — 볼륨
     확인진입 판정(안C/안C')엔 종가 하나가 아니라 OHLCV 전체가 필요해서
     df 자체를 반환하는 버전. v5.136 오늘의 결정 섹션 전용."""
-    for key in ("data:all", "data:kr", "data:us"):
+    for key in ("data:kr", "data:us"):   # v5.237: "data:all" 슬롯 제거(더 이상 안 씀)
         bundle = _data_cache.get(key)
         if bundle and ticker in bundle.get("data", {}):
             df = bundle["data"][ticker]
@@ -14077,8 +14248,9 @@ async def get_calendar():
     # 비어있음" 문구를 갈라 보여준다(판단은 서버가 하고 프론트는 렌더만,
     # v5.232와 동일 원칙).
     immediate_pipeline_health = {
-        "kr_data_bundle": _data_cache.get("data:kr") is not None or _data_cache.get("data:all") is not None,
-        "us_data_bundle": _data_cache.get("data:us") is not None or _data_cache.get("data:all") is not None,
+        # v5.237: "data:all" 슬롯 제거(더 이상 안 씀) — kr/us 각자의 슬롯만 확인.
+        "kr_data_bundle": _data_cache.get("data:kr") is not None,
+        "us_data_bundle": _data_cache.get("data:us") is not None,
         "us_pullback_scan_cache": _cache.get("us:pullback") is not None,
     }
 
