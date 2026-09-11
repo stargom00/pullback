@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.247</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.248</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -7250,6 +7250,16 @@ function renderPaperTrackCard() {
     </div>`;
 }
 
+// v5.248(사용자 지시 — "추적대기 · 앱 새로고침 시 갱신" 오안내 수정):
+// R 계산이 안 되는(추적대기) 상태의 하위 문구만 순수 함수로 분리 —
+// 손절가가 없으면 새로고침으로는 절대 안 풀리므로(사용자가 직접 입력
+//해야만 채워짐) "손절가 입력 필요"로 안내. 손절은 있고 가격만 아직
+// 안 온 경우(다음 폴링으로 실제로 풀림)는 기존 "앱 새로고침 시 갱신"
+// 문구 유지 — 새로고침 안내가 실제로 맞는 경우까지 바꾸면 안 된다.
+function _trackingWaitNote(r) {
+  if (!r.stop) return '손절가 입력 필요';
+  return r.entry ? '앱 새로고침 시 갱신' : '';
+}
 function renderJournal() {
   const wrap = document.getElementById('journalView');
   const all = getJournal();
@@ -7611,7 +7621,7 @@ function viewRow(r) {
                          + (r.target_reached ? `<div style="font-size:9px;color:#f2b33d;font-weight:600" title="목표가(2R) 도달 — 자동 종료되지 않습니다. 부분익절(🔪) 또는 직접 종료 여부를 판단하세요.">🎯 목표가 도달</div>` : '');
                   })()
                 : `<span style="color:var(--amber);font-size:11px" title="entry=${r.entry ?? '-'}는 참고가(${{auto_pivot:'피벗 자동기입',auto_close:'확인일 종가 자동기입'}[r.entry_source]||'미상'})라 R 계산에 안 씀">R 미산출</span><div style="font-size:9px;color:var(--muted)">⚠️ 체결가 입력 (참고가 ${r.entry ?? '-'})</div>`)
-            : `<span style="color:var(--muted);font-size:11px">추적대기</span><div style="font-size:9px;color:var(--muted)">${r.entry?'앱 새로고침 시 갱신':''}</div>`))
+            : `<span style="color:var(--muted);font-size:11px">추적대기</span><div style="font-size:9px;color:var(--muted)">${_trackingWaitNote(r)}</div>`))
     }</td>
     <td style="white-space:normal;max-width:240px;font-size:11px;color:var(--muted)"><div class="note-clamp" title="${(r.note||'').replace(/"/g,'&quot;')}${r.review?' / 복기: '+r.review.replace(/"/g,'&quot;'):''}">${r.note || ''}${r.review?`<br><i style="color:var(--amber)">복기: ${r.review}</i>`:''}</div></td>
     <td style="white-space:nowrap">
@@ -8650,6 +8660,40 @@ document.getElementById('refresh').addEventListener('click', () => {
   if (mode === 'calendar') { refreshCalendarTab(); } else { load(true); }
 });
 
+// v5.248(사용자 지시 — 종목 히스토리 조회): /api/debug/{ticker} 응답의
+// history 섹션(watch_snapshots/sector_snapshot/journal)을 진단 패널에
+// 렌더 — 순수 함수로 분리해 DOM 없이 테스트 가능하게(CLAUDE.md "텍스트
+// 추출 + Node 실행" 레시피). fmtPrice는 이 함수 밖(이 파일 상단)에
+// 이미 정의된 전역을 그대로 씀 — 가격 형식은 한 곳(fmtPrice)에서만
+// 정의하고 여기서 재구현하지 않는다.
+function _historyPanelHtml(hist, market) {
+  if (!hist) return '';
+  const price = (p) => (p == null ? '-' : fmtPrice(p, market));
+  const watchRows = (hist.watch_snapshots || []).map(w => `
+    <div style="font-size:12px;margin-bottom:2px">
+      <b>${w.tab}</b> ${w.signal_date || '-'} · 피벗 ${price(w.pivot)} · 손절 ${price(w.stop)}
+      ${w.status ? ` · ${w.status}` : ''}${w.confirmed_at ? ` · 확인 ${w.confirmed_at}` : ''}${w.confirm_close != null ? ` @ ${price(w.confirm_close)}` : ''}
+    </div>`).join('');
+  const sectorRows = (hist.sector_snapshot || []).map(s => `
+    <div style="font-size:12px;margin-bottom:2px">
+      ${s.date} · ${s.sector}${(s.hit_tabs || []).length ? ' · 히트: ' + s.hit_tabs.join(', ') : ''}${s.is_leader ? ' · 👑 대장' : ''}
+    </div>`).join('');
+  const journalRows = (hist.journal || []).map(j => `
+    <div style="font-size:12px;margin-bottom:2px">
+      ${j.date || '-'} · ${j.status || '-'}${j.tab ? ` (${j.tab})` : ''} · 진입 ${price(j.entry)}${(j.result_r !== '' && j.result_r != null) ? ` · 결과 ${j.result_r}R` : ''}
+    </div>`).join('');
+  const noRecord = !watchRows && !sectorRows && !journalRows;
+  const body = noRecord
+    ? `<div style="color:var(--muted);font-size:12px">스캐너 기록 없음</div>`
+    : `${watchRows ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">탭 감지 이력</div>${watchRows}` : ''}
+       ${sectorRows ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">섹터 스냅샷</div>${sectorRows}` : ''}
+       ${journalRows ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">저널</div>${journalRows}` : ''}`;
+  return `
+    <div style="border-top:1px solid var(--line);padding-top:8px;margin-top:8px">
+      <div style="font-size:13px;font-weight:600;color:#a78bfa;margin-bottom:4px">🕘 종목 히스토리${hist['요약'] ? ` — ${hist['요약']}` : ''}</div>
+      ${body}
+    </div>`;
+}
 // v4.62: 왜 안 잡혔나 진단
 async function runDiag() {
   const inp = document.getElementById('cardSearch');
@@ -8738,6 +8782,7 @@ async function runDiag() {
         <ul style="margin:0 0 10px;padding-left:18px">${reasons}</ul>
         ${pivotHtml}
         ${hlHtml}
+        ${_historyPanelHtml(d.history, d.market)}
         <div style="border-top:1px solid var(--line);padding-top:8px">${keyInd}</div>
       </div>`;
   } catch (e) {

@@ -5,6 +5,70 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.248 [신규] 종목 히스토리 조회 — /api/debug/{ticker}에 history 섹션
+        추가 (사용자 지시). 검색창에 종목명/코드를 넣으면 스캐너가
+        그 종목을 언제 어느 탭에서 잡았는지, 저널에 담긴 적 있는지
+        한 화면에서 볼 수 있다 — 금강철강 조회를 railway ssh로 파일
+        4개(journal_user.json/auto_watch.json/signal_snapshot_cache.json/
+        sector_snapshot.json) pull해 수동 검색했던 걸 화면에서 바로
+        할 수 있게 한 것. 새 화면·새 엔드포인트 없음(사용자 지시) —
+        기존 진단 패널(`runDiag()`, `#cardSearch`)과 `/api/debug/{ticker}`
+        를 그대로 확장.
+        [구현] ① `_ticker_scan_history(ticker)`(app.py) 신설 — 조회
+        전용, 아무것도 안 씀. `_auto_watch`/`_signal_snapshots`(이미
+        프로세스 메모리 상주, 파일 I/O 없음)에서 탭별 signal_date/
+        pivot/stop/status/confirmed_at/confirm_close를 병합(같은 탭이
+        둘 다에 있으면 더 풍부한 auto_watch만 채택, signal_snapshot
+        전용 탭도 보존), `sector_snapshot.load_all()`에서 날짜별
+        hits/leaders에 이 티커가 있는지 전수 스캔(leaders 필드가
+        날짜에 따라 문자열 목록/`{ticker,qualifies}` 목록 두 스키마인
+        것 확인·둘 다 처리), `load_journal()`에서 이 티커 레코드.
+        셋 다 없으면 "스캐너 기록 없음" 명시.
+        ② `debug_ticker()`의 티커 해석을 `resolve_name_to_ticker()`
+        (검색창/경보 등록과 동일한 단일 해석 지점, 사용자 지시로 재사용
+        — 새 파서 안 만듦)로 교체 — 기존 "숫자코드+접미사 자동매칭"은
+        이 함수의 부분집합이라 그대로 대체됨. 종목명 입력 지원 추가,
+        해석 실패 시 "종목을 찾을 수 없음"을 명시적으로 반환(조용히
+        빈 결과 내지 않음, 사용자 지시). 단, 유니버스 밖의 유효한 티커
+        (코드로 직접 조회하는 기존 동작)는 하드 에러로 안 막고 원문
+        그대로 시도 — `resolve_name_to_ticker()`의 `not_in_universe`
+        사유만 예외 처리해 기존 동작을 보존.
+        ③ `static/index.html`: `_historyPanelHtml(hist, market)` 신설,
+        `runDiag()` 결과 패널에 섹션 추가(탭 감지 이력/섹터 스냅샷/저널
+        3단, 없으면 "스캐너 기록 없음").
+        [비용 판단 — 사용자 지시로 위임] `_auto_watch`/`_signal_snapshots`
+        참조는 추가 비용 없음(인메모리). `load_journal()`은 매 호출
+        디스크 읽기지만 파일이 작음(프로덕션 실측 ~150KB). `sector_
+        snapshot.load_all()`도 매 호출 디스크 읽기 — 프로덕션 파일
+        크기(~470KB, 날짜별 누적)를 확인했고, 이 엔드포인트가 이미
+        하는 OHLC fetch + RS 번들 대기보다 JSON 파싱 비용이 훨씬 작아
+        별도 캐시 없이 그대로 읽기로 결정. 파일이 수 MB 이상으로
+        커지면 재검토 대상.
+        [검증] `_ticker_scan_history()` 7건(3소스 전부/일부만/전혀
+        없음/auto_watch·signal_snapshot 병합 중복 제거/signal_snapshot
+        전용 탭 보존/leaders 두 스키마/시간순 정렬), `debug_ticker()`
+        엔드포인트(mocked_env) 5건(이름 검색/코드 검색(접미사 유무)/
+        해석 실패/후보 모호), 프론트 `_historyPanelHtml` 5건 —
+        test_ticker_history.py 12건 + 프론트 부분은
+        test_history_panel_and_tracking_note.py에 포함. 사보타지 2회
+        (name_not_found 에러 경로 제거, auto_watch/signal_snapshot
+        중복제거 로직 제거) 모두 정확히 FAIL 확인 후 원복.
+        [수정, 사소 — 같이 배포] "내 일지" 추적대기 문구 — 손절가
+        없으면 "손절가 입력 필요"로. [확정된 원인] 손익 칸의
+        "추적대기 · 앱 새로고침 시 갱신"은 `r.tracking && r.last_price
+        && r.stop` 중 하나라도 없으면 뜨는데, 문구는 항상 "새로고침"을
+        권했다 — 손절가가 없는 경우(사용자가 직접 입력해야만 채워짐)엔
+        새로고침해도 절대 안 풀린다. [수정] `_trackingWaitNote(r)`
+        (static/index.html) 신설 — `!r.stop`이면 "손절가 입력 필요",
+        손절은 있고 가격만 아직 안 온 경우(실제로 다음 폴링/새로고침
+        으로 풀림)는 기존 "앱 새로고침 시 갱신" 그대로 유지. 체결가만
+        없는 경우(한미사이언스류, 손절은 있음)는 기존 "R 미산출 ·
+        체결가 입력"(다른 분기, 안 건드림)과 자동으로 구분됨.
+        [검증] test_history_panel_and_tracking_note.py 4건(손절없음+
+        진입가있음/손절없음+진입가없음도 손절안내 우선/손절있고
+        가격만없음은 기존 새로고침 문구/손절있고진입가없음은 빈 문자열).
+        사보타지 1회(손절 체크 제거) 정확히 FAIL 확인 후 원복. 전체
+        테스트 543건 통과(기존 521 + 신규 22).
 v5.247 [긴급수정] 일지 삭제가 안 되던 사고 — 병합 가드가 삭제를 계속
         되살림 (사용자 지시, 사용 자체를 막는 문제라 장중 즉시 배포).
         [확정된 원인] "내 일지" ✕ 삭제(`delJournal()`)는 전용 삭제
@@ -6842,7 +6906,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.247"
+VERSION = "v5.248"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -11570,6 +11634,99 @@ def _trace_imminent(df, is_kr, rs_rank):
             "near_pct": round(near * 100, 2), "risk_pct": rrb.get("risk_pct"), "stop": rrb.get("stop")}
 
 
+def _ticker_scan_history(ticker: str) -> dict:
+    """v5.248(사용자 지시 — 종목 히스토리 조회): 이 종목을 스캐너가 언제
+    어느 탭에서 잡았는지, 저널에 담긴 적 있는지 한 번에 모은다. 오늘
+    금강철강을 railway ssh로 파일 4개(journal_user.json/auto_watch.json/
+    signal_snapshot_cache.json/sector_snapshot.json) pull해 수동 검색
+    했던 걸 화면에서 바로 할 수 있게 하는 게 목적 — 새 저장소를 안 만들고
+    기존 인메모리 상태·기존 로더만 참조한다(조회 전용, 아무것도 안 씀).
+
+    비용 판단(사용자 지시로 위임): `_auto_watch`/`_signal_snapshots`는
+    이미 프로세스 메모리에 상주(파일 I/O 없음). `load_journal()`은 매
+    호출 디스크 읽기지만 파일이 작아(프로덕션 실측 ~150KB) 무시 가능.
+    `sector_snapshot.load_all()`도 매 호출 디스크 읽기인데, 프로덕션
+    파일 크기를 확인(~470KB, 날짜별로 계속 누적)한 결과 이 엔드포인트가
+    이미 하는 OHLC fetch + RS 번들 대기보다 JSON 파싱 비용이 훨씬 작아
+    별도 캐시 없이 그대로 읽는다 — 파일이 수 MB 이상으로 커지면 재검토
+    대상(사용자 지시로 지금은 그대로 두기로 함)."""
+    watch_rows = []
+    seen_tabs = set()
+    for source, is_auto_watch in ((_auto_watch, True), (_signal_snapshots, False)):
+        for key, entry in source.items():
+            if not key.startswith(f"{ticker}|"):
+                continue
+            tab = entry.get("tab") or key.split("|", 1)[1]
+            if is_auto_watch:
+                seen_tabs.add(tab)
+                watch_rows.append({
+                    "tab": tab, "signal_date": entry.get("signal_date"),
+                    "pivot": entry.get("pivot"), "stop": entry.get("stop"),
+                    "status": entry.get("status"),
+                    "confirmed_at": entry.get("confirmed_at"),
+                    "confirm_close": entry.get("confirm_close"),
+                    "source": "auto_watch",
+                })
+            elif tab not in seen_tabs:
+                # signal_snapshot에만 있고 auto_watch엔 없는 탭(더 오래돼
+                # 만료됐거나 auto_watch가 아직 안 생겼던 시절 신호) — 있는
+                # 필드만 채워서 보존.
+                watch_rows.append({
+                    "tab": tab, "signal_date": entry.get("signal_date"),
+                    "pivot": entry.get("pivot"), "stop": entry.get("stop"),
+                    "status": None, "confirmed_at": None, "confirm_close": None,
+                    "source": "signal_snapshot",
+                })
+    watch_rows.sort(key=lambda r: r.get("signal_date") or "")
+
+    sector_rows = []
+    try:
+        sec_data = sector_snapshot.load_all()
+        for date, day in sec_data.items():
+            for key, entry in day.items():
+                hits = entry.get("hits") or {}
+                matched_tabs = [mode for mode, tickers in hits.items() if ticker in (tickers or [])]
+                leaders = entry.get("leaders") or []
+                # leaders는 날짜별로 스키마가 다르다(문자열 목록 vs
+                # {"ticker","qualifies"} 목록, 실측 확인) — 둘 다 처리.
+                is_leader = any(
+                    (t == ticker) if isinstance(t, str) else (t.get("ticker") == ticker)
+                    for t in leaders
+                )
+                if matched_tabs or is_leader:
+                    sector_rows.append({
+                        "date": date,
+                        "sector": entry.get("sector") or key.split("|", 1)[0],
+                        "hit_tabs": matched_tabs,
+                        "is_leader": is_leader,
+                    })
+        sector_rows.sort(key=lambda r: r["date"])
+    except Exception:
+        pass   # 조회 전용 진단 섹션 — 실패해도 나머지 응답에 영향 없음
+
+    journal_rows = []
+    try:
+        for r in load_journal():
+            if r.get("ticker") == ticker:
+                journal_rows.append({
+                    "date": r.get("date"), "status": r.get("status"),
+                    "entry": r.get("entry"), "stop": r.get("stop"),
+                    "result_r": r.get("result_r"), "tab": r.get("tab"),
+                })
+        journal_rows.sort(key=lambda r: r.get("date") or "")
+    except Exception:
+        pass
+
+    no_record = not watch_rows and not sector_rows and not journal_rows
+    return {
+        "watch_snapshots": watch_rows,
+        "sector_snapshot": sector_rows,
+        "journal": journal_rows,
+        "요약": "스캐너 기록 없음" if no_record else
+                f"탭 히스토리 {len(watch_rows)}건 · 섹터스냅샷 {len(sector_rows)}건 · 저널 {len(journal_rows)}건",
+    }
+
+
 @app.get("/api/debug/{ticker}")
 async def debug_ticker(ticker: str):
     """진단용: 종목의 최근 OHLC 원본 + ATR 분해 + 각 모드 통과/탈락 여부.
@@ -11578,13 +11735,24 @@ async def debug_ticker(ticker: str):
     from scanner import (analyze, analyze_turnaround, analyze_imminent,
                          analyze_breakout, analyze_leader, analyze_super, analyze_surge,
                          analyze_boxbreak, rs_raw_score, rs_quarters_used)
-    # 접미사(.KS/.KQ) 없이 숫자코드만 입력해도 유니버스에서 자동 매칭
+    # v5.248(사용자 지시 — 종목 히스토리 조회): 접미사 없는 숫자코드
+    # 자동매칭(기존)에 종목명 입력도 지원 — resolve_name_to_ticker()
+    # (검색창/경보 등록과 동일한 단일 해석 지점, 사용자 지시로 재사용)
+    # 재사용. 다만 "유니버스 밖의 유효한 티커"(예: 상위 1500 밖 종목을
+    # 코드로 직접 조회)는 기존에도 됐던 동작이라 그대로 유지 — reason이
+    # not_in_universe면 하드 에러로 막지 않고 원문을 그대로 시도.
+    from universe import resolve_name_to_ticker
     _uni = get_universe(None)
-    if ticker not in _uni:
-        for suf in (".KS", ".KQ"):
-            if (ticker + suf) in _uni:
-                ticker = ticker + suf
-                break
+    _res = resolve_name_to_ticker(ticker, _uni)
+    if _res["candidates"]:
+        return JSONResponse({"error": "여러 종목이 검색됐어요 — 정확한 코드로 다시 시도하세요.",
+                              "candidates": _res["candidates"], "query": ticker})
+    if _res["ticker"]:
+        ticker = _res["ticker"]
+    elif _res["reason"] == "name_not_found":
+        return JSONResponse({"error": "종목을 찾을 수 없음", "query": ticker})
+    else:
+        ticker = ticker.upper()   # not_in_universe — 원문 그대로 시도(기존 동작 유지)
     df = _fetch(ticker)
     if df is None or df.empty:
         return JSONResponse({"error": "데이터 없음", "ticker": ticker})
@@ -11834,6 +12002,11 @@ async def debug_ticker(ticker: str):
             }
     except Exception as _e:
         payload["매집채점"] = {"error": str(_e)}
+    # v5.248(사용자 지시 — 종목 히스토리 조회)
+    try:
+        payload["history"] = _ticker_scan_history(ticker)
+    except Exception as _e:
+        payload["history"] = {"error": str(_e)}
     # ensure_ascii=False + charset 명시 → 모바일에서 한글 안 깨짐
     return Response(
         content=_json.dumps(payload, ensure_ascii=False, indent=2),
