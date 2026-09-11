@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.244</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.245</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -2140,6 +2140,7 @@ function card(s) {
     <div class="price-row mono">
       <span class="price">${fmtPrice(s.close, s.market)}</span>
       <span class="chg ${chgCls}">${chgSign}${s.change_pct}%</span>
+      ${s.price_stale_note ? `<span class="stale-note" style="font-size:10px;color:var(--muted)" title="이 종목 가격을 마지막으로 실제로 받아온 시각(장마감 후엔 마지막 종가 날짜)이에요. 스캔은 스냅샷이라 최대 30분(REUSE_TTL)까지 재사용될 수 있어 지금 실제가와 다를 수 있어요.">(${s.price_stale_note})</span>` : ''}
     </div>
     ${sparkSVG(s.spark, s.spark_ma20)}
     ${(s.mode === 'pullback' || s.mode === 'turnaround' || s.mode === 'breakout' || s.mode === 'imminent' || s.mode === 'boxbreak' || s.mode === 'pattern') && (s.volume || s.turnover) ? `
@@ -2663,9 +2664,16 @@ async function load(refresh = false) {
     if (data.version) { const vb = document.getElementById('verBadge'); if (vb) vb.textContent = data.version; }
     const _tm = data.timing;
     const _tmStr = _tm ? ` · ⏱ KR ${_tm.kr_sec}s / US ${_tm.us_sec}s / RS ${_tm.rs_sec}s (신규 ${_tm.n_fetched_kr+_tm.n_fetched_us}, 재사용 ${_tm.n_reused})` : '';
+    // v5.245(사용자 지시 — 스캔 결과 시각 표기): "기준 HH:MM:SS"는
+    // "이 시각의 계산 결과"라는 뜻인데 "이 가격의 시각"으로 오독되기
+    // 쉬웠다(한화생명 09:15 사고 — 실제 가격은 훨씬 이전 값인데
+    // "기준 09:15:03"을 보고 방금 값이라 오인). "스캔실행"으로 바꿔
+    // 이건 계산이 돈 시각이지 가격 시각이 아님을 명시 — 개별 종목
+    // 가격이 언제 값인지는 카드마다 price_stale_note(아래 renderCards
+    // 참고)가 따로 담당한다.
     status.innerHTML = `<span><b>${data.fetched ?? data.scanned}</b>/${data.scanned}개 종목 스캔</span>
       <span>${(typeof MODE_TAB_LABEL !== 'undefined' && MODE_TAB_LABEL[mode]) || modeTab(mode) || '스캔'} 후보 <b>${data.hits.length}</b>개</span>
-      <span>기준 ${data.generated_at}${data.cached ? ' (캐시)' : ''}${_tmStr}</span>
+      <span>스캔실행 ${data.generated_at}${data.cached ? ' (캐시)' : ''}${_tmStr}</span>
       ${data.partial ? `<span style="color:#f2b33d" title="실적 조회가 시간 제한(45초)을 넘어 일부 종목만 확인했어요. 잠시 후 다시 스캔하면 캐시가 쌓여 더 빨라져요.">⏳ 일부만 확인</span>` : ''}
       ${data.warn_count ? `<span style="color:#FF6B6B">⚠️ 경보/과대리스크 ${data.warn_count}</span>` : ''}
       <span class="alert-mgr" id="alertToggle">경보종목 관리</span>`;
@@ -6792,6 +6800,28 @@ function onMaStatusChange() {
     const m = document.querySelector('#journalModal .modal');
     if (m) m.style.transform = ''; };
 })();
+// v5.245(사용자 지시 — 스캔 결과 시각 표기, 한화생명 09:15 스캔가 vs
+// 실제가 2.3% 괴리 사고 후속): saveJournal() 저장 직전 "이 카드 가격이
+// 오래됐을 수 있다" 확인 절차의 순수 로직만 분리 — DOM/fetch 없이
+// 테스트 가능하게(CLAUDE.md "텍스트 추출 + Node 실행" 레시피).
+// 저장 자체는 막지 않는다(Cancel해도 그냥 저장을 취소할 뿐, 저널
+// 등록 기능 자체를 잠그지 않음 — R게이트와 다른 성격, 사용자 지시).
+function _staleGateApplies(wouldEnter, priceStaleLive) {
+  // priceStaleLive는 서버(app.py _price_staleness_fields())가 "장중 +
+  // PRICE_STALE_MINUTES 이상 경과"일 때만 true — 장마감 후엔 재조회해도
+  // 똑같은 종가라 여기 안 걸림(카드 배지만 항상 뜸, 등록 확인은 안 뜸).
+  return !!(wouldEnter && priceStaleLive);
+}
+function _staleConfirmMessage(closePrice, staleNote, freshPrice) {
+  const noteText = staleNote || '스캔 당시';
+  if (freshPrice == null) {
+    // /api/prices 재조회 실패(네트워크 등) — fail-open, 경고만 하고 진행 가능.
+    return `이 카드 가격(${closePrice})은 ${noteText} 값이에요 — 지금과 다를 수 있어요.\n현재가를 다시 확인하지 못했어요(네트워크 오류).\n\n그래도 이 가격으로 등록할까요?`;
+  }
+  const diffPct = closePrice ? Math.round((freshPrice / closePrice - 1) * 1000) / 10 : null;
+  const diffStr = diffPct != null ? ` (${diffPct > 0 ? '+' : ''}${diffPct}%)` : '';
+  return `이 카드 가격(${closePrice})은 ${noteText} 값이에요 — 지금과 다를 수 있어요.\n방금 확인한 현재가: ${freshPrice}${diffStr}\n\n그래도 카드 가격(${closePrice})으로 등록할까요?`;
+}
 async function saveJournal() {
   const s = pendingStock; if (!s) return;
   // 중복 확인: 같은 종목이 아직 추적 중이면 — 덮어쓰기가 아니라 '별개의 새 기록'으로 추가할지 확인.
@@ -6811,6 +6841,21 @@ async function saveJournal() {
   // 관찰 카테고리·돌파 계열(pending)은 항상 허용. 즉시 진입만 게이트 통과 필요.
   const _cat = (document.getElementById('jmCat') && document.getElementById('jmCat').value) || '';
   const wouldEnter = _cat !== '관찰' && _cat !== '대기' && !['breakout', 'imminent', 'boxbreak'].includes(s.mode);
+  // ── 가격 스냅샷 최신성 확인 (v5.245, 사용자 지시 — 한화생명 09:15
+  // 스캔가 vs 실제가 2.3% 괴리 사고 후속) ── R게이트보다 먼저: "이
+  // 트레이드를 해도 되나"보다 "이 데이터를 믿어도 되나"가 앞선 질문.
+  if (_staleGateApplies(wouldEnter, s.price_stale_live)) {
+    let freshPrice = null;
+    try {
+      const res = await fetch('/api/prices', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tickers: [s.ticker] })
+      });
+      const j = await res.json();
+      freshPrice = (j.prices || {})[s.ticker] ?? null;
+    } catch (e) { /* 아래에서 fail-open 처리(freshPrice=null) */ }
+    if (!confirm(_staleConfirmMessage(s.close, s.price_stale_note, freshPrice))) return;
+  }
   let forcePending = false;
   if (wouldEnter && rSettings.equity) {
     const gate = entryGate();

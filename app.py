@@ -5,6 +5,83 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.245 [수정] 스캔 결과 시각 표기 — 카드 가격이 언제 값인지 명시
+        (사용자 지시, 2026-09-11 "한화생명 09:15 스캔가(5,980) vs
+        실제가(5,840) 2.3% 괴리" 조사 후속).
+        [확정된 원인] 카드의 close/entry는 종목별 실제 fetch 시각
+        (data_ts)이 REUSE_TTL(30분) 이내면 재사용되는 스냅샷이라 최대
+        30분까지 stale할 수 있는데, 화면 어디에도 "이 가격이 언제
+        값인지" 표기가 없어 현재가로 오인됐다. 기존 탭 상단 "기준
+        HH:MM:SS"(`generated_at`)는 스캔 계산이 실행된 시각일 뿐 —
+        `_cache["{market}:{mode}"]`(모드별 결과 캐시, 10분 TTL)가
+        히트하면 이 값 자체도 최대 10분 전 값이고, 그 계산 안에서
+        쓰인 개별 종목 가격은 REUSE_TTL 재사용으로 또 최대 30분 더
+        묵을 수 있어 실제 가격 시각과는 이중으로 괴리될 수 있었다.
+        v5.215의 "(전일 종가 기준)" 표기는 US 시장 + 캘린더 "🔴
+        즉시행동"/"🔎 후보" 카드에만 적용돼 있어 KR + 일반 탭(눌림목
+        등)은 이번 사고의 사각지대였다.
+        [수정] ① `_price_staleness_fields(df, data_ts_val, is_kr)`
+        (app.py) 신설 — 장중/장마감 두 국면을 다르게 처리(1차 설계는
+        장중에만 표시였으나, "KST 22시에 KR 카드를 보다 혼란을 겪은"
+        실사례로 재검토): 장중엔 `data_ts_val`(실제 fetch 시각) 기준
+        `PRICE_STALE_MINUTES`(=REUSE_TTL//2=15분, REUSE_TTL은 "재사용
+        허용 상한"이지 "안전한 전형값"이 아니라 절반을 조기경보
+        절충점으로 판단 — 실측/백테스트 아닌 AI 판단값, 재검토 여지
+        명시. `SIGNAL_SNAPSHOT_RESET_PIVOT_PCT=3%` 출처 미기재 사고
+        재발 방지 원칙에 따라 근거를 코드 주석에 직접 유지) 이상이면
+        "📸 HH:MM 기준" 표시. 장마감 후엔 **항상** 표시하되 소스가
+        다름 — `data_ts_val`(fetch 시각)이 아니라 df 마지막 봉 날짜를
+        "📸 MM-DD 종가 기준"으로 표시(fetch 시각과 종가가 속한 거래일은
+        다를 수 있음 — 예: 다음날 개장 전 fetch해도 데이터는 여전히
+        전날 종가). `run_scan()`의 각 hit에 `price_stale_note`(문구)/
+        `price_stale_live`(장중+N분 경과 케이스인지, 저널 등록 확인
+        트리거용) 추가.
+        ② `static/index.html` 카드(`price-row`, 5개 메인 탭 공용
+        `card()` 함수)에 가격 옆 조건부 표시 — `priceBasisNoteText`의
+        괄호 표기 관례(`(전일 종가 기준)`)와 종가베팅 탭의 "📸 스냅샷
+        기준" 관례를 결합. muted 톤, 신선하면(장중+N분 미만) 아예 안
+        보임(경고 아닌 정보, 과하게 만들지 않음).
+        ③ 탭 상단 "기준 HH:MM:SS" → "스캔실행 HH:MM:SS"로 라벨 교체
+        — "기준"이라는 모호한 말이 가격 시각으로 오독되던 걸 "계산이
+        돈 시각"임을 명시해 방지. 값을 바꾸지 않고 라벨만 교체(카드가
+        이제 가격 시각을 전담하므로 탭 상단에 또 다른 시각을 나란히
+        만들면 "뭘 믿어야 하나" 혼란이 새로 생긴다고 판단, 병기 대신
+        역할 분리).
+        ④ `saveJournal()`("+일지") 저장 시 `price_stale_live`면(즉시
+        진입 카테고리 + 장중 + N분 이상 경과) `/api/prices`(기존
+        엔드포인트 재사용)로 현재가를 다시 조회해 카드 가격과 비교하는
+        confirm 표시 — 저장 자체는 막지 않음(Cancel해도 저장만
+        취소, 저널 등록 기능 자체는 안 잠금 — v5.244 R게이트와 다른
+        성격). `/api/prices` 실패(네트워크 등) 시 fail-open — 경고만
+        하고 진행 가능.
+        [적용 범위 밖 — 알려진 한계, 기록만] `markEntered()`("대기→
+        진입" 버튼)는 이번 확인 절차 대상이 아니다 — 이미 저장된
+        entry/stop을 그대로 쓰는 전환이라 이번 사고(스캔 카드의 close가
+        그 순간 그대로 얼어붙는 것)의 발생 지점이 아니라고 판단해
+        범위에서 제외했다(사용자 지시로 범위는 그대로 두되 이 사실만
+        기록). **단, 그 저장된 entry/stop 자체가 대기 등록 시점의
+        stale 스캔값일 수 있다는 문제는 남아있다** — 예: 대기로 담아둔
+        뒤 3일 후 진입 전환하면, 그 entry는 3일 전 스캔 시점 값이고
+        지금 이 확인 절차 어디도 그걸 다시 검증하지 않는다. 다음에
+        "왜 대기→진입 전환엔 현재가 확인이 없지"를 다시 조사하는 일이
+        없도록 여기 남겨둔다 — 필요해지면 markEntered()에도 같은
+        `/api/prices` 재조회+confirm 패턴을 붙이는 게 자연스러운
+        확장이다(이번엔 범위 밖으로 명시적으로 뺀 것뿐, 기술적으로
+        막혀서가 아님).
+        [검증] `_price_staleness_fields()` 장중(신선/stale)·장마감
+        (data_ts 신선해도 항상 표시·날짜 소스가 fetch시각이 아니라
+        마지막 봉인지)·data_ts 없음·빈 df 등 10건(test_price_staleness.py),
+        `_staleGateApplies`/`_staleConfirmMessage`(saveJournal()에서
+        DOM 없이 추출해 Node 실행) 11건(test_stale_price_confirm.py).
+        사보타지 4회(장중 fresh/stale 비교 방향 뒤집기, 장마감 날짜
+        소스를 fetch시각으로 바꿔치기, priceStaleLive 무시, 네트워크
+        실패 문구 제거) 모두 해당 테스트가 정확히 FAIL하는 것을 확인
+        후 원복. 전체 테스트 492건 통과(기존 471 + 신규 21) —
+        `test_ma_ticker_format.py::test_full_universe_no_false_rejects`
+        1건은 이번 작업과 무관하게 KR 유니버스 실시간 조회가 일시
+        저하돼(1505개 정상 대비 256개만 로드) 실패 중, 별도 확인 필요
+        (이번 커밋에 포함된 코드 변경과 무관 — 네트워크/데이터소스
+        문제로 판단).
 v5.244 [수정] R 게이트 경고줄 오표시 + 차단 다이얼로그 우회로 안내
         (사용자 지시, gate_kr='correction' 조사 후속).
         [확정된 원인] 조사 결과, "+일지"/"대기→진입"의 게이트 차단
@@ -6624,10 +6701,20 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.244"
+VERSION = "v5.245"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
+# v5.245(사용자 지시 — 2026-09-11 "한화생명 09:15 스캔가 vs 실제가
+# 2.3% 괴리" 사고 후속): 카드 가격이 몇 분 지난 값인지 표기할 임계값.
+# REUSE_TTL(재사용 "허용 상한")의 절반 — 상한 그대로 쓰면 재수집
+# 직전에만 뜨는 늦은 경보가 되고, 너무 낮으면(예: 5분) 정상 재사용
+# 구간에서도 계속 떠서 무시하게 된다. 절반 지점("재사용 허용 구간의
+# 후반부에 들어섰다")을 조기경보 절충점으로 판단 — 실측/백테스트가
+# 아닌 AI 판단값이라 명시(SIGNAL_SNAPSHOT_RESET_PIVOT_PCT=3% 출처
+# 미기재 사고 재발 방지, CLAUDE.md 참고). REUSE_TTL 값이 바뀌면
+# 이 값도 같이 바뀌도록 리터럴 대신 REUSE_TTL 참조로 계산.
+PRICE_STALE_MINUTES = REUSE_TTL // 60 // 2
 MAX_CONCURRENT_FETCH = 6    # 데이터 소스 동시 호출 제한 (차단 방지)
 US_BATCH_SIZE = 100         # 미국 종목 yf.download 배치 크기 (요청 수 1/N로 축소)
 KR_MAX_CONCURRENT = int(os.environ.get("KR_MAX_CONCURRENT", "10"))  # 한국 네이버 동시 호출 (16→10 원복)
@@ -6921,6 +7008,46 @@ def _is_market_open_now(is_kr: bool) -> bool:
     if is_kr:
         return 9 * 60 <= hm < 15 * 60 + 30
     return hm >= 22 * 60 or hm < 6 * 60 + 30
+
+
+def _price_staleness_fields(df, data_ts_val: float | None, is_kr: bool) -> tuple[str | None, bool]:
+    """v5.245(사용자 지시 — 스캔 결과 시각 표기, 2026-09-11 "한화생명
+    09:15 스캔가 vs 실제가 2.3% 괴리" 사고 후속). 카드에 표시되는
+    close/entry는 스캔 스냅샷이라 REUSE_TTL(30분)까지 stale할 수
+    있는데, 그게 언제 값인지 화면에 아무 표기가 없어 현재가로
+    오인되는 문제를 고친다.
+
+    장중/장마감 두 국면을 다르게 처리(사용자 지시 — 장중에만 표시하면
+    장마감~다음 개장 전 구간이 통째로 표시 공백이 된다, KST 22시에
+    KR 카드를 보다 혼란을 겪은 실사례로 1차 설계 재검토):
+    - 장중: data_ts_val(이 종목을 실제로 마지막 fetch한 시각)이
+      PRICE_STALE_MINUTES 이상 지났을 때만 그 시각을 HH:MM으로 표시
+      — "오늘 데이터인가"는 장중이니 자명, "몇 분 전 값인가"가 핵심.
+    - 장마감 후: 항상 표시하되 data_ts_val(fetch 시각)이 아니라 df의
+      마지막 봉 날짜(그 종가가 실제로 어느 거래일 것인지)를 쓴다 —
+      fetch 시각과 종가가 속한 거래일은 다를 수 있다(예: 다음날
+      개장 전 08:50에 fetch해도 데이터는 여전히 전날 종가). 사용자가
+      알고 싶은 건 "몇 시에 받았나"가 아니라 "어느 날 종가인가".
+
+    반환: (price_stale_note: str|None — 카드에 표시할 문구(None이면
+           표시 안 함), price_stale_live: bool — "장중 + N분 이상
+           경과" 케이스인지. saveJournal() 등록 시 현재가 재확인
+           트리거로만 쓰임 — 장마감 후엔 재조회해도 같은 종가라
+           트리거 대상 아님)."""
+    if _is_market_open_now(is_kr):
+        if data_ts_val is None:
+            return None, False
+        age_sec = time.time() - data_ts_val
+        if age_sec < PRICE_STALE_MINUTES * 60:
+            return None, False
+        hm = datetime.fromtimestamp(data_ts_val, KST).strftime("%H:%M")
+        return f"📸 {hm} 기준", True
+    try:
+        last_date = df.index[-1]
+        date_str = last_date.strftime("%m-%d")
+    except Exception:
+        return None, False
+    return f"📸 {date_str} 종가 기준", False
 
 
 def _calendar_default_market_session() -> str:
@@ -9285,6 +9412,7 @@ async def run_scan(market: str, mode: str, refresh: bool = False) -> dict:
     rs_moms = bundle["rs_moms"]
     rs3_ranks = bundle.get("rs3_ranks", {})   # v5.71 — 구 디스크캐시 호환 위해 .get
     rs_deltas = bundle.get("rs_deltas", {})
+    data_ts = bundle.get("data_ts", {})   # v5.245 — 종목별 실제 fetch 시각(카드 가격 시각 표기용)
     _scan_timing = bundle.get("timing")
 
     fn = {"turnaround": analyze_turnaround, "leader": analyze_leader, "super": analyze_super, "breakout": analyze_breakout, "surge": analyze_surge, "imminent": analyze_imminent, "boxbreak": analyze_boxbreak, "breakdown": analyze_breakdown, "pattern": analyze_pattern}.get(mode, analyze)
@@ -9354,10 +9482,16 @@ async def run_scan(market: str, mode: str, refresh: bool = False) -> dict:
             snap_stop = float(df["Low"].iloc[-1]) if mode == "imminent" else result.get("stop")
             if _record_signal_snapshot(t, GATE_MODE_LABELS[mode], df, result.get("pivot"), snap_stop):
                 snapshot_dirty = True
+        # v5.245: 카드 가격이 언제 값인지 표기(설계 보고 참고) —
+        # _price_staleness_fields()가 장중/장마감 두 국면을 다르게 처리.
+        price_stale_note, price_stale_live = _price_staleness_fields(df, data_ts.get(t), is_kr)
         hits.append({"ticker": t, "name": universe[t], "market": mkt,
                      **_sector_fields(t, bundle), "alert": alert_kind,
                      "climax": cw["climax"], "climax_reasons": cw["reasons"],
-                     "climax_level": cw["level"], **result})
+                     "climax_level": cw["level"],
+                     "price_stale_note": price_stale_note,
+                     "price_stale_live": price_stale_live,
+                     **result})
         if is_kr: diag["kr_hits"] += 1
         else: diag["us_hits"] += 1
 
