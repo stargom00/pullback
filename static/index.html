@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.246</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.247</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -5734,20 +5734,36 @@ let _journalSaveChain = Promise.resolve();
 // entry_actual/entry_actual_date/entry_source(실체결 3필드)를 클라이언트
 // 값으로 갱신하고, 그 외(id 생략 = 자동저장 전부)는 서버 값을 그대로
 // 지킨다 — 스테일 캐시가 토스 자동채움 등을 덮어쓰는 걸 서버가 막는다.
+// v5.247(사용자 지시 — 일지 삭제 안 되는 사고 후속): opts.deletedIds —
+// 이번 저장에서 "의도적으로 뺀" id 목록. 서버의 5분 병합 가드(v5.187,
+// "배열에 없는 레코드가 최근 갱신됐으면 삭제로 안 보고 되살림")는 계속
+// 추적 중인 레코드(자동 가격갱신이 updated_at을 계속 최신으로 만듦)를
+// 지우려 할 때마다 항상 걸려서 삭제가 구조적으로 불가능했다 — 서버는
+// "배열에서 빠짐"만 보고는 "삭제"인지 "이 요청이 그 레코드를 몰라서
+// 안 보냈을 뿐"인지 구분 못 했다. deletedIds로 그 구분 자체를 명시한다
+// (가드는 그대로 유지 — 두 탭 동시 편집 보호는 여전히 필요, "누락"과
+// "삭제"만 구분).
 function setJournal(arr, opts) {
   journalCache = arr;
   const editId = (opts && opts.editId != null) ? opts.editId : null;
-  _journalSaveChain = _journalSaveChain.catch(() => {}).then(() => _saveJournalToServer(journalCache, true, editId));
+  const deletedIds = (opts && Array.isArray(opts.deletedIds) && opts.deletedIds.length) ? opts.deletedIds : null;
+  _journalSaveChain = _journalSaveChain.catch(() => {}).then(() => _saveJournalToServer(journalCache, true, editId, deletedIds));
   return _journalSaveChain;
 }
 
 // 서버 저장 (성공 확인 + 1회 재시도 + 실패 시 알림). setJournal()을 통해서만 호출됨.
-async function _saveJournalToServer(arr, _retry = true, editId = null) {
+async function _saveJournalToServer(arr, _retry = true, editId = null, deletedIds = null) {
   try {
+    // v5.247: editId도 deletedIds도 없는(가장 흔한 자동저장/편집) 경로는
+    // 기존 그대로 배열만 전송 — 새 필드가 필요 없는 저장까지 구조를
+    // 바꾸지 않는다.
+    const payload = (editId != null || deletedIds)
+      ? { records: arr, edit_id: editId, deleted_ids: deletedIds || [] }
+      : arr;
     const res = await fetch('/api/journal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(editId != null ? { records: arr, edit_id: editId } : arr)
+      body: JSON.stringify(payload)
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     // v5.187(사용자 지시 — [1] 병합 가드): 서버가 병합 후 실제로 저장된
@@ -5762,7 +5778,7 @@ async function _saveJournalToServer(arr, _retry = true, editId = null) {
   } catch (e) {
     if (_retry) {   // 1회 재시도
       await new Promise(r => setTimeout(r, 800));
-      return _saveJournalToServer(arr, false, editId);
+      return _saveJournalToServer(arr, false, editId, deletedIds);
     }
     console.error('일지 저장 실패:', e);
     if (typeof showSaveError === 'function') showSaveError();
@@ -8585,10 +8601,30 @@ function updateResult(id, val) {
   const r = j.find(x => x.id === id);
   if (r) { r.result_r = val.trim(); setJournal(j); renderJournal(); }
 }
-function delJournal(id) {
+// v5.247(사용자 지시 — 일지 삭제 안 되는 사고 후속): 서버 응답을 기다린
+// 뒤에 그 결과로 렌더한다(낙관적 렌더 금지 — "삭제 요청을 보냈다"가
+// 아니라 "서버가 실제로 어떻게 처리했는지"를 화면에 반영). deletedIds로
+// 서버의 5분 병합 가드를 우회하지만, 그래도 서버가 거부했거나(방어적
+// 안내용, 정상 상황에선 이제 거의 안 생김) 요청 자체가 네트워크
+// 실패로 서버에 닿지 못했으면 화면에도 그대로 남겨야 한다.
+async function delJournal(id) {
   if (!confirm('이 기록을 삭제할까요?')) return;
-  setJournal(getJournal().filter(x => x.id !== id));
+  const prev = getJournal();
+  const target = prev.find(x => x.id === id);
+  const ok = await setJournal(prev.filter(x => x.id !== id), { deletedIds: [id] });
   if (editingId === id) editingId = null;
+  if (ok === false) {
+    // 네트워크 완전 실패 — setJournal()이 이미 journalCache를 낙관적으로
+    // (지운 채로) 바꿔놨다 — 그대로 두면 실패가 성공처럼 보인다.
+    if (target && !getJournal().some(x => x.id === id)) {
+      journalCache = [...getJournal(), target];
+    }
+    alert('삭제 요청이 서버에 전달되지 못했어요(네트워크 오류). 다시 시도해주세요.');
+  } else if (getJournal().some(x => x.id === id)) {
+    // 서버 응답은 왔지만(ok=true) 그 id가 응답의 journal에 여전히 있음
+    // — deletedIds를 보냈는데도 이러면 이상 상황(방어적 안내).
+    alert('이 기록은 서버에서 삭제되지 않았어요. 잠시 후 다시 시도해주세요.');
+  }
   renderJournal();
 }
 function exportCSV() {

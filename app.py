@@ -5,6 +5,67 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.247 [긴급수정] 일지 삭제가 안 되던 사고 — 병합 가드가 삭제를 계속
+        되살림 (사용자 지시, 사용 자체를 막는 문제라 장중 즉시 배포).
+        [확정된 원인] "내 일지" ✕ 삭제(`delJournal()`)는 전용 삭제
+        API가 없고 "삭제하려는 레코드가 빠진 전체 배열"을 `POST
+        /api/journal`로 다시 저장하는 방식이다. 서버의 병합 가드(v5.187,
+        `JOURNAL_CONCURRENT_KEEP_WINDOW_SEC=300`)는 "배열에 없는
+        레코드가 최근 5분 이내 갱신됐으면 삭제로 보지 않고 되살린다"는
+        규칙인데, 계속 추적 중인(진입/관찰 등 `_isPriceTrackable()`)
+        레코드는 `updateTracking()`이 60초마다 `last_price`/
+        `last_checked`를 갱신해 `updated_at`이 사실상 항상 "5분 이내"
+        였다 — 그래서 활성 레코드는 지워도 서버가 매번 되살렸다.
+        `delJournal()`도 서버 응답을 기다리지 않고 바로 `renderJournal()`
+        을 호출해 화면은 "삭제된 것처럼" 보였다가, 다음 새로고침(서버
+        파일을 다시 읽음, 이미 되살아난 상태)에 다시 나타났다 —
+        railway ssh로 프로덕션 `journal_user.json`을 직접 확인해 재현
+        조건(3건 모두 `status:entered`+`tracking:true`, `updated_at`이
+        확인 시점 기준 수 분 이내)을 실측으로 확정.
+        [수정] ① `POST /api/journal` body에 `deleted_ids`(선택, id 목록)
+        추가 — 이 목록의 id는 최근 갱신 여부와 무관하게 병합 가드를
+        건너뛰고 삭제한다. 기존 `{records, edit_id}` 구조에 필드만
+        얹음(별도 DELETE 엔드포인트 대신 — 이미 "배열 다시 저장" 방식인
+        삭제를 위해 별도 API를 만들면 병합/보호필드 로직을 두 곳에
+        유지해야 함). 가드 자체(두 탭 동시 편집 보호)는 그대로 유지 —
+        `deleted_ids` 없는 누락은 기존처럼 되살아남(회귀 테스트로 확인).
+        ② `delJournal()`이 `setJournal()`(→서버 응답)을 `await`한 뒤
+        그 결과로만 렌더 — 낙관적 렌더 제거. 서버 응답에 그 id가 여전히
+        있으면(이상 상황 방어, deleted_ids로 이제 거의 안 생김) 화면에도
+        남기고 안내. 네트워크가 완전히 실패(재시도까지 실패)하면
+        `setJournal()`이 이미 낙관적으로 지워둔 로컬 캐시를 되돌려
+        "실패가 성공처럼 보이는" 상태를 만들지 않는다.
+        [부수 발견 — 별건, 범위 밖, 기록만] 조사 중 09-05 스왑 레코드
+        (v5.243에서 발견한 그 건, id 1788601136338)를 다시 확인했더니
+        `ticker`/`name`이 **여전히 스왑된 채**였다 — v5.243 3단계(삭제 후
+        재입력)가 실제로 수행되지 않았다. 화면에 "정상으로 보인다"던
+        관찰은 렌더가 고쳐진 게 아니라, 두 값이 각자 형태로 자기소개가
+        되는(코드처럼 생긴 문자열/이름처럼 생긴 문자열) 우연 때문이었다
+        — 실제 슬롯(`name`=굵은 텍스트, `ticker`=작은 mono 텍스트)은
+        여전히 뒤바뀐 채 렌더된다. 이번 배포 후 사용자가 직접 삭제·
+        재입력 예정(③, 이 세션 범위 밖).
+        또한 09-10 중복 2건이 `.KQ`로 저장된 원인도 확인: `saveManualAdd()`
+        가 접미사 없는 숫자 코드 입력 시 `[ticker+'.KQ', ticker+'.KS']`
+        순서로 `/api/prices`를 시도해 먼저 값이 오는 쪽을 채택하는데,
+        `naver_kr.to_code()`가 접미사를 검증하지 않고 6자리 코드만으로
+        naver를 조회해(KOSPI/KOSDAQ 코드가 전역에서 유니크해 접미사가
+        틀려도 정상 데이터가 옴 — CLAUDE.md에 이미 기록된 기존 설계
+        갭) `.KQ`가 항상 먼저 "성공"으로 걸린다. 한미사이언스(008930)는
+        실제로는 KOSPI(.KS)인데 `.KQ`로 저장된 게 이 메커니즘 그대로다.
+        이번 범위 밖 — 근본 수정은 `naver_kr.to_code()`/`is_kr()`이
+        실제 상장 시장을 판정하도록 고치는 별도 작업(다음 세션 과제로
+        기록).
+        [검증] `save_journal()` 6건(`deleted_ids`로 최근 갱신 레코드도
+        삭제됨, `deleted_ids` 없으면 기존처럼 되살아남 — 가드 회귀
+        방지, 구형 배열 body 하위호환, 존재하지 않는 id 무해 처리 등,
+        test_journal_delete_guard.py), `delJournal()`/`setJournal()`/
+        `_saveJournalToServer()` 4건(추출+Node 실행 — 정상 삭제·서버
+        거부 시 화면 유지+안내·네트워크 실패 시 되돌림+안내·payload에
+        deleted_ids 포함 확인, test_del_journal_await.py). 사보타지
+        3회(서버의 deleted_ids 우회 로직 제거 — 원래 사고가 정확히
+        재현됨, 화면의 "서버 거부" 감지 제거, 네트워크 실패 시 되돌림
+        로직 제거) 모두 해당 테스트가 정확히 FAIL하는 것을 확인 후
+        원복. 전체 테스트 521건 통과(기존 511 + 신규 10).
 v5.246 [긴급수정] KR 유니버스 붕괴 복구 — naver PC페이지 개편으로 19시간+
         동적 수집 0건, 정적 폴백(254/1500, 17%)으로 스캔되던 장애
         (사용자 지시, 최우선 처리 — 2026-09-11 12:40 KST 장중 배포).
@@ -6781,7 +6842,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.246"
+VERSION = "v5.247"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -15726,19 +15787,31 @@ async def save_journal(request: Request):
          WINDOW_SEC 안에 갱신된 적 있으면(동시에 다른 경로가 막 추가·
          수정했을 가능성) 삭제로 보지 않고 결과에 되살린다. 그보다 오래된
          값이면 사용자의 의도적 삭제(전체 삭제·개별 삭제)로 보고 그대로 뺀다.
+         **단, deleted_ids에 명시된 id는 이 가드를 건너뛰고 무조건 삭제
+         한다**(v5.247, 사용자 지시 — "일지 삭제가 안 된다" 사고 후속).
+         [확정된 원인] 계속 추적 중인(자동 가격갱신 대상) 레코드는
+         updateTracking()이 60초마다 last_price/last_checked를 바꿔
+         updated_at이 사실상 항상 "5분 이내"였다 — 그래서 그런 레코드는
+         delJournal()로 지워도 이 가드가 "누락"과 "삭제"를 구분 못 해
+         매번 되살렸다(배열에 없다는 사실만으론 "사용자가 지웠다"와
+         "이 요청이 그 레코드를 몰라서 안 보냈다"를 구분할 수 없음).
+         deleted_ids는 그 구분을 클라이언트가 명시적으로 알려주는 필드 —
+         가드 자체(두 탭 동시 편집 보호)는 그대로 유지.
       3) 실제로 내용이 바뀐 레코드만 updated_at을 지금 시각으로 새로
          찍는다 — 안 바뀐 레코드는 서버가 이미 갖고 있던 updated_at을
          그대로 보존(그래야 2번의 "최근 갱신" 판정이 매 저장마다 전부
          갱신되는 걸 막는다).
 
-    body: 배열(구형, 하위호환 — 이 경로는 edit_id 없이 모든 레코드를
-    "자동저장"으로 취급) 또는 {"records": [...], "edit_id": <id 또는 null>}.
+    body: 배열(구형, 하위호환 — 이 경로는 edit_id/deleted_ids 없이 모든
+    레코드를 "자동저장"으로 취급) 또는 {"records": [...], "edit_id":
+    <id 또는 null>, "deleted_ids": [id, ...] (선택, 기본 빈 배열)}.
     원자적 쓰기(temp→rename) + 직전 백업으로 손상/유실 방지는 그대로."""
     body = await request.json()
     if isinstance(body, list):
-        incoming, edit_id = body, None
+        incoming, edit_id, deleted_ids = body, None, set()
     elif isinstance(body, dict) and isinstance(body.get("records"), list):
         incoming, edit_id = body["records"], body.get("edit_id")
+        deleted_ids = set(body.get("deleted_ids") or [])
     else:
         return JSONResponse({"ok": False, "error": "배열 또는 {records:[...]} 필요"}, status_code=400)
 
@@ -15763,8 +15836,12 @@ async def save_journal(request: Request):
         merged.append(r)
 
     revived = 0
+    explicitly_deleted = 0
     for rid, srv in current_by_id.items():
         if rid in incoming_ids:
+            continue
+        if rid in deleted_ids:
+            explicitly_deleted += 1
             continue
         try:
             ts = datetime.fromisoformat(srv.get("updated_at", ""))
@@ -15775,6 +15852,8 @@ async def save_journal(request: Request):
             revived += 1
     if revived:
         print(f"[journal] 병합 가드: 저장 배열에 없던 최근 갱신 레코드 {revived}건 보존")
+    if explicitly_deleted:
+        print(f"[journal] 명시적 삭제(deleted_ids): {explicitly_deleted}건 — 병합 가드 우회")
 
     try:
         _write_journal_file(merged)
