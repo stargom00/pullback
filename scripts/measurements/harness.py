@@ -202,9 +202,35 @@ def bench_score_at(bench_close: pd.Series, off: int) -> float:
     if bench_close is None or len(bench_close) == 0:
         return 0.0
     n = len(bench_close)
-    trunc = bench_close.iloc[: n - off] if off > 0 and n - off > 0 else bench_close
+    # v2026-09-11: 예전엔 n-off<=0이면 자르지 않은 전체 시계열(=오늘 기준 점수,
+    # 룩어헤드)을, rs_raw_score가 None이면 0.0을 조용히 돌려줬다 — 기본
+    # fetch_kr_benchmarks()(900일=601봉)로 checkpoints(60,950,10)을 돌린 90cp
+    # 스크립트 12개가 off 410+에서 이 폴백을 밟았다(docs/kr_us_strategy_map.md
+    # "사전 등록 대기 — 벤치마크 룩어헤드 재검증"). 폴백 대신 실패시킨다 —
+    # 기본값을 쓴 옛 스크립트는 수정 없이 재실행하면 여기서 멈추는 게 의도.
+    assert off >= 0 and n - off >= BENCH_MIN_BARS, (
+        f"[harness] 벤치마크 봉 부족: n={n}, off={off}, 남는 봉={n - off} < {BENCH_MIN_BARS} — "
+        f"fetch_kr_benchmarks(days=1900)처럼 충분히 받을 것(bench_score_at_date() 권장)")
+    trunc = bench_close.iloc[: n - off] if off > 0 else bench_close
     s = rs_raw_score(trunc)
-    return s if s is not None else 0.0
+    assert s is not None, f"[harness] 벤치마크 rs_raw_score=None (n={n}, off={off})"
+    return s
+
+
+BENCH_MIN_BARS = 253   # rs_raw_score 4분기(252봉 전 가격)를 온전히 계산하는 최소 봉수
+
+
+def bench_score_at_date(bench_close: pd.Series, cp_date) -> float:
+    """벤치마크를 날짜(cp_date) 기준으로 잘라 rs_raw_score. 종목 df가 봉 누락으로
+    offset과 날짜가 어긋날 수 있어도 벤치마크는 항상 그 체크포인트 날짜에
+    고정된다. 마지막 날짜가 cp_date가 아니거나 253봉 미만이면 실패."""
+    s = bench_close.dropna().loc[:cp_date]
+    assert len(s) and s.index[-1] == cp_date, (
+        f"[harness] 벤치마크 마지막 날짜 {s.index[-1] if len(s) else None} != {cp_date}")
+    assert len(s) >= BENCH_MIN_BARS, f"[harness] 벤치마크 {len(s)}봉 < {BENCH_MIN_BARS} @ {cp_date}"
+    sc = rs_raw_score(s)
+    assert sc is not None
+    return sc
 
 
 def compute_rs_at_checkpoint(trunc_cache: dict, b_kospi: float, b_kosdaq: float):
