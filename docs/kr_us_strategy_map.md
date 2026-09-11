@@ -2122,12 +2122,12 @@ KQ에서 서로 다르기 때문이다. 이 설명에 기대는 곳은 `rs_delta
 
 | # | 스크립트 | 근거가 된 판정 | 지난주 채택/철회 근거? |
 |---|---|---|---|
-| 1 | `2026-09-01_confirm_entry_90cp_revalidation.py` | 안C(돌파임박)/안C'(눌림목) 확인진입 **재확인(REAFFIRMED)** → UI v5.138/v5.141(Close 기준 통일 채택, 손절=신호일저가 채택) | **예 — 채택** |
+| 1 | `2026-09-01_confirm_entry_90cp_revalidation.py` | (당시) 안C/안C' 확인진입 재확인 → UI v5.138/v5.141 | **피벗진입 가정으로 이미 무효, 재검증 불필요** — `docs/confirm_entry_lookahead_2026-09-04.md`에서 EV 인용 철회됨 |
 | 2 | `2026-09-03_super_filter_ev_90cp_revalidation.py` | 슈퍼대장 필터 **채택 철회**(GUIDE.md, app.py 반영) | **예 — 철회** |
-| 3 | `2026-09-04_kr_confirm_entry_all_tabs_90cp.py` | "KR은 종가베팅 외 검증된 진입법 없음" **가설 폐기**, "확인진입으로 KR 5탭 유효" 결론 확정(사용자 승인) | **예 — 채택** |
-| 4 | `2026-09-04_kr_confirm_entry_all_tabs_90cp_checks.py` | 5탭 재검증 후속 ①~④(손절기준/레이스시작일/슬리피지/dedup) 통과 확인. static/index.html 인용 | 예 — 3번 채택의 보강 근거 |
-| 5 | `2026-09-04_kr_confirm_entry_all_tabs_90cp_entry_close.py` | ⑥ 종가진입 재측정 → **피벗진입 EV 철회** | **예 — 철회** |
-| 6 | `2026-09-04_confirm_entry_grid_search_5tabs.py` | 확인조건 거래량배수 격자탐색 → **채택 확정**(사용자 승인, app.py `CONFIRM_RULE_BY_TAB` 반영) | **예 — 채택** |
+| 3 | `2026-09-04_kr_confirm_entry_all_tabs_90cp.py` | (당시) "확인진입으로 KR 5탭 유효" 결론 | **피벗진입 가정으로 이미 무효, 재검증 불필요** — 같은 날 ⑥ 종가진입 재측정으로 철회(2026-09-05 GUIDE.md 확정) |
+| 4 | `2026-09-04_kr_confirm_entry_all_tabs_90cp_checks.py` | (당시) 3번 결론의 후속 ①~④ 보강 | **피벗진입 가정으로 이미 무효, 재검증 불필요** — 3번과 함께 무효 |
+| 5 | `2026-09-04_kr_confirm_entry_all_tabs_90cp_entry_close.py` | ⑥ 종가진입 재측정 → 피벗진입 EV 철회 + **돌파임박 KR 종가진입 유효(0.157R, z=2.37, 한계)** — 현재 "실행 가능한 KR 진입법 3개" 중 하나, 🔴 즉시행동 카드 근거 | **예 — 현재 살아있는 채택. 최우선** |
+| 6 | `2026-09-04_confirm_entry_grid_search_5tabs.py` | (당시) 돌파 vol_mult 3.0 채택, 눌림목 강한확인 배지 | **피벗진입 가정으로 이미 무효, 재검증 불필요** — v5.178(3.0배 원복)·v5.179(배지 제거) |
 | 7 | `2026-09-04_kr_confirm_entry_all_tabs_90cp_entry_buystop.py` | 룩어헤드 조사(`docs/confirm_entry_lookahead_2026-09-04.md`)의 비교 측정 | 간접 — 5번 철회 판단의 보조 |
 | 8 | `2026-09-07_kr_us_breakout_boxbreak_post_pivot_consolidation_ev.py` | ⛔ 피벗 위 0~0.5ATR 즉시진입 **표시 전용 경고**(v5.210) | 예 — 표시 반영(게이트 변경 아님) |
 | 9 | `2026-09-07_kr_us_confirm_entry_stop_width_atr_multiple_ev.py` | 손절폭 ATR 배수 **표시 전용 정보**(v5.211~v5.212) | 예 — 표시 반영(게이트 변경 아님) |
@@ -2135,9 +2135,13 @@ KQ에서 서로 다르기 때문이다. 이 설명에 기대는 곳은 `rs_delta
 | 11 | `2026-09-04_boxbreak_basevol_diagnostic.py` | ⑤ base_vol50 정의 통일 진단 | 진단용(판정 직접 근거 아님) |
 | 12 | `2026-09-04_zerovol_prevalence_check.py` | 거래량 0 봉 빈도 점검 | 진단용 |
 
-**재검증 우선순위(제안)**: 코드와 UI를 실제로 바꾼 채택/철회 판정부터 한다.
-6(격자탐색 채택, app.py 규칙값) → 3·4(KR 5탭 유효 결론) → 1(안C/안C' 재확인) →
-5(피벗진입 철회) → 2(슈퍼대장 철회) → 8·9(표시 전용) → 10 → 11·12.
+**재검증 우선순위(2026-09-11 정정, 사용자 확정)**: **5 → 7 → 2 → 8·9 → 10.** 11·12는
+진단용이라 판정 근거가 아니다. 1·3·4·6은 피벗진입 가정으로 이미 무효라 재검증하지 않는다.
+**정정 경위**: 처음 등록할 때(같은 날) 1·3·4·6번을 "채택 근거"로만 적고, 이후
+`docs/confirm_entry_lookahead_2026-09-04.md`에서 피벗진입 가정 때문에 무효가 됐다는 사실을
+빠뜨렸다. 그래서 우선순위를 "6(격자탐색) 먼저"로 잘못 제안했다. 5번 재검증 사전등록을
+준비하다가 발견해 정정했다.
+5번 사전등록: `docs/confirm_entry_close_bench_revalidation.md`.
 **`docs/imminent_score_rank_vs_return.md` 측정이 끝나면 이 목록부터 재검증한다**
 (사용자 지시 2026-09-11).
 
