@@ -6,6 +6,7 @@
 - 잘못되거나 상폐된 티커는 수집 실패 시 자동 제외됨
 """
 import os
+import re
 
 import sys
 
@@ -421,6 +422,9 @@ def get_universe(market: str) -> dict:
     return base
 
 
+_KR_ALNUM_CODE_RE = re.compile(r"\d{4}[0-9A-Z]{2}")
+
+
 def resolve_name_to_ticker(query: str, uni: dict) -> dict:
     """검색창/경보 입력 등 자유 입력을 티커로 변환하는 단일 지점.
     v5.112: 종목명(한글 포함) 검색이 /api/lookup에서 아예 처리된 적이
@@ -444,7 +448,10 @@ def resolve_name_to_ticker(query: str, uni: dict) -> dict:
     q_upper = q.upper()
     if q_upper in uni:
         return {"ticker": q_upper, "candidates": None, "reason": None}
-    if q_upper.isdigit():
+    # v5.250: 알파벳 혼용 KR 신규코드(0011A0/03473K/0220WL — 거래소 2024-01
+    # 도입)도 "코드+접미사" 해석 대상. 예전 isdigit()만으로는 이름 검색으로
+    # 떨어져 "찾을 수 없음"이 됐다(static/index.html _isKrCodeBody()와 같은 형태).
+    if q_upper.isdigit() or _KR_ALNUM_CODE_RE.fullmatch(q_upper):
         for suf in (".KS", ".KQ"):
             cand = q_upper + suf
             if cand in uni:

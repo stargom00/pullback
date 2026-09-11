@@ -52,7 +52,10 @@ def _extract_function(name: str) -> str:
     raise AssertionError(f"`{name}` 함수의 닫는 중괄호를 못 찾음 — 파일이 잘렸을 가능성")
 
 
-IS_VALID_TICKER_FORMAT_SRC = _extract_function("_isValidTickerFormat")
+# v5.250: _isValidTickerFormat이 KR 코드 판정을 _isKrCodeBody()에 위임하므로 같이 추출.
+IS_KR_CODE_BODY_SRC = _extract_function("_isKrCodeBody")
+IS_VALID_TICKER_FORMAT_SRC = IS_KR_CODE_BODY_SRC + "\n" + _extract_function("_isValidTickerFormat")
+MA_INFER_MARKET_SRC = IS_KR_CODE_BODY_SRC + "\n" + _extract_function("_maInferMarket")
 MA_TICKER_FORMAT_CHECK_SRC = _extract_function("_maTickerFormatCheck")
 # _maTickerFormatCheck가 내부에서 _isValidTickerFormat을 호출하므로 둘 다 필요.
 COMBINED_SRC = IS_VALID_TICKER_FORMAT_SRC + "\n" + MA_TICKER_FORMAT_CHECK_SRC
@@ -102,6 +105,17 @@ console.log(JSON.stringify(_maTickerFormatCheck({json.dumps(ticker)}, {json.dump
     ("F", True),
     ("BRK-B", True),             # 하이픈 포함 심볼(유니버스 실존)
     ("MU", True),
+    # v5.250 — 거래소 2024-01 도입 알파벳 혼용 KR 코드(유니버스 실존 3형태)
+    ("0011A0.KQ", True),         # 신규 보통주 \d{4}[A-Z]\d (액스비스)
+    ("0011A0", True),            # 접미사 없이도(자동보정 대상)
+    ("03473K.KS", True),         # 기존 우선주 \d{5}[A-Z] (SK우)
+    ("0220WL.KS", True),         # 신규 우선주 \d{4}[A-Z]{2}
+    ("37550L.KS", True),
+    ("0011A0 .KQ", False),       # 공백은 여전히 거부
+    ("0011 A0", False),
+    ("0011가0.KQ", False),       # 한글은 여전히 거부
+    ("0011A", False),            # 5자리 혼합 — KR 형태 아님
+    ("0011A0.KX", False),        # 잘못된 접미사
 ])
 def test_is_valid_ticker_format_cases(ticker, expected):
     result = _is_valid_ticker_format_batch([ticker])[0]
@@ -115,6 +129,56 @@ def test_is_valid_ticker_format_cases(ticker, expected):
 #    — 여기서는 공개 시장 데이터인 universe.py 전체(KR 1505 + US 2120)로
 #    같은 것을 재현·영구 테스트화한다(유니버스가 이 서브셋의 상위집합).
 # ---------------------------------------------------------------------------
+
+# v5.250 — 2026-09-12 유니버스에 실제로 들어와 있던 알파벳 혼용 KR 코드 35건
+# 전부. v5.243 전수 테스트(2026-09-10)는 당시 유니버스에 이 형태가 0건이라
+# 못 잡았다(구 PC페이지 스크레이퍼의 code=(\d{6}) 정규식이 조용히 버리고
+# 있었음 → v5.246에서 모바일 API로 바꾸자 09-11부터 유입). 라이브 유니버스
+# 구성이 바뀌어도 이 형태들의 회귀는 계속 잡히도록 목록을 고정한다.
+KR_ALNUM_CODES_SEEN_2026_09_12 = [
+    "0001A0.KQ", "0004V0.KQ", "0005G0.KS", "0007C0.KQ", "00088K.KS", "0008Z0.KQ",
+    "0009K0.KQ", "00104K.KS", "0011A0.KQ", "0011T0.KQ", "0013V0.KQ", "0015G0.KQ",
+    "0015N0.KQ", "0015S0.KQ", "0017J0.KQ", "0039P0.KQ", "00680K.KS", "0082N0.KQ",
+    "0088M0.KQ", "0117P0.KQ", "0120G0.KS", "0126Z0.KS", "0155E0.KQ", "0156T0.KQ",
+    "0164H0.KQ", "0197V0.KQ", "0218L0.KQ", "0220W0.KS", "0220WL.KS", "02826K.KS",
+    "03473K.KS", "33626K.KS", "33637K.KS", "37550K.KS", "37550L.KS",
+]
+
+
+def test_kr_alnum_codes_fixed_list_accepted():
+    results = _is_valid_ticker_format_batch(KR_ALNUM_CODES_SEEN_2026_09_12)
+    rejected = [t for t, ok in zip(KR_ALNUM_CODES_SEEN_2026_09_12, results) if not ok]
+    assert not rejected, f"알파벳 혼용 KR 코드 거짓 배제: {rejected}"
+    bodies = [t.split(".")[0] for t in KR_ALNUM_CODES_SEEN_2026_09_12]
+    body_results = _is_valid_ticker_format_batch(bodies)
+    assert all(body_results), "접미사 없는 알파벳 혼용 KR 코드가 거부됨(자동보정 경로 막힘)"
+
+
+def test_ma_infer_market_alnum_kr():
+    script = f"""
+{MA_INFER_MARKET_SRC}
+console.log(JSON.stringify(["0011A0", "03473K", "005930", "0011A0.KQ", "AAPL", "BRK-B"].map(_maInferMarket)));
+"""
+    assert json.loads(_run_node(script)) == ["KR", "KR", "KR", "KR", "US", "US"]
+
+
+def test_no_digit_only_kr_code_regex_left_in_frontend():
+    """KR 코드 본체 판정은 _isKrCodeBody() 한 곳에서만 — 숫자 전용 정규식
+    (\\d{5,6})이 다시 생기면 알파벳 혼용 코드가 그 경로에서만 조용히 막힌다
+    (v5.243 사고와 같은 모양). 경고가 아니라 실패로(CLAUDE.md 원칙)."""
+    text = INDEX_PATH.read_text(encoding="utf-8")
+    hits = [ln for ln in text.splitlines() if "\\d{5,6}" in ln and not ln.lstrip().startswith("//")]
+    assert not hits, f"숫자 전용 KR 코드 정규식 잔존 — _isKrCodeBody()로 대체할 것: {hits}"
+
+
+def test_resolve_name_to_ticker_alnum_kr_code():
+    from universe import resolve_name_to_ticker
+    uni = {"0011A0.KQ": "액스비스", "03473K.KS": "SK우", "005930.KS": "삼성전자"}
+    assert resolve_name_to_ticker("0011A0", uni)["ticker"] == "0011A0.KQ"
+    assert resolve_name_to_ticker("0011a0", uni)["ticker"] == "0011A0.KQ"
+    assert resolve_name_to_ticker("03473K", uni)["ticker"] == "03473K.KS"
+    assert resolve_name_to_ticker("005930", uni)["ticker"] == "005930.KS"
+
 
 def test_full_universe_no_false_rejects():
     from universe import get_universe

@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.249</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.250</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -6592,16 +6592,28 @@ function closeManualAdd() {
 // saveManualAdd()의 기존 KQ/KS 자동보정이 최종 안전망).
 let _maSnapshotFound = false;
 let _maSnapTimer = null;
+// v5.250(사용자 지시 — v5.243 거짓 배제 버그): KR 종목코드 본체(접미사
+// 제외) 판정의 단일 지점. 한국거래소는 2024-01-01부터 신규 단축코드에
+// 알파벳을 혼용한다(숫자 코드 소진, 2023-05 거래소 발표 — I/O/U 제외
+// 알파벳). 유니버스 실측(2026-09-12) 형태 3종: 신규 보통주 \d{4}[A-Z]\d
+// (0011A0 액스비스), 기존 우선주 \d{5}[A-Z](03473K SK우), 신규 우선주
+// \d{4}[A-Z]{2}(0220WL). 기존 숫자 6자리(005930)와 앞자리 0이 빠진
+// 5자리(v4.96 자동보정 대상)도 그대로 허용. 전부 숫자로 시작하므로 영문으로
+// 시작하는 US 심볼과 겹치지 않는다. 입력은 대문자화된 값을 가정.
+function _isKrCodeBody(s) {
+  return /^\d{5}$/.test(s) || /^\d{4}[0-9A-Z]{2}$/.test(s);
+}
 function _maInferMarket(ticker) {
   if (/\.(KS|KQ)$/i.test(ticker)) return 'KR';
-  if (/^\d{5,6}$/.test(ticker)) return 'KR';
+  if (_isKrCodeBody(String(ticker).toUpperCase())) return 'KR';
   return 'US';
 }
 // v5.243(사용자 지시 — "+직접 추가" 오염 방지): "티커" 칸이 실제 심볼
 // 형태인지만 확인 — 이름 해석(resolve_name_to_ticker)은 붙이지 않는다
 // (saveManualAdd()는 티커/종목명이 독립 자유입력인 모달이라 이 함수의
 // 역할은 딱 "심볼로 불가능한 문자를 거른다"로 한정, 사용자 지시).
-// 허용: KR 5~6자리 숫자코드(접미사 없이도 허용 — 위 v4.96 .KQ/.KS
+// 허용(v5.250부터 KR 코드는 _isKrCodeBody() 기준 — 알파벳 혼용 신규코드 포함):
+// KR 5~6자리 숫자코드(접미사 없이도 허용 — 위 v4.96 .KQ/.KS
 // 자동보정 폴백이 이 형태를 전제로 함), KR 코드+.KS/.KQ, US 스타일
 // 심볼(영문 시작, 영숫자+.-^, 1~10자 — BRK-B/V/F 등 실제 유니버스
 // 형태 확인 완료, 아래 검증 절차 참고). 이 외(한글 포함, 공백 포함,
@@ -6612,8 +6624,10 @@ function _maInferMarket(ticker) {
 // format.py 참고.
 function _isValidTickerFormat(ticker) {
   if (!ticker) return false;
-  if (/^\d{5,6}$/.test(ticker)) return true;
-  if (/^\d{5,6}\.(KS|KQ)$/.test(ticker)) return true;
+  // v5.250: KR 코드 판정은 _isKrCodeBody() 한 곳에서(알파벳 혼용 신규코드 포함).
+  if (_isKrCodeBody(ticker)) return true;
+  const krSuffixed = /^(.+)\.(KS|KQ)$/.exec(ticker);
+  if (krSuffixed && _isKrCodeBody(krSuffixed[1])) return true;
   if (/^[A-Z][A-Z0-9.\-^]{0,9}$/.test(ticker)) return true;
   return false;
 }
@@ -6692,7 +6706,7 @@ async function saveManualAdd() {
   // 경로로 새 신규상장주(마키나락스 477850)에서 재현됨. 코스닥/코스피 둘 다
   // 조회해서 실제로 값이 오는 접미사로 티커 자체를 바로잡는다(저장값도 포함).
   let fetchedPrice = null;
-  if (market === 'KR' && /^\d{5,6}$/.test(ticker)) {
+  if (market === 'KR' && _isKrCodeBody(ticker)) {   // v5.250: 알파벳 혼용 KR 코드도 접미사 자동보정
     try {
       const cand = [ticker + '.KQ', ticker + '.KS'];
       const res = await fetch('/api/prices', {
@@ -8056,7 +8070,7 @@ async function myTrackSaveAdd() {
   // 안 맞는 종목(신규상장 등)이 있다 — saveManualAdd()와 같은 방식으로
   // 실제 값이 오는 접미사를 찾아 티커 자체를 바로잡는다.
   let market = _maInferMarket(ticker);
-  if (market === 'KR' && /^\d{5,6}$/.test(ticker)) {
+  if (market === 'KR' && _isKrCodeBody(ticker)) {   // v5.250: 알파벳 혼용 KR 코드도 접미사 자동보정
     try {
       const cand = [ticker + '.KQ', ticker + '.KS'];
       const res = await fetch('/api/prices', {

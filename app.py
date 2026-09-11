@@ -5,6 +5,33 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.250 [버그수정] "+직접 추가"가 알파벳 혼용 KR 종목코드를 거부하던 v5.243
+        버그 (사용자 지시). 유니버스에 0011A0.KQ(액스비스)·03473K.KS(SK우)·
+        0220WL.KS 등 35건이 있는데 _isValidTickerFormat()이 KR 코드를
+        숫자 5~6자리로만 봐서 막았다 — 전부 실제 종목(naver 시세 정상 조회
+        확인). 한국거래소가 2024-01-01부터 신규 단축코드에 알파벳을 혼용
+        (숫자코드 소진, 2023-05 발표 — I/O/U 제외). 형태 3종: 신규 보통주
+        \d{4}[A-Z]\d, 기존 우선주 \d{5}[A-Z], 신규 우선주 \d{4}[A-Z]{2}.
+        [왜 v5.243 전수 테스트(3625종목 거짓배제 0건)가 못 잡았나] 그때
+        (09-10) 유니버스에 이 형태가 0건이었다 — 구 PC페이지 스크레이퍼
+        (naver_kr._ITEM_RE = code=(\d{6}))가 알파벳 혼용 코드를 조용히
+        버리고 있었고, v5.246에서 모바일 API(itemCode)로 바꾸자 09-11
+        06:00 유니버스 파일부터 35건 유입(날짜별 유니버스 파일로 확인:
+        09-10까지 전부 0건, 09-11_0600부터 35건).
+        [수정] static/index.html에 KR 코드 본체 판정 단일 함수
+        _isKrCodeBody()(\d{5} 또는 \d{4}[0-9A-Z]{2}) 신설 — _isValidTickerFormat/
+        _maInferMarket/saveManualAdd·myTrackSaveAdd의 .KQ/.KS 자동보정
+        4곳이 전부 이 함수를 쓰게 통일(숫자 전용 정규식 잔존 0). 한글·
+        공백은 여전히 거부. universe.resolve_name_to_ticker()도 같은
+        원인(isdigit()만 코드로 해석)으로 "0011A0" 검색이 이름검색으로
+        떨어져 실패하던 걸 함께 수정.
+        [테스트] test_ma_ticker_format.py — 알파벳 혼용 개별 케이스 +
+        35건 고정 목록(라이브 유니버스가 바뀌어도 회귀 잡힘) + _maInferMarket
+        + 프론트 숫자전용 KR정규식 잔존 금지 + 검색 해석. sabotage 양방향
+        (옛 숫자전용 복원 → 10건 FAIL, 과허용 정규식 → 한글/공백 등 5건 FAIL).
+        [미수정·별건 보고] naver_kr.fetch_high_marketcap_allowed()도 같은
+        죽은 PC페이지(sise_market_sum)를 긁어 현재 0건 반환 → 시총 1000억
+        필터가 fail-open(꺼진 상태).
 v5.249 [철회] 돌파임박 KR 종가진입을 🔴 즉시행동에서 뺌 (사용자 지시).
         [근거] docs/confirm_entry_close_bench_revalidation.md §2 — 원측정
         (2026-09-04 _entry_close, EV 0.157R·z=2.37)이 쓴 기본값 900일
@@ -6929,7 +6956,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.249"
+VERSION = "v5.250"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
