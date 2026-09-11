@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.248</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.249</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -636,7 +636,7 @@ tr.editing{background:rgba(242,179,61,.06)}
      돌파/추세전환) 전부 복원. v5.167에서 ①②③④ 검증 대기로 2탭만 남겼던 걸,
      검증 통과(docs/kr_us_strategy_map.md "후속 확인 ①②③④") 후 v5.165 원안대로
      되돌림. CONFIRM_ENTRY_MODES/renderCards() 참고. -->
-<div class="stopwidth-warn" id="confirmEntryBanner" style="display:none">KR 히트는 관심 신호다 — 5탭 확인진입 EV는 피벗 지정가 체결 가정의 산물로 밝혀져 철회됐다(2026-09-05). 돌파임박 KR 종가진입(0.157R, z=2.37)만 한계적으로 유효, 나머지는 확인돼도 진입 근거 없음. 상세: docs/confirm_entry_lookahead_2026-09-04.md</div>
+<div class="stopwidth-warn" id="confirmEntryBanner" style="display:none">KR 히트는 관심 신호다 — 5탭 확인진입 EV는 피벗 지정가 체결 가정의 산물로 밝혀져 철회됐다(2026-09-05). 한때 한계적으로 유효했던 돌파임박 KR 종가진입(0.157R, z=2.37)도 벤치마크 룩어헤드 수정 재검증에서 기준 미달로 철회됐다(2026-09-11) — 5탭 전부 확인돼도 진입 근거 없음. 상세: docs/confirm_entry_lookahead_2026-09-04.md, docs/confirm_entry_close_bench_revalidation.md</div>
 <div class="stopwidth-warn" id="stopWidthWarnBanner" style="display:none"></div>
 <div class="jongga-safety-banner" id="jonggaSafetyBanner" style="display:none">⚠️ 단기 오버나이트 전략 — 소액 고정 비중, 익일 아침 무조건 정리. 갭하락 리스크 있음(백테스트 평균이며 개별 결과 아님).</div>
 <div class="stopwidth-warn" id="jonggaSessionBanner" style="display:none"></div>
@@ -4310,15 +4310,19 @@ function todayDecisionRiskBadge(item) {
 // EV(+0.755R) 표본이 n=53(Rule 9 미달)·시기반분 미검증이라 🔴에서 빠지고
 // "🔎 관심(재량)"으로 별도 줄에 — get_calendar()가 이제 재점화 확인분을
 // immediate가 아니라 interest에 넣는 것과 정확히 대응(app.py 참고).
+// v5.249(사용자 지시): 3종 → 2종. 돌파임박 KR 종가진입(0.157R, z=2.37)은
+// 벤치마크 룩어헤드 수정 재검증에서 원래 기준 미달로 철회 — get_calendar()가
+// 돌파임박 KR 확인분을 이제 interest(🔎)에만 넣는 것과 대응
+// (docs/confirm_entry_close_bench_revalidation.md).
 const TODAY_DECISION_INFO =
-  '🔴 즉시 행동에 오르는 검증 진입 3종\n' +
-  '· 돌파임박 KR — 종가 확인 후 종가 진입 (0.157R, 한계)\n' +
+  '🔴 즉시 행동에 오르는 검증 진입 2종\n' +
   '· 종가베팅 — 종가 진입 (z=3.54)\n' +
   '· US 눌림목 — 즉시 진입 (+0.206R)\n' +
   '🔎 관심(재량) — 재점화: 근거 n=53, 시기반분 재현 미검증(Rule 9 미달). ' +
   'buy-stop가·손절은 참고 표시, 체결은 재량 체크리스트로 직접 판단.\n' +
   '그 외 모든 탭·시장 히트는 🔎 관심. 피벗 장중 매수 금지(z=-6.22).\n' +
-  '근거: docs/confirm_entry_lookahead_2026-09-04.md, docs/kr_theme_leader_reignition.md';
+  '돌파임박 KR 종가진입은 2026-09-11 재검증에서 철회(확인돼도 🔎 관심).\n' +
+  '근거: docs/confirm_entry_lookahead_2026-09-04.md, docs/confirm_entry_close_bench_revalidation.md, docs/kr_theme_leader_reignition.md';
 const TODAY_DECISION_INFO_ICON =
   `<span style="cursor:help;opacity:.6;font-size:12px" title="${TODAY_DECISION_INFO}">ⓘ</span>`;
 
@@ -7239,7 +7243,7 @@ function renderPaperTrackCard() {
     const winStr = s.win_rate == null ? '–' : `${s.win_rate}%`;
     // n≥12부터 90cp 백테스트 값을 괄호로 병기 — 괴리를 바로 보이게.
     const backtestStr = s.backtest_ev != null
-      ? ` <span style="opacity:.6;font-size:11px" title="90개 체크포인트 백테스트 EV(docs/confirm_entry_lookahead_2026-09-04.md ⑥ 종가진입 재측정) — 표본 12건 이상부터 비교 표시">(백테스트 ${s.backtest_ev >= 0 ? '+' : ''}${s.backtest_ev.toFixed(3)}R${s.gap != null ? `, 괴리 ${s.gap >= 0 ? '+' : ''}${s.gap.toFixed(2)}R` : ''})</span>`
+      ? ` <span style="opacity:.6;font-size:11px" title="90개 체크포인트 백테스트 EV — KR: 벤치마크 수정 재검증 R2(docs/confirm_entry_close_bench_revalidation.md), US: ⑥ 종가진입 재측정 원측정(docs/confirm_entry_lookahead_2026-09-04.md) — 표본 12건 이상부터 비교 표시">(백테스트 ${s.backtest_ev >= 0 ? '+' : ''}${s.backtest_ev.toFixed(3)}R${s.gap != null ? `, 괴리 ${s.gap >= 0 ? '+' : ''}${s.gap.toFixed(2)}R` : ''})</span>`
       : (s.n < 12 ? ` <span style="opacity:.5;font-size:11px">(n<12 — 백테스트 비교 대기)</span>` : '');
     return `<tr><td>${s.tab} · ${s.market}</td><td>${s.n}건${s.n_open ? ` <span style="opacity:.6">(+진행중 ${s.n_open})</span>` : ''}</td><td>${winStr}</td><td style="color:${s.ev >= 0 ? 'var(--px-up)' : s.ev < 0 ? 'var(--px-down)' : 'inherit'}">${evStr}${backtestStr}</td></tr>`;
   }).join('');

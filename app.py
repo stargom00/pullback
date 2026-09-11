@@ -5,6 +5,29 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.249 [철회] 돌파임박 KR 종가진입을 🔴 즉시행동에서 뺌 (사용자 지시).
+        [근거] docs/confirm_entry_close_bench_revalidation.md §2 — 원측정
+        (2026-09-04 _entry_close, EV 0.157R·z=2.37)이 쓴 기본값 900일
+        벤치마크가 90개 체크포인트 중 off 410+에서 0.0 폴백/룩어헤드였다.
+        벤치마크를 고친 R1(EV 0.138·z 1.84)과 +시총필터 R2(0.148·1.93)
+        둘 다 원래 기준(EV≥0.15·z≥1.96·후반 EV≥0.15) 미달 → 철회 확정.
+        살아있는 🔴 검증 진입은 종가베팅·US 눌림목 즉시진입 2종.
+        [변경] ① get_calendar(): pending_watch/auto_watch 확인분 중 돌파임박
+        KR만 verdict="entry_candidate"(진입가/손절/사이즈)로 immediate에
+        올리던 분기 제거 → 5탭 확인분 전부 interest(🔎 관심)로. reason의
+        "종가진입 0.157R z=2.37" 인용 제거. 🟡 근접 카드의 "· 확인 시 종가
+        진입"(돌파임박 KR 전용 문구, pending_watch·돌파임박 상위후보 2곳)도
+        같은 근거가 사라져 제거. CONFIRM_RULE_BY_TAB["돌파임박"] 문자열
+        갱신(값은 참/거짓으로만 쓰임, 동작 무변화). 정직성 가드 주석 3→2종.
+        ② PAPER_TRACK_BACKTEST_EV KR 5탭 = R2 값(눌림목 0.171·돌파임박
+        0.148·박스돌파 0.306·돌파 0.257·추세전환 0.201), US는 재측정
+        안 해 원값 유지. ③ static/index.html confirmEntryBanner·
+        TODAY_DECISION_INFO(3종→2종)·페이퍼 백테스트 툴팁 출처 갱신.
+        ④ immediate_empty_reason에는 돌파임박 언급이 원래 없어 무변경.
+        [남은 것] _is_auto_watch_strong_setup()과 프론트 💪강한셋업 배지는
+        유일한 사용처(auto_watch 돌파임박 KR 🔴 카드)가 없어져 더 이상
+        안 쓰인다 — 이번엔 철회 범위만 바꾸고 제거는 안 함.
+        [테스트] test_imminent_kr_withdrawn.py 신설.
 v5.248 [신규] 종목 히스토리 조회 — /api/debug/{ticker}에 history 섹션
         추가 (사용자 지시). 검색창에 종목명/코드를 넣으면 스캐너가
         그 종목을 언제 어느 탭에서 잡았는지, 저널에 담긴 적 있는지
@@ -6906,7 +6929,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.248"
+VERSION = "v5.249"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -13725,12 +13748,16 @@ PAPER_TRACK_MAX_BARS = 60  # harness.race() 기본값과 동일(안C 백테스�
 # 리터럴 사본이지만 이 값들은 "그 문서가 확정한 역사적 측정 결과"라
 # CONFIG처럼 나중에 또 바뀌는 값이 아니다(측정 자체가 새로 나오면 이
 # 표를 그때 갱신) — cfg 공용 참조 대상이 아니라 예외로 둔다.
+# v5.249: KR 5탭 값을 R2 = 벤치마크 수정 + 시총 필터 재검증치로 갱신
+# (docs/confirm_entry_close_bench_revalidation.md §2.3 R2 열 — 이전 KR 값
+# 0.170/0.157/0.286/0.225/0.144는 벤치마크 룩어헤드 오염이 섞인 원측정치).
+# US 값은 재측정 안 함(벤치마크 수정은 US 무관) — 원측정 그대로.
 PAPER_TRACK_BACKTEST_EV = {
-    ("눌림목", "KR"): 0.170, ("눌림목", "US"): 0.087,
-    ("돌파임박", "KR"): 0.157, ("돌파임박", "US"): 0.067,
-    ("박스돌파", "KR"): 0.286, ("박스돌파", "US"): 0.059,
-    ("돌파", "KR"): 0.225, ("돌파", "US"): 0.050,
-    ("추세전환", "KR"): 0.144, ("추세전환", "US"): 0.064,
+    ("눌림목", "KR"): 0.171, ("눌림목", "US"): 0.087,
+    ("돌파임박", "KR"): 0.148, ("돌파임박", "US"): 0.067,
+    ("박스돌파", "KR"): 0.306, ("박스돌파", "US"): 0.059,
+    ("돌파", "KR"): 0.257, ("돌파", "US"): 0.050,
+    ("추세전환", "KR"): 0.201, ("추세전환", "US"): 0.064,
 }
 
 
@@ -14829,11 +14856,14 @@ async def get_calendar():
     # 0.38~0.98R로 EV의 대부분을 먹어치운다는 게 드러나 5탭 EV 인용을
     # 전부 철회한다(돌파임박 KR만 종가기준 EV+0.157R·z=2.37로 사전등록
     # 기준을 간신히 통과 — docs/kr_us_strategy_map.md "⑥ 종가진입 재측정
-    # — 피벗진입 EV 철회" 절). "확인됨" 표시 자체(거래량 동반 확인이라는
+    # — 피벗진입 EV 철회" 절. v5.249: 그 돌파임박 KR도 벤치마크 룩어헤드
+    # 수정 재검증에서 철회 — docs/confirm_entry_close_bench_revalidation.md).
+    # 이 dict의 값(문자열)은 표시되지 않고 "확인규칙이 있는 탭인가"의
+    # 참/거짓으로만 쓰인다. "확인됨" 표시 자체(거래량 동반 확인이라는
     # 규율)는 여전히 유효한 정보라 배지·정렬은 유지하되, EV 근거는 안D
     # (피벗 buy-stop 체결) 재측정 결과가 나올 때까지 보류.
     CONFIRM_RULE_BY_TAB = {
-        "돌파임박": "확인진입 근거 재검증 중 — 종가진입 KR 0.157R z=2.37(한계 유효), 피벗진입 EV는 룩어헤드 아티팩트로 철회(2026-09-04) · docs/kr_us_strategy_map.md \"⑥ 종가진입 재측정\" 절",
+        "돌파임박": "확인진입 근거 없음 — 종가진입 KR(0.157R z=2.37)은 벤치마크 룩어헤드 수정 재검증에서 철회(2026-09-11), 피벗진입 EV는 룩어헤드 아티팩트로 철회(2026-09-04) · docs/confirm_entry_close_bench_revalidation.md",
         "눌림목": "확인진입 근거 재검증 중 (2026-09-04 종가진입 재측정: 피벗진입 EV는 룩어헤드 아티팩트로 철회) · docs/kr_us_strategy_map.md \"⑥ 종가진입 재측정\" 절",
         "박스돌파": "확인진입 근거 재검증 중 (2026-09-04 종가진입 재측정: 피벗진입 EV는 룩어헤드 아티팩트로 철회) · docs/kr_us_strategy_map.md \"⑥ 종가진입 재측정\" 절",
         "돌파": "확인진입 근거 재검증 중 (2026-09-04 종가진입 재측정: 피벗진입 EV는 룩어헤드 아티팩트로 철회) · docs/kr_us_strategy_map.md \"⑥ 종가진입 재측정\" 절",
@@ -14934,8 +14964,9 @@ async def get_calendar():
             # v5.179(사용자 지시 — [프로덕션 정리] 확인 카드 최종 정리):
             # docs/confirm_entry_lookahead_2026-09-04.md 결론 — 실행 가능한
             # 4개 진입정의(피벗지정가/종가/buystop/종가+확인일저가손절) 중
-            # 사전등록 기준을 통과한 건 "돌파임박 KR 종가진입"(EV 0.157R,
-            # z=2.37, 한계) 하나뿐이다. 나머지(눌림목/박스돌파/돌파/추세전환
+            # 사전등록 기준을 통과한 건 당시 "돌파임박 KR 종가진입"(EV 0.157R,
+            # z=2.37, 한계) 하나뿐이었다(v5.249에서 그것도 철회 — 아래 참고).
+            # 나머지(눌림목/박스돌파/돌파/추세전환
             # KR, US 5탭 전부)는 "확인됐다"는 사실 자체는 유효한 정보지만
             # 진입 근거(EV)가 통계적으로 확인 안 됨 — 진입가/손절/사이즈를
             # 아예 안 보여주고 "관심"으로만 표시(entry/stop/target_2r=None).
@@ -14948,42 +14979,26 @@ async def get_calendar():
             # 경우만 today로 폴백(사실상 도달 안 함 — confirmed=True면
             # df가 이미 유효했다는 뜻).
             confirm_bar_date = str(df.index[-1].date()) if df is not None and len(df) else today
-            # v5.207(긴급 수정 — 사용자 지시, US 눌림목과 같은 문제의 KR
-            # 대칭형): confirm_bar_date==today를 추가로 요구 — 캐시된 df가
-            # 휴장일(또는 아직 안 갱신된 이전 거래일)의 마지막 봉을 그대로
-            # 물고 있으면 "확인됐다"는 판정 자체가 그날 봉 기준이라 오늘
-            # 실제로 일어난 일이 아닌데도 🔴로 뜰 수 있었다.
-            is_entry_candidate = tab == "돌파임박" and market == "KR" and confirm_bar_date == today
-            if is_entry_candidate:
-                target_2r = round(close + 2 * (close - stop_f), 2) if stop_f and close > stop_f else None
-                immediate.append({
-                    "source": "pending_watch", "key": f"pending:{r.get('id')}",
-                    "ticker": ticker, "name": r.get("name") or ticker, "market": market,
-                    "mode": r.get("mode_raw") or None, "sector": r.get("sector"),
-                    "entry": close, "stop": stop_f, "target_2r": target_2r,
-                    "close": close, "pivot": pivot_f, "atr_pct": atr_pct,
-                    "verdict": "entry_candidate", "entry_method": "종가진입",
-                    "confirm_date": confirm_bar_date, "scenario": scenario_hit,
-                    "reason": f"{tab} 진입 후보 (종가진입 0.157R z=2.37, 한계) · docs/confirm_entry_lookahead_2026-09-04.md",
-                })
-            else:
-                # v5.180(사용자 지시 — 버킷 재정의): watch_interest는 더 이상
-                # immediate에 안 들어간다 — "🔎 관심(확인됨)" 전용 버킷으로
-                # 분리. 진입가/손절/사이즈 없음, 종목·탭·확인일·종가 +
-                # 피벗·손절 기준값(참고용, "진입가" 아님)만.
-                # v5.207: 게이트 실패가 "휴장이라 오늘 확인 자체가 없었다"
-                # 때문이면 원래의 "관심(확인됨)" 문구 대신 명시적으로 안내.
-                interest_item = {
-                    "source": "pending_watch", "key": f"pending:{r.get('id')}",
-                    "ticker": ticker, "name": r.get("name") or ticker, "market": market,
-                    "tab": tab, "confirmed_at": confirm_bar_date,
-                    "close": close, "pivot": pivot_f, "stop": stop_f, "scenario": scenario_hit,
-                    "reason": f"{tab} 관심 — 확인됐으나 진입 근거 미유의 · docs/confirm_entry_lookahead_2026-09-04.md",
-                }
-                if tab == "돌파임박" and market == "KR" and confirm_bar_date != today and not kr_trading_today:
-                    interest_item["interest_label"] = "🔎 KR 휴장 — 다음 개장 시 확인"
-                    interest_item["reason"] = "KR 시장이 오늘 휴장 — 마지막 거래일 확인 결과 참고용, 다음 개장 후 재확인 필요"
-                interest.append(interest_item)
+            # v5.249(사용자 지시 — 돌파임박 KR 종가진입 철회): 예전엔 돌파임박
+            # KR + confirm_bar_date==today만 🔴 entry_candidate로 올렸다(유일한
+            # 검증 조합 0.157R·z=2.37). 벤치마크 룩어헤드를 고친 재검증에서
+            # R1(EV 0.138·z 1.84)/R2(0.148·1.93) 둘 다 원래 기준 미달로 철회 —
+            # docs/confirm_entry_close_bench_revalidation.md §2. 이제 5탭 확인은
+            # 전부 "🔎 관심(확인됨)"으로만 간다(진입가/손절/사이즈 없음, 종목·
+            # 탭·확인일·종가 + 피벗·손절 기준값만 — v5.180 버킷 정의 그대로).
+            # v5.207의 휴장 안내 문구는 "오늘 확인 자체가 없었다"는 사실 표시라
+            # 등급과 무관하게 유지.
+            interest_item = {
+                "source": "pending_watch", "key": f"pending:{r.get('id')}",
+                "ticker": ticker, "name": r.get("name") or ticker, "market": market,
+                "tab": tab, "confirmed_at": confirm_bar_date,
+                "close": close, "pivot": pivot_f, "stop": stop_f, "scenario": scenario_hit,
+                "reason": f"{tab} 관심 — 확인됐으나 진입 근거 없음 · docs/confirm_entry_close_bench_revalidation.md",
+            }
+            if tab == "돌파임박" and market == "KR" and confirm_bar_date != today and not kr_trading_today:
+                interest_item["interest_label"] = "🔎 KR 휴장 — 다음 개장 시 확인"
+                interest_item["reason"] = "KR 시장이 오늘 휴장 — 마지막 거래일 확인 결과 참고용, 다음 개장 후 재확인 필요"
+            interest.append(interest_item)
         elif dist_pct <= 2:
             # v5.176(사용자 지시): KR 확인대기 UI — 이미 피벗 돌파(dist_pct<=0)
             # 했는데 확인규칙(rule)이 있는 탭에서 거래량 미충족인 KR 종목은
@@ -15015,8 +15030,8 @@ async def get_calendar():
             # 후에도 확인(종가+거래량)을 기다려야 한다는 게 이 문서 전체의
             # 결론이므로, KR 전 탭 + US(눌림목 제외, 즉시진입 EV 유효한
             # 유일한 예외라 기존 표시 유지)는 "피벗/손절 기준값 + 확인 대기"
-            # 로 통일한다. 돌파임박 KR만 "확인 시 종가 진입" 문구 추가
-            # (유일하게 통계적으로 유의한 확인진입 조합이므로).
+            # 로 통일한다. (v5.180~v5.248엔 돌파임박 KR만 "확인 시 종가 진입"
+            # 문구를 붙였으나 v5.249 철회로 제거 — 이제 확인진입 유효 조합 없음.)
             far_use_legacy = market == "US" and tab == "눌림목"
             if confirm_expired:
                 reason = f"{tab} 확인 대기 만료({AUTO_WATCH_CONFIRM_WINDOW_DAYS}거래일 내 거래량 {vol_mult_req}배 미충족)"
@@ -15027,7 +15042,7 @@ async def get_calendar():
             elif far_use_legacy:
                 reason = f"{tab or '감시'} 피벗까지 {dist_pct:.1f}%"
             else:
-                reason = f"{tab or '감시'} 피벗까지 {dist_pct:.1f}%" + (" · 확인 시 종가 진입" if (tab == "돌파임박" and market == "KR") else "")
+                reason = f"{tab or '감시'} 피벗까지 {dist_pct:.1f}%"
             item = {
                 "source": "pending_watch", "key": f"pending:{r.get('id')}",
                 "ticker": ticker, "name": r.get("name") or ticker, "market": market,
@@ -15105,12 +15120,13 @@ async def get_calendar():
         }
         # v5.180(사용자 지시 — [2]): 이 소스는 항상 돌파임박 탭이라 US
         # 눌림목 예외가 적용되지 않는다 — dist_pct>0(아직 미돌파, 🟡)이면
-        # KR/US 둘 다 "피벗/손절 기준값 + 확인 대기"로 통일, KR만 "확인 시
-        # 종가 진입" 문구 추가(유일하게 유의한 조합). dist_pct<=0(🟠, 이미
-        # 돌파)은 기존 표시 유지(사용자 지시 범위 밖).
+        # KR/US 둘 다 "피벗/손절 기준값 + 확인 대기"로 통일. dist_pct<=0(🟠,
+        # 이미 돌파)은 기존 표시 유지(사용자 지시 범위 밖). v5.249: KR에만
+        # 붙이던 "확인 시 종가 진입" 문구 제거(돌파임박 KR 종가진입 철회 —
+        # docs/confirm_entry_close_bench_revalidation.md).
         if dist_pct > 0:
             item["pre_pivot_wait"] = True
-            item["reason"] = "돌파임박 상위 후보 — 참고" + (" · 확인 시 종가 진입" if imm_market == "KR" else "")
+            item["reason"] = "돌파임박 상위 후보 — 참고"
         else:
             item["entry_if_triggered"] = pivot
             item["stop_if_triggered"] = h.get("stop")
@@ -15136,12 +15152,12 @@ async def get_calendar():
             stop = rec.get("confirm_stop") or rec.get("stop")
             if not entry or not stop or entry <= stop:
                 continue
-            # v5.179(사용자 지시 — [프로덕션 정리]): pending_watch 쪽과 동일
-            # 원칙 — 사전등록 기준을 통과한 유일한 조합(돌파임박 KR
-            # 종가진입)만 진입가/손절/사이즈 표시, 나머지는 "관심"으로만
-            # (entry/stop/target_2r 감춤). 강한확인 배지(vol_mult>=2.0)는
-            # 같은 무효 격자탐색이 근거였으므로 계산·표시 둘 다 제거.
-            is_entry_candidate = rec["tab"] == "돌파임박" and rec.get("market") == "KR"
+            # v5.179(사용자 지시 — [프로덕션 정리]): 강한확인 배지(vol_mult>=2.0)는
+            # 무효 격자탐색이 근거였으므로 계산·표시 둘 다 제거.
+            # v5.249(사용자 지시 — 돌파임박 KR 종가진입 철회): 예전엔 돌파임박 KR만
+            # 🔴 entry_candidate(진입가/손절/사이즈 + 💪강한셋업 배지)로 올렸으나
+            # 벤치마크 수정 재검증에서 철회(docs/confirm_entry_close_bench_
+            # revalidation.md §2) — pending_watch 쪽과 동일하게 전부 🔎 관심으로.
             # v5.200 [2](사용자 지시 — 버그수정): auto_watch 출처도 pending_watch와
             # 같은 섹션(🔎관심/🟡근접/🟠이미돌파)에 섞여 나오는데 시나리오가
             # 안 붙어 있었다 — 출처 무관 동일 표시 원칙. df는 새로 안 받고
@@ -15150,45 +15166,19 @@ async def get_calendar():
             _df_aw = _calendar_ticker_df(rec["ticker"])
             _snap_aw = get_signal_snapshot(rec["ticker"], rec["tab"])
             scenario_aw = _scenario_for(_df_aw, _snap_aw)
-            if is_entry_candidate:
-                target_2r = round(entry + 2 * (entry - stop), 2)
-                # v5.175(사용자 지시 — 게이트→배지 전환) 원래 등록 게이트였던
-                # RS>=80 & 손절<=ATR×1.5를 여기서 표시용 "강한 셋업" 배지로
-                # 계산(_is_auto_watch_strong_setup — vol_mult 격자탐색과는
-                # 별개 측정이라 유지).
-                strong_setup = _is_auto_watch_strong_setup(rec.get("rs"), rec.get("risk_pct"), rec.get("atr_pct"))
-                immediate.append({
-                    "source": "auto_watch", "key": f"auto_watch:{key}",
-                    "ticker": rec["ticker"], "name": rec.get("name") or rec["ticker"],
-                    "market": rec.get("market"), "mode": None, "sector": rec.get("sector"),
-                    # v5.221(사용자 지시 — [2] 카드 섹터 표시): _refresh_auto_watch()가
-                    # 등록 시점에 이미 저장해둔 값 pass-through(새 계산 없음).
-                    # 이 필드가 저장되기 전(v5.221 이전)에 등록된 기존
-                    # auto_watch.json 엔트리는 None으로 나올 수 있음 — 프론트가
-                    # None이면 섹터 줄에서 순위/RS 부분만 생략하고 정상 표시.
-                    "sector_rank": rec.get("sector_rank"), "sector_rs_pct": rec.get("sector_rs_pct"),
-                    "entry": entry, "stop": stop, "target_2r": target_2r,
-                    "close": entry, "pivot": pivot, "atr_pct": rec.get("atr_pct"),
-                    "rs": rec.get("rs"),
-                    "verdict": "entry_candidate", "entry_method": "종가진입",
-                    "strong_setup": strong_setup,
-                    "confirm_date": rec.get("confirmed_at"), "scenario": scenario_aw,
-                    "reason": "돌파임박 진입 후보 (종가진입 0.157R z=2.37, 한계) · docs/confirm_entry_lookahead_2026-09-04.md",
-                })
-            else:
-                # v5.180(사용자 지시 — 버킷 재정의): watch_interest는 "🔎
-                # 관심(확인됨)" 전용 버킷으로 분리 — 진입가/손절/사이즈 없음.
-                # v5.184(사용자 지시 — 확인일 버그): confirmed_at은 이미
-                # `_refresh_auto_watch()`가 확인봉의 실제 날짜(df.index[-1])
-                # 로 기록해둔 값이라 그대로 재사용 — 여기서 `today`(세션
-                # 날짜)로 다시 덮어쓰면 스캔 실행일로 되돌아간다.
-                interest.append({
-                    "source": "auto_watch", "key": f"auto_watch:{key}",
-                    "ticker": rec["ticker"], "name": rec.get("name") or rec["ticker"],
-                    "market": rec.get("market"), "tab": rec["tab"], "confirmed_at": rec.get("confirmed_at"),
-                    "close": entry, "pivot": pivot, "stop": stop, "scenario": scenario_aw,
-                    "reason": f"{rec['tab']} 관심 — 확인됐으나 진입 근거 미유의 · docs/confirm_entry_lookahead_2026-09-04.md",
-                })
+            # v5.180(사용자 지시 — 버킷 재정의): watch_interest는 "🔎
+            # 관심(확인됨)" 전용 버킷으로 분리 — 진입가/손절/사이즈 없음.
+            # v5.184(사용자 지시 — 확인일 버그): confirmed_at은 이미
+            # `_refresh_auto_watch()`가 확인봉의 실제 날짜(df.index[-1])
+            # 로 기록해둔 값이라 그대로 재사용 — 여기서 `today`(세션
+            # 날짜)로 다시 덮어쓰면 스캔 실행일로 되돌아간다.
+            interest.append({
+                "source": "auto_watch", "key": f"auto_watch:{key}",
+                "ticker": rec["ticker"], "name": rec.get("name") or rec["ticker"],
+                "market": rec.get("market"), "tab": rec["tab"], "confirmed_at": rec.get("confirmed_at"),
+                "close": entry, "pivot": pivot, "stop": stop, "scenario": scenario_aw,
+                "reason": f"{rec['tab']} 관심 — 확인됐으나 진입 근거 없음 · docs/confirm_entry_close_bench_revalidation.md",
+            })
         elif rec.get("status") == "watching":
             # v5.176(사용자 지시): KR 확인대기 UI를 auto_watch 풀에도 —
             # 이미 피벗(signal_high) 돌파했는데 거래량 미충족인 종목을
@@ -15238,7 +15228,8 @@ async def get_calendar():
     waiting["auto_watch"] = auto_watch_waiting
 
     # v5.181(사용자 지시 — [5] 정직성 가드): 검증된 진입은 종가베팅/
-    # 돌파임박 KR 종가진입/US 눌림목 즉시진입 3종뿐 — 이 셋은 전부 위에서
+    # US 눌림목 즉시진입 2종뿐(v5.249: 돌파임박 KR 종가진입 철회로 3→2종,
+    # docs/confirm_entry_close_bench_revalidation.md) — 이 둘은 전부 위에서
     # 명시적으로 "verdict": "entry_candidate"를 채운다. 다른 코드 경로가
     # 실수로 verdict 없이(또는 다른 값으로) immediate에 append하면 여기서
     # 강제로 interest로 내린다 — 방어적 가드라 정상 동작 시엔 아무것도 안
