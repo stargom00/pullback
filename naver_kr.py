@@ -532,67 +532,102 @@ def fetch_top_marketcap(per_market_pages: int = 20) -> dict:
 
 
 # ── 시가총액 하한 필터 (v4.91) — 국장 소형주 스캔 제외용 ──
-_ROW_RE = re.compile(r'<tr[^>]*onMouseOver.*?</tr>', re.S)
-_ROW_CODE_RE = re.compile(r'code=(\d{6})"[^>]*>([^<]+)</a>')
-_ROW_NUM_RE = re.compile(r'<td class="number">([0-9,]+)</td>')
+# v5.251(사용자 지시): 원래 finance.naver.com sise_market_sum.naver(PC 페이지)
+# 를 정규식으로 긁었는데(code=(\d{6})), 그 페이지가 2026-09-10 장마감 전후
+# Next.js SPA로 개편돼 200 OK에 종목 데이터 0건 — v5.246이 유니버스
+# (sise_quant)만 모바일 API로 옮기고 이 함수는 놓쳐서, 허용목록 0건 →
+# app._get_mcap_allowed() fail-open → 시총 1000억 필터가 꺼진 채 운영됐다.
+# 게다가 옛 정규식은 숫자 6자리만 받아 알파벳 혼용 신규코드(0011A0 등,
+# 거래소 2024-01 도입)를 원천적으로 못 담았다. fetch_top_turnover_v2()와
+# 같은 모바일 API(m.stock.naver.com marketValue, marketValue 단위=억원)로
+# 교체 — 이 경로는 itemCode를 그대로 줘서 알파벳 혼용 코드도 포함한다.
 
 
-def _parse_marketcap_rows(html: str) -> list[tuple[str, str, int]]:
-    """sise_market_sum 한 페이지에서 (코드, 이름, 시가총액(억원)) 리스트 추출.
-    행의 '숫자만 있는(중첩태그 없는) td' 중 3번째가 시가총액 — 실측 확인함
-    (1번=현재가, 2번=액면가, 3번=시가총액; 전일비/등락률 칸은 <em>/<span>이
-    중첩돼 있어 이 단순 패턴에 안 걸림)."""
-    out = []
-    for row in _ROW_RE.finditer(html):
-        r = row.group(0)
-        cm = _ROW_CODE_RE.search(r)
-        if not cm:
-            continue
-        nums = _ROW_NUM_RE.findall(r)
-        if len(nums) < 3:
-            continue
-        try:
-            mcap_eok = int(nums[2].replace(",", ""))
-        except ValueError:
-            continue
-        out.append((cm.group(1), cm.group(2).strip(), mcap_eok))
-    return out
+def _mstock_parse_market_value_eok(raw) -> int | None:
+    """marketValue 문자열("15,171,093", 단위 억원)을 정수로. 파싱 불가면 None."""
+    try:
+        return int(str(raw).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
 
 
-def fetch_high_marketcap_allowed(min_eok: int = 1000, max_pages: int = 80) -> set:
-    """시가총액이 min_eok(억원) 이상인 코스피+코스닥 종목의 티커 집합(허용목록).
-    스캐너에서 초소형주를 걸러내는 데 씀 (예: 시총 700억짜리가 돌파임박에
-    뜨는 문제) — 반환된 집합에 없는 KR 티커는 문턱 미달로 간주해 제외한다.
+def fetch_high_marketcap_allowed(min_eok: int = 1000, page_size: int = _MSTOCK_PAGE_SIZE) -> tuple[set, dict]:
+    """시가총액이 min_eok(억원) 이상인 코스피+코스닥 종목의 티커 집합(허용목록)
+    과 진단 stats를 반환: (allowed, stats).
 
-    '미달 집합(블랙리스트)'이 아니라 '충족 집합(화이트리스트)'을 만드는 이유:
-    미달 종목은 코스피/코스닥 전체(수천 개)를 끝까지 긁어야 완전히 알 수
-    있어 비쌈. 반대로 sise_market_sum은 시총 내림차순 정렬이라, 충족
-    종목만 모으는 건 문턱을 넘는 그 페이지에서 바로 멈추면 되므로 훨씬
-    쌈 — 실측상 코스피 ~25페이지, 코스닥 ~14페이지선에서 1000억 문턱을 넘음."""
-    allowed = set()
-    for sosok, suffix in ((0, ".KS"), (1, ".KQ")):
-        for page in range(1, max_pages + 1):
-            try:
-                resp = requests.get(
-                    _MARKETSUM_URL,
-                    params={"sosok": sosok, "page": page},
-                    headers=_HEADERS,
-                    timeout=_TIMEOUT,
-                )
-                resp.raise_for_status()
-                resp.encoding = "euc-kr"
-                rows = _parse_marketcap_rows(resp.text)
-            except (requests.RequestException, ValueError):
+    '미달 집합(블랙리스트)'이 아니라 '충족 집합(화이트리스트)'인 이유는
+    v4.91 그대로 — 호출부는 이 집합에 없는 KR 티커를 문턱 미달로 보고 뺀다.
+
+    **화이트리스트라서 불완전한 목록은 조용한 과잉 배제가 된다** — 한 시장
+    이라도 끝까지 못 받았으면(stats["incomplete"]) 부분 집합을 돌려주지 않고
+    빈 집합을 돌려준다(호출부가 fail-open + 경고로 처리). 부분 목록을
+    그대로 쓰면 못 받은 페이지의 대형주가 "시총 미달"로 스캔에서 빠진다.
+
+    정렬 순서(시총 내림차순)에 기대 중간에 멈추지 않고 전 페이지를 받는다
+    — 순서 가정이 깨져도 결과가 틀리지 않게(코스피+코스닥 약 45페이지,
+    fetch_top_turnover_v2와 같은 규모).
+
+    stats: kospi_total/kosdaq_total(서버 보고 종목 수), kospi_fetched/
+    kosdaq_fetched, n_unparsed(marketValue 파싱 불가), n_allowed,
+    incomplete, errors."""
+    allowed: set = set()
+    stats = {"kospi_total": None, "kosdaq_total": None, "kospi_fetched": 0, "kosdaq_fetched": 0,
+             "n_unparsed": 0, "n_allowed": 0, "incomplete": False, "errors": []}
+    for market, suffix, total_key, fetched_key in (
+        ("KOSPI", ".KS", "kospi_total", "kospi_fetched"),
+        ("KOSDAQ", ".KQ", "kosdaq_total", "kosdaq_fetched"),
+    ):
+        page = 1
+        consec_fails = 0
+        while True:
+            data = None
+            for attempt in range(2):
+                try:
+                    resp = requests.get(
+                        _MSTOCK_MARKETVALUE_URL.format(market=market),
+                        params={"page": page, "pageSize": page_size},
+                        headers=_HEADERS, timeout=_TIMEOUT,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    break
+                except (requests.RequestException, ValueError) as e:
+                    if attempt == 1:
+                        stats["errors"].append(f"{market} page={page}: {type(e).__name__}: {e}")
+            if data is None:
+                consec_fails += 1
+                if consec_fails >= _MSTOCK_MAX_CONSEC_FAILS:
+                    stats["incomplete"] = True
+                    break
+                page += 1
+                continue
+            consec_fails = 0
+            if stats[total_key] is None:
+                stats[total_key] = data.get("totalCount")
+            stocks = data.get("stocks") or []
+            if not stocks:
                 break
-            if not rows:
-                break
-            hit_below = False
-            for code, name, mcap_eok in rows:
-                if mcap_eok >= min_eok:
+            for st in stocks:
+                code = st.get("itemCode")
+                mv = _mstock_parse_market_value_eok(st.get("marketValue"))
+                if not code:
+                    continue
+                stats[fetched_key] += 1
+                if mv is None:
+                    stats["n_unparsed"] += 1
+                    continue
+                if mv >= min_eok:
                     allowed.add(f"{code}{suffix}")
-                else:
-                    hit_below = True
-            if hit_below:
-                break   # 내림차순 정렬 — 이 페이지 이후는 전부 문턱 미달
-            _time.sleep(0.12)
-    return allowed
+            _time.sleep(0.1)
+            page += 1
+            if stats[total_key] is not None and (page - 1) * page_size >= stats[total_key]:
+                break
+        # 서버가 밝힌 전체 수만큼 못 받았으면(연속실패 외에 페이지가 일찍 비는
+        # 경우 포함) 불완전으로 본다.
+        if stats[total_key] is None or stats[fetched_key] < stats[total_key]:
+            stats["incomplete"] = True
+    if stats["incomplete"]:
+        stats["n_allowed"] = 0
+        return set(), stats
+    stats["n_allowed"] = len(allowed)
+    return allowed, stats

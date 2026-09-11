@@ -101,6 +101,24 @@
 
 ---
 
+### naver 데이터 소스 의존 목록 — PC 페이지 개편 대비 (v5.251, 2026-09-12)
+**교훈**: 2026-09-10 장마감 전후 naver가 finance.naver.com PC 페이지를 Next.js SPA로 개편했다. 스크레이퍼는 **200 OK, 정상 크기 응답, 종목 0건**을 받아 **예외 없이 조용히 빈 결과**를 냈다. 같은 원인의 함수가 여러 개였는데 v5.246은 하나(유니버스)만 고쳤고, 시총 필터(`fetch_high_marketcap_allowed`)는 이틀 동안 fail-open 상태로 운영됐다(v5.251에서 발견). **naver 개편이 또 오면 이 목록을 전부 한 번에 점검할 것.** 새 스크레이퍼를 추가하면 여기에도 추가하고, 결과 건수를 TIMING이나 로그에 남겨 0건이면 경고가 뜨게 할 것(`kr_universe_source`/`kr_mcap_filter_source` 선례).
+
+**HTML 페이지 스크레이핑(개편에 취약)** — 2026-09-12 실측 상태:
+| 함수 | 페이지 | 쓰는 곳 | 상태 |
+|---|---|---|---|
+| `naver_kr.fetch_top_value()` | `finance.naver.com/sise/sise_quant.naver` | `/api/eod`의 거래대금 상위(섹터 집중도, app.py `eod_summary`), `universe.kr_status()` 진단 | **죽음 — 0건, 미수정**(eod 거래대금 상위 섹션이 조용히 빔) |
+| `naver_kr.fetch_top_marketcap()` | `finance.naver.com/sise/sise_market_sum.naver` | `fetch_top_value()` 내부 병합, `universe.kr_status()` 진단 | **죽음 — 0건, 미수정** |
+| `earnings._kr_earnings_growth()` | `finance.naver.com/item/main.naver`("주요재무정보" 표) | KR 실적 탭, 💰실적우수 배지(`_attach_earnings_badges`), 섹터 대장 EPS 게이트(`_refine_sector_leaders`), IBD9 | **죽음 — 005930도 "실적 표 없음", 미수정** |
+| ~~`universe.load_kr_dynamic()`의 소스~~ | ~~sise_quant~~ | KR 유니버스 | v5.246에서 모바일 API로 교체 |
+| ~~`naver_kr.fetch_high_marketcap_allowed()`~~ | ~~sise_market_sum~~ | KR 시총 1000억 필터 | v5.251에서 모바일 API로 교체 |
+
+**JSON API(HTML보다는 덜 취약하지만 같은 벤더)**: `api.finance.naver.com/siseJson.naver`(일봉, `naver_kr.fetch_history`/`fetch_index_history`, 무거래일 OHLC=0 오염 있음 — 위 v5.242 항목), `m.stock.naver.com/api/stock/{code}/integration`(`naver_kr.fetch_live_price`, `fundamentals.py`), `m.stock.naver.com/api/index/{code}/basic`(`naver_kr.fetch_index`), `m.stock.naver.com/api/stocks/marketValue/{market}`(`fetch_top_turnover_v2`, `fetch_high_marketcap_allowed` — itemCode를 그대로 줘서 알파벳 혼용 KR 코드도 포함).
+
+**점검 명령**: `grep -n "naver\.com" *.py`. 이 표에 없는 URL이 나오면 표를 갱신할 것. 옛 HTML 정규식은 `code=(\d{6})`처럼 숫자 6자리만 받아 알파벳 혼용 코드(거래소 2024-01 도입, v5.250 참고)도 원천적으로 놓쳤다. 대체 소스를 고를 때 이 점도 확인할 것.
+
+---
+
 ### 돈의흐름(money flow) 리포트 — 주 1회 전환 (v5.147)
 - 비용 절감 목적(월 ~$50 → ~$8, 호출당 ~113k input+13k output, 실제 활용도가 참고용이라 매일 필요 없다는 판단). 매일→**토요일 09:00 KST 이후 주 1회**로 전환.
 - `_maybe_run_weekly_money_flow()`(app.py, 스케줄러 루프에서 4분마다 체크)가 트리거. `daykey`는 "토요일 날짜"가 아니라 `_last_trading_daykey()`로 역산한 **그 주의 실제 마지막 거래일**(보통 금요일, 공휴일이면 그 이전) — 기존 마커(`_moneyflow_warmed_*.marker`)/저장 함수(`money_flow.save_report_markdown` 등)를 형식 변경 없이 그대로 재사용(값이 주 1회만 생기는 날짜라 ISO 주차 같은 새 포맷 불필요).

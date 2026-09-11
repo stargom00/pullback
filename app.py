@@ -5,6 +5,39 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.251 [긴급 버그수정] KR 시총 1000억 필터가 2026-09-10 장마감 이후 꺼진 채
+        운영되던 문제 (사용자 지시). naver_kr.fetch_high_marketcap_allowed()가
+        finance.naver.com sise_market_sum.naver(PC 페이지)를 긁었는데 그 페이지가
+        Next.js SPA로 개편돼 0건 → _get_mcap_allowed() fail-open → 아무 로그 없이
+        필터 미적용. v5.246과 같은 원인인데 v5.246은 유니버스 함수만 고쳤다.
+        [수정] ① m.stock.naver.com marketValue API(fetch_top_turnover_v2와 같은
+        경로, marketValue 단위=억원, 측정에서 이미 사용)로 교체 — 반환형
+        (allowed, stats). 알파벳 혼용 코드 포함 확인(실측 1,849종목 허용,
+        0001A0/0011A0/00088K 등). 화이트리스트라 한 시장이라도 불완전하면 부분
+        목록 대신 빈 집합(부분 목록 = 못 받은 페이지 대형주의 조용한 과잉 배제).
+        정렬 가정 없이 전 페이지(약 45페이지, 실측 ~64초, 슬롯당 1회 백그라운드).
+        죽은 PC 파서(_parse_marketcap_rows/_ROW_*_RE) 삭제.
+        ② fail-open 유지하되 가시화(kr_universe_source와 같은 방식): TIMING에
+        kr_mcap_filter_source("mobile_api"|"fail_open"; US는 None)/
+        kr_mcap_allowed_count/kr_mcap_dropped_count, market=all 병합 전달,
+        _TIMING_SCHEMA_KEYS 동기화. 허용목록 0건이면 _ensure_mcap_allowed()가
+        stats와 함께 경고(4분마다 재시도·재경고), 매 KR 스캔마다도 경고.
+        /api/calendar immediate_pipeline_health에 _kr_mcap_filter_info() 노출.
+        ③ static/index.html 상태줄 "⚠️ 시총 필터 미적용" 배지
+        (_krMcapFilterBadgeHtml, fail_open일 때만).
+        [영향 확인] 현재 KR 유니버스 1,503 중 시총 1000억 미만 366종목(24.4%)
+        섞여 스캔 중 → 배포 후 약 1,137로 감소 예상. 프로덕션 스냅샷(09-11
+        12:28 KST 수신본) 기준 09-11 신규 감지 히트 중 1000억 미만 6종목(10건).
+        종가베팅은 v2 거래대금 상위100을 전종목에서 직접 뽑고 빠진 종목은 개별
+        fetch하므로(v5.214) 이 필터와 무관 — 백테스트(z=3.54)도 시총 필터 없이
+        측정됨.
+        [남은 것 — CLAUDE.md "naver 데이터 소스 의존 목록"] 같은 개편으로
+        fetch_top_value()/fetch_top_marketcap()(/api/eod 거래대금 상위)와
+        earnings._kr_earnings_growth()(KR 실적·💰배지·대장 EPS 게이트)도 0건 —
+        미수정, 목록화만.
+        [테스트] test_kr_mcap_filter.py 신설(13건), test_disk_cache_schema.py
+        스키마 픽스처 갱신. sabotage: 불완전→빈집합 가드 제거, fail-open 경고
+        제거 각각 FAIL 확인 후 원복.
 v5.250 [버그수정] "+직접 추가"가 알파벳 혼용 KR 종목코드를 거부하던 v5.243
         버그 (사용자 지시). 유니버스에 0011A0.KQ(액스비스)·03473K.KS(SK우)·
         0220WL.KS 등 35건이 있는데 _isValidTickerFormat()이 KR 코드를
@@ -6956,7 +6989,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.250"
+VERSION = "v5.251"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7648,6 +7681,8 @@ _TIMING_SCHEMA_KEYS = frozenset({
     # 상태가 매 스캔 TIMING 로그에 드러나게(로그만 보고 바로 알 수
     # 있어야 한다는 요구) — market="us" 타이밍에는 해당 없음(None/0).
     "kr_universe_source", "kr_universe_dynamic_count",
+    # v5.251(사용자 지시 — 시총 필터 fail-open 가시화): 같은 이유로 매 스캔 TIMING에.
+    "kr_mcap_filter_source", "kr_mcap_allowed_count", "kr_mcap_dropped_count",
 })
 
 
@@ -7987,6 +8022,10 @@ async def _fetch_market_data_all(wait_for_fresh: bool = False, force: bool = Fal
         # v5.246: KR 전용 필드라 kr_t에서만 — n_invalid_bars_dropped_kr와 동일 패턴.
         "kr_universe_source": kr_t.get("kr_universe_source"),
         "kr_universe_dynamic_count": kr_t.get("kr_universe_dynamic_count", 0),
+        # v5.251: KR 전용 — kr_universe_source와 동일 패턴.
+        "kr_mcap_filter_source": kr_t.get("kr_mcap_filter_source"),
+        "kr_mcap_allowed_count": kr_t.get("kr_mcap_allowed_count", 0),
+        "kr_mcap_dropped_count": kr_t.get("kr_mcap_dropped_count", 0),
     }
     fetch_failed_sample = (kr_t.get("fetch_failed_sample", []) + us_t.get("fetch_failed_sample", []))[:10]
     if fetch_failed_sample:
@@ -8098,9 +8137,16 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
     # 뜨는 문제). 허용목록이 아직 준비 안 됐으면(서버 갓 재시작 등) 필터 없이
     # 통과 — fail-open, 백그라운드 채워지면 다음 스캔부터 적용됨.
     _mcap_allowed = _get_mcap_allowed()
+    _n_kr_before_mcap = sum(1 for t in universe if naver_kr.is_kr(t))
     if _mcap_allowed:
         universe = {t: n for t, n in universe.items()
                     if not naver_kr.is_kr(t) or t in _mcap_allowed}
+    elif market == "kr":
+        # v5.251(사용자 지시): fail-open을 조용히 넘기지 않는다 — 매 KR
+        # 스캔마다 경고(TIMING의 kr_mcap_filter_source와 짝).
+        print(f"[mcap] ⚠️ 시총 허용목록 없음 — KR {_n_kr_before_mcap}종목을 시총 필터 없이 스캔(fail-open)",
+              flush=True)
+    _kr_mcap_dropped = _n_kr_before_mcap - sum(1 for t in universe if naver_kr.is_kr(t))
     loop = asyncio.get_event_loop()
     tickers = list(universe.keys())
 
@@ -8255,6 +8301,12 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
         "n_tickers_gap_truncated_us": sum(1 for s in us_invalid_stats if s["gap_truncated"]),
         "kr_universe_source": _kr_univ_info["source"] if _kr_univ_info else None,
         "kr_universe_dynamic_count": _kr_univ_info["dynamic_count"] if _kr_univ_info else 0,
+        # v5.251(사용자 지시 — 시총 필터 fail-open 가시화, kr_universe_source와
+        # 같은 방식): "mobile_api"=허용목록 적용, "fail_open"=허용목록 0건이라
+        # 필터 미적용. US 타이밍엔 해당 없음(None/0).
+        "kr_mcap_filter_source": ("mobile_api" if _mcap_allowed else "fail_open") if market == "kr" else None,
+        "kr_mcap_allowed_count": len(_mcap_allowed) if market == "kr" else 0,
+        "kr_mcap_dropped_count": _kr_mcap_dropped if market == "kr" else 0,
     }
     if kr_fetch_failed or us_fetch_failed:
         _timing["fetch_failed_sample"] = (kr_fetch_failed + us_fetch_failed)[:10]
@@ -10292,6 +10344,14 @@ def _get_mcap_allowed() -> set:
     return set()
 
 
+def _kr_mcap_filter_info() -> dict:
+    """v5.251: 현재 슬롯의 시총 필터 상태(순수 상태 읽기, 추가 fetch 없음) —
+    TIMING과 같은 키 이름으로 /api/calendar immediate_pipeline_health에 노출."""
+    allowed = _get_mcap_allowed()
+    return {"kr_mcap_filter_source": "mobile_api" if allowed else "fail_open",
+            "kr_mcap_allowed_count": len(allowed)}
+
+
 async def _ensure_mcap_allowed():
     """시총 허용목록을 슬롯당 1회 백그라운드로 채움(블로킹 스크레이핑이라
     executor에서) — v5.231: 슬롯 갱신 여부는 _get_mcap_allowed()와 동일
@@ -10304,15 +10364,24 @@ async def _ensure_mcap_allowed():
     _mcap_fetch_in_progress = True
     try:
         loop = asyncio.get_event_loop()
-        allowed = await loop.run_in_executor(
+        # v5.251: 모바일 API로 교체, (allowed, stats) 반환 — 불완전하면 빈 집합.
+        allowed, stats = await loop.run_in_executor(
             _executor, naver_kr.fetch_high_marketcap_allowed, _MCAP_MIN_EOK
         )
         if allowed:
             _mcap_allowed_cache["slotkey"] = slotkey
             _mcap_allowed_cache["tickers"] = allowed
             print(f"[mcap] {slotkey} 시총 {_MCAP_MIN_EOK}억↑ 허용목록 {len(allowed)}종목")
+        else:
+            # v5.251(사용자 지시 — "fail-open은 유지하되 조용히 넘기지 마라"):
+            # 예전엔 0건이면 아무 로그도 없이 넘어가 09-10 장마감 이후 필터가
+            # 꺼진 걸 아무도 몰랐다. 캐시를 안 채우므로 스케줄러(4분)마다 재시도되고
+            # 그때마다 이 경고가 다시 찍힌다.
+            print(f"[mcap] ⚠️ {slotkey} 시총 허용목록 0건 — 시총 {_MCAP_MIN_EOK}억 필터 미적용(fail-open). "
+                  f"stats={ {k: v for k, v in stats.items() if k != 'errors'} } errors={stats.get('errors', [])[:3]}",
+                  flush=True)
     except Exception as e:
-        print(f"[mcap] fetch failed: {e}")
+        print(f"[mcap] ⚠️ fetch failed: {e} — 시총 필터 미적용(fail-open)", flush=True)
     finally:
         _mcap_fetch_in_progress = False
 
@@ -15441,6 +15510,8 @@ async def get_calendar():
         # 트리거 없이(get_kr_universe_info()는 순수 상태 읽기, 이 엔드포인트의
         # "새 스캔 안 돌림" 원칙 유지) 현재 KR 유니버스 소스를 노출.
         **get_kr_universe_info(),
+        # v5.251: 시총 필터 상태도 새 fetch 없이(메모리 캐시 읽기) 노출.
+        **_kr_mcap_filter_info(),
     }
 
     return JSONResponse(_clean_nan({
