@@ -2095,3 +2095,54 @@ z=1.46 — 방향은 두 반분 모두 동일하게 <2% 우위지만, 6%+ 구간
 등록된 후속 처리 그대로 **ATR%는 US 눌림목 즉시진입 정렬/필터
 후보에서 제외**한다. 표본을 늘리면(체크포인트 확대 등) 반분 재현
 문턱을 넘을 가능성이 있는 재검토 후보로 남긴다.
+
+## 사전 등록 대기 — 벤치마크 룩어헤드 재검증 (2026-09-11 등록, 미실행)
+
+**발견 경위**: `docs/imminent_score_rank_vs_return.md` 사전등록 작성 중 확인했다.
+`harness.fetch_kr_benchmarks()`의 기본값(900일)은 실측 **601봉**이다(2026-09-11).
+그런데 `harness.bench_score_at(bench_close, off)`는 데이터가 부족해도 실패하지 않고 조용히 폴백한다:
+- `n − off`가 1~199 → `rs_raw_score` = None → **0.0**(벤치마크를 빼지 않음)
+- `n − off ≤ 0` → **자르지 않은 전체 시계열**을 사용 → 오늘 기준 벤치마크 점수를 과거
+  체크포인트에 적용(**룩어헤드**)
+
+`checkpoints(60,950,10)` 기준으로 off 410~600(20개)이 0.0 폴백, off 610~950(35개)이
+룩어헤드다. off 350~400은 3분기로 재정규화된 점수라 종목 쪽(4분기)과 기준이 다르다.
+**영향 범위**: KR 종목의 KS와 KQ 사이 상대 RS 순위. KR은 KOSPI와 KOSDAQ 종목을 한 풀에서
+순위를 매기는데 벤치마크 상수는 시장마다 달라서, 벤치마크 값이 틀리면 KS와 KQ의 상대
+순위가 바뀐다. 그 결과 rs_min 게이트 통과 여부와 score의 RS 항목이 달라진다. US는 영향 없음.
+
+(참고: `app._compute_rs_ranks()` docstring의 "벤치마크 상수는 같은 시장 안에서 전 종목에
+동일하게 적용돼 백분위 순위엔 영향이 없다"는 설명도 KR에는 성립하지 않는다. 상수가 KS와
+KQ에서 서로 다르기 때문이다. 이 설명에 기대는 곳은 `rs_delta` 계산(20봉 전 시점 RS에 오늘
+벤치마크를 재사용)이다. 같은 재검증 때 함께 확인할 것.)
+
+**오염된 스크립트** — `checkpoints(60,950,10)` + 기본값 `fetch_kr_benchmarks()`를 쓰고 KR을
+포함하는 12개(2026-09-11 전수 grep). `days=1900`(또는 `KR_FETCH_DAYS=1900`)을 넘긴 90cp
+스크립트는 안전하다.
+
+| # | 스크립트 | 근거가 된 판정 | 지난주 채택/철회 근거? |
+|---|---|---|---|
+| 1 | `2026-09-01_confirm_entry_90cp_revalidation.py` | 안C(돌파임박)/안C'(눌림목) 확인진입 **재확인(REAFFIRMED)** → UI v5.138/v5.141(Close 기준 통일 채택, 손절=신호일저가 채택) | **예 — 채택** |
+| 2 | `2026-09-03_super_filter_ev_90cp_revalidation.py` | 슈퍼대장 필터 **채택 철회**(GUIDE.md, app.py 반영) | **예 — 철회** |
+| 3 | `2026-09-04_kr_confirm_entry_all_tabs_90cp.py` | "KR은 종가베팅 외 검증된 진입법 없음" **가설 폐기**, "확인진입으로 KR 5탭 유효" 결론 확정(사용자 승인) | **예 — 채택** |
+| 4 | `2026-09-04_kr_confirm_entry_all_tabs_90cp_checks.py` | 5탭 재검증 후속 ①~④(손절기준/레이스시작일/슬리피지/dedup) 통과 확인. static/index.html 인용 | 예 — 3번 채택의 보강 근거 |
+| 5 | `2026-09-04_kr_confirm_entry_all_tabs_90cp_entry_close.py` | ⑥ 종가진입 재측정 → **피벗진입 EV 철회** | **예 — 철회** |
+| 6 | `2026-09-04_confirm_entry_grid_search_5tabs.py` | 확인조건 거래량배수 격자탐색 → **채택 확정**(사용자 승인, app.py `CONFIRM_RULE_BY_TAB` 반영) | **예 — 채택** |
+| 7 | `2026-09-04_kr_confirm_entry_all_tabs_90cp_entry_buystop.py` | 룩어헤드 조사(`docs/confirm_entry_lookahead_2026-09-04.md`)의 비교 측정 | 간접 — 5번 철회 판단의 보조 |
+| 8 | `2026-09-07_kr_us_breakout_boxbreak_post_pivot_consolidation_ev.py` | ⛔ 피벗 위 0~0.5ATR 즉시진입 **표시 전용 경고**(v5.210) | 예 — 표시 반영(게이트 변경 아님) |
+| 9 | `2026-09-07_kr_us_confirm_entry_stop_width_atr_multiple_ev.py` | 손절폭 ATR 배수 **표시 전용 정보**(v5.211~v5.212) | 예 — 표시 반영(게이트 변경 아님) |
+| 10 | `2026-09-02_post_entry_stall_exit_ev.py` | 정체 조기청산 규칙 **기각**(`docs/post_entry_stall_exit_ev.md`) | 예 — 기각(현행 유지) |
+| 11 | `2026-09-04_boxbreak_basevol_diagnostic.py` | ⑤ base_vol50 정의 통일 진단 | 진단용(판정 직접 근거 아님) |
+| 12 | `2026-09-04_zerovol_prevalence_check.py` | 거래량 0 봉 빈도 점검 | 진단용 |
+
+**재검증 우선순위(제안)**: 코드와 UI를 실제로 바꾼 채택/철회 판정부터 한다.
+6(격자탐색 채택, app.py 규칙값) → 3·4(KR 5탭 유효 결론) → 1(안C/안C' 재확인) →
+5(피벗진입 철회) → 2(슈퍼대장 철회) → 8·9(표시 전용) → 10 → 11·12.
+**`docs/imminent_score_rank_vs_return.md` 측정이 끝나면 이 목록부터 재검증한다**
+(사용자 지시 2026-09-11).
+
+**재검증 방법(사전 확정)**: 스크립트는 그대로 두고 `fetch_kr_benchmarks(days=1900)`만
+바꿔 재실행한다. 원래 결과와 KR 수치를 나란히 비교하고, 원래 사전 판정 기준을 그대로
+다시 적용한다. 그 전에 `harness.bench_score_at()`을 `n − off < 253`이면 `AssertionError`를
+내도록 고친다. 이러면 기본값을 쓴 스크립트는 수정 없이 재실행하면 실패하게 되는데,
+그게 의도다(재발 방지).
