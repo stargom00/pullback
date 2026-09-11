@@ -240,7 +240,18 @@
 
 ## §1-부록. 실행 중 변경 기록
 
-(없음)
+- **변경 1 (결과를 보기 전, 스크립트 작성 중 — 2026-09-11):** 체크포인트마다
+  **프로덕션 fetch 창을 재현한다.** `df.loc[cp_date − 730일 : cp_date]`에서 730은
+  리터럴이 아니라 `naver_kr.fetch_history`의 기본 `days`를 시그니처에서 읽는다.
+  **이유:** 프로덕션 `app._fetch()` → `naver_kr.fetch()`는 최근 730 달력일(≈485봉)만
+  받는다. 하네스 1900일 데이터를 창 없이 넣으면 analyze와 RS가 프로덕션보다 긴 이력을
+  보게 된다(`late_stage_info`, 무효봉 갈래B 트렁케이션 등 전체 길이에 의존하는 계산이
+  달라질 수 있음). 앵커 게이트가 "프로덕션 재현"을 요구하므로 창까지 맞춘다.
+- **변경 2 (결과를 보기 전 — 같은 날):** `harness.clean_at_checkpoint()`가
+  `_filter_invalid_bars`만이 아니라 **`app._downcast` 전체**(무효봉 정제 + Close.notna +
+  float32)를 import해서 적용하도록 바꿨다. **이유:** 프로덕션 analyze가 보는 dtype이
+  float32라서 경계값 판정(예: `near <= 0.0`)을 1:1로 재현하려면 dtype도 맞아야 한다.
+  1.7-6의 룩어헤드 논리(truncate 후 적용)는 그대로다.
 
 ---
 

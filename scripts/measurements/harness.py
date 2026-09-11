@@ -286,8 +286,11 @@ def truncate_at(df: pd.DataFrame, off: int) -> pd.DataFrame:
 
 
 def clean_at_checkpoint(trunc_df: pd.DataFrame) -> pd.DataFrame:
-    """체크포인트까지 자른 df에 프로덕션 무효봉 정제(app.py `_filter_invalid_bars`,
-    v5.242)를 적용 — 사본이 아니라 import로 공유(동기화 누락 원천 차단).
+    """체크포인트까지 자른 df에 프로덕션 데이터 정규화(app.py `_downcast` =
+    무효봉 정제 `_filter_invalid_bars`(v5.242) + Close.notna + float32)를
+    그대로 적용 — 사본이 아니라 import로 공유(동기화 누락 원천 차단).
+    float32까지 맞추는 이유: 프로덕션 analyze_*()가 실제로 보는 dtype과
+    같아야 경계값 판정(예: near<=0.0)이 1:1로 재현된다.
 
     반드시 **truncate 후에** 호출할 것(fetch 시점 `_downcast()`에 넣지 않은
     이유): `_filter_invalid_bars`의 갈래B는 "가장 최근 장기 무효구간(5거래일+)
@@ -300,9 +303,8 @@ def clean_at_checkpoint(trunc_df: pd.DataFrame) -> pd.DataFrame:
     fetch 시점 `_downcast()`(Close.notna만)는 기존 스크립트 재현성을 위해
     그대로 둔다 — 이 함수를 안 부르는 기존 스크립트는 v5.242 이전 데이터
     (무효봉 포함)를 계속 본다."""
-    from app import _filter_invalid_bars
-    cleaned, _stats = _filter_invalid_bars(trunc_df)
-    return cleaned
+    from app import _downcast as _app_downcast
+    return _app_downcast(trunc_df.copy())
 
 
 def future_after(df: pd.DataFrame, off: int) -> pd.DataFrame:
