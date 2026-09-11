@@ -5,6 +5,86 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.246 [긴급수정] KR 유니버스 붕괴 복구 — naver PC페이지 개편으로 19시간+
+        동적 수집 0건, 정적 폴백(254/1500, 17%)으로 스캔되던 장애
+        (사용자 지시, 최우선 처리 — 2026-09-11 12:40 KST 장중 배포).
+        [확정된 원인] finance.naver.com의 sise_quant.naver(거래대금 상위)/
+        sise_market_sum.naver(시가총액 상위) 두 페이지 모두 Next.js SPA로
+        개편됨 — 실측 확인: 두 URL 다 200 OK + 정상 크기(~121KB) 응답이지만
+        HTML에 종목 데이터 자체가 없음(code=/__NEXT_DATA__/종목코드 문자열
+        전부 부재, 클라이언트 렌더링 전 빈 셸). `naver_kr.fetch_top_value()`/
+        `fetch_top_marketcap()`의 파서(`_parse_quant_page()`, 정적 HTML
+        테이블 링크 패턴 전제)가 이 신형 페이지에서 구조적으로 0건만
+        반환하게 됐다 — 타임아웃/레이트리밋/차단이 아니라 파싱 대상
+        자체의 소멸. `universe.py::get_universe("kr")`가 동적 수집 0건 시
+        정적 `KR_UNIVERSE`(254종목) 단독 폴백으로 조용히 내려가는 기존
+        안전망이 "작동은 했지만 아무 데도 안 보여서" 어제 15:30 KST(KR
+        장마감) 이후 19시간+ 아무도 모르게 지속됐다(디스크 캐시 파일명
+        타임스탬프·TIMING n_total:256 로그로 지속 기간 확정) — US(정상,
+        n_total:2120)·종가베팅(별도 모바일 API 경로라 정상)은 무관, KR
+        5개 메인 탭(눌림목/돌파임박/박스돌파/돌파/추세전환)만 영향.
+        [수정] `load_kr_dynamic()`의 소스를 `naver_kr.fetch_top_value()`
+        (PC 스크래핑, 폐기 대상)에서 `naver_kr.fetch_top_turnover_v2()`
+        (m.stock.naver.com 모바일 API, 종가베팅 탭이 이미 쓰던 검증된
+        경로 — 새 파서 안 만듦, 사용자 지시)로 교체. 확인 사항(승인
+        전 검토): ① 반환 스키마는 `{티커: 이름}`로 동일, tuple 언패킹만
+        필요 ② 정렬 기준은 둘 다 "거래대금"이지만 v2가 실제 누적거래대금
+        기준 재정렬이라 더 정확함(기존 fetch_top_value()는 sise_quant.naver
+        의 알려진 page 파라미터 버그로 91%가 시총 폴백이었음, 2026-09-01
+        발견) — 교체는 부작용이 아니라 기존 결함 제거 방향 ③ KOSPI/KOSDAQ
+        둘 다 커버, 단 시장별 강제 균등배분(v4.48.1) 없이 전체 통합
+        순위에서 자연 배분 — 그날 거래대금이 한쪽에 쏠리면 배분도 쏠릴
+        수 있음(특성 변화, 의도적으로 안 건드림) ④ 시가총액 폴백 전용
+        함수는 안 만듦 — v2 자체가 각 시장 전체를 훑어 top_n 확보를
+        시도하고(부족분 보충이 애초에 구조적으로 덜 필요), 완전 실패
+        시엔 기존 `get_universe()`의 정적 폴백 병합 로직이 그대로 안전망
+        (이번 사고의 본질은 안전망 부재가 아니라 가시성 부재였음).
+        [가시성 — 실패를 조용히 넘기지 않기] ① `load_kr_dynamic()`이
+        수집 건수 < top_n×0.5(임의값, 근거 없음을 명시 — SIGNAL_SNAPSHOT_
+        RESET_PIVOT_PCT=3% 출처 미기재 사고 재발 방지 원칙)면 매 호출마다
+        stderr 경고(fetch_top_turnover_v2()의 stats: incomplete/kospi·
+        kosdaq fetched·total/errors 포함) — 30분 슬롯 캐시와 무관하게
+        실패가 지속되는 한 `_fetch_market_data_inner()`가 도는 주기(10분
+        DATA_TTL/스케줄러 워밍)마다 반복 로그. ② `universe.get_kr_universe_
+        info()`(모듈 상태 읽기 전용, 추가 fetch 없음) 신설 — `load_kr_
+        dynamic()`이 성공/실패 모든 경로에서 갱신. `_fetch_market_data_
+        inner()`가 매 KR 타이밍 구성 시 이 값을 읽어 `kr_universe_source`
+        ("dynamic"|"static_fallback")/`kr_universe_dynamic_count`를
+        TIMING에 추가(US 타이밍엔 None/0, market="all" 병합에도 kr
+        서브번들 값 그대로 전달 — n_invalid_bars_dropped_kr과 동일
+        패턴) — 매 스캔 TIMING 로그에 찍히므로 로그만 보고 바로 확인
+        가능(사용자 지시 핵심 요구). `_TIMING_SCHEMA_KEYS` 동기화.
+        `/api/calendar`의 `immediate_pipeline_health`에도 새 fetch
+        트리거 없이 그대로 노출(해당 엔드포인트의 "새 스캔 안 돌림"
+        원칙 유지).
+        ③ `static/index.html` 상태줄에 `kr_universe_source==='static_
+        fallback'`일 때만(`_krUniverseBadgeHtml()`, 순수 함수로 분리)
+        "⚠️ KR 유니버스 축소" 배지 — 다른 경보(`⚠️ 경보/과대리스크`)와
+        같은 톤. 상시 노출 우려 없음 — 이 상태 자체가 드물어야 정상.
+        [알려진 갭 — 후속 필요, 기록만] v5.149가 "get_universe('kr') 전면
+        교체는 돌파/눌림목/추세전환 등 다른 탭이 v2로 재측정된 적이 없어
+        하지 않는다"고 명시적으로 결정했던 바로 그 전면 교체를 이번에
+        의도적으로 뒤집었다(긴급 장애 복구, "미검증 모집단 변경" vs
+        "83% 누락 유니버스로 계속 스캔" 저울질, 사용자 승인) — 관련
+        stale 주석(app.py JONGGA 섹션 두 곳) 갱신. **다른 5개 탭의 v2
+        유니버스 기준 재검증은 이 세션 범위 밖, 다음 세션 과제로 남음.**
+        별도로, 이번 수정 중 실제 유니버스가 복구되면서 v5.243(ticker
+        형식 검증)이 놓친 사각지대도 발견됨 — KR 코드 중 영문자가 섞인
+        6자리(예: `0039P0.KQ`=매드업, `00680K.KS`=미래에셋증권2우B,
+        스팩·우선주 등 실존 종목)를 `_isValidTickerFormat()`(순수 숫자
+        6자리 전제)이 거짓 배제한다(`test_ma_ticker_format.py::test_full_
+        universe_no_false_rejects`가 유니버스 복구 후 이 사각지대를
+        실제로 잡아냄 — 종전엔 정적 폴백 유니버스에 이런 코드가 아예
+        없어서 안 보였을 뿐). 이번 긴급 배포 범위에는 포함하지 않음
+        (사용자 지시로 별도 후속 처리) — 해당 테스트는 이번 커밋에서
+        deselect 상태로 둠.
+        [검증] universe.py 7건(0건/절반미만/정상/예외 각각의 로그·소스·
+        get_universe 병합까지), app.py TIMING/calendar 7건(static_fallback/
+        dynamic 매 호출 반영, market=all 병합 전달, 스키마 동기화), 화면
+        배지 5건(추출+Node 실행) — test_kr_universe_recovery.py/
+        test_timing_kr_universe_source.py/test_kr_universe_badge.py
+        신설, 총 19건. 전체 테스트 511건 통과(기존 492 + 신규 19, 위
+        ticker-format 사각지대 발견 테스트 1건은 별도 이슈라 deselect).
 v5.245 [수정] 스캔 결과 시각 표기 — 카드 가격이 언제 값인지 명시
         (사용자 지시, 2026-09-11 "한화생명 09:15 스캔가(5,980) vs
         실제가(5,840) 2.3% 괴리" 조사 후속).
@@ -6496,7 +6576,7 @@ def _sector_fields(t: str, bundle: dict) -> dict:
     return {"sector": _sector_of(t), "sector_rank": None, "sector_total": None, "sector_rs_pct": None}
 
 
-from universe import get_universe, load_alerts, _kr_cache_slot
+from universe import get_universe, load_alerts, _kr_cache_slot, get_kr_universe_info
 import scanner as scanner_mod
 import naver_kr
 import fundamentals as fundamentals_mod
@@ -6701,7 +6781,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.245"
+VERSION = "v5.246"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7389,6 +7469,10 @@ _TIMING_SCHEMA_KEYS = frozenset({
     # 이 커밋에서 실제로 통과하는지로 확인(설계 보고 참고).
     "n_invalid_bars_dropped_kr", "n_invalid_bars_dropped_us",
     "n_tickers_gap_truncated_kr", "n_tickers_gap_truncated_us",
+    # v5.246(사용자 지시 — KR 유니버스 붕괴 사고 재발 방지): 정적 폴백
+    # 상태가 매 스캔 TIMING 로그에 드러나게(로그만 보고 바로 알 수
+    # 있어야 한다는 요구) — market="us" 타이밍에는 해당 없음(None/0).
+    "kr_universe_source", "kr_universe_dynamic_count",
 })
 
 
@@ -7725,6 +7809,9 @@ async def _fetch_market_data_all(wait_for_fresh: bool = False, force: bool = Fal
         "n_invalid_bars_dropped_us": us_t.get("n_invalid_bars_dropped_us", 0),
         "n_tickers_gap_truncated_kr": kr_t.get("n_tickers_gap_truncated_kr", 0),
         "n_tickers_gap_truncated_us": us_t.get("n_tickers_gap_truncated_us", 0),
+        # v5.246: KR 전용 필드라 kr_t에서만 — n_invalid_bars_dropped_kr와 동일 패턴.
+        "kr_universe_source": kr_t.get("kr_universe_source"),
+        "kr_universe_dynamic_count": kr_t.get("kr_universe_dynamic_count", 0),
     }
     fetch_failed_sample = (kr_t.get("fetch_failed_sample", []) + us_t.get("fetch_failed_sample", []))[:10]
     if fetch_failed_sample:
@@ -7956,6 +8043,12 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
     rs_deltas = {t: rs_ranks[t] - rs_ranks_20ago[t] for t in rs_ranks if t in rs_ranks_20ago}
     _dur_rs = time.time() - _t_rs
 
+    # v5.246(사용자 지시 — KR 유니버스 붕괴 사고 재발 방지): get_universe(market)
+    # 호출 시점에 universe.py가 갱신해둔 "이번 호출의 실제 소스" 상태를
+    # 읽어온다(추가 fetch 없음, 위 universe = get_universe(market) 호출이
+    # 이미 load_kr_dynamic()을 거쳐 이 상태를 갱신해둠). market="us"에는
+    # 해당 없음(None/0) — KR 전용 문제라 US 타이밍에 값을 넣을 이유가 없다.
+    _kr_univ_info = get_kr_universe_info() if market == "kr" else None
     # ── 속도 진단 로그 — 어느 단계가 느린지 Railway 로그로 확인 ──
     _timing = {
         "market": market,
@@ -7985,6 +8078,8 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
         "n_invalid_bars_dropped_us": sum(s["n_dropped"] for s in us_invalid_stats),
         "n_tickers_gap_truncated_kr": sum(1 for s in kr_invalid_stats if s["gap_truncated"]),
         "n_tickers_gap_truncated_us": sum(1 for s in us_invalid_stats if s["gap_truncated"]),
+        "kr_universe_source": _kr_univ_info["source"] if _kr_univ_info else None,
+        "kr_universe_dynamic_count": _kr_univ_info["dynamic_count"] if _kr_univ_info else 0,
     }
     if kr_fetch_failed or us_fetch_failed:
         _timing["fetch_failed_sample"] = (kr_fetch_failed + us_fetch_failed)[:10]
@@ -8049,11 +8144,24 @@ STAGE2_RS_PCTILE_MIN = 70
 # 상위 유니버스, m.stock.naver.com 기반, 신설)로 90개 체크포인트
 # 재측정 완료 — z=3.54(≥1.96 유의 유지) → 사전 선언 기준상 채택 유지.
 # 원측정(구 유니버스, z=4.28)은 삭제하지 않고 같이 인용 — 수치가 왜
-# 바뀌었는지 나중에 추적 가능하게(사용자 지시). **운영 미반영 주의**:
-# 이 재측정은 fetch_top_turnover_v2()로 했지만 실제 스캔 파이프라인
-# (load_kr_dynamic)은 아직 fetch_top_value()(구버전)를 그대로 쓴다 —
-# 즉 화면에 뜨는 후보는 여전히 구 유니버스 기준. 운영 교체 계획은
-# docs/kr_jongga_betting_backtest.md "운영 반영 계획" 절 참고.
+# 바뀌었는지 나중에 추적 가능하게(사용자 지시).
+# v5.246(사용자 지시 — 긴급 장애 대응, 2026-09-11): **아래 "운영 미반영"
+# 상태가 바뀌었다.** naver가 fetch_top_value()가 긁던 PC 페이지를
+# Next.js SPA로 개편해(200 OK + 정상 크기지만 종목 데이터 자체가 없는
+# 빈 SPA 껍데기, 확인 완료) load_kr_dynamic()이 19시간+ 0건→정적
+# 폴백(254종목, 정상 1505의 17%)으로 조용히 무너진 사고가 발생 —
+# `universe.py::load_kr_dynamic()`을 fetch_top_turnover_v2()로 전면
+# 교체했다. 이 교체는 바로 아래 v5.149 단락이 명시적으로 피하려 했던
+# 그 "전면 교체"이고, "돌파/눌림목/추세전환 등 다른 탭이 v2로 재측정된
+# 적이 없다"는 v5.149의 우려도 여전히 유효하다 — 다만 이번엔 "미검증
+# 모집단 변경" vs "83% 누락된 유니버스로 계속 스캔"을 저울질해 후자가
+# 명백히 더 나쁘다고 판단해 의도적으로 뒤집었다(긴급 장애 복구, 사용자
+# 승인). **결과: 이제 종가베팅뿐 아니라 다른 5개 메인 탭도 v2 유니버스
+# 기준으로 스캔된다** — v5.149가 말한 "다른 탭 미검증 리스크"가 지금부터
+# 실제로 적용된다는 뜻. 재측정은 이 세션 범위 밖(사용자 지시로 별도
+# 작업). 운영 교체 계획 문서(docs/kr_jongga_betting_backtest.md "운영
+# 반영 계획")는 이제 이 사실과 어긋나므로 다음에 그 문서를 다루는
+# 세션이 갱신할 것.
 JONGGA_BACKTEST_NOTE = ("이 조건 과거 평균 익일갭 +0.80% (n=292, 비용차감후, "
                           "왕복0.3% 가정) — z=3.54, 당일 거래대금 상위 100"
                           "(전종목 기준, v2 유니버스) (docs/kr_jongga_betting_"
@@ -8062,7 +8170,7 @@ JONGGA_BACKTEST_NOTE = ("이 조건 과거 평균 익일갭 +0.80% (n=292, 비�
 JONGGA_SELL_RULE = "익일 시초가~9:05 전량 매도"
 
 # ── 종가베팅 turnover_rank — v2(진짜 거래대금 상위) 부분 교체 (v5.149) ──
-# 배경: get_universe("kr") 자체는 91% 시총폴백(naver_kr.fetch_top_value
+# 배경(당시): get_universe("kr") 자체는 91% 시총폴백(naver_kr.fetch_top_value
 # 페이지네이션 버그, docs/kr_universe_turnover_pagination_investigation.md)이
 # 그대로 남아있고, 이걸 전면 교체하면 돌파/눌림목/추세전환 등 다른 탭의
 # 스캔 모집단까지 같이 바뀐다 — 그 탭들은 v2로 재측정된 적이 없어 전면
@@ -8070,6 +8178,12 @@ JONGGA_SELL_RULE = "익일 시초가~9:05 전량 매도"
 # 에만 naver_kr.fetch_top_turnover_v2()를 부분 적용 — get_universe("kr")
 # 자체(스캔 대상 종목군)는 그대로 두고, 그 종목들에 매기는 순위만
 # 정확한 거래대금 기준으로 바꾼다.
+# **v5.246로 전제 변경**: get_universe("kr")도 이제 fetch_top_turnover_v2
+# 기반이다(위 v5.145 단락의 v5.246 참고 — 긴급 장애 대응으로 "부분
+# 교체만" 원칙을 의도적으로 뒤집음). 아래 이 섹션(jongga 자체 v7
+# 네임스페이스 순위 캐시)은 get_universe("kr")와 독립된 별도 메커니즘
+# 이라 코드 동작 자체는 안 바뀜 — 다만 "get_universe는 아직 구버전"
+# 이라는 전제 문장만 지금은 틀렸다.
 JONGGA_TURNOVER_SOURCE_ENV = "JONGGA_TURNOVER_SOURCE"   # v1|v2, 기본 v2. Railway 환경변수만 바꾸면 코드 배포 없이 즉시 롤백 가능(v5.139 킬스위치와 같은 패턴).
 
 
@@ -15071,6 +15185,10 @@ async def get_calendar():
         "kr_data_bundle": _data_cache.get("data:kr") is not None,
         "us_data_bundle": _data_cache.get("data:us") is not None,
         "us_pullback_scan_cache": _cache.get("us:pullback") is not None,
+        # v5.246(사용자 지시 — KR 유니버스 붕괴 사고 재발 방지): 새 fetch
+        # 트리거 없이(get_kr_universe_info()는 순수 상태 읽기, 이 엔드포인트의
+        # "새 스캔 안 돌림" 원칙 유지) 현재 KR 유니버스 소스를 노출.
+        **get_kr_universe_info(),
     }
 
     return JSONResponse(_clean_nan({

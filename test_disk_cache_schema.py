@@ -102,6 +102,8 @@ def test_load_disk_cache_accepts_current_schema(isolated_disk_cache_dir, monkeyp
             # 자체가 "현재 스키마"를 못 만드는 것이니 함께 갱신.
             "n_invalid_bars_dropped_kr": 0, "n_invalid_bars_dropped_us": 0,
             "n_tickers_gap_truncated_kr": 0, "n_tickers_gap_truncated_us": 0,
+            # v5.246: KR 유니버스 소스 표기 필드 — 위와 동일 이유로 함께 갱신.
+            "kr_universe_source": "dynamic", "kr_universe_dynamic_count": 1500,
         },
     }
     path = app._disk_cache_path(market, daykey)

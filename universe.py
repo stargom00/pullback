@@ -33,6 +33,28 @@ print(f"[universe] 미국 확장 로드: EXT={len(US_UNIVERSE_EXT)} AUTO={len(US
 # pykrx 미설치/조회 실패 시 정적 KR_UNIVERSE로 폴백.
 _KR_DYNAMIC_CACHE: dict = {}
 KR_TOP_N = int(os.environ.get("KR_TOP_N", "1500"))  # 거래대금 상위 (800→1500, v4.48.1: 유동성 있는 전 종목 커버 — 화장품·건설 로테이션을 베이스 단계부터 포착. naver_kr에 재시도·지터 추가로 확대분 안정화)
+
+# v5.246(사용자 지시 — 2026-09-11 "naver PC페이지 개편으로 KR 유니버스
+# 1505→256 붕괴, 19시간+ 아무도 못 알아챔" 사고 후속): load_kr_dynamic()이
+# 매 호출마다(성공/실패 무관) 갱신하는 "최근 상태" — app.py의 TIMING이
+# 매 스캔마다 이 값을 읽어 kr_universe_source/kr_universe_dynamic_count로
+# 노출한다(사용자 지시 — "정적 폴백 상태가 지속되는 동안은 매 스캔 TIMING에
+# 찍혀야 로그만 봐도 바로 보인다"). load_kr_dynamic()의 반환값(그 호출
+# 시점의 최신 결과)만 반영 — 과거 슬롯의 stale한 성공 여부를 들고 있지
+# 않는다.
+_LAST_KR_UNIVERSE_INFO: dict = {"source": "unknown", "dynamic_count": 0}
+
+
+def get_kr_universe_info() -> dict:
+    """{"source": "dynamic"|"static_fallback"|"unknown", "dynamic_count": int}
+    — load_kr_dynamic()이 가장 최근에 실행된 결과. get_universe("kr")를
+    부른 적이 없으면(예: US만 쓰는 프로세스) "unknown"."""
+    return dict(_LAST_KR_UNIVERSE_INFO)
+
+
+def _set_kr_universe_info(source: str, dynamic_count: int) -> None:
+    _LAST_KR_UNIVERSE_INFO["source"] = source
+    _LAST_KR_UNIVERSE_INFO["dynamic_count"] = dynamic_count
 # 장중 거래대금 급증 종목 포착: 한국 장중(09:00~15:30 KST)엔 캐시를 INTRADAY_REFRESH_MIN분마다
 # 갱신해 섹터 로테이션으로 새로 거래 터지는 종목을 유니버스에 빠르게 편입. 장 외엔 하루 1회.
 INTRADAY_REFRESH_MIN = int(os.environ.get("KR_INTRADAY_REFRESH_MIN", "30"))
@@ -53,13 +75,24 @@ def _kr_cache_slot() -> str:
 
 
 def load_kr_dynamic(top_n: int = KR_TOP_N) -> dict:
-    """KRX 거래대금 상위 top_n 종목을 {티커.KS/.KQ: 이름}으로 반환.
-    하루 1회만 실제 조회(파일 캐시), 실패 시 빈 dict."""
+    """거래대금 상위 top_n 종목을 {티커.KS/.KQ: 이름}으로 반환. 슬롯마다
+    (장중 30분/장외 1일) 1회만 실제 조회(파일 캐시), 실패 시 빈 dict.
+
+    v5.246(사용자 지시 — 2026-09-11 사고 후속): 소스를 naver_kr.fetch_top_value()
+    (finance.naver.com PC 페이지 스크래핑)에서 naver_kr.fetch_top_turnover_v2()
+    (m.stock.naver.com 모바일 API, 종가베팅 탭이 이미 쓰던 검증된 경로)로
+    교체 — naver가 PC 페이지를 Next.js SPA로 개편해 기존 파서(_parse_quant_page(),
+    정적 HTML 테이블 전제)가 200 OK를 받고도 0건을 반환하게 됐다(응답에
+    종목 데이터 자체가 없음 — code=/__NEXT_DATA__ 전부 부재, 확인 완료).
+    fetch_top_value()는 건드리지 않는다(다른 호출부가 아직 씀, docstring 참고)
+    — 이 함수의 호출만 바꾼다. 반환 dict 스키마(티커→이름)는 동일해 어댑터는
+    tuple 언패킹뿐."""
     import json
     # 장중엔 30분 슬롯, 장 외엔 하루 1회로 갱신되는 캐시 키
     slotkey = _kr_cache_slot()
     # 메모리 캐시 (슬롯이 같을 때만 재사용 → 장중 30분마다 자동 무효화)
     if _KR_DYNAMIC_CACHE.get("slotkey") == slotkey and _KR_DYNAMIC_CACHE.get("data"):
+        _set_kr_universe_info("dynamic", len(_KR_DYNAMIC_CACHE["data"]))
         return _KR_DYNAMIC_CACHE["data"]
     # 파일 캐시 (/data 우선)
     cache_dir = os.environ.get("JOURNAL_DIR") or ("/data" if os.path.isdir("/data") else os.path.dirname(__file__))
@@ -71,13 +104,31 @@ def load_kr_dynamic(top_n: int = KR_TOP_N) -> dict:
             with open(cache_path, encoding="utf-8") as f:
                 data = json.load(f)
             _KR_DYNAMIC_CACHE.update({"slotkey": slotkey, "data": data})
+            _set_kr_universe_info("dynamic", len(data))
             return data
         except Exception:
             pass
-    # 실제 조회 — 네이버 거래대금 상위 (pykrx는 KRX 로그인 요구로 폐기, v4.38.9)
+    # 실제 조회 — naver 모바일 API 거래대금 상위 (pykrx는 KRX 로그인 요구로 폐기, v4.38.9;
+    # PC 페이지 스크래핑은 2026-09-11 사이트 개편으로 폐기, v5.246)
     try:
         import naver_kr
-        out = naver_kr.fetch_top_value(top_n)
+        out, stats = naver_kr.fetch_top_turnover_v2(top_n)
+        # v5.246(사용자 지시): top_n의 절반 — 임의값. 정확한 근거(예:
+        # REUSE_TTL 절반처럼 기존 상수와의 비례 관계)는 없고, "완전
+        # 정상(top_n 근접)과 완전 실패(0건) 사이 어디부턴가는 경고해야
+        # 한다"는 판단으로 중간값을 잡았다 — SIGNAL_SNAPSHOT_RESET_
+        # PIVOT_PCT=3% 출처 미기재 사고 재발 방지 원칙에 따라 근거
+        # 없음을 명시(CLAUDE.md 참고). 노이즈가 과하면(정상 변동으로도
+        # 자주 걸리면) 재검토 대상.
+        if len(out) < top_n * 0.5:
+            import sys
+            print(f"[universe] ⚠️ KR 동적 수집 부족: {len(out)}/{top_n} "
+                  f"(incomplete={stats.get('incomplete')}, "
+                  f"kospi={stats.get('kospi_fetched')}/{stats.get('kospi_total')}, "
+                  f"kosdaq={stats.get('kosdaq_fetched')}/{stats.get('kosdaq_total')}, "
+                  f"errors={stats.get('errors')}) — "
+                  f"{'정적 폴백(' + str(len(KR_UNIVERSE)) + '종목)만 서빙됩니다' if not out else '정적 폴백과 병합됩니다'}",
+                  file=sys.stderr)
         if out:
             try:
                 with open(cache_path, "w", encoding="utf-8") as f:
@@ -85,12 +136,14 @@ def load_kr_dynamic(top_n: int = KR_TOP_N) -> dict:
             except Exception:
                 pass
             _KR_DYNAMIC_CACHE.update({"slotkey": slotkey, "data": out})
+        _set_kr_universe_info("dynamic" if out else "static_fallback", len(out))
         return out
     except Exception as e:
         import sys, traceback
         _KR_DYNAMIC_CACHE["last_error"] = f"{type(e).__name__}: {e}"
         print(f"[universe] load_kr_dynamic 실패: {type(e).__name__}: {e}", file=sys.stderr)
         traceback.print_exc()
+        _set_kr_universe_info("static_fallback", 0)
         return {}
 
 
