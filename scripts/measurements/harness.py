@@ -285,6 +285,26 @@ def truncate_at(df: pd.DataFrame, off: int) -> pd.DataFrame:
     return df.iloc[: n - off] if off > 0 else df
 
 
+def clean_at_checkpoint(trunc_df: pd.DataFrame) -> pd.DataFrame:
+    """체크포인트까지 자른 df에 프로덕션 무효봉 정제(app.py `_filter_invalid_bars`,
+    v5.242)를 적용 — 사본이 아니라 import로 공유(동기화 누락 원천 차단).
+
+    반드시 **truncate 후에** 호출할 것(fetch 시점 `_downcast()`에 넣지 않은
+    이유): `_filter_invalid_bars`의 갈래B는 "가장 최근 장기 무효구간(5거래일+)
+    이전을 전부 버린다". 전체 이력(오늘까지)에 먼저 적용하면, 예컨대 2025년에
+    장기 거래정지된 종목이 2023년 체크포인트에서도 통째로 사라진다 — 미래
+    사건으로 과거 표본을 고르는 룩어헤드. 체크포인트 시점 df에 적용하면 그
+    시점 프로덕션이 봤을 데이터와 정확히 같다(2026-09-11,
+    docs/imminent_score_rank_vs_return.md 1.7-6/1.8a).
+
+    fetch 시점 `_downcast()`(Close.notna만)는 기존 스크립트 재현성을 위해
+    그대로 둔다 — 이 함수를 안 부르는 기존 스크립트는 v5.242 이전 데이터
+    (무효봉 포함)를 계속 본다."""
+    from app import _filter_invalid_bars
+    cleaned, _stats = _filter_invalid_bars(trunc_df)
+    return cleaned
+
+
 def future_after(df: pd.DataFrame, off: int) -> pd.DataFrame:
     n = len(df)
     return df.iloc[n - off:] if off > 0 else df.iloc[0:0]
