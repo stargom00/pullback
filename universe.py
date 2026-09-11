@@ -85,9 +85,10 @@ def load_kr_dynamic(top_n: int = KR_TOP_N) -> dict:
     교체 — naver가 PC 페이지를 Next.js SPA로 개편해 기존 파서(_parse_quant_page(),
     정적 HTML 테이블 전제)가 200 OK를 받고도 0건을 반환하게 됐다(응답에
     종목 데이터 자체가 없음 — code=/__NEXT_DATA__ 전부 부재, 확인 완료).
-    fetch_top_value()는 건드리지 않는다(다른 호출부가 아직 씀, docstring 참고)
-    — 이 함수의 호출만 바꾼다. 반환 dict 스키마(티커→이름)는 동일해 어댑터는
-    tuple 언패킹뿐."""
+    반환 dict 스키마(티커→이름)는 동일해 어댑터는 tuple 언패킹뿐.
+    (v5.252: fetch_top_value()는 남은 호출부까지 전부 이전돼 naver_kr에서 삭제됨.
+    이 캐시가 거래대금 내림차순이라 /api/eod의 "거래대금 상위"도 상위 N을
+    그대로 재사용한다.)"""
     import json
     # 장중엔 30분 슬롯, 장 외엔 하루 1회로 갱신되는 캐시 키
     slotkey = _kr_cache_slot()
@@ -160,15 +161,15 @@ def kr_dynamic_status() -> dict:
     except Exception as e:
         info["pykrx_installed"] = False
         info["pykrx_error"] = f"{type(e).__name__}: {e}"
-    # 네이버 소스별 직접 시도 (거래대금 vs 시가총액)
+    # v5.252(사용자 지시): 네이버 PC 페이지 스크레이퍼(fetch_top_marketcap/
+    # fetch_top_value)가 2026-09-10 SPA 개편으로 폐기돼 이 진단이 항상 0건을
+    # 보고했다 — 실제 운영 소스인 모바일 API(fetch_top_turnover_v2) 통계로 교체.
     try:
         import naver_kr
-        # 거래대금만 (시총 병합 전 원시 카운트는 측정 어려우니 marketcap 단독 확인)
-        mcap = naver_kr.fetch_top_marketcap()
-        info["naver_marketcap_count"] = len(mcap)
-        info["naver_mcap_first3"] = list(mcap.items())[:3]
-        full = naver_kr.fetch_top_value(800)  # 병합 결과
-        info["naver_merged_count"] = len(full)
+        out, stats = naver_kr.fetch_top_turnover_v2(KR_TOP_N)
+        info["naver_turnover_v2_count"] = len(out)
+        info["naver_turnover_v2_first3"] = list(out.items())[:3]
+        info["naver_turnover_v2_stats"] = stats
     except Exception as e:
         info["naver_error"] = f"{type(e).__name__}: {e}"
     # 실제 로딩 시도 (캐시 포함)

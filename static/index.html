@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.251</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.252</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -2643,6 +2643,22 @@ function _krMcapFilterBadgeHtml(tm) {
   if (!tm || tm.kr_mcap_filter_source !== 'fail_open') return '';
   return `<span style="color:#FF6B6B" title="시총 목록을 못 받아와 KR 시총 1000억 미만 소형주 제외 필터가 꺼진 채 스캔했어요 — 평소엔 안 보이는 소형주가 섞여 있을 수 있어요.">⚠️ 시총 필터 미적용 (KR 1000억 미만 포함)</span>`;
 }
+// v5.252(사용자 지시 — KR 실적 조회 실패 가시화, v5.246/v5.251 배지와 같은
+// 방식): tm.kr_earnings_source==='failed'(조회한 KR 실적이 전부 실패)일 때만.
+// 'mobile_api'(정상)/'unchecked'(조회 대상 없음)/null/tm 없음은 빈 문자열.
+function _krEarningsBadgeHtml(tm) {
+  if (!tm || tm.kr_earnings_source !== 'failed') return '';
+  return `<span style="color:#FF6B6B" title="KR 실적(EPS·매출) 데이터를 못 받아왔어요 — 💰실적우수 배지가 KR 종목에 안 붙고, 실적 탭 KR 결과가 비고, 섹터 대장 EPS 판정이 '판정 불가'로 표시됩니다.">⚠️ KR 실적 조회 실패</span>`;
+}
+// v5.252(사용자 지시 — 실적 탭 KR 판정불가 건수): KR 히트 0건이 "조건 통과
+// 종목 없음"인지 "조회 자체가 죽음"인지 구분되게. 전부 실패면 경고색.
+function _krEarningsUnknownHtml(diag) {
+  if (!diag || !diag.kr_earnings_checked) return '';
+  const n = diag.kr_earnings_unknown || 0;
+  if (!n) return '';
+  const all = n >= diag.kr_earnings_checked;
+  return `<span style="color:${all ? '#FF6B6B' : 'var(--muted)'}" title="KR 종목의 실적 데이터를 못 받아와 판정하지 못한 건수입니다. 판정불가는 '조건 미달'이 아니라 '확인 못 함'이라 이 탭 결과에서 빠집니다.">${all ? '⚠️ ' : ''}KR 실적 판정불가 ${n}/${diag.kr_earnings_checked}</span>`;
+}
 async function load(refresh = false) {
   hideFilterButtonsIfNotApplicable();
   if (mode === 'inverse') { return loadInverse(refresh); }
@@ -2695,6 +2711,8 @@ async function load(refresh = false) {
       ${data.warn_count ? `<span style="color:#FF6B6B">⚠️ 경보/과대리스크 ${data.warn_count}</span>` : ''}
       ${_krUniverseBadgeHtml(_tm)}
       ${_krMcapFilterBadgeHtml(_tm)}
+      ${_krEarningsBadgeHtml(_tm)}
+      ${mode === 'earnings' ? _krEarningsUnknownHtml(data.diag) : ''}
       <span class="alert-mgr" id="alertToggle">경보종목 관리</span>`;
     const tg = document.getElementById('alertToggle');
     if (tg) tg.addEventListener('click', () => {
@@ -2881,7 +2899,7 @@ async function loadEod() {
         <div style="flex:1;min-width:320px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px">
           <div style="font-size:13px;font-weight:700;margin-bottom:2px">🔥 거래대금 상위 섹터</div>
           <div style="font-size:10.5px;color:var(--muted);margin-bottom:8px">거래대금 상위 120종목이 몰린 섹터(종목 수 기준)</div>
-          ${sectorTable(d.sector_value || [], sectorValueRow, '종목수', '섹터 데이터를 못 가져왔어요.')}
+          ${sectorTable(d.sector_value || [], sectorValueRow, '종목수', d.top_value_source === 'unavailable' ? '⚠️ 거래대금 순위 소스 0건 — 집계 불가(위 표와 같은 원인).' : '섹터 데이터를 못 가져왔어요.')}
         </div>
       </div>` : '';
     content.innerHTML = breadthHtml + sectorHtml + `
@@ -2894,7 +2912,7 @@ async function loadEod() {
         <div style="flex:1;min-width:320px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px">
           <div style="font-size:13px;font-weight:700;margin-bottom:2px">💰 거래대금 상위</div>
           <div style="font-size:10.5px;color:var(--muted);margin-bottom:8px">코스피+코스닥 통합, 네이버 거래대금 순위 기준 상위 ${d.top_value.length}종목</div>
-          ${table(d.top_value, '데이터를 못 가져왔어요.')}
+          ${table(d.top_value, d.top_value_source === 'unavailable' ? '⚠️ 거래대금 순위 소스 0건 — KR 유니버스 수집 실패(naver). 상태줄의 KR 유니버스 배지를 확인하세요.' : '데이터를 못 가져왔어요.')}
         </div>
       </div>`;
   } catch (e) {
@@ -4886,10 +4904,16 @@ function _sectorLeaderCompactHtml(leaders, marketCode) {
   if (!leaders || !leaders.length) return '<span style="color:var(--muted)">-</span>';
   return leaders.map(l => {
     const label = marketCode === 'US' ? (l.ticker || '') : (l.name || l.ticker || '').slice(0, 6);
+    // v5.252: qualifies 3상태 — false(확인된 탈락)만 회색⚠️, null(실적 판정
+    // 불가: 200일선은 통과했지만 EPS를 못 구함)은 회색이 아니라 "?" 표시.
+    // 데이터 장애를 "진짜 대장 아님"으로 단정하던 걸 분리한 것.
     const gray = l.qualifies === false;
-    const title = gray ? '200일선 아래이거나 최근 4분기 적자 — 진짜 대장 아님, 참고용' : '트레이딩뷰 차트 열기';
+    const unknown = l.qualifies === null || l.qualifies === undefined;
+    const title = gray ? '200일선 아래이거나 최근 4분기 적자 — 진짜 대장 아님, 참고용'
+      : unknown ? '실적(EPS) 판정 불가 — 200일선은 통과. 데이터가 없거나 조회 실패라 대장 여부를 확인 못 했어요'
+      : '트레이딩뷰 차트 열기';
     const style = gray ? 'color:var(--muted);opacity:.7' : '';
-    return `<a class="name-link" href="${tvUrl(l.ticker)}" target="_blank" rel="noopener" title="${title}" style="${style}">${label}${gray ? '⚠️' : ''}</a>`;
+    return `<a class="name-link" href="${tvUrl(l.ticker)}" target="_blank" rel="noopener" title="${title}" style="${style}">${label}${gray ? '⚠️' : unknown ? '<span style="opacity:.7">❔</span>' : ''}</a>`;
   }).join(' · ');
 }
 // v5.209: 한 섹터 = 한 줄 테이블(섹터/20일/60일/RS↕/대장) — 예전 카드형

@@ -6,6 +6,9 @@
   - 미국(yfinance income_stmt/quarterly_income_stmt): 20/20 성공(100%).
     대형주~최근 상장 소형주까지 전부 연간 4년치 + 분기 5개치 EPS·매출 확보.
     지연 없음, NVDA/SK하이닉스급 실적 흐름과 방향성 검증 완료.
+  - [v5.252 교체] 한국은 이제 m.stock.naver.com 모바일 JSON API(아래 참고).
+    아래 줄들은 원래 소스(PC 페이지) 정찰 기록 — 2026-09-10 naver PC 페이지
+    SPA 개편으로 그 페이지는 200 OK에 표 0건이 돼 폐기.
   - 한국(finance.naver.com/item/main.naver HTML "주요재무정보" 표): 19/20
     성공(95%). 실패 1건(091990 셀트리온헬스케어)은 2023년 실제 합병으로
     상장폐지된 종목이라 정상 동작(스크레이핑 결함 아님).
@@ -34,7 +37,13 @@ import naver_kr
 
 _KR_HEADERS = naver_kr._HEADERS
 _KR_TIMEOUT = 10
-_KR_MAIN_URL = "https://finance.naver.com/item/main.naver"
+# v5.252(사용자 지시): finance.naver.com/item/main.naver(PC HTML "주요재무정보"
+# 표)가 2026-09-10 장마감 전후 Next.js SPA로 개편돼 KR 전 종목이 "실적 표 없음"
+# (판정불가)으로 조용히 떨어졌다 — 같은 개편으로 v5.246(유니버스)/v5.251(시총
+# 필터)이 먼저 고쳐졌고 이게 마지막. 모바일 JSON API로 교체: 연간(실적 3년 +
+# 컨센서스 1년)/분기(실적 5분기 + 컨센서스 1분기) 구성이 옛 PC 표와 동일하고
+# EPS·매출액 행이 있어 판정 로직은 그대로 둔다(데이터 소스만 교체).
+_KR_FINANCE_URL = "https://m.stock.naver.com/api/stock/{code}/finance/{period}"
 
 
 def _pct_change(new: float | None, old: float | None) -> float | None:
@@ -112,67 +121,73 @@ def _us_earnings_growth(ticker: str) -> dict:
 
 
 # ══════════════════════════════════════════════════════
-# 한국 — finance.naver.com "주요재무정보" 표 (colspan 헤더 매칭)
+# 한국 — m.stock.naver.com finance/annual + finance/quarter (v5.252)
 # ══════════════════════════════════════════════════════
-def _parse_kr_table(html: str) -> dict | None:
-    """헤더의 colspan(연간/분기 개수) + <th scope="col">기간(E)?</th> 라벨을
-    먼저 읽고, 그 개수만큼만 값 셀을 순서대로 매칭 — 개수 추측(guess) 없음."""
-    idx = html.find("주요재무정보")
-    if idx == -1:
+def _mstock_num(raw) -> float | None:
+    """"6,564"/"-1,234"/"-"/""/None → float 또는 None."""
+    if raw is None:
         return None
-    table = html[idx:idx + 40000]
-
-    m_annual_span = re.search(r'colspan="(\d+)"[^>]*th_cop_anal6', table)
-    m_quarter_span = re.search(r'colspan="(\d+)"[^>]*th_cop_anal7', table)
-    if not m_annual_span or not m_quarter_span:
+    txt = str(raw).replace(",", "").strip()
+    if txt in ("", "-", "N/A"):
         return None
-    n_annual = int(m_annual_span.group(1))
-    n_quarter = int(m_quarter_span.group(1))
-    total_cols = n_annual + n_quarter
+    try:
+        return float(txt)
+    except ValueError:
+        return None
 
-    thead_end = table.find("</thead>")
-    thead = table[:thead_end] if thead_end > 0 else table[:6000]
-    period_cells = re.findall(
-        r'<th scope="col"[^>]*>\s*([\d.]+)\s*(?:<em>&#40;E&#41;</em>)?\s*</th>', thead)
-    est_flags = [bool(e) for e in re.findall(
-        r'<th scope="col"[^>]*>\s*[\d.]+\s*(<em>&#40;E&#41;</em>)?\s*</th>', thead)]
-    if len(period_cells) != total_cols or len(est_flags) != total_cols:
-        periods = None   # 라벨 개수가 안 맞으면 신뢰 불가
-    else:
-        periods = [{"period": p, "est": e} for p, e in zip(period_cells, est_flags)]
 
-    def row_values(label_pattern: str):
-        m = re.search(rf'<th scope="row"[^>]*><strong>{label_pattern}</strong></th>', table)
-        if not m:
-            return None
-        seg = table[m.end():]
-        tds = re.findall(r'<td class="([^"]*)">(.*?)</td>', seg, re.S)[:total_cols]
-        if len(tds) < total_cols:
-            return None
-        out = []
-        for cls, raw in tds:
-            numm = re.search(r'(-?[\d,]+\.?\d*)', raw)
-            val = float(numm.group(1).replace(",", "")) if numm else None
-            out.append({"value": val, "est": "cell_strong" in cls})
-        return out
+def _mstock_period_cells(payload: dict, row_title: str) -> list | None:
+    """모바일 finance 응답 하나(연간 또는 분기)에서 row_title 행을 기간 순서
+    (key 오름차순 = 과거→최근)대로 [{value, est}]로 뽑는다. est=컨센서스(추정치)
+    열(isConsensus=="Y") — 옛 PC 표의 "(E)" 열과 같은 의미. 행/기간이 없으면 None."""
+    fi = (payload or {}).get("financeInfo") or {}
+    titles = sorted(fi.get("trTitleList") or [], key=lambda x: str(x.get("key")))
+    if not titles:
+        return None
+    row = next((r for r in (fi.get("rowList") or []) if r.get("title") == row_title), None)
+    if row is None:
+        return None
+    cols = row.get("columns") or {}
+    return [{"value": _mstock_num((cols.get(t.get("key")) or {}).get("value")),
+             "est": t.get("isConsensus") == "Y"} for t in titles]
 
-    eps = row_values(r"EPS\(원\)")
-    revenue = row_values(r"매출액")
-    return {"n_annual": n_annual, "n_quarter": n_quarter,
-            "periods": periods, "eps": eps, "revenue": revenue}
+
+def _parse_kr_mobile(annual: dict, quarter: dict) -> dict | None:
+    """연간/분기 응답 → 옛 _parse_kr_table()과 같은 구조
+    {n_annual, n_quarter, periods, eps, revenue}. eps/revenue는 연간 셀 뒤에
+    분기 셀을 이어붙인 목록(옛 PC 표의 열 순서와 동일) — 아래 판정 코드가
+    n_annual로 잘라 쓰므로 그대로 호환. 연간·분기 어느 쪽이든 기간이 없으면
+    None(= "실적 표 없음")."""
+    a_eps = _mstock_period_cells(annual, "EPS")
+    q_eps = _mstock_period_cells(quarter, "EPS")
+    a_rev = _mstock_period_cells(annual, "매출액")
+    q_rev = _mstock_period_cells(quarter, "매출액")
+    a_titles = ((annual or {}).get("financeInfo") or {}).get("trTitleList") or []
+    q_titles = ((quarter or {}).get("financeInfo") or {}).get("trTitleList") or []
+    if not a_titles or not q_titles:
+        return None
+    eps = (a_eps + q_eps) if (a_eps is not None and q_eps is not None) else None
+    revenue = (a_rev + q_rev) if (a_rev is not None and q_rev is not None) else None
+    return {"n_annual": len(a_titles), "n_quarter": len(q_titles), "periods": None,
+            "eps": eps, "revenue": revenue}
+
+
+def _fetch_kr_finance(code: str, period: str) -> dict:
+    resp = requests.get(_KR_FINANCE_URL.format(code=code, period=period),
+                        headers=_KR_HEADERS, timeout=_KR_TIMEOUT)
+    resp.raise_for_status()
+    return resp.json()
 
 
 def _kr_earnings_growth(ticker: str) -> dict:
-    code = naver_kr.to_code(ticker)
+    code = naver_kr.to_code(ticker)   # 알파벳 혼용 신규코드(0011A0 등)도 그대로
     try:
-        resp = requests.get(_KR_MAIN_URL, params={"code": code},
-                            headers=_KR_HEADERS, timeout=_KR_TIMEOUT)
-        resp.encoding = "utf-8"   # v5.05: 이 페이지는 UTF-8 — EUC-KR로 잘못 지정하면
-        html = resp.text          # "주요재무정보" 텍스트 매칭이 조용히 전부 실패함
+        annual = _fetch_kr_finance(code, "annual")
+        quarter = _fetch_kr_finance(code, "quarter")
     except Exception as e:
         return _empty(f"조회 실패: {e}")
 
-    parsed = _parse_kr_table(html)
+    parsed = _parse_kr_mobile(annual, quarter)
     if parsed is None:
         return _empty("실적 표 없음(상장폐지·병합 종목일 수 있음)")
     if parsed["eps"] is None:

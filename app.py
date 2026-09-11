@@ -5,6 +5,51 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.252 [버그수정] naver PC 페이지 개편 잔여 3건 — KR 실적 조회 복구 + EOD
+        거래대금 상위 복구 + 실패 가시화 (사용자 지시). 셋 다 필터가 아니라
+        표시 경로라 스캔 히트·점수·🔴는 이번에도 무영향.
+        [1. KR 실적 — 소스만 교체] earnings._kr_earnings_growth()가 긁던
+        finance.naver.com/item/main.naver "주요재무정보" 표가 SPA 개편으로
+        사라져 2026-09-10 장마감 이후 KR 전 종목이 "실적 표 없음"(판정불가)
+        이었다(삼성전자 포함 실측). m.stock.naver.com/api/stock/{code}/
+        finance/annual + /quarter로 교체 — 연간 실적3년+컨센서스1년, 분기
+        실적5+컨센서스1로 옛 PC 표와 구성이 같아 **판정 로직(3년 연속 EPS
+        증가·분기 EPS YoY 25%+·매출 YoY·최근 4분기 EPS 합)은 한 줄도 안 고쳤다**
+        — 파서만 교체해 같은 {n_annual, eps, revenue} 구조를 만든다. 옛 파서
+        (_parse_kr_table/_KR_MAIN_URL) 삭제. 알파벳 혼용 코드(0011A0 등)도
+        그대로 조회됨(실측). 커버리지 실측 42/44(실패 2건은 우선주·스팩으로
+        원래 재무 데이터 없음).
+        [2. EOD 거래대금 상위] fetch_top_value()/fetch_top_marketcap() 삭제.
+        /api/eod는 load_kr_dynamic()이 슬롯마다 이미 받아둔 v2(모바일 API,
+        거래대금 내림차순) 캐시의 상위 120을 재사용 — 네트워크 추가 호출 0건.
+        universe.kr_dynamic_status() 진단도 v2 통계로 교체(예전엔 항상 0건 보고).
+        [3. 가시화 — v5.246/v5.251과 같은 방식] TIMING에 kr_earnings_source
+        ("mobile_api"|"failed"|"unchecked"; US는 None)/kr_earnings_ok/
+        kr_earnings_checked 추가(_refine_sector_leaders가 실제 조회한 KR 건수
+        기준), market=all 병합 전달, _TIMING_SCHEMA_KEYS 동기화. checked>0 &&
+        ok==0이면 경고 로그 + 상태줄 "⚠️ KR 실적 조회 실패" 배지
+        (_krEarningsBadgeHtml). 실적 탭엔 "KR 실적 판정불가 N/M"
+        (_krEarningsUnknownHtml, diag.kr_earnings_*) — 0건이 "조건 미달"인지
+        "조회 실패"인지 구분되게. EOD 응답에 top_value_source/top_value_count,
+        0건이면 화면 문구를 소스 실패로 명시. TIMING 출력 위치를 섹터 계산
+        뒤로 옮겼다(그 안에서 실적 조회가 일어나므로).
+        [대장 회색 처리 — 3상태로 변경] 예전엔 200일선은 통과했는데 EPS를 못
+        구한 후보도 qualifies=False("진짜 대장 아님" 회색⚠️)로 뭉갰다 — 이번
+        사고 때 KR 대장 192명 전원이 그렇게 표시됐다(데이터 장애가 시장 판단
+        처럼 보임). True(통과)/None(실적 판정 불가, 200일선은 통과)/False
+        (확인된 탈락)로 분리하고 채우는 순서도 True→None→False. 프론트는
+        None을 회색이 아니라 ❔로 표시(_sectorLeaderCompactHtml).
+        [실패 캐시 TTL] 조회 실패(ok=False)만 6시간→30분(_EARNINGS_FAIL_TTL).
+        소스가 죽거나 살아났을 때 최대 6시간 틀린 표시가 유지되던 문제. 30분은
+        AI 판단 임의값(유니버스·시총 캐시의 장중 슬롯과 같은 주기로 맞춤, 실측
+        근거 없음). 데이터 부족으로 판정만 못 한 경우(ok=True, verdict=unknown)
+        는 정상 결과라 6시간 유지.
+        [테스트] test_kr_earnings_mobile.py 신설(24건) — 실제 API 응답 고정값
+        으로 판정 로직 재확인, 컨센서스 열 제외, 알파벳 코드 URL, 실패=판정불가,
+        실패 캐시 TTL, 대장 3상태·순서, TIMING 3종·경고·스키마, 배지 3종(Node
+        실행), EOD 소스, PC 페이지 의존 0건(URL 리터럴 재등장 시 FAIL).
+        sabotage 3종(컨센서스 포함/대장 None→False/실패캐시 6시간) 전부 FAIL
+        확인 후 원복. CLAUDE.md naver 의존 목록 갱신 — PC HTML 의존 0건.
 v5.251 [긴급 버그수정] KR 시총 1000억 필터가 2026-09-10 장마감 이후 꺼진 채
         운영되던 문제 (사용자 지시). naver_kr.fetch_high_marketcap_allowed()가
         finance.naver.com sise_market_sum.naver(PC 페이지)를 긁었는데 그 페이지가
@@ -6784,7 +6829,7 @@ def _sector_fields(t: str, bundle: dict) -> dict:
     return {"sector": _sector_of(t), "sector_rank": None, "sector_total": None, "sector_rs_pct": None}
 
 
-from universe import get_universe, load_alerts, _kr_cache_slot, get_kr_universe_info
+from universe import get_universe, load_alerts, _kr_cache_slot, get_kr_universe_info, load_kr_dynamic
 import scanner as scanner_mod
 import naver_kr
 import fundamentals as fundamentals_mod
@@ -6989,7 +7034,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.251"
+VERSION = "v5.252"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7683,6 +7728,8 @@ _TIMING_SCHEMA_KEYS = frozenset({
     "kr_universe_source", "kr_universe_dynamic_count",
     # v5.251(사용자 지시 — 시총 필터 fail-open 가시화): 같은 이유로 매 스캔 TIMING에.
     "kr_mcap_filter_source", "kr_mcap_allowed_count", "kr_mcap_dropped_count",
+    # v5.252(사용자 지시 — KR 실적 조회 실패 가시화).
+    "kr_earnings_source", "kr_earnings_ok", "kr_earnings_checked",
 })
 
 
@@ -8026,6 +8073,10 @@ async def _fetch_market_data_all(wait_for_fresh: bool = False, force: bool = Fal
         "kr_mcap_filter_source": kr_t.get("kr_mcap_filter_source"),
         "kr_mcap_allowed_count": kr_t.get("kr_mcap_allowed_count", 0),
         "kr_mcap_dropped_count": kr_t.get("kr_mcap_dropped_count", 0),
+        # v5.252: KR 전용 — 위와 동일 패턴.
+        "kr_earnings_source": kr_t.get("kr_earnings_source"),
+        "kr_earnings_ok": kr_t.get("kr_earnings_ok", 0),
+        "kr_earnings_checked": kr_t.get("kr_earnings_checked", 0),
     }
     fetch_failed_sample = (kr_t.get("fetch_failed_sample", []) + us_t.get("fetch_failed_sample", []))[:10]
     if fetch_failed_sample:
@@ -8074,7 +8125,21 @@ async def _refine_sector_leaders(by_sector: dict, data: dict) -> None:
     _get_earnings_safe)를 조회해 비용을 줄인다. 3개를 다 못 채우면(섹터
     전체가 게이트 미달) 남은 슬롯은 RS 상위 미달 후보로 채우되
     qualifies=False로 표시 — 프론트가 회색 처리해서 "이건 진짜 대장이
-    아니다"를 알 수 있게(조용히 숨기지 않음)."""
+    아니다"를 알 수 있게(조용히 숨기지 않음).
+
+    v5.252(사용자 지시 — 대장 판정 3상태): 예전엔 200일선은 통과했는데 EPS를
+    못 구한(조회 실패·데이터 부족) 후보도 qualifies=False(= "200일선 아래이거나
+    적자 — 진짜 대장 아님")로 뭉뚱그렸다. 2026-09-10 naver PC 페이지 개편으로
+    KR 실적 조회가 전부 죽자 KR 대장 192명 전원이 "진짜 대장 아님" 회색으로
+    바뀌어, 데이터 장애가 "시장 판단"처럼 표시됐다(fail-closed). 모른다는 것과
+    탈락은 다른 정보라 분리한다: True=게이트 통과 / False=200일선 아래 또는
+    최근 4분기 EPS 합<=0(확인된 탈락) / None=200일선은 통과했지만 EPS 판정 불가.
+    채우는 순서는 True → None → False(확인된 탈락이 맨 뒤). sector_snapshot.
+    compute()가 호출부 실패 시 넣어두는 폴백도 원래 None이라 의미가 같다.
+
+    반환: {"kr_checked", "kr_ok"} — 이번 호출에서 실적을 조회한 KR 후보 수와
+    그중 조회·파싱에 성공(ok=True)한 수. TIMING의 kr_earnings_*로 노출."""
+    stats = {"kr_checked": 0, "kr_ok": 0}
     for entry in by_sector.values():
         candidates = entry.pop("leader_candidates", [])
         if not candidates:
@@ -8096,19 +8161,33 @@ async def _refine_sector_leaders(by_sector: dict, data: dict) -> None:
                 eg_by_ticker = {t: (r if isinstance(r, dict) else {}) for t, r in zip(ma_pass, results)}
             except Exception as e:
                 print(f"[sector_snapshot] 대장 EPS 조회 실패: {e}", flush=True)
-        qualified, fallback = [], []
+        for t in ma_pass:
+            if naver_kr.is_kr(t):
+                stats["kr_checked"] += 1
+                if eg_by_ticker.get(t, {}).get("ok") is True:
+                    stats["kr_ok"] += 1
+        qualified, undetermined, fallback = [], [], []
         for t in candidates:
             eps_sum = eg_by_ticker.get(t, {}).get("eps_sum_last4q")
-            if above_ma200[t] and eps_sum is not None and eps_sum > 0:
+            if not above_ma200[t]:
+                fallback.append(t)
+            elif eps_sum is None:
+                undetermined.append(t)
+            elif eps_sum > 0:
                 qualified.append(t)
             else:
                 fallback.append(t)
         leaders = [{"ticker": t, "qualifies": True} for t in qualified[:3]]
+        for t in undetermined:
+            if len(leaders) >= 3:
+                break
+            leaders.append({"ticker": t, "qualifies": None})
         for t in fallback:
             if len(leaders) >= 3:
                 break
             leaders.append({"ticker": t, "qualifies": False})
         entry["leaders"] = leaders
+    return stats
 
 
 async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = False) -> dict:
@@ -8310,19 +8389,38 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
     }
     if kr_fetch_failed or us_fetch_failed:
         _timing["fetch_failed_sample"] = (kr_fetch_failed + us_fetch_failed)[:10]
-    print(f"[TIMING] {_timing}", flush=True)
-
     # v5.195 [3]: 섹터 합성지표 — 위에서 이미 받은 data/rs_ranks 그대로 재사용
     # (추가 fetch 0건). 이 bundle 자체의 스코프(kr/us/all 중 무엇이든) 안에서만
     # 계산해 market 필터별 카드가 그 필터 안에서의 순위/백분위를 보게 한다.
+    _leader_eps_stats = {"kr_checked": 0, "kr_ok": 0}
     try:
         sector_info = sector_snapshot.compute(data, rs_ranks, _sector_of)
         # v5.204: 대장(leaders) RS 상위 후보를 200일선+EPS 게이트로 재확정 —
         # by_sector를 in-place로 갱신(leader_candidates 소비, leaders 확정).
-        await _refine_sector_leaders(sector_info["by_sector"], data)
+        _leader_eps_stats = await _refine_sector_leaders(sector_info["by_sector"], data) or _leader_eps_stats
     except Exception as e:
         print(f"[sector_snapshot] compute 실패: {e}", flush=True)
         sector_info = {"by_ticker": {}, "by_sector": {}}
+
+    # v5.252(사용자 지시 — KR 실적 조회 실패 가시화, kr_universe_source/
+    # kr_mcap_filter_source와 같은 방식): 대장 게이트가 이번 빌드에서 실제로
+    # 조회한 KR 실적의 성공 수. checked>0인데 ok==0이면 "failed" + 경고 —
+    # 2026-09-10 naver PC 개편 때 KR 실적이 이틀간 조용히 전부 판정불가였던
+    # 사고 재발 방지. 조회 대상이 없으면(200일선 통과 KR 후보 0) "unchecked".
+    # TIMING 출력을 이 계산 뒤로 옮겼다(예전엔 섹터 계산 전에 찍힘).
+    if market == "kr":
+        _kc, _ko = _leader_eps_stats["kr_checked"], _leader_eps_stats["kr_ok"]
+        _timing["kr_earnings_source"] = "unchecked" if _kc == 0 else ("failed" if _ko == 0 else "mobile_api")
+        _timing["kr_earnings_ok"] = _ko
+        _timing["kr_earnings_checked"] = _kc
+        if _kc > 0 and _ko == 0:
+            print(f"[earnings] \u26a0\ufe0f KR 실적 조회 {_kc}건 전부 실패 — 💰배지·실적 탭 KR·"
+                  f"섹터 대장 EPS 판정이 전부 '판정 불가'로 표시됨(데이터 소스 확인 필요)", flush=True)
+    else:
+        _timing["kr_earnings_source"] = None
+        _timing["kr_earnings_ok"] = 0
+        _timing["kr_earnings_checked"] = 0
+    print(f"[TIMING] {_timing}", flush=True)
 
     bundle = {
         "universe": universe,
@@ -9614,6 +9712,11 @@ async def _run_scan_earnings_inner(bundle: dict) -> dict:
             eg_map[t] = r if isinstance(r, dict) else {"ok": False, "verdict": "unknown", "reasons": [str(r)]}
     diag["earnings_checked"] = len(eg_map)
     diag["earnings_timed_out"] = timed_out
+    # v5.252(사용자 지시): KR 조회 실패(ok!=True) 건수를 따로 — KR 히트 0건이
+    # "조건 통과 종목이 없음"인지 "조회 자체가 죽음"인지 화면에서 구분되게.
+    _kr_checked = [t for t in eg_map if naver_kr.is_kr(t)]
+    diag["kr_earnings_checked"] = len(_kr_checked)
+    diag["kr_earnings_unknown"] = sum(1 for t in _kr_checked if eg_map[t].get("ok") is not True)
 
     hits = []
     for t, rs in candidates:
@@ -12141,11 +12244,23 @@ _earnings_cache: dict = {}
 _EARNINGS_TTL = 6 * 3600   # 실적 성장 캐시 6시간 — 실적은 분기 단위로만 바뀜 (v5.05)
 
 
+# v5.252(사용자 지시 "실패는 짧게 캐시할지 판단"): 조회·파싱 실패(ok=False —
+# 네트워크 오류, 응답 구조 변경, "실적 표 없음")도 예전엔 6시간 캐시됐다.
+# 그래서 소스가 죽으면 고쳐 배포하거나 소스가 살아난 뒤에도 최대 6시간 동안
+# 틀린 표시(💰 배지 사라짐·대장 판정불가)가 유지된다 — 2026-09-10 사고에서
+# 실제로 겪은 지연. 실패만 30분으로 줄인다. 30분은 AI 판단 임의값(근거:
+# 유니버스·시총 캐시 슬롯이 장중 30분이라 같은 주기로 맞춤 — 백테스트·실측
+# 근거 없음, 재검토 가능). 데이터가 모자라 판정만 못 한 경우(ok=True,
+# verdict=unknown — 신규상장·스팩 등)는 실패가 아니라 정상 결과라 6시간 유지.
+_EARNINGS_FAIL_TTL = 30 * 60
+
+
 def _get_earnings_cached(ticker: str) -> dict:
-    """블로킹 — executor에서 실행. earnings.get_earnings_growth()를 6시간 캐시."""
+    """블로킹 — executor에서 실행. earnings.get_earnings_growth()를 6시간
+    캐시(조회 실패는 _EARNINGS_FAIL_TTL=30분)."""
     now = time.time()
     c = _earnings_cache.get(ticker)
-    if c and now - c["ts"] < _EARNINGS_TTL:
+    if c and now - c["ts"] < (_EARNINGS_FAIL_TTL if c["data"].get("ok") is False else _EARNINGS_TTL):
         return c["data"]
     data = earnings_mod.get_earnings_growth(ticker)
     _earnings_cache[ticker] = {"ts": now, "data": data}
@@ -12526,6 +12641,7 @@ async def eod_summary():
         # v5.12: 콜드 스타트라 백그라운드로 수집 중 — 잠시 후 재요청하면 됨.
         return JSONResponse({"pending": True, "date": "", "market_closed": False,
                              "breadth": {}, "limit_up": [], "top_value": [],
+                             "top_value_source": "unavailable", "top_value_count": 0,
                              "sector_rise": [], "sector_value": []})
     data = bundle.get("data", {})
     universe = bundle.get("universe", {})
@@ -12555,10 +12671,20 @@ async def eod_summary():
 
     top_value = []
     tv = {}
+    top_value_source = "unavailable"
     try:
         loop = asyncio.get_event_loop()
         # v4.97: 섹터별 거래대금 집중도 집계에 쓸 표본을 늘리려 40→120.
-        tv = await loop.run_in_executor(_executor, naver_kr.fetch_top_value, 120)
+        # v5.252(사용자 지시): naver_kr.fetch_top_value()(finance.naver.com PC
+        # 페이지 스크래핑)가 2026-09-10 SPA 개편으로 0건이 돼 이 섹션 두 개가
+        # 조용히 비었다. 유니버스가 이미 슬롯마다 받아 캐시해둔
+        # fetch_top_turnover_v2() 결과(load_kr_dynamic, 거래대금 내림차순)의
+        # 상위 120을 그대로 재사용한다 — 이 엔드포인트는 위에서 이미 번들을
+        # 만들며 같은 캐시를 채웠으므로 사실상 네트워크 추가 호출 0건
+        # (콜드일 때만 그 안에서 1회 조회, 기존 fetch_top_value와 같은 비용).
+        _dyn = await loop.run_in_executor(_executor, load_kr_dynamic)
+        tv = dict(list(_dyn.items())[:120])
+        top_value_source = "turnover_v2_cache" if tv else "unavailable"
         for t, name in tv.items():
             df = data.get(t)
             if df is None or len(df) < 2:
@@ -12630,6 +12756,11 @@ async def eod_summary():
         "breadth": breadth,
         "limit_up": limit_up,
         "top_value": top_value,
+        # v5.252(사용자 지시): 소스 상태를 응답에 명시 — 0건이 "오늘 데이터가
+        # 없다"인지 "소스가 죽었다"인지 화면에서 구분되게(kr_universe_source와
+        # 같은 방식).
+        "top_value_source": top_value_source,
+        "top_value_count": len(top_value),
         "sector_rise": sector_rise[:8],
         "sector_value": sector_value[:8],
     }
@@ -16463,7 +16594,7 @@ async def get_positions():
     # v5.152(사용자 지시): Toss가 name을 안 준 KR 종목은 스캐너 유니버스
     # 이름으로 폴백. get_universe("kr")을 무조건 쓰면 안 되는 이유 —
     # 동적 유니버스가 콜드(재배포 직후 등)면 내부에서 naver_kr.
-    # fetch_top_value()가 실제 네트워크 조회(최대 25페이지×2시장)를
+    # load_kr_dynamic()이 콜드면 내부에서 실제 네트워크 조회(모바일 API 약 45페이지)를
     # 걸어서 포지션 로드가 수십 초 붙잡힐 수 있다 — 이 앱 전체가 지키는
     # 원칙(`_fetch_market_data`의 wait_for_fresh=False류: 콜드면 안
     # 기다리고 있는 것만 쓴다)과 어긋남. 그래서 동적 유니버스가 이미

@@ -267,15 +267,15 @@ def fetch_index(code: str) -> dict | None:
         return None
 
 
-# ── 거래대금 상위 종목 (pykrx 대체) ─────────────────────
-# 네이버 금융 거래대금 상위 페이지를 긁어 코스피/코스닥 상위 N개를
-# {티커.KS/.KQ: 이름}으로 반환. KRX 인증(pykrx) 불필요.
-# 페이지: finance.naver.com/sise/sise_quant.naver?sosok=0(코스피)/1(코스닥)
+# ── 종목 분류 상수(ETF 판별) ─────────────────────
+# v5.252(사용자 지시): 여기 있던 PC 페이지 스크레이퍼(fetch_top_value/
+# _parse_quant_page/_QUANT_URL/_ITEM_RE)는 삭제 — finance.naver.com이
+# 2026-09-10 SPA로 개편돼 200 OK에 0건만 돌려줬고(유니버스는 v5.246,
+# 시총 필터는 v5.251에 모바일 API로 이미 이전), 마지막 호출부였던
+# /api/eod 거래대금 상위도 v5.252에서 fetch_top_turnover_v2() 캐시
+# 재사용으로 바뀌었다. 아래 ETF 키워드/판별기는 모바일 API 경로
+# (fetch_top_turnover_v2)가 계속 쓴다.
 import time as _time
-
-_QUANT_URL = "https://finance.naver.com/sise/sise_quant.naver"
-# code=XXXXXX 뒤 속성이 어떻든(따옴표·class 등) 종목명 텍스트까지 잡음
-_ITEM_RE = re.compile(r'code=(\d{6})[^>]*>\s*([^<]+?)\s*</a>')
 
 # ETF/ETN/인버스/레버리지 등 — 개별주가 아니라 제외 (미너비니/오닐 대상 아님)
 # ETF/ETN 전용 브랜드 접두어 (개별주명과 안 겹치는 것만).
@@ -307,88 +307,7 @@ def _is_etf_like(name: str) -> bool:
     return any(k.upper() in up for k in _ETF_KEYWORDS)
 
 
-def _parse_quant_page(html: str) -> list:
-    """sise_quant 페이지 HTML에서 (종목코드, 종목명) 리스트 추출 (등장 순서=거래대금 순)."""
-    results = []
-    seen = set()
-    for m in _ITEM_RE.finditer(html):
-        code, name = m.group(1), m.group(2).strip()
-        if code and name and code not in seen:
-            seen.add(code)
-            results.append((code, name))
-    return results
-
-
-def fetch_top_value(top_n: int = 800, include_etf: bool = False) -> dict:
-    """코스피+코스닥 거래대금 상위 종목을 {코드.KS/.KQ: 이름}으로.
-    네이버 거래대금 상위 페이지를 페이지네이션으로 긁는다. KRX 인증 불필요.
-    기본적으로 ETF/ETN/인버스/레버리지는 제외(개별주만). 실패 시 빈 dict."""
-    out = {}
-    skipped_etf = 0
-    # v4.48.1: 시장당 top_n의 절반씩 균형 수집.
-    # 기존엔 시장당 top_n까지 받고 마지막에 앞에서부터 잘랐는데, 수집 순서가
-    # 코스피 전부 → 코스닥이라 top_n=1500이면 코스피 1250 + 코스닥 250이 되는
-    # 버그(모멘텀 중소형주가 사는 코스닥이 증발). 절반씩이면 트림 왜곡 없음.
-    per_market = (top_n + 1) // 2
-    for sosok, suffix in ((0, ".KS"), (1, ".KQ")):
-        empty_streak = 0
-        for page in range(1, 26):  # 페이지당 ~50종목, 최대 25페이지(~1250/시장)
-            mkt_count = sum(1 for k in out if k.endswith(suffix))
-            if mkt_count >= per_market:
-                break
-            try:
-                resp = requests.get(
-                    _QUANT_URL,
-                    params={"sosok": sosok, "page": page},
-                    headers=_HEADERS,
-                    timeout=_TIMEOUT,
-                )
-                resp.raise_for_status()
-                resp.encoding = "euc-kr"  # 네이버 sise는 EUC-KR 인코딩
-                rows = _parse_quant_page(resp.text)
-                if not rows:
-                    empty_streak += 1
-                    if empty_streak >= 2:  # 빈 페이지 2연속이면 끝
-                        break
-                    continue
-                empty_streak = 0
-                added = 0
-                for code, name in rows:
-                    if not include_etf and _is_etf_like(name):
-                        skipped_etf += 1
-                        continue
-                    key = f"{code}{suffix}"
-                    if key not in out:
-                        out[key] = name
-                        added += 1
-                _time.sleep(0.12)
-            except (requests.RequestException, ValueError):
-                break
-    # 거래대금 상위만으로 부족하면 시가총액 상위를 병합 (커버리지 확대)
-    if len(out) < top_n:
-        try:
-            mcap = fetch_top_marketcap()
-            for k, v in mcap.items():
-                if k not in out:
-                    out[k] = v
-        except Exception:
-            pass
-    if len(out) > top_n:
-        # 교차 트림: 시장별 순위를 유지하며 번갈아 채워 코스피 편중 방지
-        ks = [(k, v) for k, v in out.items() if k.endswith(".KS")]
-        kq = [(k, v) for k, v in out.items() if k.endswith(".KQ")]
-        merged, i = {}, 0
-        while len(merged) < top_n and (i < len(ks) or i < len(kq)):
-            if i < len(ks) and len(merged) < top_n:
-                merged[ks[i][0]] = ks[i][1]
-            if i < len(kq) and len(merged) < top_n:
-                merged[kq[i][0]] = kq[i][1]
-            i += 1
-        out = merged
-    return out
-
-
-# ── 거래대금 상위 v2 — 모바일 API 기반, fetch_top_value()와 완전 독립 ──
+# ── 거래대금 상위 v2 — 모바일 API 기반(v5.252부터 KR 유니버스·EOD의 유일 소스) ──
 # (2026-09-01, 사용자 지시) 발견: fetch_top_value()가 긁는
 # finance.naver.com/sise/sise_quant.naver는 page 파라미터가 응답에
 # 반영되지 않는 버그가 있어(실측 재현 — page 1~59 전부 동일 콘텐츠 반환)
@@ -494,41 +413,9 @@ def fetch_top_turnover_v2(top_n: int = 1500, page_size: int = _MSTOCK_PAGE_SIZE)
     return universe, stats
 
 
-# ── 시가총액 상위 (거래대금 상위와 병합해 커버리지 확대) ──
-_MARKETSUM_URL = "https://finance.naver.com/sise/sise_market_sum.naver"
-
-
-def fetch_top_marketcap(per_market_pages: int = 20) -> dict:
-    """코스피+코스닥 시가총액 상위를 {코드.KS/.KQ: 이름}으로.
-    sise_market_sum 페이지를 긁는다. ETF 제외. 거래대금 상위와 병합용."""
-    out = {}
-    for sosok, suffix in ((0, ".KS"), (1, ".KQ")):
-        empty = 0
-        for page in range(1, per_market_pages + 1):
-            try:
-                resp = requests.get(
-                    _MARKETSUM_URL,
-                    params={"sosok": sosok, "page": page},
-                    headers=_HEADERS,
-                    timeout=_TIMEOUT,
-                )
-                resp.raise_for_status()
-                resp.encoding = "euc-kr"
-                rows = _parse_quant_page(resp.text)  # 같은 링크 형식
-                if not rows:
-                    empty += 1
-                    if empty >= 2:
-                        break
-                    continue
-                empty = 0
-                for code, name in rows:
-                    if _is_etf_like(name):
-                        continue
-                    out.setdefault(f"{code}{suffix}", name)
-                _time.sleep(0.12)
-            except (requests.RequestException, ValueError):
-                break
-    return out
+# (v5.252 삭제) fetch_top_marketcap() — sise_market_sum PC 페이지 스크레이퍼.
+# 유일한 호출부였던 fetch_top_value()와 함께 제거. 시총 데이터가 필요하면
+# 아래 fetch_high_marketcap_allowed()(모바일 API)를 쓸 것.
 
 
 # ── 시가총액 하한 필터 (v4.91) — 국장 소형주 스캔 제외용 ──

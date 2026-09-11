@@ -107,6 +107,9 @@ def test_load_disk_cache_accepts_current_schema(isolated_disk_cache_dir, monkeyp
             # v5.251: 시총 필터 상태 필드 — 위와 동일 이유로 함께 갱신.
             "kr_mcap_filter_source": "mobile_api", "kr_mcap_allowed_count": 1849,
             "kr_mcap_dropped_count": 0,
+            # v5.252: KR 실적 조회 상태 필드 — 위와 동일 이유로 함께 갱신.
+            "kr_earnings_source": "mobile_api", "kr_earnings_ok": 12,
+            "kr_earnings_checked": 12,
         },
     }
     path = app._disk_cache_path(market, daykey)

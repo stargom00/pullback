@@ -101,21 +101,24 @@
 
 ---
 
-### naver 데이터 소스 의존 목록 — PC 페이지 개편 대비 (v5.251, 2026-09-12)
-**교훈**: 2026-09-10 장마감 전후 naver가 finance.naver.com PC 페이지를 Next.js SPA로 개편했다. 스크레이퍼는 **200 OK, 정상 크기 응답, 종목 0건**을 받아 **예외 없이 조용히 빈 결과**를 냈다. 같은 원인의 함수가 여러 개였는데 v5.246은 하나(유니버스)만 고쳤고, 시총 필터(`fetch_high_marketcap_allowed`)는 이틀 동안 fail-open 상태로 운영됐다(v5.251에서 발견). **naver 개편이 또 오면 이 목록을 전부 한 번에 점검할 것.** 새 스크레이퍼를 추가하면 여기에도 추가하고, 결과 건수를 TIMING이나 로그에 남겨 0건이면 경고가 뜨게 할 것(`kr_universe_source`/`kr_mcap_filter_source` 선례).
+### naver 데이터 소스 의존 목록 — PC 페이지 개편 대비 (v5.251~v5.252, 2026-09-12)
+**교훈**: 2026-09-10 장마감 전후 naver가 finance.naver.com PC 페이지를 Next.js SPA로 개편했다. 스크레이퍼는 **200 OK, 정상 크기 응답, 종목 0건**을 받아 **예외 없이 조용히 빈 결과**를 냈다. 같은 원인의 함수가 5개였는데 v5.246은 유니버스 하나만 고쳤고, 시총 필터는 이틀간 fail-open(v5.251), KR 실적은 이틀간 전 종목 판정불가(v5.252)로 방치됐다. **한 벤더의 같은 개편은 여러 함수를 동시에 죽인다 — 하나를 고치면 이 목록 전체를 점검할 것.**
 
-**HTML 페이지 스크레이핑(개편에 취약)** — 2026-09-12 실측 상태:
-| 함수 | 페이지 | 쓰는 곳 | 상태 |
+**PC HTML 페이지 의존: 0건(v5.252 기준).** 아래 5개를 전부 모바일 JSON API로 옮겼고, 죽은 스크레이퍼는 삭제했다. `test_kr_earnings_mobile.py::test_no_finance_naver_html_pages_in_source`가 `"https://finance.naver.com/...` URL 리터럴이 다시 생기면 FAIL시킨다(Referer 헤더와 JSON API는 예외).
+
+| 기능 | 옛 PC 페이지(삭제됨) | 현재 소스 | 이전 |
 |---|---|---|---|
-| `naver_kr.fetch_top_value()` | `finance.naver.com/sise/sise_quant.naver` | `/api/eod`의 거래대금 상위(섹터 집중도, app.py `eod_summary`), `universe.kr_status()` 진단 | **죽음 — 0건, 미수정**(eod 거래대금 상위 섹션이 조용히 빔) |
-| `naver_kr.fetch_top_marketcap()` | `finance.naver.com/sise/sise_market_sum.naver` | `fetch_top_value()` 내부 병합, `universe.kr_status()` 진단 | **죽음 — 0건, 미수정** |
-| `earnings._kr_earnings_growth()` | `finance.naver.com/item/main.naver`("주요재무정보" 표) | KR 실적 탭, 💰실적우수 배지(`_attach_earnings_badges`), 섹터 대장 EPS 게이트(`_refine_sector_leaders`), IBD9 | **죽음 — 005930도 "실적 표 없음", 미수정** |
-| ~~`universe.load_kr_dynamic()`의 소스~~ | ~~sise_quant~~ | KR 유니버스 | v5.246에서 모바일 API로 교체 |
-| ~~`naver_kr.fetch_high_marketcap_allowed()`~~ | ~~sise_market_sum~~ | KR 시총 1000억 필터 | v5.251에서 모바일 API로 교체 |
+| KR 유니버스 | `sise_quant.naver`(`fetch_top_value`) | `m.stock.naver.com/api/stocks/marketValue`(`fetch_top_turnover_v2`) | v5.246 |
+| 시총 1000억 필터 | `sise_market_sum.naver`(`fetch_high_marketcap_allowed` 옛 파서) | 같은 marketValue API | v5.251 |
+| 시총 상위 병합 | `sise_market_sum.naver`(`fetch_top_marketcap`) | 삭제(유니버스가 대체) | v5.252 |
+| `/api/eod` 거래대금 상위 | `sise_quant.naver` | `load_kr_dynamic()` 캐시(v2)의 상위 120 재사용 — 네트워크 추가 0건 | v5.252 |
+| KR 실적(EPS·매출) | `item/main.naver` "주요재무정보" 표(`_parse_kr_table`) | `m.stock.naver.com/api/stock/{code}/finance/{annual,quarter}` | v5.252 |
 
-**JSON API(HTML보다는 덜 취약하지만 같은 벤더)**: `api.finance.naver.com/siseJson.naver`(일봉, `naver_kr.fetch_history`/`fetch_index_history`, 무거래일 OHLC=0 오염 있음 — 위 v5.242 항목), `m.stock.naver.com/api/stock/{code}/integration`(`naver_kr.fetch_live_price`, `fundamentals.py`), `m.stock.naver.com/api/index/{code}/basic`(`naver_kr.fetch_index`), `m.stock.naver.com/api/stocks/marketValue/{market}`(`fetch_top_turnover_v2`, `fetch_high_marketcap_allowed` — itemCode를 그대로 줘서 알파벳 혼용 KR 코드도 포함).
+**현재 쓰는 JSON API(같은 벤더라 개편 위험은 남음)**: `api.finance.naver.com/siseJson.naver`(일봉 — 무거래일 OHLC=0 오염 있음, 위 v5.242 항목), `m.stock.naver.com/api/stock/{code}/integration`(현재가·`fundamentals.py`), `.../api/stock/{code}/finance/{annual,quarter}`(실적), `.../api/index/{code}/basic`(지수), `.../api/stocks/marketValue/{market}`(거래대금·시총 — itemCode를 그대로 줘서 알파벳 혼용 KR 코드 포함).
 
-**점검 명령**: `grep -n "naver\.com" *.py`. 이 표에 없는 URL이 나오면 표를 갱신할 것. 옛 HTML 정규식은 `code=(\d{6})`처럼 숫자 6자리만 받아 알파벳 혼용 코드(거래소 2024-01 도입, v5.250 참고)도 원천적으로 놓쳤다. 대체 소스를 고를 때 이 점도 확인할 것.
+**이 사고 유형의 공통 방어(3건 모두 같은 방식)**: 소스 상태를 매 스캔 TIMING에 남기고(`kr_universe_source`/`kr_mcap_filter_source`/`kr_earnings_source`), 0건·전량 실패면 경고 로그 + 상태줄 배지를 띄운다. **새 외부 소스를 붙일 때 이 세 가지(상태 필드·경고 로그·화면 배지)를 같이 넣을 것** — 조용한 빈 결과는 몇 달 뒤에나 발견된다.
+
+**점검 명령**: `grep -n "naver\.com" *.py`. 이 표에 없는 URL이 나오면 표를 갱신할 것.
 
 ---
 
