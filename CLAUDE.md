@@ -157,5 +157,6 @@
 ---
 
 ## Git 워크플로
+- **`git add -A`/`git add .` 금지 — 파일을 하나씩 명시해 stage할 것.** 2026-09-12에 `git add -A docs CLAUDE.md scripts/measurements`로 커밋했다가 세션 전부터 있던 미추적 파일(`.stage1_data_cache.pkl` 89MB, 다른 세션의 측정 스크립트·stage json)까지 같이 커밋·push됐다 — 89MB 블롭은 히스토리 재작성(filter-branch)과 강제 push로 걷어내야 했다. 측정 캐시·중간 산출물은 `.gitignore`에도 추가했지만(`scripts/measurements/*.pkl` 등), 근본 방어는 "무엇을 커밋하는지 매번 명시"다.
 - 개인 전용 레포, 협업자 없음 — **별도 브랜치/PR 없이 main에서 바로 작업하고 push한다.**
 - Railway는 main만 보고 자동 배포하므로, 다른 브랜치에 머물러 있으면 배포가 트리거되지 않는다.
