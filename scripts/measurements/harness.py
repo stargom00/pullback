@@ -306,6 +306,37 @@ def checkpoints(start=60, end=250, step=10):
     return list(range(start, end + 1, step))
 
 
+def run_stamp(data: dict | None = None) -> dict:
+    """측정 실행 시각(로컬+KST)과 데이터의 KR/US 마지막 봉 날짜를 기록용으로 반환.
+    **새 측정 스크립트는 결과 JSON에 이 값을 반드시 넣을 것.**
+
+    배경(2026-09-12): 2026-09-07 측정 2건이 KR 개장 전(KST 07:31/08:34)에 돌아
+    KR 데이터가 전 거래일에서 끝나 있었는데, 결과 파일만 봐서는 알 수 없어
+    재검증 때 체크포인트 앵커가 하루 어긋났다(R0 재현 게이트 실패 →
+    docs/display_only_bench_revalidation.md §2). 이 머신 시계는 NZST(UTC+12)라
+    KST보다 3시간 빠르다 — 파일 mtime만 보면 장 마감 후처럼 보여도 실제로는
+    개장 전일 수 있다. 그래서 시각은 두 타임존 다, 마지막 봉 날짜는 시장별로
+    남긴다(다음 재검증이 파일만 보고 앵커를 잡을 수 있게)."""
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now()
+    kst = datetime.now(timezone(timedelta(hours=9)))
+    out = {"run_at_local": now.strftime("%Y-%m-%d %H:%M:%S %Z") or now.isoformat(timespec="seconds"),
+           "run_at_kst": kst.strftime("%Y-%m-%d %H:%M:%S KST"),
+           "local_tz_utc_offset_hours": round((now.astimezone().utcoffset().total_seconds()) / 3600, 1)}
+    if data:
+        kr = [df.index[-1] for t, df in data.items() if is_kr_ticker(t) and len(df)]
+        us = [df.index[-1] for t, df in data.items() if not is_kr_ticker(t) and len(df)]
+        out["kr_last_bar_max"] = str(max(kr).date()) if kr else None
+        out["us_last_bar_max"] = str(max(us).date()) if us else None
+        # 마지막 봉이 최빈값과 다른 종목 수 — 개장 전/장중 실행이면 크게 갈린다.
+        if kr:
+            from collections import Counter
+            c = Counter(kr)
+            out["kr_last_bar_mode"] = str(c.most_common(1)[0][0].date())
+            out["kr_tickers_with_older_last_bar"] = sum(v for k, v in c.items() if k != c.most_common(1)[0][0])
+    return out
+
+
 def truncate_at(df: pd.DataFrame, off: int) -> pd.DataFrame:
     n = len(df)
     return df.iloc[: n - off] if off > 0 else df

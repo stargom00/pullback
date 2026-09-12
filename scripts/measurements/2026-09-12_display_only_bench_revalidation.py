@@ -56,9 +56,11 @@ ORIG_DATE = pd.Timestamp("2026-09-07")
 ORIG_UNIV_FILE = "kr_universe_v6_1500_20260907_eod.json"
 OFFSETS = P8.OFFSETS
 NEED_BARS = max(P8.NEED_BARS, P9.NEED_BARS)
-RUNS = ("R0", "R1", "R2", "R3")
+RUNS = tuple(os.environ.get("DIAG_RUNS", "R0,R1,R2,R3").split(","))
 DECISIVE = ("R1", "R2")
-OUT_PATH = os.path.join(MEAS, "2026-09-12_display_only_bench_revalidation.results.json")
+OUT_PATH = os.path.join(MEAS, "2026-09-12_display_only_bench_revalidation"
+                        + (f".diag_dkr{os.environ.get('DIAG_DKR_EXTRA')}" if os.environ.get("DIAG_DKR_EXTRA") else "")
+                        + ".results.json")
 HUG = "0.0~0.5ATR"          # 8번 판정 대상 버킷 라벨(P8.run_q2 결과 키)
 BASE9 = P9.BASELINE_BUCKET_LABEL   # 9번 상한검정 기준 버킷("1.0~1.5ATR")
 
@@ -69,6 +71,14 @@ ORIGINAL_8 = {   # (탭, 시장): (0~0.5ATR EV, n, z)
 }
 ORIGINAL_9_BASE_NV = {"KR": 261, "US": 310}   # 돌파임박 1.0~1.5ATR 기준 버킷
 R0_GATE_TOL = 0.02
+# ── 진단 모드(사용자 지시 2026-09-12, 1차 실행의 R0 게이트 실패 원인 확인) ──
+# DIAG_DKR_EXTRA: KR만 Δ를 이만큼 더한다(=KR 기준일을 그만큼 과거로).
+#   원본이 09-07 10:31 KR 장중에 실행돼 마지막 봉이 미완성/부재였다면, 종목별
+#   기준일이 하루 앞이었을 수 있다 — 그 극단을 재현해 원본 쪽으로 수치가
+#   움직이는지 본다. DIAG_ONLY_Q8=1이면 9번 수집을 건너뛰어 시간을 줄인다.
+#   DIAG_RUNS=R0 처럼 실행 목록도 줄일 수 있다. 셋 다 기본값은 비활성(원 동작).
+DIAG_DKR_EXTRA = int(os.environ.get("DIAG_DKR_EXTRA", "0"))
+DIAG_ONLY_Q8 = os.environ.get("DIAG_ONLY_Q8") == "1"
 MIN_N_TREND = 30    # 사전등록 1.2(9번): 추세 서술용 최소 표본, AI 판단 임의값
 
 
@@ -135,7 +145,7 @@ def collect(run):
     q19 = BLOB["bench1900"]["kosdaq"]["Close"].dropna()
     cal = k19.index
     assert ORIG_DATE in cal
-    d_kr = len(cal) - 1 - cal.get_loc(ORIG_DATE)
+    d_kr = len(cal) - 1 - cal.get_loc(ORIG_DATE) + DIAG_DKR_EXTRA
     d_us = _delta_us(data)
     win = pd.Timedelta(days=PREV_IMM.PROD_WINDOW_DAYS)
     hits8 = {name: [] for name in P8.TABS}
@@ -210,7 +220,7 @@ def collect(run):
                     continue
                 # 9번 히트
                 stop_val = signal_low if spec["stop_key"] == "signal_low" else r.get(spec["stop_key"])
-                if stop_val is not None:
+                if stop_val is not None and not DIAG_ONLY_Q8:
                     hits9[name].append({
                         "ticker": t, "off": off, "is_kr": ikr,
                         "signal_high": signal_high, "trailing50_vol": trailing50_vol,
@@ -289,7 +299,9 @@ def main():
                     "fetched_at": BLOB["fetched_at"], "dd": BLOB["dd"], "n_fetched": len(BLOB["data"])},
            "original_8": {f"{k[0]}|{k[1]}": v for k, v in ORIGINAL_8.items()},
            "original_9_baseline_nv": ORIGINAL_9_BASE_NV,
-           "runs": results, "r0_gate": gate, "r0_gate_pass": gate_pass}
+           "runs": results, "r0_gate": gate, "r0_gate_pass": gate_pass,
+           "run_stamp": harness.run_stamp(BLOB["data"]),
+           "kr_anchor_extra": DIAG_DKR_EXTRA}
 
     if not gate_pass:
         out["verdict_8"] = out["verdict_9"] = "판정 없음 — R0 재현 게이트 실패"
@@ -308,7 +320,7 @@ def main():
         for (tab, mkt) in ORIGINAL_8:
             key = f"{tab}|{mkt}"
             # summarize()의 z = harness.one_sample_zscore(= EV가 0과 다른지)
-            zs = {r: ((results[r]["q8"].get(key) or {}).get("buckets", {}).get(HUG, {}) or {}).get("z")
+            zs = {r: ((results.get(r, {}).get("q8", {}).get(key) or {}).get("buckets", {}).get(HUG, {}) or {}).get("z")
                   for r in DECISIVE}
             cells[key] = {"z_by_run": zs, "branch": max((branch(z) for z in zs.values()), key=lambda b: order[b])}
         out["cells_8"] = cells
@@ -319,8 +331,8 @@ def main():
         # 9번: 돌파임박 상한검정 유의성 + KR stop_rate 추세
         ceil = {}
         for mkt in ("KR", "US"):
-            c = (results["R1"]["q9"].get(f"돌파임박|{mkt}") or {}).get("_상한검정(vs_1.0~1.5)", {})
-            c2 = (results["R2"]["q9"].get(f"돌파임박|{mkt}") or {}).get("_상한검정(vs_1.0~1.5)", {})
+            c = (results.get("R1", {}).get("q9", {}).get(f"돌파임박|{mkt}") or {}).get("_상한검정(vs_1.0~1.5)", {})
+            c2 = (results.get("R2", {}).get("q9", {}).get(f"돌파임박|{mkt}") or {}).get("_상한검정(vs_1.0~1.5)", {})
             ceil[mkt] = {"R1": {k: v.get("z") for k, v in c.items()},
                           "R2": {k: v.get("z") for k, v in c2.items()},
                           "any_significant": any((v.get("significant") for v in list(c.values()) + list(c2.values())))}
@@ -349,7 +361,7 @@ def main():
             print(f"  {mkt} {r}: " + ", ".join(f"{k}: z={v.get('z')}" for k, v in c.items()))
     print("\n=== 9번: KR stop_rate 추세(n>=30 버킷만) ===")
     for name in P9.TABS:
-        for r in ("R0", "R1", "R2"):
+        for r in [x for x in ("R0", "R1", "R2") if x in results]:
             d = results[r]["q9"].get(f"{name}|KR") or {}
             row = [(lbl, v.get("stop_rate"), v.get("nv")) for lbl, v in d.items()
                    if isinstance(v, dict) and (v.get("nv") or 0) >= MIN_N_TREND]
