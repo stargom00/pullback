@@ -463,6 +463,47 @@ def welch_zscore(sample_a: pd.Series, sample_b: pd.Series):
     return z, abs(z) >= 1.96
 
 
+# ── 7b) 두 독립표본의 "중앙값(순위) 위치" 검정 ─────────────────────────
+# welch_zscore는 평균 격차를 본다. 20거래일 단순보유 수익률처럼 오른쪽
+# 꼬리가 긴 분포에서 "효과 크기는 중앙값 차이로 재고 유의성은 평균으로
+# 재는" 조합은 서로 다른 것을 묻게 되어, 중앙값은 벌어졌는데 평균이
+# 꼬리에 끌려 판정이 갈리는 상황이 생긴다(2026-09-13 바닥다지기 측정
+# 사전등록 §3-2, docs/stage1to2_base_setup.md). 효과 크기와 유의성을
+# 같은 것(분포 위치)으로 통일하려고 순위 기반 검정을 여기 추가한다.
+def mannwhitney_zscore(sample_a: pd.Series, sample_b: pd.Series):
+    """Mann-Whitney U 정규근사 z (동점 보정 포함, scipy 미사용).
+
+    반환: (z, significant:bool). z > 0 이면 **b가 a보다 큰 쪽**
+    (welch_zscore와 부호 방향 동일 — b.mean() - a.mean() 꼴).
+    계산 불가(표본 부족·분산 0)시 (None, False).
+
+    연속성 보정은 하지 않는다 — 이 레포 측정의 표본은 수백~수천 단위라
+    영향이 무시할 수준이고, 보정 유무로 결과가 갈리지 않게 고정해 둔다.
+    """
+    a = sample_a.dropna()
+    b = sample_b.dropna()
+    na, nb = len(a), len(b)
+    if na < 3 or nb < 3:
+        return None, False
+
+    combined = pd.concat([a, b], ignore_index=True)
+    ranks = combined.rank(method="average")      # 동점은 평균 순위
+    r_b = ranks.iloc[na:].sum()
+    u_b = r_b - nb * (nb + 1) / 2.0              # b 쪽 U (부호 방향을 b 기준으로)
+
+    n = na + nb
+    mu = na * nb / 2.0
+    # 동점 보정 분산: na*nb/12 * [(n+1) - Σ(t³-t)/(n(n-1))]
+    tie_counts = combined.value_counts()
+    tie_term = float(((tie_counts ** 3 - tie_counts).sum())) / (n * (n - 1))
+    var = na * nb / 12.0 * ((n + 1) - tie_term)
+    if var <= 0:
+        return None, False
+
+    z = (u_b - mu) / var ** 0.5
+    return z, abs(z) >= 1.96
+
+
 # ── 8) 단일 표본 EV의 유의성(귀무가설: EV=0) ────────────────────────────
 # ev_gap_zscore는 "두 그룹 격차"용이라, "이 표본의 EV가 그냥 0(우연)과
 # 다른가"를 묻는 단일표본 검정엔 못 쓴다(비교 대상 그룹이 없음). 2026-09-04
