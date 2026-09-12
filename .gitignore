@@ -28,3 +28,7 @@ decision_log.json
 kr_turnover_v7_jongga_*.json
 auto_watch.json
 signal_snapshot_cache.json
+# v2026-09-12: 측정 중간 캐시/스테이지 산출물은 커밋 대상 아님(README 규칙5)
+scripts/measurements/*.pkl
+scripts/measurements/.*.pkl
+scripts/measurements/*.stage[0-9].json
