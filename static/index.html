@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.252</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.253</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -2460,6 +2460,11 @@ let hiddenMap = {};  // {TICKER: {ticker, name, hidden_at, days_left}}
 // 하단에 "N개 숨김" 한 줄만 보여준다 — 탭(mode)별로 펼침 상태를 따로
 // 기억(다른 탭 전환해도 유지, 새로고침하면 초기화).
 let priceFrozenExpandedModes = new Set();
+// v5.253(사용자 지시 — 피벗 밀착 기본 접힘): 탭별 펼침 상태. price_frozen과
+// 같은 방식이지만 완전히 독립된 Set — 한쪽을 펼쳐도 다른 쪽은 그대로다.
+// 필터 토글이 아니라 "기본 접힘 + 원하면 펼침"이라 상태를 서버에 저장하지
+// 않는다(새로고침하면 다시 접힘 = 기본값이 항상 보수적인 쪽).
+let pivotHugExpandedModes = new Set();
 
 async function loadHidden() {
   try {
@@ -3347,6 +3352,25 @@ function renderCards() {
     };
     list.sort((a, b) => rank(a) - rank(b));  // 안정 정렬: 시장 내 원래 순서 유지
   }
+  // v5.253(사용자 지시): ⛔ 피벗 밀착(0~0.5ATR) 종목을 기본 접힘으로.
+  // 근거 — docs/display_only_bench_revalidation.md §2.4 재검증(8번): R1·R2에서
+  // 4셀 전부 z ≤ −2.66(박스돌파 KR −4.19/−3.80 · 박스돌파 US −2.66/−2.66 ·
+  // 돌파 KR −6.11/−5.24 · 돌파 US −3.82/−3.82), EV −0.21~−0.36R.
+  // **적용 범위는 그 4셀 그대로 = 돌파·박스돌파 탭뿐이다.** 눌림목은 8번
+  // 측정 대상이 아니었고(9번에선 저ATR 표본 부족으로 '판정불가'로 명시)
+  // 같은 처리를 눌림목에 넓히면 근거 없는 확장이 된다 — 2026-09-13 사용자
+  // 확인으로 돌파·박스돌파로 한정(지시 원문: "돌파·박스돌파 탭만. 근거 범위
+  // 그대로. 눌림목은 손대지 않는다").
+  // 필터 토글이 아니라 기본 접힘이다 — 모든 필터(시장·검색·주도주 등)가
+  // 적용된 뒤 여기서 가르므로 "밀착 N건"의 N은 지금 화면 조건 기준 건수다.
+  // 게이트·스캔·저널 무영향(list는 카드 렌더링 전용) — price_frozen과 같은
+  // 표시 레이어 처리.
+  const hugApplies = (mode === 'breakout' || mode === 'boxbreak');
+  const isHug = h => pivotHuggingDistAtr(h.close, h.pivot, h.atr_pct) != null;
+  const hugList = hugApplies ? list.filter(isHug) : [];
+  if (hugApplies && !pivotHugExpandedModes.has(mode)) {
+    list = list.filter(h => !isHug(h));
+  }
   // 즐겨찾기를 최상단으로 (시장 정렬 위에 얹음)
   const isFav = h => favorites.includes((h.ticker || '').toUpperCase());
   list.sort((a, b) => (isFav(b) ? 1 : 0) - (isFav(a) ? 1 : 0));
@@ -3365,8 +3389,35 @@ function renderCards() {
     </div>
     ${pfExpanded ? `<div class="grid pf-frozen-grid">${frozenList.map(card).join('')}</div>` : ''}
   ` : '';
+  // v5.253: ⛔ 피벗 밀착 접힘 줄 — 위 가격고정 줄과 같은 형태·다른 상태.
+  // 존재를 항상 알려주되(건수 표시) 기본은 접힘.
+  const hugExpanded = pivotHugExpandedModes.has(mode);
+  const hugHtml = hugList.length ? `
+    <div class="pf-frozen-bar">
+      <button class="pf-frozen-toggle" id="pivotHugToggle" type="button">
+        ⛔ 피벗 밀착(0~0.5ATR) ${hugList.length}건 ${hugExpanded ? '— 접기 ▲' : '— 펼치기 ▼'}
+      </button>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px">
+        재검증(2026-09-12) 4셀 전부 z ≤ −2.66 · EV −0.21~−0.36R — 즉시진입 금지 구간이라 기본 접힘
+      </div>
+    </div>
+    ${hugExpanded ? `<div class="grid pf-frozen-grid">${hugList.map(card).join('')}</div>` : ''}
+  ` : '';
+  // v5.253: 히트가 전부 밀착이라 본목록이 비는 경우 — 기본 empty-state("조건을
+  // 충족하는 종목이 없습니다")는 사실과 다르다(종목은 있고 접혀 있을 뿐).
+  const mainHtmlShown = (!list.length && hugList.length)
+    ? `<div class="empty">이 탭의 종목 ${hugList.length}건이 전부 ⛔ 피벗 밀착(0~0.5ATR) 구간이라 접혀 있습니다.<br>즉시진입 금지 구간이지만 아래 '펼치기'로 확인할 수 있어요.</div>`
+    : mainHtml;
   const reignitionTopHtml = (mode === 'pullback') ? reignitionPullbackSectionHtml() : '';
-  content.innerHTML = reignitionTopHtml + mainHtml + frozenHtml + jonggaForwardFooterHtml() + reignitionWatchSectionHtml();
+  content.innerHTML = reignitionTopHtml + mainHtmlShown + hugHtml + frozenHtml + jonggaForwardFooterHtml() + reignitionWatchSectionHtml();
+  const hugToggle = document.getElementById('pivotHugToggle');
+  if (hugToggle) {
+    hugToggle.addEventListener('click', () => {
+      if (pivotHugExpandedModes.has(mode)) pivotHugExpandedModes.delete(mode);
+      else pivotHugExpandedModes.add(mode);
+      renderCards();
+    });
+  }
   const pfToggle = document.getElementById('pfFrozenToggle');
   if (pfToggle) {
     pfToggle.addEventListener('click', () => {

@@ -14,7 +14,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "measurements"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[0] / "scripts" / "measurements"))
 import harness  # noqa: E402
 
 def _bruteforce_z(a, b):
