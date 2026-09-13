@@ -5,7 +5,42 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
-v5.257 [버그수정] 상단 지수 신호등이 데이터 없이 색을 냄(사용자 보고).
+v5.258 [버그수정] 종가베팅 포워드(jongga_forward) 3중 결함 — close 기준 갭이
+        영구히 안 채워지던 문제(사용자 보고: 09-09 이노메트리 eod_recorded=false,
+        close_price=null). **이 상태면 표본이 30건 쌓여도 close_basis n=0이라
+        백테스트 대조 자체가 불가능했다.**
+        [A. 호출 순서] _warm_market EOD 분기에서 _record_jongga_eod()가
+        **폴백 스냅샷보다 먼저** 호출됐다. 14:40 창을 놓친 날은 그 시점에 그날
+        레코드가 아예 없어 `if not day_rec: return`으로 즉시 빠져나갔고,
+        직후 폴백이 만든 레코드는 close_price=None으로 남았다.
+        → 폴백 스냅샷 **직후** _record_jongga_eod()/_resolve_jongga_gaps()를
+          한 번 더 호출.
+        [B. 과거 미기록을 다시 안 봄] _record_jongga_eod()가 `fwd.get(date_str)`
+        그날 하나만 훑어서, 한 번 놓치면 영영 안 채워졌다(EOD 분기는 _warmed
+        가드로 하루 1회). → eod_recorded=False인 **모든 날짜**를 훑도록 확장.
+        [B-부수. 날짜 오염 방지] 백필을 하려면 "마지막 봉 종가"를 쓰면 안 된다 —
+        과거 날짜 레코드에 **다른 날 종가**가 들어간다(룩어헤드의 반대 방향이지만
+        같은 급의 오염, 사용자 지적). 신규 _close_on_date(df, date_str)가
+        **그 날짜 봉을 정확히 찾아** 쓰고, 없으면 None을 반환해 **비워둔다**
+        (휴장·상장폐지·데이터 누락을 다른 날 값으로 때우지 않는다).
+        [C. resolved가 먼저 찍혀 되돌릴 수 없음] _resolve_jongga_gaps()가
+        close_price=None인 채 `resolved=True`를 찍었고(`if close_:`가 갭 계산을
+        건너뜀), 이후 `if rec.get("resolved"): continue`로 재방문하지 않아
+        나중에 종가를 채워도 gap_close_pct가 영영 null이었다.
+        → resolved라도 **gap_close_pct가 None이고 close_price가 생겼으면** 재계산.
+          이때 next_open_price는 **저장된 값을 그대로 쓴다** — 현재 마지막 봉으로
+          시가를 다시 잡으면 훨씬 뒤 날짜의 시가가 섞인다.
+        [복구] 기존 레코드(09-09 이노메트리 포함)는 다음 EOD 틱에서 B(백필) →
+        C(갭 보정) 순서로 자동 복구된다 — 그 종목의 그 날짜 봉이 데이터에
+        남아 있는 한. 백필·보정은 로그로 남긴다(조용히 넘기지 않음).
+        [테스트] test_jongga_forward_eod_backfill.py(13) — 날짜 정확 매칭,
+        그 날짜 봉이 없으면 None 유지(다른 날 종가 금지), 기록된 값 미덮어씀,
+        resolved 재방문이 저장된 시가를 쓰는지, 호출 순서 회귀, 09-09 복구 경로
+        재현. 사보타주 3종(마지막 봉 무조건 쓰기 / 백필 제거 / resolved 재방문
+        제거) 전부 FAIL 확인 후 원복. 전체 670 passed.
+        [문서] docs/kr_us_strategy_map.md에 측정 대기 **D**(종가베팅 급등일
+        +15%↑ 익일 갭) 추가 — 백테스트 276건 표본, 이 버그와 무관.
+v5.257[버그수정] 상단 지수 신호등이 데이터 없이 색을 냄(사용자 보고).
         [확인 결과 — 출처]
         · 신호등/게이트 배너는 **스캔 캐시와 무관**하다. /api/indices가 지수를
           직접 fetch(naver/yfinance, 60초 캐시)해 _index_regime()으로 판정한다.
@@ -7174,7 +7209,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.257"
+VERSION = "v5.258"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -8955,28 +8990,63 @@ def _record_jongga_snapshot(date_str: str, hits: list, source: str = "intraday")
         _save_jongga_forward(fwd)
 
 
+def _close_on_date(df, date_str: str):
+    """df에서 **정확히 그 날짜의 봉** 종가를 찾는다. 없으면 None.
+
+    v5.258(버그수정): 이전 구현은 `df["Close"].iloc[-1]`(마지막 봉)을 무조건
+    썼다. 그날 장마감 직후 호출될 때는 마지막 봉 == 그날 봉이라 맞았지만,
+    과거 날짜를 백필하는 순간 **다른 날 종가를 그 날짜 레코드에 써넣는
+    오염**이 된다(룩어헤드의 반대 방향이지만 같은 급의 오염 — 사용자 지적).
+    날짜를 명시적으로 맞춰 그 위험을 구조적으로 없앤다.
+    """
+    if df is None or getattr(df, "empty", True):
+        return None
+    try:
+        for i in range(len(df.index) - 1, -1, -1):
+            d = str(df.index[i].date())
+            if d == date_str:
+                v = float(df["Close"].iloc[i])
+                return round(v, 2) if v == v else None      # NaN 방어
+            if d < date_str:
+                return None                                  # 인덱스는 오름차순 — 더 볼 필요 없음
+    except Exception:
+        return None
+    return None
+
+
 def _record_jongga_eod(date_str: str, kr_data: dict):
-    """장 마감 후(daykey 확정 시점, _warm_market의 '장마감 후' 분기)
-    오늘자 후보들의 확정 종가를 채운다."""
+    """장 마감 후(daykey 확정 시점, _warm_market의 '장마감 후' 분기) 후보들의
+    확정 종가를 채운다.
+
+    v5.258(버그수정 — 사용자 지시): **그날 하나만 보던 것을 미기록 전 날짜로
+    확장**한다. 기존엔 `fwd.get(date_str)` 하나만 훑어서, 그 틱에 못 채우면
+    영영 안 채워졌다(EOD 분기는 _warmed 가드로 하루 1회) — 09-09 이노메트리가
+    close_price=null로 남은 이유. 이제 eod_recorded=False인 모든 날짜를 훑고,
+    각 레코드는 **자기 날짜의 봉**(_close_on_date)으로만 채운다.
+    date_str(오늘)을 계속 받는 이유는 로그·의미 유지용이며, 동작은 전 날짜 대상이다.
+    """
     fwd = _load_jongga_forward()
-    day_rec = fwd.get(date_str)
-    if not day_rec:
+    if not fwd:
         return
-    changed = False
-    for t, rec in day_rec.items():
-        if rec.get("eod_recorded"):
+    changed, filled = False, 0
+    for d_str, day_rec in fwd.items():
+        if not isinstance(day_rec, dict):
             continue
-        df = kr_data.get(t)
-        if df is None or df.empty:
-            continue
-        try:
-            rec["close_price"] = round(float(df["Close"].iloc[-1]), 2)
+        for t, rec in day_rec.items():
+            if not isinstance(rec, dict) or rec.get("eod_recorded"):
+                continue
+            close_ = _close_on_date(kr_data.get(t), d_str)
+            if close_ is None:
+                continue      # 그 날짜 봉이 없으면 **비워둔다**(다른 날 값으로 때우지 않는다)
+            rec["close_price"] = close_
             rec["eod_recorded"] = True
             changed = True
-        except Exception:
-            continue
+            filled += 1
+            if d_str != date_str:
+                print(f"[jongga-forward] 백필: {d_str} {t} close={close_}", flush=True)
     if changed:
         _save_jongga_forward(fwd)
+        print(f"[jongga-forward] EOD 종가 기록 {filled}건(기준일 {date_str})", flush=True)
 
 
 def _resolve_jongga_gaps(kr_data: dict):
@@ -8993,6 +9063,20 @@ def _resolve_jongga_gaps(kr_data: dict):
             continue
         for t, rec in day_rec.items():
             if rec.get("resolved"):
+                # v5.258(버그수정): resolved라도 **close 기준 갭이 비어 있고 그 사이
+                # close_price가 채워졌으면** 한 번 더 계산한다. 기존엔 close_price가
+                # None인 채 resolved=True가 찍히면(아래 `if close_:`가 건너뜀) 나중에
+                # 종가를 백필해도 영영 재방문하지 않아 gap_close_pct가 null로 남았다
+                # → close 기준 표본이 0이라 백테스트 대조 자체가 불가능했다.
+                # next_open_price는 **이미 확정된 값을 그대로 쓴다** — 여기서 현재
+                # 마지막 봉으로 다시 잡으면 훨씬 뒤 날짜의 시가가 섞인다.
+                if rec.get("gap_close_pct") is None:
+                    c0, o1 = rec.get("close_price"), rec.get("next_open_price")
+                    if c0 and o1:
+                        rec["gap_close_pct"] = round((o1 / c0 - 1 - JONGGA_FORWARD_COST) * 100, 2)
+                        changed = True
+                        print(f"[jongga-forward] 갭(종가기준) 보정: {date_str} {t} "
+                              f"{rec['gap_close_pct']}%", flush=True)
                 continue
             df = kr_data.get(t)
             if df is None or df.empty:
@@ -10502,6 +10586,13 @@ async def _warm_market(market: str):
                         print(f"[jongga] {daykey} EOD 폴백 스냅샷 완료(14:40 창 누락) — "
                               f"후보 {len(fb_result['hits'])}개")
                         _record_jongga_snapshot(daykey, fb_result["hits"], source="eod_fallback")
+                        # v5.258(버그수정 — 사용자 지시 [1] 순서): 위 EOD 기록
+                        # (_record_jongga_eod)은 이 폴백 **이전에** 돌았고, 그 시점엔
+                        # 오늘 레코드가 아예 없어서 즉시 return했다 → 방금 만든
+                        # 레코드의 close_price가 그날 영영 안 채워졌다(09-09 이노메트리).
+                        # 폴백으로 레코드를 만든 직후 한 번 더 부른다.
+                        _record_jongga_eod(daykey, bundle["data"])
+                        _resolve_jongga_gaps(bundle["data"])
                     except Exception as e2:
                         print(f"[jongga] EOD 폴백 스냅샷 실패: {e2}")
                 # v5.125: 전 리더 재점화 워치리스트 — 장마감 확정 시점에
