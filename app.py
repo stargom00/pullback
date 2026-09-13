@@ -5,7 +5,37 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
-v5.256 [버그수정] 섹터 칩이 시장 필터를 안 따라감(사용자 보고 — 눌림목에서
+v5.257 [버그수정] 상단 지수 신호등이 데이터 없이 색을 냄(사용자 보고).
+        [확인 결과 — 출처]
+        · 신호등/게이트 배너는 **스캔 캐시와 무관**하다. /api/indices가 지수를
+          직접 fetch(naver/yfinance, 60초 캐시)해 _index_regime()으로 판정한다.
+          → "0/0 종목 스캔"이어도 지수 데이터 자체는 살아 있는 게 정상이고,
+          이전 배포 값이 남는 경로도 아니다(60초 캐시는 프로세스 메모리).
+        · 홈 스트립의 게이트 KR/US는 /api/market_gate → 같은 _index_regime을
+          쓰되 **그룹 최악값**이다(US = worst(^GSPC, ^IXIC)). 그래서
+          "게이트 US🟡인데 나스닥🟢"은 소스가 달라서가 아니라 **S&P500이
+          🟡이면 US 그룹이 🟡**이 되기 때문 — 버그가 아니라 정의 차이다.
+          (market_gate에는 실패 시 직전 성공값 유지(TTL 72h, stale 표시)가
+           따로 있는데, 지수 바 신호등에는 그런 경로가 없다.)
+        [진짜 버그 2개]
+        ① 지수 dict에 regime 키가 아예 없어도(=_index_regime이 None을 반환해
+           병합이 안 된 경우: fetch 실패·봉 60개 미만 등) 프론트 gateOf()의
+           else 분기가 무조건 '🟡 지수 혼조'를 만들어냈다. **없는 데이터로
+           색을 지어낸 것.** → lv='unknown'(⚪ 데이터 대기) 신설, .mkt-unknown
+           회색 스타일 추가. "데이터 없음"과 "괜찮음"이 같아 보이지 않게.
+        ② 지수 카드의 점(regimeDot)은 regime을 그대로 매핑해 dist_days를
+           무시했다 → 같은 지수인데 게이트 배너 🟡 / 카드 점 🟢으로 갈렸다.
+           → 점을 gateOf()와 **같은 판정**에서 뽑도록 통일(판정 지점 1곳).
+        [추가] dist_days=None("거래량 없어 분산일 판정 불가")을 0처럼 보여주던
+        것을 문구로 명시. 마지막 봉 날짜(last_bar)를 _index_regime이 내려주고,
+        3일(달력) 넘게 뒤처지면 "⚠️ 마지막 봉 YYYY-MM-DD(N일 전)" 표시 —
+        3일은 주말·공휴일을 정상으로 넘기기 위한 **임의값**(측정 근거 없음).
+        [테스트] test_index_regime_dot.py(8) — regime 없으면 무색, 점과 배너
+        판정 일치, good+분산일4=🟡, 분산일 불가 명시, stale 표시 경계, 회색
+        CSS 존재, 서버 last_bar 노출. 사보타주 3종(regime 없을 때 neutral로
+        되돌리기 / 점을 regime 직접 매핑 / dist null을 0 취급) 전부 FAIL 확인
+        후 원복. 전체 657 passed.
+v5.256[버그수정] 섹터 칩이 시장 필터를 안 따라감(사용자 보고 — 눌림목에서
         미국→한국을 눌러도 칩이 Biotechnology/Gold 그대로).
         [원인] 칩 집계는 **서버가 market=all 전체 히트로** 만든 sector_summary
         (이 파일 9430행대)를 프론트가 **로드 시 한 번만** 렌더한 것이었고,
@@ -7144,7 +7174,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.256"
+VERSION = "v5.257"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -12747,6 +12777,9 @@ def _index_regime(code: str) -> dict | None:
         txt += f" · {gate_why}"
 
         return {"regime": regime, "regime_txt": txt,
+                # v5.257(사용자 지시): 마지막 봉 날짜 — 화면이 "데이터가 오래됐다"를
+                # 표시할 수 있어야 한다. 판정 자체에는 쓰지 않는다(표시 전용).
+                "last_bar": str(close.index[-1].date()),
                 "above_ma20": cur > m20, "above_ma60": above60,
                 "ma20_rising": rising20,
                 "dist_days": d,

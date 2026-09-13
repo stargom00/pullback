@@ -92,6 +92,9 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .mkt-banner.mkt-good{background:rgba(40,180,120,.1);border-color:rgba(40,180,120,.45);color:#28b478}
 .mkt-banner.mkt-neutral{background:rgba(230,170,40,.1);border-color:rgba(230,170,40,.45);color:#e6aa28}
 .mkt-banner.mkt-bad{background:rgba(255,90,110,.1);border-color:rgba(255,90,110,.45);color:#FF5A6E}
+/* v5.257: 판정 근거가 없을 때 — 색(초록/노랑/빨강)을 내지 않는 회색 상태.
+   "데이터 없음"과 "괜찮음"이 같아 보이면 안 된다. */
+.mkt-banner.mkt-unknown{background:var(--surface);border-color:var(--line);color:var(--muted)}
 /* v5.93: 게이트가 개별 신호 EV를 예측 못 한다는 실측(2026-08-29,
    docs/pullback_ev_kr_us_regime_investigation.md 7절, US z=-3.15 역방향)
    반영 안내 — 펼침 상세 전용, 작고 눈에 안 띄게. */
@@ -555,7 +558,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.256</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.257</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -9161,6 +9164,21 @@ const TV_INDEX_SYMBOL = {
 // 있다가 재렌더 시 그대로 반영(사용자가 펼쳐둔 채 새 지수 데이터만 갱신됨).
 let idxExpanded = false;
 
+// v5.257(사용자 지시): "데이터가 오래됐으면 그것도 표시".
+// 지수 마지막 봉(last_bar, 서버 _index_regime)이 최근 거래일보다 뒤처지면
+// 날짜를 그대로 보여준다. 주말·공휴일에 하루 이틀 뒤처지는 건 정상이므로
+// **3일(달력 기준) 넘게** 벌어졌을 때만 표시한다 — 정상 상태에 경고를 띄우면
+// 아무도 안 읽게 된다. 임의 기준값(AI 판단, 근거 측정 없음).
+const IDX_STALE_DAYS = 3;
+function idxStaleNote(ix) {
+  const lb = ix && ix.last_bar;
+  if (!lb) return '';
+  const d = new Date(lb + 'T00:00:00');
+  if (isNaN(d)) return '';
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  return days > IDX_STALE_DAYS ? ` · ⚠️ 마지막 봉 ${lb}(${days}일 전)` : '';
+}
+
 async function loadIndices() {
   const bar = document.getElementById('idxbar');
   try {
@@ -9169,11 +9187,13 @@ async function loadIndices() {
     const list = (data.indices || []);
     if (!list.length) { bar.style.display = 'none'; return; }
     bar.style.display = 'block';
-    const regimeDot = (rg) => {
-      if (!rg) return '';
-      const map = {good:['🟢','#28b478'], neutral:['🟡','#e6aa28'], bad:['🔴','#FF5A6E']};
-      const [emoji] = map[rg] || ['',''];
-      return emoji;
+    // v5.257: 지수 카드의 점은 아래 gateOf()와 **같은 판정**을 쓴다.
+    // 이전엔 regime을 그대로 매핑해서(dist_days 무시) 같은 지수인데 게이트
+    // 배너는 🟡, 카드 점은 🟢으로 갈렸다. 판정 지점을 하나로 합친다.
+    const GATE_LV_DOT = { good: '🟢', neutral: '🟡', bad: '🔴', unknown: '⚪' };
+    const regimeDot = (ix) => {
+      const g = gateOf(ix);
+      return g ? (GATE_LV_DOT[g.lv] || '') : '';
     };
     // ── 지수별 게이트 배너 (v4.53.1): 코스피·코스닥·나스닥 각각 판정 ──
     // 각 지수의 분산일·레짐·FTD로 개별 신호. 한국 종목은 코스피/코스닥,
@@ -9185,17 +9205,25 @@ async function loadIndices() {
     // EV를 예측하지 못함을 확인(US는 오히려 역방향 z=-3.15) — "진입
     // 자제"/"양호"/"선별 진입" 같은 처방형 문구를 제거하고 시장 상태
     // 서술로만 바꿈(사용자 지시). 3단계 판정과 분산일/FTD 사실 표시는 그대로.
+    // v5.257(버그수정 — 사용자 보고): 데이터 없이 색이 나오던 문제.
+    // [원인] ix에 regime 키가 아예 없어도(서버 _index_regime이 None을 반환해
+    // 병합이 안 된 경우 — 지수 fetch 실패·봉 60개 미만 등) 여기 else 분기가
+    // 무조건 'neutral 🟡 지수 혼조'를 만들어냈다. 없는 데이터로 색을 지어낸 것.
+    // [수정] 판정 근거가 없으면 색을 내지 않고 unknown(⚪ 데이터 대기)으로.
     const gateOf = (ix) => {
       if (!ix) return null;
-      const dist = ix.dist_days || 0;
-      const rg = ix.regime;   // good | weakening | ok | bad ...
+      const rg = ix.regime;             // good | neutral | bad (서버 gate_suggest 파생)
+      const dist = ix.dist_days;        // null이면 "거래량 없어 분산일 판정 불가"
+      if (!rg) return { lv: 'unknown', html: '⚪ 데이터 대기 — 지수 데이터를 못 받았습니다' };
       let lv, txt;
-      if (rg === 'bad' || dist >= 6) { lv = 'bad'; txt = '🔴 지수 약세'; }
-      else if (rg === 'good' && dist <= 3) { lv = 'good'; txt = '🟢 지수 안정'; }
+      if (rg === 'bad' || (dist != null && dist >= 6)) { lv = 'bad'; txt = '🔴 지수 약세'; }
+      else if (rg === 'good' && (dist == null || dist <= 3)) { lv = 'good'; txt = '🟢 지수 안정'; }
       else { lv = 'neutral'; txt = '🟡 지수 혼조'; }
-      const distTxt = dist >= 1 ? ` · 분산일 ${dist}개` : '';
+      const distTxt = dist == null ? ' · 분산일 판정 불가(거래량 없음)'
+                                   : (dist >= 1 ? ` · 분산일 ${dist}개` : '');
       const ftdTxt = ix.ftd ? ' · FTD(바닥 신호)' : '';
-      return { lv, html: `${txt}${distTxt}${ftdTxt}` };
+      const staleTxt = idxStaleNote(ix);
+      return { lv, html: `${txt}${distTxt}${ftdTxt}${staleTxt}` };
     };
     const gateNames = ['코스피', '코스닥', '나스닥'];
     const gateResults = gateNames.map(nm => {
@@ -9205,7 +9233,7 @@ async function loadIndices() {
 
     // 요약 한 줄(기본 표시) — 이름+신호등만. 탭하면 상세(배너 문장+지수
     // 카드 6개, 닛케이·비트코인은 여기 안에만)가 펼쳐짐.
-    const GATE_LV_EMOJI = { good: '🟢', neutral: '🟡', bad: '🔴' };
+    const GATE_LV_EMOJI = { good: '🟢', neutral: '🟡', bad: '🔴', unknown: '⚪' };
     const summaryHtml = gateResults.map(({ nm, g }) =>
       `<span class="gate-sum-item">${nm}${GATE_LV_EMOJI[g.lv] || ''}</span>`
     ).join('');
@@ -9231,7 +9259,7 @@ async function loadIndices() {
       const chgStr = (chg != null && pct != null)
         ? `${arrow} ${Math.abs(chg).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} (${pct > 0 ? '+' : ''}${pct.toFixed(2)}%)`
         : '–';
-      const dot = regimeDot(ix.regime);
+      const dot = regimeDot(ix);
       // v4.75: 지수 이름 클릭 → 트레이딩뷰 차트. 백엔드가 한글 라벨만 주므로
       // 프론트에서 라벨→트레이딩뷰 심볼로 매핑 (표에 없는 지수는 그냥 텍스트).
       const tvSym = TV_INDEX_SYMBOL[ix.name];
