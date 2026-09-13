@@ -181,3 +181,111 @@ def test_inometry_0909_recovery_path(store):
     r = store["d"]["2026-09-09"]["457190.KQ"]
     assert r["close_price"] == 122.5 and r["eod_recorded"] is True
     assert r["gap_close_pct"] == round((112.8 / 122.5 - 1 - app.JONGGA_FORWARD_COST) * 100, 2)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# v5.259 — P1 메타 / P2·P3 파일 기준 게이트 / P4 source 분리
+# ══════════════════════════════════════════════════════════════════════
+def test_zero_hits_still_writes_meta(store):
+    """P1 핵심: 0건이어도 날짜 키+메타가 남아야 '누락'과 '진짜 0건'이 갈린다."""
+    app._record_jongga_snapshot("2026-09-10", [], source="intraday")
+    d = store["d"]
+    assert "2026-09-10" in d, "0건이라고 날짜 키가 아예 안 생겼다(v5.258 이전 동작)"
+    meta = d["2026-09-10"]["_meta"]["intraday"]
+    assert meta["n"] == 0 and meta["ran_at"]
+    assert list(app._iter_day_records(d["2026-09-10"])) == [], "메타가 티커로 새어나갔다"
+
+
+def test_meta_records_each_source_separately(store):
+    app._record_jongga_snapshot("2026-09-10", [], source="intraday")
+    app._record_jongga_snapshot("2026-09-10", [{"ticker": "X.KS", "name": "X", "close": 10}],
+                                source="eod_fallback")
+    meta = store["d"]["2026-09-10"]["_meta"]
+    assert meta["intraday"]["n"] == 0
+    assert meta["eod_fallback"]["n"] == 1
+    assert [t for t, _ in app._iter_day_records(store["d"]["2026-09-10"])] == ["X.KS"]
+
+
+def test_meta_keeps_first_run_time_and_counts_runs(store):
+    app._record_jongga_snapshot("2026-09-10", [], source="intraday")
+    first = store["d"]["2026-09-10"]["_meta"]["intraday"]["first_ran_at"]
+    app._record_jongga_snapshot("2026-09-10", [], source="intraday")
+    m = store["d"]["2026-09-10"]["_meta"]["intraday"]
+    assert m["first_ran_at"] == first and m["runs"] == 2
+
+
+# ── P2·P3: 폴백 게이트가 파일 기준인가 ────────────────────────────────
+def test_fallback_needed_when_nothing_recorded(store):
+    store["d"] = {}
+    assert app._jongga_needs_eod_fallback("2026-09-10") is True
+
+
+def test_fallback_still_needed_after_zero_hit_intraday(store):
+    """v5.258까지의 치명적 경로 — 0건 장중 스캔이 폴백을 껐다."""
+    app._record_jongga_snapshot("2026-09-10", [], source="intraday")
+    assert app._jongga_needs_eod_fallback("2026-09-10") is True
+
+
+def test_fallback_still_needed_after_successful_intraday(store):
+    """장중 스캔이 성공해도 확정 종가 기준 보강은 한 번 돈다(설계 합의)."""
+    app._record_jongga_snapshot("2026-09-10", [{"ticker": "X.KS", "name": "X", "close": 10}],
+                                source="intraday")
+    assert app._jongga_needs_eod_fallback("2026-09-10") is True
+
+
+def test_fallback_not_repeated_once_done(store):
+    """P3: 재시작으로 인메모리 플래그가 리셋돼도 두 번 돌지 않는다."""
+    app._record_jongga_snapshot("2026-09-10", [], source="eod_fallback")
+    app._jongga_snapshot_date = None          # 프로세스 재시작 시뮬
+    assert app._jongga_needs_eod_fallback("2026-09-10") is False
+
+
+def test_legacy_day_without_meta_is_unknown_not_zero(store):
+    """v5.259 이전 레코드는 메타가 없다 — '0건이었다'로 단정하면 안 된다."""
+    store["d"] = {"2026-09-09": {"457190.KQ": _rec(ticker="457190.KQ")}}
+    assert app._day_meta(store["d"], "2026-09-09") == {}
+    assert app._jongga_needs_eod_fallback("2026-09-09") is True
+
+
+def test_call_site_uses_file_based_gate():
+    """회귀 방지 — 인메모리 플래그로 되돌아가면 P2가 부활한다."""
+    src = Path(app.__file__).read_text(encoding="utf-8")
+    # 앵커는 **실제 호출부**여야 한다 — 'source="eod_fallback"'만 찾으면
+    # _record_jongga_snapshot의 docstring 첫 등장에 걸린다(실제로 걸렸다).
+    i = src.index('_record_jongga_snapshot(daykey, fb_result["hits"], source="eod_fallback")')
+    before = src[max(0, i - 2500):i]
+    assert "_jongga_needs_eod_fallback(daykey)" in before, "폴백 게이트가 파일 기준이 아니다"
+    assert "if _jongga_snapshot_date != daykey:" not in src, "인메모리 게이트가 되살아났다"
+
+
+# ── 병합 정책: 선착순 유지, 폴백은 없는 티커만 추가 ───────────────────
+def test_fallback_does_not_overwrite_intraday_record(store):
+    app._record_jongga_snapshot("2026-09-10", [{"ticker": "A.KS", "name": "A", "close": 100}],
+                                source="intraday")
+    app._record_jongga_snapshot("2026-09-10", [
+        {"ticker": "A.KS", "name": "A", "close": 130},      # 같은 티커, 확정 종가
+        {"ticker": "B.KS", "name": "B", "close": 50},       # 신규
+    ], source="eod_fallback")
+    day = store["d"]["2026-09-10"]
+    assert day["A.KS"]["snapshot_price"] == 100, "14:40 기록이 덮어써졌다"
+    assert day["A.KS"]["snapshot_source"] == "intraday"
+    assert day["B.KS"]["snapshot_price"] == 50
+    assert day["B.KS"]["snapshot_source"] == "eod_fallback"
+
+
+# ── P4: source별 분리 집계 ────────────────────────────────────────────
+def test_stats_split_snapshot_basis_by_source(store, monkeypatch):
+    store["d"] = {"2026-09-10": {
+        "A.KS": _rec(ticker="A.KS", snapshot_source="intraday", resolved=True,
+                     gap_snapshot_pct=2.0, gap_close_pct=1.0),
+        "B.KS": _rec(ticker="B.KS", snapshot_source="eod_fallback", resolved=True,
+                     gap_snapshot_pct=-4.0, gap_close_pct=-1.0),
+        "_meta": {"intraday": {"n": 1}},
+    }}
+    s = app._jongga_forward_stats()
+    assert s["total_resolved"] == 2, "메타가 레코드로 세어졌다"
+    assert s["snapshot_basis_by_source"]["intraday"]["n"] == 1
+    assert s["snapshot_basis_by_source"]["intraday"]["mean_gap_pct"] == 2.0
+    assert s["snapshot_basis_by_source"]["eod_fallback"]["mean_gap_pct"] == -4.0
+    assert s["close_basis"]["n"] == 2, "close 기준은 균일하므로 합쳐서 센다"
+    assert s["close_basis_source_mix"] == {"intraday": 1, "eod_fallback": 1}

@@ -5,7 +5,47 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
-v5.258 [버그수정] 종가베팅 포워드(jongga_forward) 3중 결함 — close 기준 갭이
+v5.259 [버그수정] 종가베팅 포워드 기록 누락(09-10·09-11 레코드 0건) —
+        설계 승인 후 P1~P4 구현(사용자 지시).
+        [P2·P3 — 폴백 게이트를 인메모리 → **파일 기준**으로]
+        기존 `if _jongga_snapshot_date != daykey:`는 두 방향으로 깨졌다.
+        ① 14:40 스캔이 **0건**이어도 플래그가 설정되고, 0건이면
+           _record_jongga_snapshot이 파일을 저장조차 안 해 날짜 키가 없는데,
+           폴백은 스킵돼 **확정 종가 기준 후보가 영구 누락**됐다.
+           (14:40은 거래량 20일평균 2배 조건이 부분 거래량과 겨루므로
+            마감 대비 체계적으로 0건이 나오기 쉽다.)
+        ② 프로세스 재시작 시 플래그가 리셋돼 이미 처리한 날을 다시 돌렸다.
+        → `_jongga_needs_eod_fallback(daykey)` 신설: "이 날짜에 eod_fallback
+          기록을 남겼나"를 **파일**에서 본다. 장중 스캔이 성공한 날도 확정
+          종가 기준으로 한 번 보강한다(선착순이라 14:40 레코드는 유지되고
+          없는 티커만 추가 — 병합 정책은 기존 그대로).
+        [P1 — 0건도 기록으로 남긴다 + 순회 통일]
+        날짜 dict에 `_meta`를 둬서 경로별 실행 시각·후보 수·실행 횟수를
+        남긴다 → **"진짜 0건"과 "스케줄러 누락"이 구분된다**(이번 조사에서
+        로그 없이는 갈리지 않았던 바로 그 지점).
+        v5.259 이전 레코드엔 `_meta`가 없다 — **"알 수 없음"으로 두고
+        0건으로 단정하지 않는다**(`_day_meta`가 빈 dict 반환).
+        `_meta`가 티커로 오인되지 않도록 순회를 `_iter_day_records()` 한 곳으로
+        모았다 — 기존엔 `_record_jongga_eod`/`_resolve_jongga_gaps`/
+        `_jongga_forward_stats` 세 곳이 각자 `day_rec.items()`를 돌아서
+        사본이 세 벌이었다(하나만 고치면 조용히 어긋나는 구조).
+        [P4 — snapshot_basis 통계 분리]
+        `snapshot_price`는 intraday면 14:40 장중가, eod_fallback이면 확정
+        종가라 **의미가 다른데 한 숫자에 풀링**돼 있었다.
+        → `snapshot_basis_by_source`(intraday/eod_fallback) 신설.
+          기존 `snapshot_basis`는 하위호환으로 남기되 혼합값임을
+          `snapshot_basis_note`에 명시. `close_basis`는 close_price가 항상
+          _record_jongga_eod의 확정 종가라 균일 — 그대로 두고
+          `close_basis_source_mix`로 구성비만 병기.
+        [범위] 원인 로그 확인은 사용자가 별도 진행 — 결과가 P2든 재시작이든
+        P3가 잡으므로 설계에 영향 없음(사용자 판단).
+        [테스트] test_jongga_forward_eod_backfill.py +11 (총 24) — 0건 메타
+        기록, 경로별 메타 분리, 재실행 카운트, 파일 기준 게이트 4종(무기록/
+        0건 후/성공 후/완료 후), 구버전 레코드는 "알 수 없음", 호출부 회귀,
+        폴백이 14:40 레코드를 안 덮어씀, source별 분리 집계.
+        사보타주 4종(0건 저장 제거 / 게이트 인메모리 복귀 / 헬퍼 필터 제거 /
+        source 필터 제거) 전부 FAIL 확인 후 원복. 전체 681 passed.
+v5.258[버그수정] 종가베팅 포워드(jongga_forward) 3중 결함 — close 기준 갭이
         영구히 안 채워지던 문제(사용자 보고: 09-09 이노메트리 eod_recorded=false,
         close_price=null). **이 상태면 표본이 30건 쌓여도 close_basis n=0이라
         백테스트 대조 자체가 불가능했다.**
@@ -7209,7 +7249,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.258"
+VERSION = "v5.259"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -8962,6 +9002,50 @@ def _save_jongga_forward(data: dict):
         print(f"[jongga-forward] 저장 실패: {e}")
 
 
+def _iter_day_records(day_rec: dict):
+    """하루치 dict에서 **티커 레코드만** 돌려준다.
+
+    v5.259: 날짜 dict에 티커가 아닌 메타 키(`_meta`)가 들어가면서 필요해졌다.
+    기존엔 `_record_jongga_eod`/`_resolve_jongga_gaps`/`_jongga_forward_stats`가
+    각자 `for t, rec in day_rec.items()`로 **모든 키를 티커로 간주**했다 —
+    사본이 세 벌이라 하나만 고치면 조용히 어긋난다(이 레포가 반복해 겪은
+    드리프트 유형). 순회를 여기 한 곳으로 모아 물리적으로 막는다.
+    `_`로 시작하는 키는 전부 메타로 보고 건너뛴다.
+    """
+    if not isinstance(day_rec, dict):
+        return
+    for t, rec in day_rec.items():
+        if isinstance(t, str) and t.startswith("_"):
+            continue
+        if isinstance(rec, dict):
+            yield t, rec
+
+
+def _day_meta(fwd: dict, date_str: str) -> dict:
+    """그날 어떤 경로가 실제로 돌았는지. 없으면 빈 dict = **"알 수 없음"**.
+
+    v5.259 이전 레코드에는 이 값이 없다 — 그 경우 "0건이었다"로 해석하지
+    않는다(누락과 진짜 0건을 구분하려고 만든 장치인데 과거를 단정하면 역효과).
+    """
+    d = fwd.get(date_str)
+    return (d or {}).get("_meta") or {}
+
+
+def _jongga_needs_eod_fallback(daykey: str) -> bool:
+    """EOD 보강 스캔을 돌려야 하는가 — **파일 기준**으로 판단한다.
+
+    v5.259(버그수정): 기존 게이트는 인메모리 `_jongga_snapshot_date != daykey`
+    였다. 두 방향으로 깨진다 —
+      ① 14:40 스캔이 **0건**이어도 플래그가 설정돼(그리고 0건이면
+         _record_jongga_snapshot이 파일을 아예 저장하지 않아 날짜 키조차
+         안 생긴다) 폴백이 스킵 → 확정 종가 기준 후보가 **영구 누락**.
+      ② 프로세스가 재시작하면 플래그가 리셋돼 이미 돈 날도 다시 돈다.
+    폴백이 실제로 물어야 할 질문은 "장중 스캔이 돌았나"가 아니라
+    **"이 날짜에 EOD 기준 기록을 남겼나"**다. 그건 파일에만 있다.
+    """
+    return "eod_fallback" not in _day_meta(_load_jongga_forward(), daykey)
+
+
 def _record_jongga_snapshot(date_str: str, hits: list, source: str = "intraday"):
     """14:40~15:00 스냅샷(source="intraday") 또는 장마감 후 폴백
     (source="eod_fallback", v5.129) 확정 시(스케줄러 1회 실행분에서만
@@ -8986,8 +9070,19 @@ def _record_jongga_snapshot(date_str: str, hits: list, source: str = "intraday")
             "gap_snapshot_pct": None, "gap_close_pct": None,
         }
         changed = True
-    if changed:
-        _save_jongga_forward(fwd)
+    # v5.259(P1): 후보가 0건이어도 **그 경로가 돌았다는 사실**을 남긴다.
+    # 이전엔 0건이면 changed=False라 파일을 저장조차 안 해 날짜 키가 없었고,
+    # 그래서 "그날 진짜 후보가 없었다"와 "스케줄러가 안 돌아 누락됐다"가
+    # 구분되지 않았다. 티커 레코드는 그대로 없고 메타만 생긴다.
+    meta = day_rec.setdefault("_meta", {})
+    prev = meta.get(source) or {}
+    meta[source] = {"ran_at": now_str, "n": len(hits),
+                    "first_ran_at": prev.get("first_ran_at") or now_str,
+                    "runs": (prev.get("runs") or 0) + 1}
+    _save_jongga_forward(fwd)
+    if not changed:
+        print(f"[jongga-forward] {date_str} {source}: 후보 0건 — 메타만 기록(누락 아님)",
+              flush=True)
 
 
 def _close_on_date(df, date_str: str):
@@ -9032,7 +9127,7 @@ def _record_jongga_eod(date_str: str, kr_data: dict):
     for d_str, day_rec in fwd.items():
         if not isinstance(day_rec, dict):
             continue
-        for t, rec in day_rec.items():
+        for t, rec in _iter_day_records(day_rec):
             if not isinstance(rec, dict) or rec.get("eod_recorded"):
                 continue
             close_ = _close_on_date(kr_data.get(t), d_str)
@@ -9061,7 +9156,7 @@ def _resolve_jongga_gaps(kr_data: dict):
     for date_str, day_rec in fwd.items():
         if date_str >= today_str:
             continue
-        for t, rec in day_rec.items():
+        for t, rec in _iter_day_records(day_rec):
             if rec.get("resolved"):
                 # v5.258(버그수정): resolved라도 **close 기준 갭이 비어 있고 그 사이
                 # close_price가 채워졌으면** 한 번 더 계산한다. 기존엔 close_price가
@@ -9110,7 +9205,7 @@ def _jongga_forward_stats() -> dict:
     fwd = _load_jongga_forward()
     resolved = []
     for date_str, day_rec in fwd.items():
-        for t, rec in day_rec.items():
+        for t, rec in _iter_day_records(day_rec):
             if rec.get("resolved"):
                 resolved.append({**rec, "date": date_str})
     resolved.sort(key=lambda r: (r["date"], r.get("ticker", "")), reverse=True)
@@ -9126,10 +9221,39 @@ def _jongga_forward_stats() -> dict:
             "up_rate": round(sum(1 for v in vals if v > 0) / n * 100, 1),
         }
 
+    # v5.259(P4): snapshot 기준은 **source마다 의미가 다르다** — intraday는
+    # 14:40 장중가, eod_fallback은 확정 종가가 snapshot_price로 들어간다.
+    # 기존엔 둘을 구분 없이 풀링해 "장중가 기준 갭"과 "종가 기준 갭"이 한
+    # 숫자에 섞여 있었다. 이제 쪼개서 낸다.
+    # close_basis는 close_price가 항상 _record_jongga_eod의 확정 종가라 균일
+    # (어느 경로가 레코드를 만들었든 동일) — 그대로 두되 구성비를 병기한다.
+    def _agg_src(field, src):
+        vals = [r[field] for r in resolved
+                if r.get(field) is not None and r.get("snapshot_source") == src]
+        n = len(vals)
+        if n == 0:
+            return {"n": 0, "mean_gap_pct": None, "up_rate": None}
+        return {"n": n, "mean_gap_pct": round(sum(vals) / n, 3),
+                "up_rate": round(sum(1 for v in vals if v > 0) / n * 100, 1)}
+
+    src_mix = {}
+    for r in resolved:
+        src_mix[r.get("snapshot_source") or "unknown"] = \
+            src_mix.get(r.get("snapshot_source") or "unknown", 0) + 1
+
     return {
         "total_resolved": len(resolved),
+        # 혼합값 — 하위호환으로 남기되 인용하지 말 것(아래 by_source를 볼 것)
         "snapshot_basis": _agg("gap_snapshot_pct"),
+        "snapshot_basis_by_source": {
+            "intraday": _agg_src("gap_snapshot_pct", "intraday"),
+            "eod_fallback": _agg_src("gap_snapshot_pct", "eod_fallback"),
+        },
+        "snapshot_basis_note": ("snapshot_basis는 intraday(14:40 장중가)와 "
+                                 "eod_fallback(확정 종가)이 섞인 값이다 — "
+                                 "기준을 맞춰 인용하려면 by_source를 쓸 것"),
         "close_basis": _agg("gap_close_pct"),
+        "close_basis_source_mix": src_mix,
         "backtest_reference": {"mean_gap_pct": 1.22, "n": 276, "z": 4.28,
                                 "source": "docs/kr_jongga_betting_backtest.md"},
         "recent": resolved[:30],
@@ -10574,7 +10698,14 @@ async def _warm_market(market: str):
                 # 대신 찍는다. 재점화 EOD 갱신과 같은 원칙 — 좁은 창에
                 # 의존하지 않고 "장마감 후 첫 틱"에 자연스럽게 걸리게 한다.
                 global _jongga_snapshot_date
-                if _jongga_snapshot_date != daykey:
+                # v5.259(P2·P3): 게이트를 인메모리 플래그 → **파일 기준**으로.
+                # 이전 `_jongga_snapshot_date != daykey`는 14:40 스캔이 0건이어도
+                # 설정된 플래그 때문에 스킵됐고(확정 종가 후보 영구 누락),
+                # 재시작 시엔 반대로 이미 돈 날을 또 돌렸다.
+                # 이제 "이 날짜에 eod_fallback 기록을 남겼나"만 본다 —
+                # 장중 스캔이 성공했더라도 확정 종가 기준 후보를 한 번 더 보강한다
+                # (선착순 유지라 14:40 레코드는 그대로 남고 없는 티커만 추가).
+                if _jongga_needs_eod_fallback(daykey):
                     try:
                         fb_result = await _run_scan_jongga(bundle)
                         fb_result["daykey"] = daykey
