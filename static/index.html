@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.255</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.256</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -2737,7 +2737,11 @@ async function load(refresh = false) {
     const sb = document.getElementById('cardSearch'); if (sb) sb.value = '';
     document.getElementById('searchBar').style.display = '';
     document.getElementById('diagBar').style.display = '';
-    renderSectors(data.sector_summary || []);
+    // v5.256: 여기서 서버 sector_summary로 한 번 그리던 것을 제거했다 —
+    // 바로 아래 renderCards()가 현재 시장 필터를 반영해 다시 집계·렌더하므로
+    // 중복이고, 전체 시장 기준 칩이 한 프레임 번쩍이는 원인이었다.
+    // (data.sector_summary 자체는 서버 응답에 그대로 남겨둔다 — 다른 소비처가
+    //  생길 수 있고 제거할 이유가 없다.)
     renderCards();
   } catch (e) {
     // v5.11 [버그수정]: v5.10(20초×9회=3분)도 부족했음 — 사용자 확인: 콜드
@@ -3319,6 +3323,24 @@ document.getElementById('alertAdd').addEventListener('click', async () => {
 const SECTOR_CHIP_TOP = 6;
 let sectorExpanded = false;
 
+// v5.256(버그수정): 현재 화면에 실제로 보이는 목록으로 섹터를 집계한다.
+// 서버의 sector_summary(app.py, market=all 전체 히트 기준)는 시장 필터를
+// 모르기 때문에 시장을 바꿔도 칩이 안 바뀌었다 — 이제 프론트가 필터 적용 후
+// 목록으로 다시 센다. 정렬·하한(n>=2)은 서버 집계와 같은 규칙으로 맞춘다
+// (그래야 첫 로드 시 칩이 갑자기 달라 보이지 않는다).
+function sectorSummaryOf(list) {
+  const c = new Map();
+  for (const h of list) {
+    const s = h && h.sector;
+    if (!s) continue;                       // 섹터 미분류는 칩을 만들지 않는다
+    c.set(s, (c.get(s) || 0) + 1);
+  }
+  return [...c.entries()]
+    .filter(([, n]) => n >= 2)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([sector, count]) => ({ sector, count }));
+}
+
 function renderSectors(summary) {
   const bar = document.getElementById('sectorbar');
   if (!summary.length) { bar.innerHTML = ''; return; }
@@ -3342,16 +3364,18 @@ function renderSectors(summary) {
     ? `<span class="schip more-toggle" id="sectorMoreToggle">${sectorExpanded ? '접기 ▴' : `+${moreCount}개 ▾`}</span>`
     : '';
   bar.innerHTML = chipHtml + toggleHtml;
+  // v5.256: 상태만 바꾸고 renderCards()에 맡긴다 — renderCards가 현재 필터로
+  // 칩을 다시 집계해 renderSectors를 부르므로, 여기서 옛 summary로 다시
+  // 그리면 시장 필터가 반영되기 전 목록이 한 프레임 남는다.
   bar.querySelectorAll('.schip[data-sec]').forEach(ch => ch.addEventListener('click', () => {
     const sec = ch.dataset.sec;
     sectorFilter = (sectorFilter === sec) ? null : sec;
-    renderSectors(summary);
     renderCards();
   }));
   const moreBtn = document.getElementById('sectorMoreToggle');
   if (moreBtn) moreBtn.addEventListener('click', () => {
     sectorExpanded = !sectorExpanded;
-    renderSectors(summary);
+    renderCards();
   });
 }
 
@@ -3380,7 +3404,11 @@ function renderPatternSubTabs(list) {
 
 function renderCards() {
   const content = document.getElementById('content');
-  let list = sectorFilter ? lastHits.filter(h => h.sector === sectorFilter) : lastHits.slice();
+  // v5.256(버그수정): 섹터 필터를 여기서 바로 적용하지 않는다 — 시장·검색 등
+  // 다른 필터를 먼저 걸고, 그 결과로 섹터 칩을 재집계한 **뒤에** 적용한다
+  // (아래 "섹터 칩 재집계" 주석 참고). renderPatternSubTabs가 쓰는 것과 같은
+  // 순서 원칙: "자기 필터 직전 상태로 자기 카운트를 낸다".
+  let list = lastHits.slice();
   // v5.72: 숨긴 종목 제외 — 순수 표시 필터, list는 카드 렌더링 전용이라
   // 스캔/게이트/저널/하네스 어디에도 영향 없음(hiddenMap은 렌더 함수에서만 참조).
   list = list.filter(h => !hiddenMap[(h.ticker || '').toUpperCase()]);
@@ -3466,6 +3494,32 @@ function renderCards() {
   if (superOnlyFilter && mode === 'pullback') {
     list = list.filter(h => h.is_super === true);
   }
+  // v5.256(버그수정 — 사용자 지시): 섹터 칩 재집계.
+  // [버그] 칩은 서버가 `market=all` 히트 전체로 집계한 sector_summary를
+  // 로드 시 **한 번만** 렌더했다(app.py의 sector_summary → load()의
+  // renderSectors). 시장 필터는 여기 renderCards()에서 클라이언트로만
+  // 걸리므로, 미국→한국을 눌러도 칩은 미국 섹터 그대로였다. 눌림목만의
+  // 문제가 아니라 칩을 쓰는 **전 탭 공통**이라 공통 지점인 여기서 고친다.
+  // [순서] 시장·검색·주도주·💎·👑 등 다른 필터를 전부 적용한 **뒤**,
+  // 섹터 필터를 적용하기 **전** 상태로 집계한다 — 섹터 필터까지 반영해
+  // 집계하면 칩을 하나 누르는 순간 그 칩만 남아 다른 섹터로 못 옮긴다.
+  // renderPatternSubTabs와 같은 원칙이라 바로 앞에 둔다.
+  // n>=2 하한은 서버 집계(app.py sector_summary)와 같은 기준을 유지한다.
+  const secSummary = sectorSummaryOf(list);
+  if (sectorFilter) {
+    // 시장을 바꾸면 선택된 섹터가 그쪽엔 아예 없을 수 있다(예: Gold는 미국만).
+    // 그대로 두면 "0종목 + 해제할 칩도 안 보임"으로 갇힌다.
+    //  - 그 섹터 히트가 아직 있으면(칩 하한 n>=2에 못 미쳐 칩이 안 생긴
+    //    경우 포함) 칩을 끼워 넣어 해제할 수 있게 한다.
+    //  - 한 건도 없으면 필터를 자동 해제한다(갇힘 방지).
+    const n = list.filter(h => h.sector === sectorFilter).length;
+    if (n === 0) sectorFilter = null;
+    else if (!secSummary.some(s => s.sector === sectorFilter)) {
+      secSummary.push({ sector: sectorFilter, count: n });
+    }
+  }
+  renderSectors(secSummary);
+  if (sectorFilter) list = list.filter(h => h.sector === sectorFilter);
   // v5.36: 패턴 서브탭 — 카운트는 여기까지의 필터(시장·검색·주도주만 등) 반영,
   // 서브필터 자체 적용은 카운트 계산 다음에(0개면 그대로 빈 리스트가 되고
   // renderCards() 하단 empty-state가 처리).
