@@ -162,6 +162,12 @@ def evaluate(data, off, rank_at_off):
             "ticker": t, "off": off, "half": half,
             "base": base_ok, "candle": candle_ok, "volume": volume_ok, "position": position_ok,
             "gap_open": gap_open, "gap_high": gap_high,
+            # 2026-09-13(측정 D): 당일 등락률을 출력에만 추가한다 — 위에서
+            # 이미 계산해 candle 판정에 쓰던 값 그대로라 **판정 로직·기존
+            # 결과는 전혀 바뀌지 않는다**(순수 추가 필드). D(급등일 +15%↑
+            # 익일 갭)가 이 값을 필요로 하는데, 새 스크립트에서 다시
+            # 계산하면 정의가 두 벌이 되어 갈라질 수 있어 여기서 함께 내보낸다.
+            "ret_t": ret_t,
         })
     return out
 
