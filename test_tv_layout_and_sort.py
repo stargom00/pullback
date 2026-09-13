@@ -97,3 +97,56 @@ def test_sort_does_not_mutate_input():
                  "console.log(JSON.stringify({orig:rows.map(r=>r.ret20), out:out.map(r=>r.ret20)}));")
     assert got["orig"] == [1, 9], "원본 배열이 정렬로 훼손됐다"
     assert got["out"] == [9, 1]
+
+
+# ── v5.255: "유니버스 밖" 배지·링크 렌더 ──────────────────────────────
+def run_row_js(rows):
+    """themeRowHtml을 production 코드 그대로 실행해 렌더 결과를 본다."""
+    src = (layout_const() + "\n"
+           + extract_function("tvSymbolUrl") + "\n"
+           + extract_function("tvUrl") + "\n"
+           + extract_function("_tmNum") + "\n"
+           + extract_function("themeRowHtml") + "\n"
+           + f"const rows={json.dumps(rows)};"
+           + "console.log(JSON.stringify(rows.map(r=>{const h=themeRowHtml(r);"
+             "return {badge: h.includes('유니버스 밖'), link: h.includes('tradingview.com'), crown: h.includes('👑')};})));")
+    out = subprocess.run(["node", "-e", src], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+def test_badge_only_when_explicitly_false():
+    """v5.254 버그: 업종 층 members엔 in_universe가 없어(undefined) 전부 배지가
+    붙고 링크가 사라졌다. undefined/null은 배지 없음이어야 한다."""
+    base = {"ticker": "005930.KS", "name": "삼성전자", "price": 100, "ret20": 1.0,
+            "ret60": 2.0, "rs": 90, "above_ma200": True, "theme_leader": False}
+    rows = [
+        {**base},                                # in_universe 없음(업종 층 과거 형태)
+        {**base, "in_universe": None},           # 캐시 콜드
+        {**base, "in_universe": True},           # 정상
+        {**base, "in_universe": False},          # 진짜 유니버스 밖
+    ]
+    got = run_row_js(rows)
+    assert [g["badge"] for g in got] == [False, False, False, True]
+
+
+def test_link_present_in_every_state():
+    """2번 버그: 차트 링크가 사라지면 안 된다 — 유니버스 밖이어도 건다."""
+    base = {"ticker": "005930.KS", "name": "삼성전자", "price": None, "ret20": None,
+            "ret60": None, "rs": None, "above_ma200": None, "theme_leader": False}
+    got = run_row_js([{**base}, {**base, "in_universe": False}, {**base, "in_universe": True}])
+    assert all(g["link"] for g in got), got
+
+
+def test_crown_rendered():
+    base = {"ticker": "005930.KS", "name": "삼성전자", "price": 1, "ret20": 1.0,
+            "ret60": 1.0, "rs": 99, "above_ma200": True, "in_universe": True}
+    got = run_row_js([{**base, "theme_leader": True}, {**base, "theme_leader": False}])
+    assert [g["crown"] for g in got] == [True, False]
+
+
+def test_table_columns_are_fixed_width():
+    """3번: width:100%만 주면 화면이 넓을수록 이름과 숫자가 벌어진다."""
+    body = extract_function("themeTableHtml")
+    assert "table-layout:fixed" in body and "max-width:560px" in body
+    assert "<colgroup>" in body

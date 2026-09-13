@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.254</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.255</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -570,6 +570,10 @@ tr.editing{background:rgba(242,179,61,.06)}
          대장관찰/섹터/돈의흐름/인버스/붕괴는 ⋯실험 드롭다운으로 이동
          (기능 유지, 위치만 변경). -->
     <button class="tab active" data-mode="calendar">📅 캘린더</button>
+    <!-- v5.255(사용자 지시): 🧭 업종/테마를 ⋯실험 드롭다운 → 캘린더 바로 옆으로.
+         드롭다운 안이면 매번 두 번 눌러야 해서 상시 탭으로 승격. 기존 📊 섹터
+         (일일 등락 3패널)는 드롭다운에 그대로 둔다 — 다른 화면이다. -->
+    <button class="tab" data-mode="themes" title="업종·테마별 구성종목 — 스캐너가 이미 계산한 값만 표시(새 계산 없음)">🧭 업종/테마</button>
     <span class="tab-group-sep"></span>
     <button class="tab" data-mode="pullback">눌림목</button>
     <button class="tab" data-mode="imminent">돌파임박</button>
@@ -594,9 +598,6 @@ tr.editing{background:rgba(242,179,61,.06)}
       <button class="tab" data-mode="super">슈퍼대장</button>
       <button class="tab" data-mode="leader">대장관찰</button>
       <button class="tab" data-mode="sectors">📊 섹터</button>
-      <!-- v5.254(사용자 지시): 섹터/테마 "종목 보기" — 기존 📊 섹터(일일 등락
-           3패널 + 주도업종 랭킹)와는 다른 화면이라 탭을 따로 둔다. -->
-      <button class="tab" data-mode="themes" title="업종·테마별 구성종목 — 스캐너가 이미 계산한 값만 표시(새 계산 없음)">🧭 업종/테마</button>
       <button class="tab" data-mode="moneyflow">💰 돈의흐름<span class="mf-unread-dot" id="moneyflowUnreadDot" style="display:none"> ●</span></button>
       <button class="tab tab-exp" data-mode="inverse">🔻인버스<span class="exp-tag">하락</span></button>
       <button class="tab tab-exp" data-mode="breakdown">🩸붕괴<span class="exp-tag">숏</span></button>
@@ -2857,14 +2858,18 @@ function sortThemeRows(rows, key) {
 }
 
 function themeRowHtml(r) {
-  const out = !r.in_universe;
-  const nameCell = out
-    ? `<span style="color:var(--muted)">${r.name}</span> <span style="font-size:10px;color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:0 3px">유니버스 밖</span>`
-    : `<a href="${tvUrl(r.ticker, 'kr')}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${r.name}</a>`;
+  // v5.255(버그수정): `=== false`로만 판정한다. `!r.in_universe`는 필드가
+  // 없을 때(undefined)와 캐시 콜드(null)까지 "밖"으로 몰아, v5.254에서
+  // 업종 층 전 종목이 회색 + 배지 + 링크 없음이 됐다.
+  const out = r.in_universe === false;
+  // 차트 링크는 **유니버스 밖이어도 건다** — 트레이딩뷰는 우리 유니버스와
+  // 무관하게 열린다(스캔 대상이 아닐 뿐 상장된 종목).
+  const nameCell = `<a href="${tvUrl(r.ticker, 'kr')}" target="_blank" rel="noopener" style="color:${out ? 'var(--muted)' : 'inherit'};text-decoration:none" title="트레이딩뷰 차트 열기">${r.name}</a>`
+    + (out ? ' <span style="font-size:10px;color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:0 3px">유니버스 밖</span>' : '');
   const ma = r.above_ma200 == null ? '<span style="color:var(--muted)">—</span>'
     : r.above_ma200 ? '<span style="color:var(--px-up)">▲</span>' : '<span style="color:var(--px-down)">▼</span>';
   return `<tr style="${out ? 'opacity:.55' : ''}">
-    <td style="padding:4px 8px;border-bottom:1px solid var(--line)">${r.theme_leader ? '👑 ' : ''}${nameCell}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.name}">${r.theme_leader ? '👑 ' : ''}${nameCell}</td>
     <td class="mono" style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${r.price != null ? r.price.toLocaleString() : '—'}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${_tmNum(r.ret20)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${_tmNum(r.ret60)}</td>
@@ -2873,8 +2878,16 @@ function themeRowHtml(r) {
   </tr>`;
 }
 
+// v5.255(사용자 지시): 종목명과 숫자 열이 너무 벌어져 있었다(width:100%라
+// 화면이 넓을수록 계속 벌어짐). table-layout:fixed + 고정 컬럼폭으로 왼쪽에
+// 붙이고, 남는 공간은 오른쪽에 그대로 둔다. 모바일에선 max-width가 화면보다
+// 크면 100%로 줄어든다.
 function themeTableHtml(rows) {
-  return `<table style="width:100%;border-collapse:collapse;font-size:12px">
+  return `<table style="width:100%;max-width:560px;table-layout:fixed;border-collapse:collapse;font-size:12px">
+    <colgroup>
+      <col style="width:auto"><col style="width:78px"><col style="width:64px">
+      <col style="width:64px"><col style="width:44px"><col style="width:52px">
+    </colgroup>
     <thead><tr style="color:var(--muted);font-size:11px">
       <th style="text-align:left;padding:3px 8px">종목</th>
       <th style="text-align:right;padding:3px 8px">현재가</th>

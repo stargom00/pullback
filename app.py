@@ -5,7 +5,31 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
-v5.254 [신규] 🧭 업종/테마 탭 — 섹터/테마 구성종목 보기(사용자 지시).
+v5.255 [버그수정+UI] 🧭 업종/테마 탭 수정 4건(사용자 지시).
+        [1+2. "유니버스 밖" 오판 → 링크까지 사라짐 — 같은 뿌리]
+        v5.254는 "유니버스 밖" 판정을 테마 층 전용으로만 만들고(themes_kr.json
+        종목이 universe dict에 있나) 업종 층 members엔 그 필드를 아예 안 실었다.
+        프론트가 `!r.in_universe`로 보는 바람에 **undefined가 전부 "밖"으로
+        걸려 업종 층 전 종목이 회색 + 배지 + 차트 링크 제거**됐다(2번 증상의
+        원인도 이것 — 링크가 "유니버스 밖" 분기에서 빠져 있었다).
+        → 판정을 `_has_bars(bundle, ticker)`("bundle 일봉이 있나") 하나로 통일,
+          층 무관 동일 기준. 캐시 콜드면 None(단정 불가)을 반환해 멀쩡한
+          종목에 배지가 붙는 2차 오판도 막는다.
+        → 프론트는 `in_universe === false`일 때만 배지. 차트 링크는 **모든
+          상태에서 건다**(유니버스 밖은 스캔 대상이 아닐 뿐 상장 종목이고,
+          트레이딩뷰는 우리 유니버스와 무관하게 열린다).
+        [3. 표 간격] width:100%만 줘서 화면이 넓을수록 종목명과 숫자 열이
+        계속 벌어졌다 → table-layout:fixed + colgroup 고정폭 + max-width:560px로
+        왼쪽 정렬. 긴 종목명은 말줄임(title에 전체 이름).
+        [4. 탭 위치] ⋯실험 드롭다운 → 📅캘린더 바로 옆 상시 탭으로 승격.
+        기존 📊 섹터(일일 등락 3패널)는 드롭다운에 그대로 — 다른 화면이다.
+        탭 바는 overflow-x:auto라 넘쳐도 깨지지 않고 가로 스크롤된다(다른 탭을
+        드롭다운으로 옮기지 않았다 — 실제 넘침 여부는 화면 폭에 달렸다).
+        [테스트] +9건. 업종 층 전 종목 in_universe=True, 테마 층은 일봉 유무로
+        갈림, 콜드면 None, 배지는 false일 때만, 링크는 전 상태에서 존재,
+        표 고정폭. 사보타주 3종(배지 판정 되돌리기 / 업종 층 필드 제거 /
+        고정폭 제거) 각각 해당 테스트만 FAIL 확인 후 원복. 전체 639 passed.
+v5.254[신규] 🧭 업종/테마 탭 — 섹터/테마 구성종목 보기(사용자 지시).
         스캐너 로직 무수정. 라우트 2개 추가 + 프론트 탭 1개.
         [왜 새 탭인가] data-mode="sectors"(📊 섹터)와 /api/sectors는 이미
         다른 화면(일일 등락 3패널 + 주도업종 랭킹)이 쓰고 있어 덮지 않았다 —
@@ -7091,7 +7115,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.254"
+VERSION = "v5.255"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -11374,6 +11398,24 @@ def _peek_market_bundle(market: str) -> dict | None:
     return None
 
 
+def _has_bars(bundle: dict | None, ticker: str) -> bool | None:
+    """v5.255(버그수정): "유니버스 밖" 배지의 **유일한** 판정 기준 —
+    bundle의 일봉 데이터가 있는가. 층(업종/테마)과 무관하게 같은 기준을 쓴다.
+
+    v5.254 버그: 테마 층 전용 판정(themes_kr.json 종목이 universe dict에
+    있나)을 만들어 두고, 업종 층 members에는 그 필드를 아예 안 실었다 →
+    프론트에서 `!r.in_universe`가 undefined에 걸려 **업종 층 전 종목이
+    "유니버스 밖"으로 회색 처리되고 차트 링크까지 사라졌다**.
+
+    캐시가 없으면(bundle=None) True/False를 단정할 수 없으므로 None을
+    반환한다 — 프론트는 `=== false`일 때만 배지를 붙이므로, 콜드 상태에서
+    멀쩡한 종목에 "유니버스 밖"이 붙는 2차 오판이 생기지 않는다.
+    """
+    if bundle is None:
+        return None
+    return ticker in (bundle.get("data") or {})
+
+
 def _ticker_stats_from_bundle(bundle: dict, ticker: str) -> dict | None:
     """bundle의 일봉에서 표시용 값만 뽑는다(새 지표 계산 아님 — 전부 Close 파생).
     200일선은 종가 200봉 SMA — scanner의 게이트와 무관한 표시용."""
@@ -11426,6 +11468,9 @@ async def api_sector_members(market: str = "kr"):
         members.setdefault(key, []).append({
             "ticker": t, "name": (bundle.get("universe") or {}).get(t) or t,
             "sector_rank": si.get("rank"), "sector_total": si.get("total"),
+            # v5.255(버그수정): 층 무관하게 같은 기준 — "bundle의 일봉이 있나".
+            # 업종 층은 정의상 전부 있다(by_ticker가 bundle에서 파생되므로).
+            "in_universe": _has_bars(bundle, t),
             **(st or {"price": None, "ret20": None, "ret60": None,
                       "rs": None, "above_ma200": None, "bars": 0}),
         })
@@ -11482,10 +11527,12 @@ async def api_themes():
         rows = []
         for item in (body.get("tickers") or []):
             t, n = (item.get("t") or "").strip(), item.get("n") or ""
-            st = _ticker_stats_from_bundle(bundle, t) if bundle and t in uni else None
+            st = _ticker_stats_from_bundle(bundle, t) if bundle else None
             rows.append({
                 "ticker": t, "name": uni.get(t) or n, "file_name": n,
-                "in_universe": bool(t in uni),
+                # v5.255: 업종 층과 같은 기준(_has_bars). 이전엔 universe dict
+                # 소속으로 판정했는데, 실제로 가격을 못 그리는 기준은 일봉 유무다.
+                "in_universe": _has_bars(bundle, t),
                 **(st or {"price": None, "ret20": None, "ret60": None,
                           "rs": None, "above_ma200": None, "bars": 0}),
             })

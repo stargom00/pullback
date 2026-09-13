@@ -143,6 +143,58 @@ def test_sector_members_shape_and_market_split(warm_cache, no_fetch):
     assert m["sector_rank"] == 1 and m["sector_total"] == 2
 
 
+def test_sector_layer_never_marks_members_out_of_universe(warm_cache, no_fetch):
+    """v5.255 회귀 방지: 업종 층 종목은 정의상 전부 유니버스 안이다.
+
+    v5.254 버그 — 이 필드가 아예 없어서 프론트가 전 종목을 "유니버스 밖"으로
+    회색 처리하고 차트 링크까지 지웠다.
+    """
+    r = asyncio.run(app.api_sector_members("kr"))
+    members = [m for s in r["sectors"] for m in s["members"]]
+    assert members, "표본이 없으면 이 테스트는 의미가 없다"
+    assert all(m["in_universe"] is True for m in members), \
+        [m["ticker"] for m in members if m["in_universe"] is not True]
+
+
+def test_theme_layer_out_of_universe_only_for_missing_bars(warm_cache, no_fetch,
+                                                           monkeypatch, tmp_path):
+    """테마 층에서도 같은 기준(_has_bars) — 일봉이 있으면 '안', 없으면 '밖'."""
+    p = tmp_path / "t.json"
+    p.write_text(json.dumps({"themes": {"X": {"tickers": [
+        {"t": "005930.KS", "n": "삼성전자"},
+        {"t": "999999.KQ", "n": "없는종목"},
+    ]}}}, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(app, "_THEMES_FILE", str(p))
+    rows = asyncio.run(app.api_themes())["themes"][0]["tickers"]
+    got = {r["ticker"]: r["in_universe"] for r in rows}
+    assert got == {"005930.KS": True, "999999.KQ": False}
+
+
+def test_has_bars_is_none_when_cache_cold():
+    """콜드면 단정 불가 → None. False로 내려보내면 멀쩡한 종목에 배지가 붙는다."""
+    assert app._has_bars(None, "005930.KS") is None
+    assert app._has_bars(_fake_bundle(), "005930.KS") is True
+    assert app._has_bars(_fake_bundle(), "999999.KQ") is False
+
+
+def test_cold_cache_does_not_label_anything_out_of_universe(no_fetch, monkeypatch):
+    monkeypatch.setattr(app, "_data_cache", {})
+    monkeypatch.setattr(app, "_load_disk_cache", lambda *a, **k: None)
+    rows = [r for t in asyncio.run(app.api_themes())["themes"] for r in t["tickers"]]
+    assert rows and all(r["in_universe"] is None for r in rows)
+
+
+def test_real_file_out_of_universe_count(warm_cache, no_fetch):
+    """실제 themes_kr.json + 실제 유니버스에서 '밖'이 몇 건인지 — 1단계 검증에서
+    확인한 14건. 캐시가 합성이라 여기서는 개수 대신 '판정이 종목마다 갈리는가'만
+    본다(합성 bundle엔 2종목뿐이라 대부분 밖으로 나오는 게 정상)."""
+    if not os.path.exists(app._THEMES_FILE):
+        pytest.skip("themes_kr.json 없음")
+    rows = [r for t in asyncio.run(app.api_themes())["themes"] for r in t["tickers"]]
+    vals = {r["in_universe"] for r in rows}
+    assert vals <= {True, False} and True in vals, "합성 캐시 종목조차 '밖'으로 나온다"
+
+
 def test_ticker_stats_math():
     b = _fake_bundle()
     st = app._ticker_stats_from_bundle(b, "005930.KS")
