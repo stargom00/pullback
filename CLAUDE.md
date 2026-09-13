@@ -28,8 +28,31 @@
 ---
 
 ## 검증 방법
-- 라이브 URL(pullback2-production.up.railway.app)은 Claude bash 네트워크 allowlist에 **없다** → curl 불가.
-- `raw.githubusercontent.com`은 됨 → 배포 검증은 **레포의 raw 파일**로 한다.
+- **라이브 URL(pullback2-production.up.railway.app)에 curl로 접근된다 (2026-09-13 확인).**
+  이전에 여기 "allowlist에 없다 → curl 불가"라고 적혀 있었는데 **틀린 기록이었다.**
+  그 한 줄 때문에 프로덕션 상태 확인을 시도조차 안 하고 매번 사용자에게 브라우저로
+  확인해 달라고 떠넘겼다(2026-09-13 paper-track 404 조사에서 발견 — 시도해 보니 바로 됐고,
+  그 자리에서 원인까지 규명됐다). **프로덕션 상태 확인은 curl로 직접 할 것.**
+  교훈: "안 된다"고 적힌 기록도 비용이 싼 확인이면 한 번은 실제로 해볼 것.
+- **단, `/api/*`는 전부 401이 돌아온다** — `_auth_gate` 미들웨어가 라우팅보다 먼저 돌아서
+  **존재하지 않는 경로도 401**이다(404가 아니다). 그래서 401만 보고 "엔드포인트가 있다/없다"를
+  판단하면 안 된다. 라우트 존재 확인이 필요하면 아래 게이트 우회 경로를 쓴다.
+- **게이트 우회 경로 2개(설계된 동작, 아래 보안 메모 참고)**: `POST /api/positions/sync`,
+  `POST /api/positions/sync_error`는 `_auth_gate`를 통과한다. GET으로 찌르면
+  **405 Method Not Allowed**가 오는데, 이건 "경로는 등록돼 있다"는 뜻이라
+  **프로덕션 라우터가 어디까지 등록됐는지 확인하는 프로브**로 쓸 수 있다
+  (app.py 16713행 근처 — 이보다 앞선 라우트는 전부 등록된 것으로 확정 가능).
+- 인증이 필요한 응답 본문까지 봐야 하면 사용자에게 브라우저로 요청한다(비밀번호는 절대 받지 않는다).
+- `raw.githubusercontent.com`도 됨 → 배포된 **소스 파일** 확인은 raw로.
+
+### 보안 메모 — 로그인 게이트 우회 경로
+`_SYNC_TOKEN_GATED_PATHS = {"/api/positions/sync", "/api/positions/sync_error"}`는
+`APP_PASSWORD` 세션 게이트를 **완전히 우회**한다(app.py `_auth_gate`). 브라우저 쿠키를 못 들고
+있는 로컬 스크립트(`sync_toss.py`) 전용이라 의도된 설계이고, 대신 자체 `SYNC_TOKEN`
+(`_verify_sync_token`)으로만 보호된다. **즉 이 두 경로의 실질 보안은 SYNC_TOKEN 하나에 달려 있다** —
+토큰이 유출되면 로그인 없이 포지션 데이터가 쓰기 가능하다. 새 경로를 이 집합에 추가할 때는
+같은 수준의 자체 인증이 반드시 있어야 한다. (얼마냐봇용 `_BOT_READ_EXACT_PATHS`는 성격이 다르다 —
+게이트를 우회하는 게 아니라 `API_READ_TOKEN` 헤더로 통과하며, 읽기 전용이다.)
 
 ---
 
