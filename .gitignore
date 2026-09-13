@@ -2,6 +2,10 @@ __pycache__/
 *.pyc
 kr_universe_v6_*.json
 datacache_*.pkl
+# 실행 로그 전반 — 측정 스크립트 nohup 출력 등(2026-09-13 추가).
+# 아래 sync_toss.log / us_industry_cache_build.log는 이 규칙에 포함되지만
+# "무엇이 로그인지" 목록으로서의 값이 있어 그대로 남겨둔다.
+*.log
 .env
 scripts/measurements/*.results.json
 scripts/measurements/logs/
