@@ -555,7 +555,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.253</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.254</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -594,6 +594,9 @@ tr.editing{background:rgba(242,179,61,.06)}
       <button class="tab" data-mode="super">슈퍼대장</button>
       <button class="tab" data-mode="leader">대장관찰</button>
       <button class="tab" data-mode="sectors">📊 섹터</button>
+      <!-- v5.254(사용자 지시): 섹터/테마 "종목 보기" — 기존 📊 섹터(일일 등락
+           3패널 + 주도업종 랭킹)와는 다른 화면이라 탭을 따로 둔다. -->
+      <button class="tab" data-mode="themes" title="업종·테마별 구성종목 — 스캐너가 이미 계산한 값만 표시(새 계산 없음)">🧭 업종/테마</button>
       <button class="tab" data-mode="moneyflow">💰 돈의흐름<span class="mf-unread-dot" id="moneyflowUnreadDot" style="display:none"> ●</span></button>
       <button class="tab tab-exp" data-mode="inverse">🔻인버스<span class="exp-tag">하락</span></button>
       <button class="tab tab-exp" data-mode="breakdown">🩸붕괴<span class="exp-tag">숏</span></button>
@@ -2668,6 +2671,7 @@ async function load(refresh = false) {
   hideFilterButtonsIfNotApplicable();
   if (mode === 'inverse') { return loadInverse(refresh); }
   if (mode === 'sectors') { return loadSectors(); }
+  if (mode === 'themes') { return loadThemes(); }
   if (mode === 'eod') { return loadEod(); }
   const content = document.getElementById('content');
   const status = document.getElementById('status');
@@ -2820,6 +2824,170 @@ async function loadSectors() {
     </div>`;
   } catch (e) {
     content.innerHTML = '<div class="empty">섹터 집계에 실패했습니다.</div>';
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// v5.254(사용자 지시): 🧭 업종/테마 — 구성종목 보기. 두 층.
+//   (a) 업종 층: /api/sector_members — sector_snapshot이 이미 계산한 값을
+//       종목 단위로 펼친 것. 대장은 기존 qualifies 3상태 그대로.
+//   (b) 테마 층: /api/themes — themes_kr.json(사용자 편집) + 스캐너 시세.
+// 스캔·게이트·진입 판정과 무관한 읽기 전용 화면이다. 새 계산 없음.
+// ══════════════════════════════════════════════════════════════════════
+let themesLayer = 'theme';       // 'theme' | 'sector'
+let themesSort = 'ret20';        // 'ret20' | 'rs' | 'ret60'
+let themesMarket = 'kr';         // 업종 층 전용
+let _themesData = null, _sectorMembersData = null;
+
+function _tmNum(v, suffix = '%', digits = 2) {
+  if (v == null) return '<span style="color:var(--muted)">—</span>';
+  const col = v > 0 ? 'var(--px-up)' : v < 0 ? 'var(--px-down)' : 'var(--muted)';
+  return `<span class="mono" style="color:${col}">${v > 0 ? '+' : ''}${v.toFixed(digits)}${suffix}</span>`;
+}
+
+// 정렬 — 값 없는 항목은 항상 뒤로(정렬 기준이 뭐든 "모름"이 위로 올라오면 안 됨)
+function sortThemeRows(rows, key) {
+  return rows.slice().sort((a, b) => {
+    const av = a[key], bv = b[key];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return bv - av;
+  });
+}
+
+function themeRowHtml(r) {
+  const out = !r.in_universe;
+  const nameCell = out
+    ? `<span style="color:var(--muted)">${r.name}</span> <span style="font-size:10px;color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:0 3px">유니버스 밖</span>`
+    : `<a href="${tvUrl(r.ticker, 'kr')}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${r.name}</a>`;
+  const ma = r.above_ma200 == null ? '<span style="color:var(--muted)">—</span>'
+    : r.above_ma200 ? '<span style="color:var(--px-up)">▲</span>' : '<span style="color:var(--px-down)">▼</span>';
+  return `<tr style="${out ? 'opacity:.55' : ''}">
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line)">${r.theme_leader ? '👑 ' : ''}${nameCell}</td>
+    <td class="mono" style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${r.price != null ? r.price.toLocaleString() : '—'}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${_tmNum(r.ret20)}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${_tmNum(r.ret60)}</td>
+    <td class="mono" style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${r.rs != null ? r.rs : '—'}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center">${ma}</td>
+  </tr>`;
+}
+
+function themeTableHtml(rows) {
+  return `<table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr style="color:var(--muted);font-size:11px">
+      <th style="text-align:left;padding:3px 8px">종목</th>
+      <th style="text-align:right;padding:3px 8px">현재가</th>
+      <th style="text-align:right;padding:3px 8px">20일</th>
+      <th style="text-align:right;padding:3px 8px">60일</th>
+      <th style="text-align:right;padding:3px 8px">RS</th>
+      <th style="text-align:center;padding:3px 8px" title="200일선 위/아래">200MA</th>
+    </tr></thead>
+    <tbody>${rows.map(themeRowHtml).join('')}</tbody></table>`;
+}
+
+function renderThemesLayer() {
+  const d = _themesData;
+  if (!d) return '';
+  if (!d.ok) {
+    // fail-open이되 조용히 넘기지 않는다 — 사유를 그대로 띄운다.
+    return `<div class="empty">⚠️ 테마 목록을 못 읽었습니다.<br>
+      <span style="font-size:12px;color:var(--muted)">${d.error || '알 수 없는 오류'}</span><br>
+      <span style="font-size:12px;color:var(--muted)">themes_kr.json은 레포 루트에 두는 사용자 편집 파일입니다. 업종 층은 정상 동작합니다.</span></div>`;
+  }
+  const cold = d.cache_state === 'cold'
+    ? `<div style="margin-bottom:10px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:12px;color:var(--muted)">
+         아직 스캔 캐시가 없어 가격·수익률·RS가 비어 있습니다. 스캔을 한 번 돌린 뒤 새로고침하세요. (목록 자체는 정상)</div>` : '';
+  return cold + d.themes.map(t => `
+    <div style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap">
+        <b style="font-size:14px">${t.theme}</b>
+        <span style="font-size:11px;color:var(--muted)">
+          ${t.n}종목${t.n_priced < t.n ? ` (시세 ${t.n_priced})` : ''} ·
+          20일 중앙값 ${t.median_ret20 == null ? '—' : `${t.median_ret20 > 0 ? '+' : ''}${t.median_ret20}%`} ·
+          200일선 위 ${t.pct_above_ma200 == null ? '—' : t.pct_above_ma200 + '%'}
+        </span>
+      </div>
+      ${t.note ? `<div style="font-size:11px;color:var(--muted);margin:2px 0 4px">${t.note}</div>` : ''}
+      ${themeTableHtml(sortThemeRows(t.tickers, themesSort))}
+    </div>`).join('');
+}
+
+function renderSectorLayer() {
+  const d = _sectorMembersData;
+  if (!d) return '';
+  if (d.cache_state === 'cold') {
+    return `<div class="empty">${d.message || '캐시가 없습니다.'}</div>`;
+  }
+  return d.sectors.map(s => {
+    // 대장 3상태 그대로: true=확정, false=회색⚠️(200일선/EPS 미달), null=❔(확인 못 함)
+    const lead = (s.leaders || []).map(l => {
+      const nm = (s.members.find(m => m.ticker === l.ticker) || {}).name || l.ticker;
+      if (l.qualifies === true) return `<span>👑 ${nm}</span>`;
+      if (l.qualifies === false) return `<span style="color:var(--muted)" title="RS 상위지만 200일선·EPS 게이트 미달">⚠️ ${nm}</span>`;
+      return `<span style="color:var(--muted)" title="대장 조건을 확인하지 못했습니다(실적 조회 실패 등)">❔ ${nm}</span>`;
+    }).join(' · ');
+    return `<div style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap">
+        <b style="font-size:14px">${s.sector}</b>
+        <span style="font-size:11px;color:var(--muted)">
+          ${s.n}종목 · 20일 ${s.ret20 == null ? '—' : (s.ret20 > 0 ? '+' : '') + s.ret20 + '%'} ·
+          60일 ${s.ret60 == null ? '—' : (s.ret60 > 0 ? '+' : '') + s.ret60 + '%'} ·
+          섹터RS ${s.sector_rs_pct ?? '—'} · 50일선 위 ${s.pct_above_ma50 ?? '—'}%${s.new_high_52w ? ' · 🆕52주신고가' : ''}
+        </span>
+      </div>
+      ${lead ? `<div style="font-size:11px;margin:2px 0 4px">대장: ${lead}</div>` : ''}
+      ${themeTableHtml(sortThemeRows(s.members, themesSort))}
+    </div>`;
+  }).join('');
+}
+
+function renderThemesPage() {
+  const content = document.getElementById('content');
+  const btn = (active, label, onclick) =>
+    `<button class="tab${active ? ' active' : ''}" style="font-size:12px;padding:3px 10px" onclick="${onclick}">${label}</button>`;
+  const head = `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      ${btn(themesLayer === 'theme', '테마', "setThemesLayer('theme')")}
+      ${btn(themesLayer === 'sector', '업종', "setThemesLayer('sector')")}
+      <span style="width:10px"></span>
+      <span style="font-size:11px;color:var(--muted)">정렬</span>
+      ${btn(themesSort === 'ret20', '20일', "setThemesSort('ret20')")}
+      ${btn(themesSort === 'rs', 'RS', "setThemesSort('rs')")}
+      ${btn(themesSort === 'ret60', '60일', "setThemesSort('ret60')")}
+      ${themesLayer === 'sector' ? `<span style="width:10px"></span>
+        ${btn(themesMarket === 'kr', '한국', "setThemesMarket('kr')")}
+        ${btn(themesMarket === 'us', '미국', "setThemesMarket('us')")}` : ''}
+    </div>`;
+  content.innerHTML = head + (themesLayer === 'theme' ? renderThemesLayer() : renderSectorLayer());
+}
+
+function setThemesLayer(v) { themesLayer = v; if (v === 'sector' && !_sectorMembersData) return loadThemes(); renderThemesPage(); }
+function setThemesSort(v) { themesSort = v; renderThemesPage(); }
+function setThemesMarket(v) { themesMarket = v; _sectorMembersData = null; loadThemes(); }
+
+async function loadThemes() {
+  const content = document.getElementById('content');
+  const status = document.getElementById('status');
+  document.getElementById('searchBar').style.display = 'none';
+  document.getElementById('diagBar').style.display = 'none';
+  content.innerHTML = '<div class="loading"><div class="spinner"></div>불러오는 중…</div>';
+  status.innerHTML = '';
+  try {
+    const [tr, sr] = await Promise.all([
+      _themesData ? Promise.resolve(null) : fetch('/api/themes').then(r => r.json()),
+      themesLayer === 'sector' && !_sectorMembersData
+        ? fetch(`/api/sector_members?market=${themesMarket}`).then(r => r.json())
+        : Promise.resolve(null),
+    ]);
+    if (tr) _themesData = tr;
+    if (sr) _sectorMembersData = sr;
+    const meta = _themesData && _themesData.ok
+      ? `테마 파일 ${_themesData.updated || ''}${_themesData.file_version ? ` (v${_themesData.file_version})` : ''}` : '';
+    const asof = (_sectorMembersData && _sectorMembersData.asof) ? ` · 스캔 기준 ${_sectorMembersData.asof}` : '';
+    status.innerHTML = `<span>${meta}${asof}</span><span>스캐너가 이미 계산한 값만 표시 — 새 계산·추가 조회 없음</span>`;
+    renderThemesPage();
+  } catch (e) {
+    content.innerHTML = `<div class="empty">불러오기에 실패했습니다.<br><span style="font-size:12px;color:var(--muted)">${e}</span></div>`;
   }
 }
 
@@ -5930,7 +6098,25 @@ const LEADER_WATCH_EXPIRY_DAYS = 26;
 // "⌛ 만료 임박" 배지가 서버 판정과 어긋나 보이지 않도록 같은 값 유지할 것.
 const PENDING_EXPIRE_DAYS = 10;
 const PENDING_EXPIRE_DAYS_CUSTOM_TRIGGER = 30;
+// v5.254(사용자 지시): 트레이딩뷰 저장 레이아웃 ID. 값이 있으면 모든 차트
+// 링크가 이 레이아웃으로 열린다(기존 카드·일지 링크 포함 — "같은 레이아웃으로
+// 열리는 게 오히려 맞다"는 사용자 판단). **빈 문자열로 두면 즉시 기존 형식
+// (레이아웃 없음)으로 되돌아간다** — 되돌리려면 이 한 줄만 비우면 된다.
+// 주의: 레이아웃 ID는 트레이딩뷰 계정에 종속이라 로그아웃/타 계정에서는
+// 열리지 않을 수 있다(개인용 레포라 허용). URL 형식은 사용자가 실제 브라우저에서
+// 확인한 것: https://www.tradingview.com/chart/<ID>/?symbol=KRX:005930
+const TV_LAYOUT_ID = "0zrxNaq0";
+// 트레이딩뷰 URL을 만드는 **유일한** 자리 — tvUrl(티커용)과 지수 링크(심볼 직접)
+// 둘 다 이걸 거친다. 사본을 만들면 레이아웃이 한쪽에만 붙는다(v5.254에서 실제로
+// 지수 링크가 그 상태였고 테스트가 잡아냈다).
+function tvSymbolUrl(symbol) {
+  const base = TV_LAYOUT_ID
+    ? `https://www.tradingview.com/chart/${TV_LAYOUT_ID}/`
+    : 'https://www.tradingview.com/chart/';
+  return `${base}?symbol=${encodeURIComponent(symbol)}`;
+}
 // 트레이딩뷰 차트 URL — 한국주는 KRX, 미국주는 거래소 자동판별 대신 심볼만
+// (링크 생성은 이 함수 한 곳뿐 — 사본을 만들지 말 것)
 function tvUrl(tickerOrObj, market) {
   // 카드는 객체(s)를, 일지는 (ticker, market)을 넘김 — 둘 다 처리
   let ticker = tickerOrObj;
@@ -5942,10 +6128,10 @@ function tvUrl(tickerOrObj, market) {
   ticker = String(ticker).toUpperCase();
   if (market === 'kr' || market === 'KR' || /\.(KS|KQ)$/.test(ticker)) {
     const code = ticker.replace(/\.(KS|KQ)$/, '');
-    return `https://www.tradingview.com/chart/?symbol=KRX:${code}`;
+    return tvSymbolUrl(`KRX:${code}`);
   }
   // 미국주: 거래소 접두어 없이 심볼만 줘도 트레이딩뷰가 자동 해석
-  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(ticker.replace(/\./g, ''))}`;
+  return tvSymbolUrl(ticker.replace(/\./g, ''));
 }
 
 // v5.44: 가격 추적 대상 판정 — 기존(진입가 있는 진입/대기/추적종목) OR
@@ -8983,7 +9169,7 @@ async function loadIndices() {
       // 프론트에서 라벨→트레이딩뷰 심볼로 매핑 (표에 없는 지수는 그냥 텍스트).
       const tvSym = TV_INDEX_SYMBOL[ix.name];
       const nm = tvSym
-        ? `<a href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSym)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${ix.name}</a>`
+        ? `<a href="${tvSymbolUrl(tvSym)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${ix.name}</a>`
         : ix.name;
       return `<div class="idx" title="${ix.regime_txt || '시장 분위기(분산일 기반)'}"><span class="nm">${nm}${dot ? ` <span style="font-size:9px" title="시장 분위기">${dot}</span>` : ''}</span>`
         + `<span class="vl">${val}</span>`

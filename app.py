@@ -5,7 +5,41 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
-v5.253 [UI 개선] ⛔ 피벗 밀착(0~0.5ATR) 종목을 돌파·박스돌파 탭에서 기본
+v5.254 [신규] 🧭 업종/테마 탭 — 섹터/테마 구성종목 보기(사용자 지시).
+        스캐너 로직 무수정. 라우트 2개 추가 + 프론트 탭 1개.
+        [왜 새 탭인가] data-mode="sectors"(📊 섹터)와 /api/sectors는 이미
+        다른 화면(일일 등락 3패널 + 주도업종 랭킹)이 쓰고 있어 덮지 않았다 —
+        새 라우트 이름은 /api/sector_members, 새 탭은 data-mode="themes".
+        [1. 업종 층] /api/sector_members?market=kr|us — sector_snapshot이
+        이미 계산한 by_sector(n·ret20·ret60·sector_rs_pct·pct_above_ma50·
+        new_high_52w·leaders)와 by_ticker(섹터·RS순위)를 종목 단위로 펼친다.
+        대장은 기존 qualifies 3상태(true 👑 / false ⚠️회색 / null ❔) 그대로.
+        [2. 테마 층] /api/themes — themes_kr.json(레포 루트, 사용자 편집)
+        22테마 312종목. 종목별 현재가·20일·60일·RS·200일선 위아래를 붙이고,
+        테마별 요약(종목 수·20일 중앙값·200일선 위 비율)과 테마 내 RS 1위 👑.
+        유니버스 밖(거래대금 상위 1500 밖) 14종목은 회색 + "유니버스 밖" +
+        가격 없음. 파일 없음/파싱 실패 → ok=False + 사유를 화면에 띄우고
+        로그를 남긴다(fail-open이되 조용히 넘기지 않음). 업종 층은 무관하게 동작.
+        [성능 — 첫 로드] 두 라우트 모두 **_fetch_market_data()를 부르지
+        않는다**. _peek_market_bundle()이 메모리 → 디스크 캐시만 보고,
+        없으면 cache_state="cold"로 즉시 반환한다(콜드 스타트 시 수 분
+        블록되는 것을 구조적으로 차단). 네트워크 호출 0건, 새 지표 계산 0건
+        (전부 기존 bundle의 Close 시리즈 파생).
+        [3. 트레이딩뷰 레이아웃] TV_LAYOUT_ID="0zrxNaq0" 상수 신설 —
+        사용자의 저장 차트 레이아웃으로 열린다. 기존 카드·일지 링크도 같은
+        레이아웃(사용자 판단: "오히려 맞다"). **상수를 비우면 레이아웃 없는
+        기존 형식으로 즉시 복귀**. URL 생성은 tvSymbolUrl() 한 곳으로 통일 —
+        지수 링크가 tvUrl을 안 거치고 URL을 직접 만들고 있어 레이아웃이
+        한쪽에만 붙던 것을 테스트가 잡아내 같이 고쳤다(KR 심볼 콜론이
+        %3A로 인코딩되는 변화가 생기지만 트레이딩뷰가 둘 다 받고, 사용자가
+        브라우저에서 확인한 URL도 인코딩된 형태다).
+        [테스트] test_sector_theme_page.py(12) — 라우트가 fetch를 부르면
+        즉시 실패시키는 가드, 콜드 캐시 명시, themes_kr.json 없음·깨짐,
+        두 층 독립, 시장 분리, 중앙값 짝수 경로, 짧은 이력 None 처리.
+        test_tv_layout_and_sort.py(5) — 프론트 함수를 node로 직접 실행.
+        사보타주 3종(지수 링크 사본 복원 / 라우트가 fetch 호출 / 콜드 안내
+        제거) 각각 해당 테스트만 FAIL 확인 후 원복. 전체 630 passed.
+v5.253[UI 개선] ⛔ 피벗 밀착(0~0.5ATR) 종목을 돌파·박스돌파 탭에서 기본
         접힘으로(사용자 지시, 표시 전용 — static/index.html만 변경, 이
         파일은 VERSION/이력만). 근거: docs/display_only_bench_revalidation.md
         §2.4 재검증(8번) R1·R2에서 4셀 전부 z ≤ −2.66(박스돌파 KR −4.19/
@@ -7057,7 +7091,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.253"
+VERSION = "v5.254"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -11309,6 +11343,172 @@ async def api_sectors():
         # 마감 확정된 결과만 스냅샷으로 표시 — 다음 장중엔 이 스냅샷을 그대로 재사용.
         _sectors_cache["closed_daykey"] = daykey
     return result
+
+
+# ══════════════════════════════════════════════════════════════════════
+# v5.254(사용자 지시): 섹터/테마 종목 보기 — 읽기 전용 두 층
+# ══════════════════════════════════════════════════════════════════════
+# 스캐너 로직 무관. 아래 두 라우트는 **이미 있는 캐시만 읽는다** — 절대
+# _fetch_market_data()를 부르지 않는다(콜드 스타트면 그 함수가 수 분간
+# 블록되고, 사용자 제약이 "배포 후 첫 로드가 느려지면 안 된다"였다).
+# 캐시가 없으면 cache_state="cold"로 명시해 반환하고 화면이 그 사실을
+# 그대로 보여준다(조용한 빈 화면 금지).
+_THEMES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "themes_kr.json")
+
+
+def _peek_market_bundle(market: str) -> dict | None:
+    """네트워크·재계산 없이 기존 bundle 캐시만 들여다본다. 없으면 None.
+
+    _fetch_market_data()의 캐시 우선 분기와 같은 순서(메모리 → 디스크)지만
+    **폴백 fetch가 없다** — 이 함수는 절대 새 작업을 만들지 않는다.
+    """
+    mem = _data_cache.get(f"data:{market}")
+    if mem:
+        return mem
+    daykey = _confirmed_daykey(market)
+    if daykey:
+        try:
+            return _load_disk_cache(market, daykey)
+        except Exception as e:
+            print(f"[sector_members] 디스크 캐시 읽기 실패 {market}/{daykey}: {e}", flush=True)
+    return None
+
+
+def _ticker_stats_from_bundle(bundle: dict, ticker: str) -> dict | None:
+    """bundle의 일봉에서 표시용 값만 뽑는다(새 지표 계산 아님 — 전부 Close 파생).
+    200일선은 종가 200봉 SMA — scanner의 게이트와 무관한 표시용."""
+    df = (bundle.get("data") or {}).get(ticker)
+    if df is None or "Close" not in df:
+        return None
+    c = df["Close"].dropna()
+    if c.empty:
+        return None
+    last = float(c.iloc[-1])
+    def _ret(n):
+        return round((last / float(c.iloc[-n - 1]) - 1) * 100, 2) if len(c) > n else None
+    ma200 = float(c.iloc[-200:].mean()) if len(c) >= 200 else None
+    return {
+        "price": round(last, 2),
+        "ret20": _ret(20),
+        "ret60": _ret(60),
+        "rs": (bundle.get("rs_ranks") or {}).get(ticker),
+        "above_ma200": (last > ma200) if ma200 else None,
+        "bars": int(len(c)),
+    }
+
+
+@app.get("/api/sector_members")
+async def api_sector_members(market: str = "kr"):
+    """업종 층 — sector_snapshot이 이미 계산한 (섹터, 시장) 통계를 **종목 단위로
+    펼친 것**. 새 계산 0건: by_sector(통계·대장)와 by_ticker(섹터·RS순위)를
+    그대로 쓰고, 종목별 가격/수익률만 bundle의 일봉에서 읽는다.
+
+    이름이 /api/sectors와 다른 이유: 그쪽은 이미 다른 화면(일일 등락 3패널 +
+    주도업종 랭킹)이 쓰는 라우트라 건드리지 않는다.
+    """
+    mkt = (market or "kr").lower()
+    if mkt not in ("kr", "us"):
+        return {"ok": False, "error": "market은 kr 또는 us"}
+    bundle = _peek_market_bundle(mkt)
+    if not bundle:
+        return {"ok": True, "cache_state": "cold", "sectors": [],
+                "message": "아직 스캔 캐시가 없습니다 — 스캔을 한 번 돌린 뒤 새로고침하세요."}
+
+    info = bundle.get("sector_info") or {}
+    by_sector, by_ticker = info.get("by_sector") or {}, info.get("by_ticker") or {}
+    mkt_up = mkt.upper()
+    members: dict[str, list] = {}
+    for t, si in by_ticker.items():
+        if si.get("market") != mkt_up:
+            continue
+        key = f"{si.get('sector')}|{mkt_up}"
+        st = _ticker_stats_from_bundle(bundle, t)
+        members.setdefault(key, []).append({
+            "ticker": t, "name": (bundle.get("universe") or {}).get(t) or t,
+            "sector_rank": si.get("rank"), "sector_total": si.get("total"),
+            **(st or {"price": None, "ret20": None, "ret60": None,
+                      "rs": None, "above_ma200": None, "bars": 0}),
+        })
+
+    out = []
+    for key, entry in by_sector.items():
+        if entry.get("market") != mkt_up:
+            continue
+        out.append({
+            "sector": entry.get("sector"), "n": entry.get("n"),
+            "ret20": entry.get("ret20"), "ret60": entry.get("ret60"),
+            "sector_rs_pct": entry.get("sector_rs_pct"), "rs20_pct": entry.get("rs20_pct"),
+            "new_high_52w": entry.get("new_high_52w"),
+            "pct_above_ma50": entry.get("pct_above_ma50"),
+            "pct_20d_high": entry.get("pct_20d_high"),
+            # 대장 3상태(true/false/null) 그대로 — 프론트가 기존 규칙대로 렌더
+            "leaders": entry.get("leaders") or [],
+            "members": sorted(members.get(key, []),
+                              key=lambda m: (m["ret20"] is None, -(m["ret20"] or 0))),
+        })
+    out.sort(key=lambda s: (s["ret20"] is None, -(s["ret20"] or 0)))
+    ts = bundle.get("ts")
+    return {"ok": True, "cache_state": "warm", "market": mkt, "sectors": out,
+            "asof": datetime.fromtimestamp(ts, KST).strftime("%Y-%m-%d %H:%M") if ts else "",
+            "daykey": bundle.get("daykey"), "version": VERSION}
+
+
+@app.get("/api/themes")
+async def api_themes():
+    """테마 층 — themes_kr.json(사용자가 직접 편집)을 읽어 종목별 시세를 붙인다.
+
+    fail-open이되 조용히 넘기지 않는다: 파일이 없거나 파싱이 깨지면 ok=False와
+    사유를 그대로 실어 보내고(화면이 그 문구를 띄운다), 업종 층은 이 라우트와
+    무관하므로 정상 동작한다.
+    유니버스 밖 종목(거래대금 상위 1500 밖 또는 상장폐지)은 in_universe=False로
+    내려보내고 가격 필드는 None — 프론트가 회색 처리한다.
+    """
+    try:
+        with open(_THEMES_FILE, encoding="utf-8") as f:
+            doc = _json.load(f)   # app.py는 json을 _json으로 별칭해 쓴다
+    except FileNotFoundError:
+        print("[themes] themes_kr.json 없음 — 테마 층 비활성", flush=True)
+        return {"ok": False, "error": "themes_kr.json 파일이 없습니다.", "themes": []}
+    except Exception as e:
+        print(f"[themes] themes_kr.json 파싱 실패: {e}", flush=True)
+        return {"ok": False, "error": f"themes_kr.json 읽기 실패: {e}", "themes": []}
+
+    bundle = _peek_market_bundle("kr")
+    cache_state = "warm" if bundle else "cold"
+    uni = (bundle.get("universe") if bundle else None) or {}
+
+    out = []
+    for theme, body in (doc.get("themes") or {}).items():
+        rows = []
+        for item in (body.get("tickers") or []):
+            t, n = (item.get("t") or "").strip(), item.get("n") or ""
+            st = _ticker_stats_from_bundle(bundle, t) if bundle and t in uni else None
+            rows.append({
+                "ticker": t, "name": uni.get(t) or n, "file_name": n,
+                "in_universe": bool(t in uni),
+                **(st or {"price": None, "ret20": None, "ret60": None,
+                          "rs": None, "above_ma200": None, "bars": 0}),
+            })
+        # 👑 = 테마 안 RS 1위(동점이면 첫 번째). 업종 층의 qualifies와는 다른
+        # 개념이라 이름도 다르게 둔다 — 여긴 EPS·200일선 게이트가 없다.
+        best = max((r for r in rows if r.get("rs") is not None),
+                   key=lambda r: r["rs"], default=None)
+        for r in rows:
+            r["theme_leader"] = bool(best and r["ticker"] == best["ticker"])
+        rets = sorted(r["ret20"] for r in rows if r["ret20"] is not None)
+        n_ma = [r["above_ma200"] for r in rows if r["above_ma200"] is not None]
+        med = (rets[len(rets) // 2] if len(rets) % 2
+               else round((rets[len(rets) // 2 - 1] + rets[len(rets) // 2]) / 2, 2)) if rets else None
+        out.append({
+            "theme": theme, "note": body.get("note"),
+            "n": len(rows), "n_priced": len(rets),
+            "median_ret20": med,
+            "pct_above_ma200": round(sum(n_ma) / len(n_ma) * 100, 1) if n_ma else None,
+            "tickers": sorted(rows, key=lambda r: (r["ret20"] is None, -(r["ret20"] or 0))),
+        })
+    return {"ok": True, "cache_state": cache_state, "themes": out,
+            "updated": doc.get("updated"), "file_version": doc.get("version"),
+            "version": VERSION}
 
 
 @app.get("/api/lookup/{ticker}")
