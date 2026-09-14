@@ -147,7 +147,7 @@ def main():
     stamp = harness.run_stamp(data)
     print(f"[data] kr={len(kr_t)} us={len(us_t)} last_kr={cal_kr[-1].date()} "
           f"last_us={cal_us[-1].date()}", flush=True)
-    print(f"[stamp] {stamp['run_at_kst']} KST | [bonf] k=17 -> z >= {Z_BONF}", flush=True)
+    print(f"[stamp] {stamp['run_at_kst']} | [bonf] k=17 -> z >= {Z_BONF}", flush=True)
 
     stats = defaultdict(int)
     all_hits, gate_n = [], 0
