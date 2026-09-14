@@ -5,7 +5,32 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
-v5.260 [버그수정+UI] 시각 표기 — NZST 시계 함정이 실제 판정에 들어가 있었다.
+v5.261 [UI] 눌림목 카드 score **강등**(사용자 지시) — 삭제가 아니라 톤 낮춤.
+        [근거] 2026-09-14 측정 B/B-2: score 구성 항목 중 **노출된 17개 전부**가
+        20일 수익률을 가르지 못했다(체크포인트별 상·하위 30% 대비, MWU 중앙값,
+        Bonferroni 보정 z ≥ 2.974, 눌림목 히트 9,2xx건, 재현 게이트 ±3% 이내 PASS).
+        `rs`는 중앙값차 −0.08%p·z 0.14로 사실상 0이었고(게이트 rs_min=80 위에서는
+        RS가 수익률을 못 가른다), 보정 전에만 유의했던 4개(rs_mom·tightening·
+        vol_dry·grade)는 **부호가 전부 음수** — score가 좋다는 쪽이 오히려 낮았다.
+        docs/pullback_quality_axes.md · docs/pullback_quality_axes_b2.md
+        [1. 표시] `scoreRing()`의 초록/노랑 색 분기 제거 → **회색 단일 톤 +
+        아래 "참고" 라벨**. 툴팁에 측정 근거 한 줄(`SCORE_NOTE`, 상수 1곳).
+        접힌 카드의 `cc-score`도 같은 회색 톤으로.
+        [2. 기본 정렬] `run_scan()`의 2차 키를 `setup_score or score` → **`rs`**로.
+        판별력 없는 값으로 목록 순서를 정하면 "위에 있는 게 더 좋다"는 잘못된
+        신호를 준다. RS도 히트 안에서는 판별력이 없었지만 **정렬 기준은 하나
+        필요**하고 RS는 의미가 자명해 오해가 적다. 1차 키(`triggered`)는 유지 —
+        확인 신호가 뜬 종목을 위로 올리는 건 측정과 무관한 운영 규칙이다.
+        [3. 유지] **score 계산·필드·배지·정렬 로직은 삭제하지 않는다**(사용자 지시).
+        근거가 뒤집힐 수 있고, `setup_score` 등 다른 경로도 이 값을 참조한다.
+        바뀐 것은 표시 톤과 기본 정렬 2차 키뿐이다.
+        [테스트] test_score_demotion.py(8) — 색 분기 부재, "참고" 라벨·툴팁,
+        SCORE_NOTE 문구, 회색 CSS, 접힌 카드, 정렬에 score 미사용, **score가
+        여전히 계산·표시되는지**(강등이지 제거가 아님), node로 실제 렌더해
+        고점수·저점수 색이 같은지. 사보타주 3종(색 복원 / 정렬 되돌림 / 표시
+        제거) 확인 — 세 번째는 처음에 통과해버려(호출부 2곳 중 1곳만 지워도
+        `in` 검사가 통과) 개수 검사로 보강한 뒤 잡혔다. 전체 718 passed.
+v5.260[버그수정+UI] 시각 표기 — NZST 시계 함정이 실제 판정에 들어가 있었다.
         [1. 종가베팅 안내 문턱 18:20 → 15:20 (KST)]
         `immediate_empty_reason`의 경계가 리터럴 `18*60+20`이었다. 비교 대상
         `_now_hm`은 `datetime.now(KST)`에서 나온 **KST**인데 문턱만 18:20이라
@@ -7287,7 +7312,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.260"
+VERSION = "v5.261"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -10338,7 +10363,15 @@ async def run_scan(market: str, mode: str, refresh: bool = False) -> dict:
     if mode in GATE_MODE_LABELS and snapshot_dirty:
         _save_signal_snapshots(_signal_snapshots)
 
-    hits.sort(key=lambda x: (x.get("triggered", False), x.get("setup_score") or x["score"]),
+    # v5.261(사용자 지시 — score 강등): 기본 정렬 2차 키를 score → **RS**로.
+    # 근거: 2026-09-14 측정 B/B-2에서 score 구성 항목 중 노출된 17개 전부가
+    # 20일 수익률을 가르지 못했다 — 그 값으로 목록 순서를 정하면 "위에 있는 게
+    # 더 좋다"는 잘못된 신호를 준다. RS도 히트 안(게이트 80+)에서는 판별력이
+    # 없었지만(중앙값차 −0.08%p), **정렬 기준이 하나는 필요**하고 RS는 의미가
+    # 자명해 오해가 적다. 1차 키(triggered)는 그대로 — 확인 신호가 뜬 종목을
+    # 위로 올리는 건 측정과 무관한 운영 규칙이다.
+    # score 계산·필드·배지는 전부 유지(측정이 뒤집힐 수 있음, 사용자 지시).
+    hits.sort(key=lambda x: (x.get("triggered", False), x.get("rs") or 0),
               reverse=True)
     # v5.05: 💰실적우수 배지 — 스캔 하나에 수십~백여 개 히트가 나올 수 있어
     # (IBD9/Stage2와 달리 이 경로는 히트 수가 안 작음) 상위 30개만 적용.
