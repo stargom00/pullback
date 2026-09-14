@@ -46,13 +46,80 @@ def test_no_literal_1820_threshold_left_in_code():
 def test_reason_uses_the_constant():
     """안내 문구가 상수를 쓰는지 — 문자열을 따로 하드코딩하면 또 갈린다."""
     src = Path(app.__file__).read_text(encoding="utf-8")
-    i = src.index("_reason_parts.append(f\"종가베팅은")
+    i = src.index("_reason_parts.append(f\"종가베팅")
     line = src[i:src.index("\n", i)]
     assert "JONGGA_READY_LABEL" in line, line
 
 
 def test_threshold_is_before_market_close():
-    """15:20은 KR 정규장 마감(15:30) 전이어야 한다 — 동시호가 직전이 의도."""
+    """15:20은 스냅샷 창(14:40~15:00) 직후 · 정규장 마감(15:30) 전.
+
+    v5.264에서 **진입** 시각은 19:50~20:00으로 옮겼지만, 이 문턱은 진입이 아니라
+    **후보 등장 시각**이라 그대로다(아래 test_ready_threshold_stays_at_candidate_time).
+    """
     assert app.JONGGA_READY_HM < 15 * 60 + 30
     # 스케줄러 스냅샷 창(14:40~15:00 KST) 이후이기도 해야 한다
     assert app.JONGGA_READY_HM >= 15 * 60
+
+
+# ══════════════════════════════════════════════════════════════════════
+# v5.264 — 진입 시각이 애프터마켓(19:50~20:00)으로 이동
+# ══════════════════════════════════════════════════════════════════════
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+KST = timezone(timedelta(hours=9))
+
+
+def _state(s):
+    return app._jongga_session_state(datetime.strptime(s, "%Y-%m-%d %H:%M").replace(tzinfo=KST))
+
+
+def test_session_active_window_extends_to_after_market_close():
+    """활성 창이 15:30에 끝나면 진입 시각(19:50~20:00)을 못 덮는다."""
+    assert _state("2026-09-14 14:40")["state"] == "active"
+    assert _state("2026-09-14 15:31")["state"] == "active", "구 경계 15:30에서 끊겼다"
+    assert _state("2026-09-14 19:55")["state"] == "active", "진입 시각인데 비활성이다"
+    assert _state("2026-09-14 20:00")["state"] == "after"
+
+
+def test_session_label_points_at_after_market_not_closing_auction():
+    lab = _state("2026-09-14 19:55")["label"]
+    assert "19:50~20:00" in lab and "애프터마켓" in lab, lab
+    assert "동시호가" not in lab, "15:20 동시호가 문구가 남아 있다"
+
+
+def test_before_window_unchanged():
+    assert _state("2026-09-14 10:00")["state"] == "before"
+    assert "14:40" in _state("2026-09-14 10:00")["label"], "후보 선정 시각은 그대로여야 한다"
+
+
+def test_weekend_still_after():
+    assert _state("2026-09-12 19:55")["state"] == "after"
+
+
+def test_ready_threshold_stays_at_candidate_time_not_entry_time():
+    """진입이 19:50로 바뀌어도 이 문턱은 **후보 등장 시각**이라 15:20 유지.
+
+    19:50으로 올리면 15:00~19:50 사이에 후보가 화면에 떠 있는데도
+    "아직 없다"는 안내가 뜨는 모순이 생긴다.
+    """
+    assert app.JONGGA_READY_HM == 15 * 60 + 20
+    assert app.JONGGA_READY_HM < 19 * 60 + 50
+
+
+def test_reason_text_says_candidates_not_entry():
+    """문구가 진입 시각으로 오해되면 안 된다."""
+    src = Path(app.__file__).read_text(encoding="utf-8")
+    i = src.index("_reason_parts.append(f\"종가베팅")
+    line = src[i:src.index("\n", i)]
+    assert "후보는" in line, line
+
+
+def test_docs_record_the_confirmed_close_definition():
+    root = Path(app.__file__).parent
+    bt = (root / "docs" / "kr_jongga_betting_backtest.md").read_text(encoding="utf-8")
+    assert "확정 (2026-09-15" in bt and "248,500" in bt
+    assert "정의 미확정" not in bt, "미확정 콜아웃이 남아 있다"
+    guide = (root / "GUIDE.md").read_text(encoding="utf-8")
+    assert "19:50~20:00 애프터마켓" in guide
+    assert "15:20 동시호가 전 진입용" not in guide
