@@ -5,7 +5,45 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
-v5.259 [버그수정] 종가베팅 포워드 기록 누락(09-10·09-11 레코드 0건) —
+v5.260 [버그수정+UI] 시각 표기 — NZST 시계 함정이 실제 판정에 들어가 있었다.
+        [1. 종가베팅 안내 문턱 18:20 → 15:20 (KST)]
+        `immediate_empty_reason`의 경계가 리터럴 `18*60+20`이었다. 비교 대상
+        `_now_hm`은 `datetime.now(KST)`에서 나온 **KST**인데 문턱만 18:20이라
+        의도(동시호가 직전 15:20 KST)보다 **정확히 3시간** 늦었다 — 3시간은
+        이 개발 머신의 NZST − KST 차이다(CLAUDE.md "NZST 시계 함정").
+        NZST 시계를 보고 적은 값이 KST 비교에 들어간 것이고, v5.236의 주석
+        자체가 "프론트 카드 문구가 이미 '15:20 동시호가 전 진입'"이라 적고
+        있어 의도는 명확했다.
+        **증상**: 후보가 이미 나온 15:00 KST 이후에도 "종가베팅은 18:20 이후"
+        안내가 3시간 더 떠 있었다. **수정 후**: 15:20 KST 이후에는 그 안내가
+        뜨지 않는다(후보가 이미 나온 시각이므로 맞는 동작 — 사용자 확인).
+        리터럴 대신 `JONGGA_READY_HM`/`JONGGA_READY_LABEL` 상수로 뽑아
+        숫자와 화면 문구가 갈리지 않게 했다.
+        [2. 화면 시각에 "(KST)" 라벨 — 서버 응답 문자열은 무변경]
+        조사 결과 **서버는 전부 KST**(`datetime.now(KST)`/`fromtimestamp(ts, KST)`)이고
+        프론트도 그대로 출력하는데, **어디에도 시간대 표시가 없었다**. NZST
+        환경에서 보면 화면의 16:01이 본인 시계(19:01)와 안 맞아 "3시간 전
+        데이터인가"로 읽힌다. 표시 시점에만 라벨을 붙였다(5곳):
+        스캔실행 · 📸 스냅샷 기준 · 섹터 탭 "기준" · 업종/테마 "스캔 기준" ·
+        인버스 "기준" · 종가베팅 포워드 "14:40 KST 가격 매수 가정".
+        **API 응답 문자열은 건드리지 않았다** — 얼마냐봇 등 소비처가 파싱할 수 있다.
+        [통일안 근거] 이 앱의 시각은 전부 **시장 사건**(기준봉·동시호가·스냅샷·
+        마감)이라 KST가 원본이다. 사용자 로컬로 변환하면 "15:20 동시호가"가
+        사람마다 다른 숫자가 되어 GUIDE·문서·백테스트 문구와 어긋난다 →
+        **KST 고정 + 라벨**로 통일(사용자 승인).
+        [3. 19:00 경계 — **값 유지, 주석만 정정**(사용자 확정)]
+        `_session_market_for_calendar()`의 19:00 KST 경계는 그 근거 문장이
+        "KR 종가베팅 확정(18:20~18:30) 이후"로 **위와 같은 잘못된 전제**를
+        인용하고 있었다(실제 확정은 15:20~15:30 KST). **값은 그대로 둔다** —
+        "저녁까지 KR 카드를 유지한다"는 별개 의도로 확정됐다. docstring만
+        실제 시각과 오기 경위를 적도록 고쳤다.
+        (옛 changelog 항목 안의 "18:20~18:30" 인용은 그때의 기록이라 남겨둔다 —
+         과거 항목을 사후 수정하면 무엇이 언제 잘못됐는지 추적이 끊긴다.)
+        [테스트] test_jongga_ready_time.py(6) — 문턱이 KST 15:20인지, 18:20이나
+        KST+3h 값이 아닌지, 라벨과 숫자가 일치하는지, 실행 코드에 18:20 리터럴이
+        없는지, 문구가 상수를 쓰는지, 마감(15:30) 전·스냅샷 창(15:00) 후인지.
+        사보타주(18:20 복귀) 5건 FAIL 확인 후 원복.
+v5.259[버그수정] 종가베팅 포워드 기록 누락(09-10·09-11 레코드 0건) —
         설계 승인 후 P1~P4 구현(사용자 지시).
         [P2·P3 — 폴백 게이트를 인메모리 → **파일 기준**으로]
         기존 `if _jongga_snapshot_date != daykey:`는 두 방향으로 깨졌다.
@@ -7249,7 +7287,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.259"
+VERSION = "v5.260"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7621,9 +7659,10 @@ def _calendar_default_market_session() -> str:
     ② KR 휴장일(`is_trading_day`) → US
     ③ 07:00 ≤ KST < 19:00 → KR
     ④ 그 외(19:00~익일 07:00) → US
-    19:00 경계 근거: KR 종가베팅 확정(18:20~18:30) 이후. 미국 서머타임은
-    이 임계값에 영향 없음(ET 쪽이 아니라 KST 고정 시각 기준이라
-    DST 전환과 무관)."""
+    19:00 경계 근거: KR 종가베팅 확정(15:20~15:30 KST) 이후 여유. 원래
+    '18:20~18:30'은 NZST 오기(v5.236). 값은 저녁까지 KR 카드를 유지하는
+    의도로 그대로 둠(v5.260, 사용자 확정). 미국 서머타임은 이 임계값에
+    영향 없음(ET 쪽이 아니라 KST 고정 시각 기준이라 DST 전환과 무관)."""
     now = datetime.now(KST)
     if now.weekday() >= 5:
         return "us"
@@ -8979,6 +9018,15 @@ async def _run_scan_jongga(bundle: dict) -> dict:
 # 스냅샷가↔확정종가가 다를 수 있어(14:40~15:30 변동) 둘 다 남기고 분리
 # 계산한다 — 실전 진입가는 그 사이 어딘가라 어느 한쪽만 쓰면 왜곡된다.
 JONGGA_FORWARD_COST = 0.003  # 왕복 수수료+슬리피지 0.3% — 백테스트와 동일 가정
+
+# v5.260(사용자 지시 — 버그수정): 종가베팅 후보가 "이미 나와 있다"고 볼 시각.
+# **KST 기준이다.** 화면 문구(`TODAY_DECISION_INFO`의 "15:20 동시호가 전 진입")와
+# 스케줄러 스냅샷 창(14:40~15:00 KST)이 근거 — 그 시각이면 후보가 확정돼 있다.
+# 이전엔 이 값이 리터럴 `18*60+20`(18:20)이라 KST 비교에 NZST 시각이 들어가
+# 3시간 늦었다. 상수로 뽑고 라벨을 함께 둬서 숫자와 문구가 갈리지 않게 한다.
+# 바꿀 때는 둘 다 같이 바꿀 것(test_jongga_ready_time.py가 KST 15:20으로 고정).
+JONGGA_READY_HM = 15 * 60 + 20     # KST 15:20
+JONGGA_READY_LABEL = "15:20"
 
 
 def _load_jongga_forward() -> dict:
@@ -16064,7 +16112,14 @@ async def get_calendar():
     for _it in _immediate_all:
         (immediate if (_it.get("market") or "").upper() == _session_mkt_upper else immediate_other_market).append(_it)
     # v5.236: 즉시행동이 세션 필터로 0건이 된 이유를 한 줄로 — 이미 계산된
-    # gate/jongga_today 재사용(새 계산 아님). 18:20 경계는 JONGGA 스냅샷
+    # gate/jongga_today 재사용(새 계산 아님).
+    # v5.260(버그수정): 경계가 **18:20**이었다. `_now_hm`은 KST인데(today_dt =
+    # datetime.now(KST)) 문턱만 18:20이라 실제 의도(동시호가 직전 15:20 KST)보다
+    # 정확히 3시간 늦었다 — 3시간은 이 개발 머신의 NZST − KST 차이다(CLAUDE.md
+    # "NZST 시계 함정"). 즉 NZST 시계를 보고 적은 값이 KST 비교에 들어간 것.
+    # 증상: 종가베팅 후보가 이미 나온 15:00 KST 이후에도 "종가베팅은 18:20 이후"
+    # 안내가 3시간 더 떠 있었다. 아래 상수로 뽑아 같은 실수를 막는다.
+    # (아래 옛 주석 유지) 경계 근거는 JONGGA 스냅샷
     # 확정 시각(14:40~15:00 자동 스냅샷과 별개로 프론트 카드 문구가
     # 이미 "15:20 동시호가 전 진입"이라 쓰는 것과 같은 근거 — 종가베팅
     # 후보 자체가 그 시각 이후에나 자연스럽게 나온다는 뜻이지 신규 판단
@@ -16075,8 +16130,8 @@ async def get_calendar():
         _reason_parts = [f"오늘 {_label} 즉시진입 없음"]
         if _session_mkt_upper == "KR":
             _now_hm = today_dt.hour * 60 + today_dt.minute
-            if not jongga_today and _now_hm < 18 * 60 + 20:
-                _reason_parts.append("종가베팅은 18:20 이후")
+            if not jongga_today and _now_hm < JONGGA_READY_HM:
+                _reason_parts.append(f"종가베팅은 {JONGGA_READY_LABEL} 이후")
             if (gate or {}).get("gate_kr") == "correction":
                 _reason_parts.append("게이트 🔴")
         else:
