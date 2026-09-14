@@ -255,7 +255,11 @@ def test_call_site_uses_file_based_gate():
     i = src.index('_record_jongga_snapshot(daykey, fb_result["hits"], source="eod_fallback")')
     before = src[max(0, i - 2500):i]
     assert "_jongga_needs_eod_fallback(daykey)" in before, "폴백 게이트가 파일 기준이 아니다"
-    assert "if _jongga_snapshot_date != daykey:" not in src, "인메모리 게이트가 되살아났다"
+    # 모듈 docstring(= 변경 이력)에는 옛 게이트가 **인용문으로** 남아 있다.
+    # 파일 전체를 훑으면 그 인용에 걸린다(실제로 걸렸다 — v5.259 changelog).
+    # 실행되는 코드 영역만 본다.
+    code = src[src.index('"""', src.index('"""') + 3) + 3:]
+    assert "if _jongga_snapshot_date != daykey:" not in code, "인메모리 게이트가 되살아났다"
 
 
 # ── 병합 정책: 선착순 유지, 폴백은 없는 티커만 추가 ───────────────────
