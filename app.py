@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.262 [관측성] /api/jongga/forward에 **days_meta** 추가(사용자 지시).
+        v5.259가 "후보 0건인 날"을 날짜별 `_meta`로 파일에 남기게 했지만, 이
+        응답은 resolved 레코드만 집계·나열해서 **레코드가 0건인 날짜는 응답
+        어디에도 안 나왔다** — 파일엔 기록이 있는데 API로는 "그날이 아예 없음"과
+        구분이 안 됐다(09-10·09-11 누락 조사가 정확히 이 지점에서 막혀
+        `railway ssh`가 필요했다).
+        `days_meta = {날짜: {intraday: {n, ran_at, ...}, eod_fallback: {...}}}`를
+        **recent와 별도 키**로 내보낸다 — 기존 소비처(프론트 종가베팅 포워드 카드,
+        얼마냐봇)가 읽던 필드는 그대로라 무영향. v5.259 이전 날짜는 `_meta`가
+        없으므로 **빈 dict**(= "알 수 없음", 0건으로 단정하지 않음).
+        [테스트] +3 — 0건 날짜가 응답에 나오는지, 구버전 날짜가 빈 dict인지,
+        기존 키 6개가 그대로인지(무영향 보장).
 v5.261 [UI] 눌림목 카드 score **강등**(사용자 지시) — 삭제가 아니라 톤 낮춤.
         [근거] 2026-09-14 측정 B/B-2: score 구성 항목 중 **노출된 17개 전부**가
         20일 수익률을 가르지 못했다(체크포인트별 상·하위 30% 대비, MWU 중앙값,
@@ -7312,7 +7324,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.261"
+VERSION = "v5.262"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -9314,8 +9326,19 @@ def _jongga_forward_stats() -> dict:
         src_mix[r.get("snapshot_source") or "unknown"] = \
             src_mix.get(r.get("snapshot_source") or "unknown", 0) + 1
 
+    # v5.262(사용자 지시): 날짜별 _meta를 그대로 노출한다.
+    # v5.259가 "후보 0건인 날"을 _meta로 파일에 남기게 했지만, 이 응답은
+    # resolved 레코드만 집계·나열해서 **레코드가 0건인 날짜는 응답 어디에도
+    # 안 나왔다** — 파일엔 있는데 API로는 "그날이 아예 없음"과 구분이 안 됐다
+    # (09-10·09-11 조사에서 정확히 이 지점에서 막혔다).
+    # recent와 **별도 키**라 기존 소비처(프론트 jongga-forward 카드, 얼마냐봇)는
+    # 영향 없다 — 읽던 필드가 그대로 있고 키 하나가 늘 뿐이다.
+    days_meta = {d: (rec or {}).get("_meta") or {}
+                 for d, rec in fwd.items() if isinstance(rec, dict)}
+
     return {
         "total_resolved": len(resolved),
+        "days_meta": days_meta,
         # 혼합값 — 하위호환으로 남기되 인용하지 말 것(아래 by_source를 볼 것)
         "snapshot_basis": _agg("gap_snapshot_pct"),
         "snapshot_basis_by_source": {

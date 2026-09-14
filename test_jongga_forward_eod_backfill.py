@@ -293,3 +293,38 @@ def test_stats_split_snapshot_basis_by_source(store, monkeypatch):
     assert s["snapshot_basis_by_source"]["eod_fallback"]["mean_gap_pct"] == -4.0
     assert s["close_basis"]["n"] == 2, "close 기준은 균일하므로 합쳐서 센다"
     assert s["close_basis_source_mix"] == {"intraday": 1, "eod_fallback": 1}
+
+
+# ── v5.262: days_meta 노출 ─────────────────────────────────────────────
+def test_days_meta_exposes_zero_hit_days(store):
+    """레코드 0건인 날짜도 응답에 보여야 한다 — v5.259가 파일엔 남겼지만
+    API로는 '그날이 아예 없음'과 구분되지 않았다(09-10·09-11 조사에서 막힌 지점)."""
+    store["d"] = {
+        "2026-09-10": {"_meta": {"intraday": {"n": 0, "ran_at": "x"},
+                                 "eod_fallback": {"n": 0, "ran_at": "y"}}},
+        "2026-09-14": {"_meta": {"intraday": {"n": 3, "ran_at": "z"}},
+                       "X.KS": _rec(ticker="X.KS", resolved=True, gap_close_pct=1.0,
+                                    close_price=100.0)},
+    }
+    s = app._jongga_forward_stats()
+    assert "2026-09-10" in s["days_meta"], "레코드 0건인 날짜가 빠졌다"
+    assert s["days_meta"]["2026-09-10"]["intraday"]["n"] == 0
+    assert s["days_meta"]["2026-09-14"]["intraday"]["n"] == 3
+    assert s["total_resolved"] == 1, "_meta가 레코드로 세어졌다"
+
+
+def test_days_meta_is_empty_dict_for_legacy_days(store):
+    """v5.259 이전 레코드는 _meta가 없다 — 키는 있되 빈 dict."""
+    store["d"] = {"2026-09-09": {"A.KS": _rec(ticker="A.KS")}}
+    assert app._jongga_forward_stats()["days_meta"] == {"2026-09-09": {}}
+
+
+def test_existing_keys_unchanged(store):
+    """기존 소비처가 읽던 키가 그대로 있어야 한다(무영향 보장)."""
+    store["d"] = {"2026-09-14": {"X.KS": _rec(ticker="X.KS", resolved=True,
+                                              gap_snapshot_pct=1.0, gap_close_pct=2.0,
+                                              close_price=100.0)}}
+    s = app._jongga_forward_stats()
+    for k in ("total_resolved", "snapshot_basis", "close_basis", "recent",
+              "backtest_reference", "snapshot_basis_by_source"):
+        assert k in s, f"기존 키 {k}가 사라졌다"
