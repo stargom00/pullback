@@ -5,6 +5,36 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.263 [값 변경] **KR 애프터마켓(16:00~20:00 KST) 대응** — 경계 3건(사용자 지시).
+        [배경] 2026-09-14 KRX 애프터마켓 도입. 실측(19:34:30→19:35:48, 75초 간격
+        재조회)에서 naver siseJson **일봉의 Close·Volume이 애프터마켓 중 계속
+        갱신**됐다 — 삼성전자 거래량 +5,417주, SK하이닉스 종가 +1,000원,
+        한화오션 거래량 +628주. **15:30 종가는 더 이상 그날 봉의 끝이 아니다.**
+        [1] `_market_session_key()`의 KR 마감 경계 **15:40 → 20:10**.
+            EOD 스캔·jongga EOD 기록·폴백이 전부 이 판정을 쓰므로 함께 옮겨진다.
+        [2] `_calendar_default_market_session()`의 KR↔US 전환 **19:00 → 20:10**.
+            애프터 종료까지 KR 카드를 유지한다.
+        [3] CLAUDE.md 90cp 측정 실행 창 **KST 16:00~22:30 → 20:10~22:30**
+            (NZST 23:10~01:30). 16:00~20:00은 애프터마켓과 정면으로 겹쳤다.
+        두 경계를 리터럴 대신 **`KR_CLOSE_CONFIRMED_HM` 상수 하나**로 모았다
+        (정의를 사용처 위에 둔다). **20:10 = 애프터 종료 + 여유 10분, 여유분은
+        임의값**(체결·집계 반영 지연 감안, 측정 근거 없음).
+        [오늘 측정 B·B-2] KST 16:09/16:36 실행이라 **마지막 봉이 미확정 상태로
+        들어갔다.** 각 문서 §2에 그 사실을 주석으로 남겼고 **재실행하지 않는다**
+        (사용자 판단) — 90개 체크포인트 중 그 봉 하나뿐이고, 미래 20봉이 없어
+        진입가로 쓰이지 않아 판정에 영향이 없다.
+        [종가베팅 — 판단 대기] 백테스트 276건은 애프터 도입 *전* 데이터라 그
+        "종가"는 15:30 확정가인데, 포워드 `close_price`는 애프터가 섞인 값일 수
+        있다("T일 종가 매수"라 진입가 정의가 바뀌는 것). 20:00 이후 naver 종가가
+        KRX 공식 15:30 종가와 같은지 대조 후 결정하고, 그때까지 포워드 기록은
+        그대로 쌓는다 — `docs/kr_jongga_betting_backtest.md` 상단 콜아웃.
+        [별건 등록] `naver_kr.fetch_current_price()`의 폴백(`dealTrendInfos[0]`)이
+        **1거래일 뒤처진 값**을 반환한다(실측 `bizdate=20260911`). 애프터마켓과
+        무관한 별개 결함이라 손대지 않고 `docs/kr_us_strategy_map.md`에 등록만.
+        [테스트] test_kr_after_market_boundary.py(8) — 상수 20:10 고정, 15:40·19:00
+        리터럴 부재, 애프터 한복판(19:00)은 미확정·20:10은 확정, 캘린더 전환 4케이스,
+        주말 동작 유지, CLAUDE.md 창 동기화. 사보타주 3종(상수 15:40 복귀 /
+        캘린더 19:00 리터럴 복귀 / CLAUDE.md 창 되돌림) 전부 FAIL 확인 후 원복.
 v5.262 [관측성] /api/jongga/forward에 **days_meta** 추가(사용자 지시).
         v5.259가 "후보 0건인 날"을 날짜별 `_meta`로 파일에 남기게 했지만, 이
         응답은 resolved 레코드만 집계·나열해서 **레코드가 0건인 날짜는 응답
@@ -7324,7 +7354,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.262"
+VERSION = "v5.263"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7588,10 +7618,20 @@ def _compute_rs_ranks(data: dict, b_kospi: float, b_kosdaq: float, b_us: float):
 KST = timezone(timedelta(hours=9))
 
 
+# v5.263(사용자 지시 — KR 애프터마켓 대응): KR 일봉이 "확정"되는 시각.
+# 2026-09-14 KRX 애프터마켓(16:00~20:00 KST) 도입으로 **15:30 종가가 더 이상
+# 그날 봉의 끝이 아니다** — 실측(2026-09-14 19:34→19:35, 75초 간격 재조회)에서
+# naver siseJson 일봉의 Close·Volume이 애프터마켓 중 계속 갱신됐다
+# (삼성전자 거래량 +5,417주, SK하이닉스 종가 +1,000원).
+# 그래서 "마감 후" 판정을 애프터 종료(20:00) + 여유 10분으로 옮긴다.
+# 여유 10분은 임의값 — 체결/집계 반영 지연을 감안한 값이고 측정 근거는 없다.
+KR_CLOSE_CONFIRMED_HM = 20 * 60 + 10   # KST 20:10
+
+
 def _market_session_key(market: str) -> str | None:
     """둘 다 마감했으면 '확정된 거래일 키'(YYYY-MM-DD)를 반환, 아니면 None.
     None이면 장중/애매한 시간 → 기존 10분 메모리 TTL로 동작.
-    - 한국장 마감: 평일 KST 15:40 이후
+    - 한국장 마감: 평일 KST 20:10 이후 (v5.263 — 애프터마켓 16:00~20:00 종료 후)
     - 미국장 마감: KST 06:00 이후(서머타임 포함 안전)~ 한국장 시작(09:00) 전 종일
     market=all 은 둘 다 마감해야 확정. kr/us 단독은 해당 장만 따짐.
     """
@@ -7602,7 +7642,7 @@ def _market_session_key(market: str) -> str | None:
     # 주말은 항상 '마감 확정'(데이터 안 바뀜) — 직전 거래일 날짜로 키 고정
     weekend = wd >= 5
 
-    kr_closed = weekend or (wd <= 4 and hm >= 15 * 60 + 40)
+    kr_closed = weekend or (wd <= 4 and hm >= KR_CLOSE_CONFIRMED_HM)   # v5.263: 15:40 → 20:10(애프터마켓)
     # 미국장 데이터는 KST 새벽에 확정. 06:00~다음 한국장 데이터 갱신 전까지 안정.
     us_closed = weekend or (hm >= 6 * 60)
 
@@ -7694,11 +7734,12 @@ def _calendar_default_market_session() -> str:
     평가 순서(위에서부터, 먼저 걸리면 종료) — 사용자 지시로 확정:
     ① 토·일 → US(주말 규칙이 07:00 진입보다 우선)
     ② KR 휴장일(`is_trading_day`) → US
-    ③ 07:00 ≤ KST < 19:00 → KR
-    ④ 그 외(19:00~익일 07:00) → US
-    19:00 경계 근거: KR 종가베팅 확정(15:20~15:30 KST) 이후 여유. 원래
-    '18:20~18:30'은 NZST 오기(v5.236). 값은 저녁까지 KR 카드를 유지하는
-    의도로 그대로 둠(v5.260, 사용자 확정). 미국 서머타임은 이 임계값에
+    ③ 07:00 ≤ KST < 20:10 → KR
+    ④ 그 외(20:10~익일 07:00) → US
+    20:10 경계 근거(v5.263): KR 애프터마켓(16:00~20:00 KST) 종료 + 여유 10분 —
+    그 시각까지 일봉이 갱신되므로 KR 카드를 유지한다. 이전 값 19:00은
+    '종가베팅 확정 이후'가 근거였고(그 근거 문장의 '18:20~18:30'은 NZST
+    오기, v5.236→v5.260에서 정정), 애프터마켓 도입으로 전제가 바뀌었다. 미국 서머타임은 이 임계값에
     영향 없음(ET 쪽이 아니라 KST 고정 시각 기준이라 DST 전환과 무관)."""
     now = datetime.now(KST)
     if now.weekday() >= 5:
@@ -7706,7 +7747,7 @@ def _calendar_default_market_session() -> str:
     if not is_trading_day("kr", now.strftime("%Y-%m-%d")):
         return "us"
     hm = now.hour * 60 + now.minute
-    if 7 * 60 <= hm < 19 * 60:
+    if 7 * 60 <= hm < KR_CLOSE_CONFIRMED_HM:   # v5.263: 19:00 → 20:10(애프터 종료까지 KR)
         return "kr"
     return "us"
 
@@ -9062,6 +9103,7 @@ JONGGA_FORWARD_COST = 0.003  # 왕복 수수료+슬리피지 0.3% — 백테스�
 # 이전엔 이 값이 리터럴 `18*60+20`(18:20)이라 KST 비교에 NZST 시각이 들어가
 # 3시간 늦었다. 상수로 뽑고 라벨을 함께 둬서 숫자와 문구가 갈리지 않게 한다.
 # 바꿀 때는 둘 다 같이 바꿀 것(test_jongga_ready_time.py가 KST 15:20으로 고정).
+
 JONGGA_READY_HM = 15 * 60 + 20     # KST 15:20
 JONGGA_READY_LABEL = "15:20"
 
