@@ -233,6 +233,24 @@ def bench_score_at_date(bench_close: pd.Series, cp_date) -> float:
     return sc
 
 
+def rank_by_return(trunc_cache: dict, days: int) -> dict:
+    """days봉 수익률의 **시장별** 백분위 랭크. {ticker: rank}.
+
+    v2026-09-14(측정 B-2): compute_rs_at_checkpoint() 안에 인라인으로 있던
+    rank3/rank12 계산을 여기로 뺐다 — `rs_3m`(=rank3)을 측정 스크립트가
+    따로 써야 하는데, 스크립트에서 다시 짜면 정의가 두 벌이 된다
+    (app.py `_fetch_market_data_inner`의 rs3_ranks와 같은 값이어야 한다).
+    compute_rs_at_checkpoint()도 이 함수를 쓰므로 **정의는 한 곳뿐**이다.
+    """
+    kr, us = {}, {}
+    for t, hist in trunc_cache.items():
+        r = ret_pct(hist["Close"], days)
+        if r is None:
+            continue
+        (kr if is_kr_ticker(t) else us)[t] = r
+    return {**to_rs_rank(kr), **to_rs_rank(us)}
+
+
 def compute_rs_at_checkpoint(trunc_cache: dict, b_kospi: float, b_kosdaq: float):
     """trunc_cache: {ticker: 그 체크포인트까지 잘린 df}. 반환: (rs_ranks, rs_moms)."""
     kr_raw, us_raw = {}, {}
@@ -247,18 +265,10 @@ def compute_rs_at_checkpoint(trunc_cache: dict, b_kospi: float, b_kosdaq: float)
             us_raw[t] = raw  # 벤치마크 차감 생략 (순위불변 검증됨)
     rs_ranks = {**to_rs_rank(kr_raw), **to_rs_rank(us_raw)}
 
-    kr3, kr12, us3, us12 = {}, {}, {}, {}
-    for t, hist in trunc_cache.items():
-        r3 = ret_pct(hist["Close"], 63)
-        r12 = ret_pct(hist["Close"], 252)
-        if is_kr_ticker(t):
-            if r3 is not None: kr3[t] = r3
-            if r12 is not None: kr12[t] = r12
-        else:
-            if r3 is not None: us3[t] = r3
-            if r12 is not None: us12[t] = r12
-    rank3 = {**to_rs_rank(kr3), **to_rs_rank(us3)}
-    rank12 = {**to_rs_rank(kr12), **to_rs_rank(us12)}
+    # v2026-09-14: rank_by_return()으로 공용화 — 계산 내용은 동일하다
+    # (63봉/252봉 수익률의 시장별 백분위). 측정 B-2가 rank3을 따로 쓴다.
+    rank3 = rank_by_return(trunc_cache, 63)
+    rank12 = rank_by_return(trunc_cache, 252)
     rs_moms = {t: rank3[t] - rank12[t] for t in trunc_cache if t in rank3 and t in rank12}
     return rs_ranks, rs_moms
 

@@ -206,3 +206,104 @@ def test_every_item_actually_produces_both_groups():
         if g.count("top") == 0 or g.count("bot") == 0:
             empty.append((key, g.count("top"), g.count("bot")))
     assert not empty, f"군이 비어 측정되지 않는 항목: {empty}"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# B-2 (2026-09-14) — B에서 3항목이 조용히 미측정된 것의 재발 방지
+# ══════════════════════════════════════════════════════════════════════
+_spec_b2 = importlib.util.spec_from_file_location(
+    "qaxes_b2", ROOT / "scripts" / "measurements" / "2026-09-14_pullback_quality_axes_b2.py")
+qb2 = importlib.util.module_from_spec(_spec_b2)
+_spec_b2.loader.exec_module(qb2)
+
+
+def _b2_hit(**kw):
+    base = {"ticker": "T", "off": 60, "ret20": 0.0,
+            "rs_3m": None, "rs_delta": None, "tt_pass": None}
+    base.update(kw)
+    return base
+
+
+def test_b2_real_data_none_case_yields_empty_groups():
+    """**실데이터 재현**: 필드가 전부 None이면 군이 비어야 한다.
+
+    B에서 rs_3m/rs_delta는 analyze()에 안 넘겨서, tt_pass는 타입 오분류로
+    전부 None이었다. 합성 데이터로 모든 필드를 채워 돌린 기존 테스트는
+    이 상태를 재현하지 못했다.
+    """
+    hits = [_b2_hit(ticker=str(i)) for i in range(10)]
+    qb2.assign_splits_b2(hits, defaultdict(int))
+    for key, _ in qb2.ITEMS_B2:
+        g = [h.get(f"_g_{key}") for h in hits]
+        assert g.count("top") == 0 and g.count("bot") == 0, (key, g)
+
+
+def test_b2_tt_pass_is_treated_as_integer_not_bool():
+    """tt_pass는 0~8 정수다. bool로 다루면 전부 None이 된다(B의 실패)."""
+    hits = [_b2_hit(ticker=str(i), tt_pass=i % 9) for i in range(18)]
+    qb2.assign_splits_b2(hits, defaultdict(int))
+    g = [h.get("_g_tt_pass") for h in hits]
+    assert g.count("top") > 0 and g.count("bot") > 0, g
+
+
+def test_b2_true_false_are_not_counted_as_numbers():
+    """파이썬에서 bool은 int의 하위형 — 진짜 불리언이 섞이면 걸러야 한다."""
+    hits = [_b2_hit(ticker=str(i), tt_pass=(i % 2 == 0)) for i in range(10)]
+    st = defaultdict(int)
+    qb2.assign_splits_b2(hits, st)
+    assert st["none_tt_pass"] == 10
+    assert all(h.get("_g_tt_pass") is None for h in hits)
+
+
+def test_b2_injected_fields_are_measurable_when_present():
+    hits = [_b2_hit(ticker=str(i), rs_3m=i * 3, rs_delta=i - 5, tt_pass=i % 9)
+            for i in range(10)]
+    qb2.assign_splits_b2(hits, defaultdict(int))
+    for key, _ in qb2.ITEMS_B2:
+        g = [h.get(f"_g_{key}") for h in hits]
+        assert g.count("top") == 3 and g.count("bot") == 3, (key, g)
+
+
+def test_b2_threshold_is_k17_not_k14():
+    """사용자 지시: 문턱은 원래 설계 k=17 기준 2.974를 그대로 쓴다."""
+    assert qb2.Z_BONF == 2.974, qb2.Z_BONF
+    assert qb2.Z_BONF == qx.Z_BONF, "B와 B-2의 문턱이 갈렸다"
+
+
+def test_b2_script_hard_fails_on_empty_group():
+    """n=0을 만나면 **하드 실패**여야 한다 — B는 nan으로 조용히 넘어갔다."""
+    src = (ROOT / "scripts" / "measurements"
+           / "2026-09-14_pullback_quality_axes_b2.py").read_text(encoding="utf-8")
+    assert "raise SystemExit" in src
+    i = src.index('empty = [(r["item"]')
+    assert 'r["n_top"] == 0 or r["n_bot"] == 0' in src[i:i + 300]
+
+
+def test_b2_injects_into_analyze():
+    """rs_3m/rs_delta를 analyze()에 실제로 넘기는지 — B의 누락 지점."""
+    src = (ROOT / "scripts" / "measurements"
+           / "2026-09-14_pullback_quality_axes_b2.py").read_text(encoding="utf-8")
+    i = src.index("r = analyze(h, rs_rank=rs_m.get(t)")
+    call = src[i:i + 300]                     # 호출 한 줄로 안 끝나므로 넉넉히
+    assert "rs_3m=rs3_m.get(t)" in call, call
+    assert "rs_delta=rs_delta_m.get(t)" in call, call
+
+
+def test_harness_rank_by_return_matches_inline_definition():
+    """harness 리팩터가 기존 rank3 정의를 바꾸지 않았는가."""
+    import numpy as np
+    import pandas as pd
+    import harness
+    from scanner import to_rs_rank
+    rng = np.random.default_rng(11)
+    cache = {(f"{i:06d}.KS" if i % 2 else f"T{i}"):
+             pd.DataFrame({"Close": np.cumsum(rng.normal(0, 1, 300)) + 200},
+                          index=pd.bdate_range("2024-01-01", periods=300))
+             for i in range(30)}
+    kr, us = {}, {}
+    for t, h in cache.items():
+        r = harness.ret_pct(h["Close"], 63)
+        if r is None:
+            continue
+        (kr if harness.is_kr_ticker(t) else us)[t] = r
+    assert harness.rank_by_return(cache, 63) == {**to_rs_rank(kr), **to_rs_rank(us)}
