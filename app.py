@@ -5,6 +5,39 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.265 [진단 — 1회성] `GET /api/debug/memory` 신설(사용자 지시). OOM 원인 규명용.
+        [배경] Railway Metrics: 컨테이너 시작 직후 **900MB / 1GB 축 상시 90%**,
+        2026-09-17 03:0x **자동 재배포**(GitHub 배포 이력에 없음 → git push가
+        아니라 Railway 컨테이너 교체, OOM 유력). CLAUDE.md에 2026-09-01
+        "원인 미상 재시작" 전례가 이미 있다.
+        [로컬 실측 — 900MB가 설명되지 않는다] `_downcast`가 **이미 float32**라
+        (v4.48.1) DataFrame은 종목당 **13.3KB**(값 9.5 + 인덱스 3.8, 730일=485봉),
+        **KR+US 3,605종목 전체가 약 47MB**뿐이다. import만으로 115MB
+        (pandas 53 + app 48)라 정상 보유량은 200MB 안팎 → **700MB 격차**.
+        → "float64→float32"는 **이미 적용돼 여지 없고**, "730일 창 축소"도
+          전체가 47MB라 효과가 미미하다(게다가 RS에 252봉이 필요해 210봉으로는
+          RS가 깨진다). 남은 후보는 일시 할당 미회수·pickle 직렬화 피크·
+          모드별 `_cache` 누적이며, **그 프로세스 안에서** 재야 갈린다.
+        [엔드포인트] RSS(/proc/self/status 우선, psutil 의존성 추가 없음) ·
+        tracemalloc 상위 N(파일:줄, MB, count) · 전역 캐시 9종 크기 · gc 카운트 ·
+        살아있는 DataFrame 개수/합계. 인증은 `API_READ_TOKEN`
+        (`_BOT_READ_EXACT_PATHS`에 등록 — 세션 쿠키 없이 찍기 위해).
+        [오버헤드 가드] tracemalloc은 상시 켜면 느려서 **`MEMORY_DIAG=1`일 때만**
+        기동 시 `start(5)`. Railway Variables에 넣고 배포 → 30분 뒤 호출 →
+        결과 확보 → **변수와 이 코드를 함께 제거**한다(1회성).
+        [작성 중 잡은 자체 결함 2건 — 테스트가 잡았다]
+        ① DataFrame 크기에 `memory_usage(deep=True)`와 `getsizeof(df)`를 **둘 다**
+           더해 **정확히 2배**로 보고됐다(현재 pandas의 getsizeof는 내부 블록을
+           이미 포함 — 실측 24,032 vs 24,000). 하마터면 그 2배를 "객체 오버헤드"로
+           오독할 뻔했다. → memory_usage만 사용, 실측 배수 1.00 확인.
+        ② 크기 측정 실패를 `return 0`으로 뭉개 **전 캐시가 0.0MB로 보고**됐다
+           (pandas 미import → NameError). "캐시가 안 크다"는 정반대 결론이
+           나올 뻔했다. → 실패를 음수로 전파하고 `partial: true`로 노출.
+        [테스트] test_memory_diag.py(10) — 라우트·봇토큰 게이트, 기본 비활성과
+        활성 방법 안내, RSS/gc, DataFrame 정밀 집계(이중계산 금지), 캐시 집계가
+        실제 보유량과 일치, 실패가 0으로 뭉개지지 않음, 순회 예산 상한,
+        MEMORY_DIAG=1일 때만 tracemalloc. 사보타주 3종(이중계산 복원 / 실패
+        무시 / 상시 tracemalloc) 전부 FAIL 확인 후 원복.
 v5.264 [의미 확정+UI] 종가베팅 "종가" 정의 확정, **매수 시각을 애프터마켓으로**.
         [확정] KRX 공식 종가 = **애프터마켓(16:00~20:00 KST) 포함 가격**이고
         **naver 일봉 종가가 그 공식 종가와 일치**한다(삼성전자 2026-09-14
@@ -7237,6 +7270,12 @@ _BOT_READ_EXACT_PATHS = {
     # stock-alert 쪽에 이 경로를 폴링하는 코드가 추가돼야 실제 발송이 된다 —
     # 여기서는 데이터(pending_alert)만 열어둠.
     "/api/apiguard/status",
+    # v5.265(사용자 지시 — 1회성 메모리 진단): OOM 의심(컨테이너 시작 직후
+    # 900MB / 1GB 축 90%, 09-17 자동 재배포) 원인을 프로덕션 프로세스에서
+    # 직접 재기 위한 읽기 전용 엔드포인트. **MEMORY_DIAG=1일 때만 의미 있는
+    # 값을 준다**(그 외엔 enabled=false만 반환). 진단이 끝나면 환경변수와
+    # 함께 이 경로도 제거할 것 — 1회성이다.
+    "/api/debug/memory",
 }
 _BOT_READ_PATH_PREFIXES = ("/api/dist/", "/api/ma/", "/api/pullback-signal/", "/api/vol/")
 
@@ -7382,7 +7421,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.264"
+VERSION = "v5.265"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -11157,8 +11196,21 @@ async def _scheduler_loop():
         await asyncio.sleep(240)  # 4분
 
 
+# v5.265(사용자 지시 — 1회성 메모리 진단): tracemalloc은 할당마다 프레임을
+# 기록해 **상시 켜면 오버헤드가 크다**(공식 문서 기준 실행시간 2배 내외).
+# 그래서 환경변수 MEMORY_DIAG=1일 때만 켠다 — Railway Variables에 넣고 배포,
+# 30분쯤 뒤 /api/debug/memory로 찍고, 결과를 얻으면 변수와 이 코드를 함께 제거.
+MEMORY_DIAG = os.environ.get("MEMORY_DIAG") == "1"
+
+
 @app.on_event("startup")
 async def _start_scheduler():
+    if MEMORY_DIAG:
+        import tracemalloc
+        # frames=5: 할당처를 호출 스택 5단계까지 — 1이면 pandas 내부만 찍혀
+        # "누가 불렀는지"가 안 보인다. 더 키우면 메모리·속도 부담이 커진다.
+        tracemalloc.start(5)
+        print("[memory-diag] tracemalloc 시작(frames=5) — MEMORY_DIAG=1", flush=True)
     asyncio.create_task(_scheduler_loop())
 
 
@@ -11681,6 +11733,161 @@ async def unhide_ticker(ticker: str):
     entries.pop(ticker, None)
     _save_hidden(entries)
     return JSONResponse({"ok": True})
+
+
+# ══════════════════════════════════════════════════════════════════════
+# v5.265(사용자 지시): 1회성 메모리 진단 — OOM 원인 규명용
+# ══════════════════════════════════════════════════════════════════════
+# 배경: Railway Metrics에서 컨테이너 시작 직후 900MB, 1GB 축 상시 90%,
+# 09-17 03:0x 자동 재배포(= git push 아님, OOM 유력). 로컬 실측으로는
+# DataFrame 전체가 KR+US 3,605종목 기준 **약 47MB**(종목당 13.3KB, 이미
+# float32)라 900MB가 설명되지 않는다 — 나머지 850MB가 무엇인지 **그 프로세스
+# 안에서** 재야 한다.
+# 진단이 끝나면 이 블록과 MEMORY_DIAG 환경변수를 함께 제거할 것.
+
+def _deep_size(obj, _seen=None, _depth=0, _budget=None):
+    """재귀 크기 추정. **DataFrame/Series는 memory_usage(deep=True)로 정확히**
+    재고(그 안을 getsizeof로 훑으면 느리고 부정확), 나머지는 컨테이너만 따라간다.
+
+    _budget: 방문 객체 수 상한 — 캐시가 수만 개 노드면 이 함수 자체가 느려져
+    요청이 타임아웃된다. 상한에 걸리면 그때까지의 합을 돌려주고 truncated를 표시.
+    """
+    import sys as _s
+    import pandas as pd            # app.py는 모듈 레벨에 pandas를 안 들인다
+    if _seen is None:
+        _seen = set()
+    if _budget is None:
+        _budget = [200000]
+    oid = id(obj)
+    if oid in _seen or _budget[0] <= 0:
+        return 0
+    _seen.add(oid)
+    _budget[0] -= 1
+    try:
+        # ⚠️ getsizeof(df)를 더하면 **이중 계산**이다 — 현재 pandas의
+        # getsizeof는 내부 블록 데이터를 이미 포함한다(실측: 500행 5열 float64에서
+        # getsizeof 24,032 vs memory_usage 24,000). 작성 중 이걸 더해 캐시가
+        # 정확히 2배로 보고됐고, 그걸 "객체 오버헤드"로 오독할 뻔했다.
+        if isinstance(obj, pd.DataFrame):
+            return int(obj.memory_usage(deep=True).sum())
+        if isinstance(obj, pd.Series):
+            return int(obj.memory_usage(deep=True))
+        size = _s.getsizeof(obj)
+    except Exception:
+        # 크기를 못 재면 **0으로 뭉개지 말 것** — 합계가 조용히 축소돼
+        # "캐시가 안 크다"는 잘못된 결론이 나온다(작성 중 실제로 겪음:
+        # pandas 미import → NameError → 전부 0.0MB로 보고됨).
+        return -1
+    if _depth > 12:
+        return size
+    try:
+        # 하위 노드가 측정 실패(-1)면 **그 사실을 위로 전파**한다. 그냥 더하면
+        # 음수가 상위 합계에 묻혀 "측정됐다"로 보인다(작성 중 실제로 그랬다).
+        failed = False
+        if isinstance(obj, dict):
+            for k, v in list(obj.items())[:50000]:
+                for part in (_deep_size(k, _seen, _depth + 1, _budget),
+                             _deep_size(v, _seen, _depth + 1, _budget)):
+                    if part < 0:
+                        failed = True
+                    else:
+                        size += part
+        elif isinstance(obj, (list, tuple, set, frozenset)):
+            for v in list(obj)[:50000]:
+                part = _deep_size(v, _seen, _depth + 1, _budget)
+                if part < 0:
+                    failed = True
+                else:
+                    size += part
+        if failed:
+            return -size if size else -1
+    except Exception:
+        return -size if size else -1
+    return size
+
+
+def _rss_mb() -> float | None:
+    """컨테이너 실제 사용량. Railway는 리눅스라 /proc/self/status가 1순위 —
+    psutil은 이 레포에 설치돼 있지 않다(의존성 추가 없이 재려는 것이 목적)."""
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return round(int(line.split()[1]) / 1024, 1)
+    except Exception:
+        pass
+    try:
+        import resource
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # 리눅스는 KB, macOS는 bytes — 값 크기로 구분(로컬 테스트 편의)
+        return round(rss / 1024 / 1024, 1) if rss > 10 ** 7 else round(rss / 1024, 1)
+    except Exception:
+        return None
+
+
+@app.get("/api/debug/memory")
+async def debug_memory(top: int = 20):
+    """메모리 진단(1회성). MEMORY_DIAG=1일 때만 tracemalloc 결과가 채워진다.
+    인증은 API_READ_TOKEN(X-Api-Read-Token) — _BOT_READ_EXACT_PATHS에 등록."""
+    import gc
+    import pandas as pd
+    import sys as _s
+
+    out = {"enabled": MEMORY_DIAG, "rss_mb": _rss_mb(),
+           "gc_count": list(gc.get_count()),
+           "gc_threshold": list(gc.get_threshold())}
+
+    # 전역 캐시별 크기 — 무엇이 메모리를 잡고 있는지가 핵심 질문이다
+    caches = {}
+    for name in ("_data_cache", "_cache", "_indices_cache", "_sectors_cache",
+                 "_signal_snapshots", "_paper_track", "_mcap_allowed_cache",
+                 "_index_last_good", "_us_industry_cache_data"):
+        obj = globals().get(name)
+        if obj is None:
+            continue
+        try:
+            raw = _deep_size(obj)
+            caches[name] = {"mb": round(abs(raw) / 1024 / 1024, 2),
+                            "len": len(obj) if hasattr(obj, "__len__") else None}
+            if raw < 0:
+                caches[name]["partial"] = True   # 일부 노드 측정 실패 — 과소집계
+        except Exception as e:
+            caches[name] = {"error": f"{type(e).__name__}: {e}"}
+    out["caches"] = caches
+
+    # 살아있는 DataFrame — 번들 밖에 새어 나온 사본이 있는지
+    try:
+        dfs = [o for o in gc.get_objects() if isinstance(o, pd.DataFrame)]
+        out["live_dataframes"] = {
+            "count": len(dfs),
+            "total_mb": round(sum(int(d.memory_usage(deep=True).sum())
+                                  for d in dfs[:20000]) / 1024 / 1024, 2),
+        }
+    except Exception as e:
+        out["live_dataframes"] = {"error": f"{type(e).__name__}: {e}"}
+
+    if MEMORY_DIAG:
+        try:
+            import tracemalloc
+            cur, peak = tracemalloc.get_traced_memory()
+            out["tracemalloc"] = {
+                "current_mb": round(cur / 1024 / 1024, 2),
+                "peak_mb": round(peak / 1024 / 1024, 2),
+                "top": [],
+            }
+            for st in tracemalloc.take_snapshot().statistics("lineno")[:max(1, top)]:
+                fr = st.traceback[0]
+                out["tracemalloc"]["top"].append({
+                    "where": f"{fr.filename.split('/')[-1]}:{fr.lineno}",
+                    "mb": round(st.size / 1024 / 1024, 2),
+                    "count": st.count,
+                })
+        except Exception as e:
+            out["tracemalloc"] = {"error": f"{type(e).__name__}: {e}"}
+    else:
+        out["hint"] = ("tracemalloc 미작동 — Railway Variables에 MEMORY_DIAG=1을 "
+                       "넣고 재배포한 뒤 30분쯤 지나 다시 호출할 것")
+    return out
 
 
 @app.get("/api/debugraw/{ticker}")
