@@ -113,7 +113,10 @@ def test_startup_only_traces_when_env_set():
 
 
 def test_live_dataframe_count_reported():
-    r = asyncio.run(app.debug_memory())
-    lv = r["live_dataframes"]
+    """v5.266: 기본은 건너뛰고(전체 힙 순회가 느려 1,465MB에서 27.9초 걸렸다),
+    ?objects=1일 때만 센다."""
+    base = asyncio.run(app.debug_memory())["live_dataframes"]
+    assert "skipped" in base and "objects=1" in base["skipped"]
+    lv = asyncio.run(app.debug_memory(objects=1))["live_dataframes"]
     assert "error" not in lv, lv
     assert isinstance(lv["count"], int) and lv["count"] >= 0

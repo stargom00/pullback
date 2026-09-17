@@ -5,6 +5,40 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.266 [버그수정] 종가베팅 포워드 백필 미작동 — **근본 원인 확정 후 수정**.
+        [원인] `_fetch_market_data_inner()`는 **fetch 이전에** 시총 1000억 필터로
+        유니버스를 자른다(`universe = {... if t in _mcap_allowed}`). 반면 종가베팅
+        후보 기준은 **거래대금 상위 100**이라 시총 조건이 없다 → 거래대금은
+        터졌지만 시총이 작은 종목(이노메트리 302430.KQ, 09-09 종가 8,810)은
+        **후보로 뽑히지만 `bundle["data"]`엔 아예 없다** → `kr_data.get(t)`가
+        None → `_close_on_date(None, ...)`도 None → **백필이 영원히 스킵**됐다.
+        09-09 레코드가 8일 넘게 close_price=null로 남은 이유다.
+        **번들 부재는 예외가 아니라 정상 케이스**다(사용자 확정).
+        [수정1] `_jongga_bars()` 신설 — 번들에 없으면 `naver_kr.fetch_history()`로
+        **직접 조회**하고 `_downcast`(= `_filter_invalid_bars` + float32, 번들과
+        동일 후처리)를 거친다. `_record_jongga_eod`·`_resolve_jongga_gaps` 둘 다 적용.
+        상한 `_JONGGA_DIRECT_FETCH_MAX=20`(임의값) + TTL 600초 캐시 — 미기록분은
+        보통 한 자릿수라 비용이 무시할 수준이고, 상한 도달 시 경고를 남긴다.
+        [수정2 — 로그] 요약 로그를 `if changed:`에서 빼내 **0건일 때도** 남긴다:
+        "EOD 종가 기록 N건 / 미기록 M건 (번들 a · 직접조회 b · 실패 c)".
+        09-17 로그에 `[jongga-forward]` 줄이 없는 것을 보고 **"함수가 호출조차
+        안 됐다"고 오판**했는데, 실제로는 돌았고 0건을 채운 것이었다 — 침묵이
+        두 상태를 구분 못 하게 했다.
+        [수정3] `/api/debug/memory`의 `live_dataframes`를 **`?objects=1` 옵션**으로.
+        `gc.get_objects()` 전체 힙 순회가 메모리에 비례해 느려져 **1,465MB일 때
+        27.9초** 걸렸고, 25초 타임아웃에 3연속 실패한 것을 앱 장애로 오인할
+        뻔했다. 기본 응답은 수십 ms.
+        [조사 경위 — 가설 3개가 연속으로 틀렸다] resolved 차단 / `_meta` 날짜 필터 /
+        `_downcast` 트렁케이션 — 전부 로컬 재현에서 통과해 기각됐다. 원인은
+        **재현 방식**이었다: `kr_data`를 매번 직접 만들어 넣어 **프로덕션이 그
+        dict를 만드는 경로(시총 필터)를 재현하지 않았다.** CLAUDE.md 테스트 절에
+        패턴 4·5로 기록.
+        [테스트] test_jongga_bundle_fallback.py(10) — **프로덕션과 같은 순서로
+        시총 필터를 적용해 번들을 만든 뒤** 검증(`_production_bundle()`), 번들 부재
+        시 직접 조회, 번들 적중 시 네트워크 미사용, 직접 조회분의 무효봉 필터·dtype,
+        상한·TTL 캐시, 0건일 때 요약 로그, 소스별 집계, 진단 엔드포인트 옵션화.
+        사보타주 4종(폴백 제거 / 로그를 changed로 / _downcast 미적용 / objects
+        기본 노출) 전부 FAIL 확인 후 원복.
 v5.265 [진단 — 1회성] `GET /api/debug/memory` 신설(사용자 지시). OOM 원인 규명용.
         [배경] Railway Metrics: 컨테이너 시작 직후 **900MB / 1GB 축 상시 90%**,
         2026-09-17 03:0x **자동 재배포**(GitHub 배포 이력에 없음 → git push가
@@ -7421,7 +7455,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.265"
+VERSION = "v5.266"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -9317,6 +9351,48 @@ def _close_on_date(df, date_str: str):
     return None
 
 
+# v5.266(사용자 지시 — 09-09 이노메트리 백필 미작동 근본 수정):
+# **번들에 없는 종가베팅 후보는 정상 케이스다.**
+# `_fetch_market_data_inner()`는 fetch **이전에** 시총 1000억 필터로 유니버스를
+# 자른다(`universe = {t: n for t, n in universe.items() if ... t in _mcap_allowed}`).
+# 반면 종가베팅 후보 선정 기준은 **거래대금 상위 100**이라 시총 조건이 없다 →
+# 거래대금은 터졌지만 시총이 작은 종목(이노메트리 302430.KQ)은 후보로 뽑히지만
+# `bundle["data"]`엔 아예 없다 → `kr_data.get(t)`가 None → 백필이 영원히 스킵됐다.
+# 그래서 번들에 없으면 **직접 조회**로 폴백한다.
+_JONGGA_BAR_CACHE: dict[str, tuple[float, object]] = {}
+_JONGGA_BAR_TTL = 600          # 초 — 한 EOD 틱 안에서 같은 티커를 두 번 안 받게
+_JONGGA_DIRECT_FETCH_MAX = 20  # 임의값(사용자 지시) — 넘으면 경고. 미기록분은 보통 한 자릿수다
+
+
+def _jongga_bars(kr_data: dict, ticker: str, budget: list) -> tuple:
+    """(df, source) — source는 "bundle" | "direct" | "miss".
+
+    budget: 남은 직접조회 허용 횟수(리스트로 넘겨 호출 간 공유). 0 이하가 되면
+    더 받지 않고 "miss"로 처리한다 — 진단은 호출부가 로그로 남긴다.
+    """
+    df = (kr_data or {}).get(ticker)
+    if df is not None and getattr(df, "empty", True) is False:
+        return df, "bundle"
+    now = time.time()
+    hit = _JONGGA_BAR_CACHE.get(ticker)
+    if hit and now - hit[0] < _JONGGA_BAR_TTL:
+        return hit[1], ("direct" if hit[1] is not None else "miss")
+    if budget[0] <= 0:
+        return None, "miss"
+    budget[0] -= 1
+    try:
+        raw = naver_kr.fetch_history(ticker)
+        # 프로덕션 fetch 후처리와 동일하게 — _downcast가 _filter_invalid_bars(v5.242)
+        # + Close.notna + float32를 전부 한다. 번들 데이터와 같은 처리를 거쳐야
+        # 같은 종가가 나온다.
+        got = _downcast(raw) if raw is not None and not raw.empty else None
+    except Exception as e:
+        print(f"[jongga-forward] 직접조회 실패 {ticker}: {type(e).__name__}: {e}", flush=True)
+        got = None
+    _JONGGA_BAR_CACHE[ticker] = (now, got)
+    return got, ("direct" if got is not None else "miss")
+
+
 def _record_jongga_eod(date_str: str, kr_data: dict):
     """장 마감 후(daykey 확정 시점, _warm_market의 '장마감 후' 분기) 후보들의
     확정 종가를 채운다.
@@ -9332,13 +9408,19 @@ def _record_jongga_eod(date_str: str, kr_data: dict):
     if not fwd:
         return
     changed, filled = False, 0
+    budget = [_JONGGA_DIRECT_FETCH_MAX]
+    pending = src_cnt = 0
+    srcs = {"bundle": 0, "direct": 0, "miss": 0}
     for d_str, day_rec in fwd.items():
         if not isinstance(day_rec, dict):
             continue
         for t, rec in _iter_day_records(day_rec):
             if not isinstance(rec, dict) or rec.get("eod_recorded"):
                 continue
-            close_ = _close_on_date(kr_data.get(t), d_str)
+            pending += 1
+            df, src = _jongga_bars(kr_data, t, budget)
+            srcs[src] = srcs.get(src, 0) + 1
+            close_ = _close_on_date(df, d_str)
             if close_ is None:
                 continue      # 그 날짜 봉이 없으면 **비워둔다**(다른 날 값으로 때우지 않는다)
             rec["close_price"] = close_
@@ -9346,10 +9428,19 @@ def _record_jongga_eod(date_str: str, kr_data: dict):
             changed = True
             filled += 1
             if d_str != date_str:
-                print(f"[jongga-forward] 백필: {d_str} {t} close={close_}", flush=True)
+                print(f"[jongga-forward] 백필: {d_str} {t} close={close_} ({src})", flush=True)
     if changed:
         _save_jongga_forward(fwd)
-        print(f"[jongga-forward] EOD 종가 기록 {filled}건(기준일 {date_str})", flush=True)
+    # v5.266: **filled=0이어도 반드시 남긴다.** 이전엔 `if changed`일 때만 찍어서,
+    # 09-17 로그에 아무것도 없는 것을 보고 "함수가 호출조차 안 됐다"고 오판했다
+    # (실제로는 돌았고 0건을 채운 것). 침묵이 두 상태를 구분 못 하게 했다.
+    if pending or filled:
+        print(f"[jongga-forward] EOD 종가 기록 {filled}건 / 미기록 {pending}건 "
+              f"(번들 {srcs['bundle']} · 직접조회 {srcs['direct']} · 실패 {srcs['miss']}) "
+              f"기준일 {date_str}", flush=True)
+    if budget[0] <= 0 and srcs["miss"]:
+        print(f"[jongga-forward] ⚠️ 직접조회 상한({_JONGGA_DIRECT_FETCH_MAX}) 도달 — "
+              f"미기록이 비정상적으로 많다. 남은 건은 다음 틱에 재시도된다.", flush=True)
 
 
 def _resolve_jongga_gaps(kr_data: dict):
@@ -9361,6 +9452,9 @@ def _resolve_jongga_gaps(kr_data: dict):
     fwd = _load_jongga_forward()
     today_str = datetime.now(KST).strftime("%Y-%m-%d")
     changed = False
+    # v5.266: 여기도 번들 폴백 — 시총 필터로 번들에서 빠진 후보(거래대금 상위
+    # 100이라 정상적으로 섞인다)의 다음날 시가가 영영 안 잡히던 같은 문제.
+    budget = [_JONGGA_DIRECT_FETCH_MAX]
     for date_str, day_rec in fwd.items():
         if date_str >= today_str:
             continue
@@ -9381,7 +9475,7 @@ def _resolve_jongga_gaps(kr_data: dict):
                         print(f"[jongga-forward] 갭(종가기준) 보정: {date_str} {t} "
                               f"{rec['gap_close_pct']}%", flush=True)
                 continue
-            df = kr_data.get(t)
+            df, _src = _jongga_bars(kr_data, t, budget)
             if df is None or df.empty:
                 continue
             try:
@@ -11826,7 +11920,7 @@ def _rss_mb() -> float | None:
 
 
 @app.get("/api/debug/memory")
-async def debug_memory(top: int = 20):
+async def debug_memory(top: int = 20, objects: int = 0):
     """메모리 진단(1회성). MEMORY_DIAG=1일 때만 tracemalloc 결과가 채워진다.
     인증은 API_READ_TOKEN(X-Api-Read-Token) — _BOT_READ_EXACT_PATHS에 등록."""
     import gc
@@ -11855,16 +11949,24 @@ async def debug_memory(top: int = 20):
             caches[name] = {"error": f"{type(e).__name__}: {e}"}
     out["caches"] = caches
 
-    # 살아있는 DataFrame — 번들 밖에 새어 나온 사본이 있는지
-    try:
-        dfs = [o for o in gc.get_objects() if isinstance(o, pd.DataFrame)]
-        out["live_dataframes"] = {
-            "count": len(dfs),
-            "total_mb": round(sum(int(d.memory_usage(deep=True).sum())
-                                  for d in dfs[:20000]) / 1024 / 1024, 2),
-        }
-    except Exception as e:
-        out["live_dataframes"] = {"error": f"{type(e).__name__}: {e}"}
+    # 살아있는 DataFrame — 번들 밖에 새어 나온 사본이 있는지.
+    # v5.266(사용자 지시): **기본 응답에서 제외**한다. gc.get_objects()가 전체 힙을
+    # 훑고 DataFrame마다 memory_usage(deep=True)를 부르는데, 메모리가 클수록
+    # 느려져 **정작 필요한 순간에 못 찍는다** — 실측 27.9초(1,465MB일 때)라
+    # 25초 타임아웃에 3연속 실패했고, 그걸 앱 장애로 오인할 뻔했다.
+    # 필요할 때만 ?objects=1.
+    if objects:
+        try:
+            dfs = [o for o in gc.get_objects() if isinstance(o, pd.DataFrame)]
+            out["live_dataframes"] = {
+                "count": len(dfs),
+                "total_mb": round(sum(int(d.memory_usage(deep=True).sum())
+                                      for d in dfs[:20000]) / 1024 / 1024, 2),
+            }
+        except Exception as e:
+            out["live_dataframes"] = {"error": f"{type(e).__name__}: {e}"}
+    else:
+        out["live_dataframes"] = {"skipped": "느려서 기본 제외 — ?objects=1로 요청"}
 
     if MEMORY_DIAG:
         try:
