@@ -173,7 +173,37 @@ def test_warning_banner_is_present_and_unambiguous():
     assert "초기 임의값(2026-09-18)" in TEXT
 
 
-def test_star_uses_ma200_price_not_a_recomputed_percent():
+def test_star_uses_the_baseline_price_not_a_recomputed_percent():
+    """v5.268: 트리거는 **기준선(MA600) 가격**. MA200으로 되돌아가면 안 된다."""
     src = _extract_function("abcWatch")
-    assert "h.ma200" in src and "pivot: h.ma200" in src, src
-    assert "ma200_pct" not in src, "화면에서 비율로 가격을 되돌리려 한다"
+    assert "pivot: h.ma," in src, src
+    assert "ma200" not in src, "★가 보조 표시 열(MA200)을 트리거로 쓴다"
+    assert "_pct" not in src, "화면에서 비율로 가격을 되돌리려 한다"
+
+
+def test_baseline_is_the_main_column_and_ma200_is_secondary():
+    """MA600이 주 판정 축, MA200은 보조 — 화면에서 뒤바뀌면 오독한다."""
+    i = TEXT.index("function abcRowHtml")
+    row = TEXT[i:TEXT.index("\nfunction abcFilteredHits")]
+    main = row.index("h.ma_pct")
+    sub = row.index("h.ma200_pct")
+    assert main < sub, "MA200 열이 기준선 열보다 앞에 있다"
+    assert "ABC_MA_COLOR" in row[:main], "기준선 열에 핫핑크 표시가 없다"
+    assert "opacity:.6" in row[sub - 200:sub], "보조 열이 주 열과 같은 비중으로 보인다"
+
+
+def test_baseline_label_comes_from_the_server_not_a_literal():
+    """라벨을 'MA600'으로 박으면 기간을 바꿔도 화면만 옛 이름으로 남는다."""
+    src = _extract_function("_abcMaLabel")
+    assert "_abcData.ma_label" in src, src
+
+
+def test_hot_pink_is_defined_once():
+    assert TEXT.count("const ABC_MA_COLOR") == 1
+    i = TEXT.index("const ABC_MA_COLOR")
+    assert re.search(r"#[0-9A-Fa-f]{6}", TEXT[i:i + 80]), "색이 상수로 안 잡혀 있다"
+
+
+def test_unavailable_baseline_count_is_surfaced():
+    """봉 부족으로 빠진 종목 수가 화면에 없으면 '왜 안 보이지'가 미궁이 된다."""
+    assert "_abcMaLabel() + ' 불가'" in TEXT, "카운트 노출이 없다"

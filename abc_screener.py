@@ -13,6 +13,12 @@ from __future__ import annotations
 
 # ── 임계값 — 전부 한 곳에. 근거 없음(초기 임의값, 2026-09-18) ──────────
 ABC_CONFIG = {
+    # ── 기준선 ────────────────────────────────────────────────────
+    # v5.268(사용자 지시): 200 → **600**. "핫핑크 = 더양봉맨 장기 추세 전환선".
+    # C 단계·B 중앙값 밴드·매물대 밴드·돌파봉 탐지가 **전부** 이 값을 쓴다.
+    # 아래 키 이름에서 "ma200"을 뺀 이유: 기간이 설정값이 된 이상 이름에 200이
+    # 박혀 있으면 값과 이름이 어긋난다(CLAUDE.md "이름이 의미와 어긋나면 개명").
+    "ma_period": 600,
     # A: 긴 하락
     "a_lookback": 250,        # 고점 탐색 구간(봉) ≈ 52주
     "a_drop_min": 0.40,       # 고점→저점 하락폭 ≥ 40%
@@ -21,8 +27,8 @@ ABC_CONFIG = {
     "b_min_bars": 20,         # 저점 **직후** 횡보로 인정할 최소 봉수
     "b_max_bars": 60,         # 같은 구간의 최대 — 20~60 중 가장 긴 것을 고른다
     "b_range_max": 0.25,      # 그 구간 고저 범위 ≤ 25%
-    "b_ma200_band": 0.15,     # 구간 중앙값이 MA200 ±15% 안
-    # C: 단계 (close vs MA200)
+    "b_ma_band": 0.15,        # 구간 중앙값이 기준선 ±15% 안
+    # C: 단계 (close vs 기준선)
     "c0": (-0.15, -0.05),     # 대기
     "c1": (-0.05, 0.05),      # 벽앞 — **c2와 [0,+5%)에서 겹친다**(사용자 정의
                               #   C1 −5~+5 / C2 0~+20 그대로). 판정 순서가 C2를
@@ -41,46 +47,59 @@ ABC_CONFIG = {
                               # "가돌이"로 잘못 부른다(LS에코 09-15 2.09배 →
                               # 09-16 13.01배).
     # 매물대
-    "supply_band": (1.00, 1.30),   # MA200 ~ MA200×1.3
+    "supply_band": (1.00, 1.30),   # 기준선 ~ 기준선×1.3
     "supply_min_bars": 30,         # 그 구간에 과거 250봉 중 ≥30봉
     # 다른 셋업(ABC 아님) 판정
-    "other_above_ma200_bars": 60,  # MA200 위 60봉 이상이면 박스/눌림
+    "other_above_ma_bars": 60,     # 기준선 위 60봉 이상이면 박스/눌림
     # 기업 축
     "min_turnover_eok": 300,       # 판정일 거래대금(억) — close×volume
     "rev_yoy_min_quarters": 3,     # 최근 4분기 중 매출 YoY+ 분기 수
     "rev_yoy_window": 4,
     "eps_positive_quarters": 2,    # 최근 2분기 EPS 흑자
-    "min_bars": 250,               # 판정에 필요한 최소 봉수
+    # 판정에 필요한 최소 봉수 — **기준선 기간과 같이 움직여야 한다.**
+    # 250으로 두면 MA600이 NaN인 종목이 게이트를 통과해 들어온다.
+    # `_min_bars(cfg)`가 max(250, ma_period)로 계산한다(리터럴 금지).
+    "min_bars_floor": 250,
 }
 
 C_STAGES = ("C0 대기", "C1 벽앞", "C2 진돌이", "C2 가돌이", "C3 이탈")
+
+
+def _min_bars(cfg: dict = ABC_CONFIG) -> int:
+    """판정 최소 봉수. 기준선 기간보다 짧으면 MA가 NaN이라 판정 자체가 불가."""
+    return max(cfg["min_bars_floor"], cfg["ma_period"])
+
+
+def _ma_label(cfg: dict = ABC_CONFIG) -> str:
+    """화면·사유 문자열용. 리터럴 "MA600"을 박으면 기간을 바꿔도 안 따라온다."""
+    return f"MA{cfg['ma_period']}"
 
 
 def _ma(close, n: int):
     return float(close.iloc[-n:].mean()) if len(close) >= n else None
 
 
-def _find_breakout(close, vol, ma200: float, cfg: dict):
-    """최근 `breakout_lookback`봉 중 **MA200 아래→위로 넘어간 마지막 봉**.
+def _find_breakout(close, vol, cfg: dict):
+    """최근 `breakout_lookback`봉 중 **기준선 아래→위로 넘어간 마지막 봉**.
 
     없으면 None("돌파 없음" — 60봉 내내 위에 있었다는 뜻).
     vol_mult는 **그 돌파봉의** 거래량 ÷ 직전 5일평균이다(오늘 거래량이 아니다) —
     진돌이/가돌이 라벨은 돌파 시점의 성격이고 이후 유지된다(사용자 확정).
 
-    ⚠️ 비교 기준은 **각 봉 시점의 MA200**(이동값)이다. 처음엔 오늘의 MA200
+    ⚠️ 비교 기준은 **각 봉 시점의 기준선**(이동값)이다. 처음엔 오늘의 값
     하나를 상수로 두고 과거 봉을 비교했는데, 그러면 "오늘 기준선"을 며칠 전에
     넘은 봉이 돌파로 잡혀 **돌파 시점과 거래량이 둘 다 틀렸다**
     (LS에코 2026-09-18: 잘못된 값 vol 2.09 / 3봉 전).
     """
     n = len(close)
     look = min(cfg["breakout_lookback"], n - 1)
-    ma_series = close.rolling(200).mean()
+    ma_series = close.rolling(cfg["ma_period"]).mean()
     found = None
     for i in range(n - look, n):
         if i < 1:
             continue
         m = ma_series.iloc[i]
-        if m != m:                      # NaN — 200봉 미만 구간
+        if m != m:                      # NaN — 기준선 기간 미만 구간
             continue
         if float(close.iloc[i - 1]) <= float(m) < float(close.iloc[i]):
             found = i
@@ -106,26 +125,41 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
 
     반환 dict의 `verdict`:
       "ABC"        — A 충족(차트 후보). b_ok / c_stage가 함께 채워진다
-      "다른 셋업"   — A 없음 + MA200 위 장기 → 박스/눌림. 탭에서 제외하되 카운트
+      "다른 셋업"   — A 없음 + 기준선 위 장기 → 박스/눌림. 탭에서 제외하되 카운트
+      "MA600 불가"  — 봉이 기준선 기간보다 짧다. **등급 제외, 카운트만**
+                      (사용자 지시 v5.268). 라벨은 `_ma_label()`로 만들어져
+                      기간을 바꾸면 같이 바뀐다
       "ABC 아님"    — 그 외(데이터 부족 포함)
     """
     out = {"verdict": "ABC 아님", "reason": None, "a": None, "b": None,
-           "c_stage": None, "ma200_pct": None, "vol_mult": None,
+           "c_stage": None, "ma_pct": None, "ma200_pct": None, "vol_mult": None,
            "supply_above": False, "supply_bars": 0, "turnover_eok": None,
-           "breakout": None, "close": None, "ma200": None}
-    if df is None or getattr(df, "empty", True) or len(df) < cfg["min_bars"]:
-        out["reason"] = f"봉 부족({0 if df is None else len(df)} < {cfg['min_bars']})"
+           "breakout": None, "close": None, "ma": None,
+           "ma_period": cfg["ma_period"]}
+    n_bars = 0 if df is None or getattr(df, "empty", True) else len(df)
+    need = _min_bars(cfg)
+    if n_bars < need:
+        # v5.268(사용자 지시): 기준선을 못 그리는 종목은 **등급에서 빼고 세기만**
+        # 한다. "봉 부족"과 한 덩어리로 묶으면 화면에서 몇 종목이 기준선 때문에
+        # 빠졌는지 안 보인다.
+        out["verdict"] = f"{_ma_label(cfg)} 불가"
+        out["reason"] = f"{_ma_label(cfg)} 계산 불가 — {n_bars}봉 < {need}봉"
         return out
 
     close, high, low, vol = df["Close"], df["High"], df["Low"], df["Volume"]
     last = float(close.iloc[-1])
-    ma200 = _ma(close, 200)
-    if not ma200:
-        out["reason"] = "MA200 계산 불가"
+    ma = _ma(close, cfg["ma_period"])
+    if not ma:
+        out["verdict"] = f"{_ma_label(cfg)} 불가"
+        out["reason"] = f"{_ma_label(cfg)} 계산 불가"
         return out
-    out["ma200_pct"] = round((last / ma200 - 1) * 100, 1)
+    out["ma_pct"] = round((last / ma - 1) * 100, 1)
     # ★ 추적 트리거로 쓰려면 비율이 아니라 **가격**이 필요하다(화면에서 재계산 금지).
-    out["close"], out["ma200"] = last, round(ma200, 2)
+    out["close"], out["ma"] = last, round(ma, 2)
+    # MA200은 v5.268부터 **판정에 안 쓰인다** — 화면 보조 열 하나로만 남긴다
+    # (사용자 지시). 어떤 게이트도 이 값을 읽으면 안 된다.
+    ma200 = _ma(close, 200)          # ← 보조 표시 전용, 판정 금지
+    out["ma200_pct"] = round((last / ma200 - 1) * 100, 1) if ma200 else None
 
     v_avg = float(vol.iloc[-cfg["vol_avg_bars"] - 1:-1].mean()) if len(vol) > cfg["vol_avg_bars"] else 0.0
     out["vol_mult"] = round(float(vol.iloc[-1]) / v_avg, 2) if v_avg > 0 else None
@@ -147,13 +181,13 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
     a_ok = drop >= cfg["a_drop_min"] and span >= cfg["a_span_min"]
 
     if not a_ok:
-        # 다른 셋업: MA200 위에 오래 머문 종목 — 탭에서 빼되 카운트는 남긴다
-        ma_series = close.rolling(200).mean()
-        above = (close.iloc[-cfg["other_above_ma200_bars"]:]
-                 > ma_series.iloc[-cfg["other_above_ma200_bars"]:]).sum()
-        if int(above) >= cfg["other_above_ma200_bars"]:
+        # 다른 셋업: 기준선 위에 오래 머문 종목 — 탭에서 빼되 카운트는 남긴다
+        ma_series = close.rolling(cfg["ma_period"]).mean()
+        above = (close.iloc[-cfg["other_above_ma_bars"]:]
+                 > ma_series.iloc[-cfg["other_above_ma_bars"]:]).sum()
+        if int(above) >= cfg["other_above_ma_bars"]:
             out["verdict"] = "다른 셋업"
-            out["reason"] = "박스/눌림 (ABC 아님) — MA200 위 장기"
+            out["reason"] = f"박스/눌림 (ABC 아님) — {_ma_label(cfg)} 위 장기"
         else:
             out["reason"] = (f"A 미달 (하락 {drop*100:.0f}% / {span}봉, "
                              f"기준 {cfg['a_drop_min']*100:.0f}% · {cfg['a_span_min']}봉)")
@@ -162,7 +196,7 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
     out["verdict"] = "ABC"
 
     # ── B: **저점 직후** 횡보 (사용자 확정 2026-09-18, 안 (b)) ──────
-    # 저점 이후 **전 구간**으로 재면 −70% 빠졌다가 MA200까지 올라온 종목은
+    # 저점 이후 **전 구간**으로 재면 −70% 빠졌다가 기준선까지 올라온 종목은
     # 범위가 60%대라 **C2에 도달한 종목이 B를 구조적으로 통과할 수 없었다**
     # (A급이 원리적으로 안 나옴). 그래서 저점 **직후**만 보고, 그 뒤 상승분은
     # B 판정에서 제외한다 — 상승은 C가 담당한다.
@@ -182,24 +216,24 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
         rng = (float(seg_h.max()) - lo_s) / lo_s
         med = float(seg_c.median())
         cand = {"bars": n, "range_pct": round(rng * 100, 1),
-                "median_vs_ma200_pct": round((med / ma200 - 1) * 100, 1),
+                "median_vs_ma_pct": round((med / ma - 1) * 100, 1),
                 "ok": bool(rng <= cfg["b_range_max"]
-                           and abs(med / ma200 - 1) <= cfg["b_ma200_band"])}
+                           and abs(med / ma - 1) <= cfg["b_ma_band"])}
         if best is None:
             best = cand                         # 가장 긴 후보(조건 불문) — 표시용
         if cand["ok"]:
             best = cand                         # 조건 만족하는 가장 긴 구간
             break
     out["b"] = best or {"bars": n_since, "range_pct": None,
-                        "median_vs_ma200_pct": None, "ok": False}
+                        "median_vs_ma_pct": None, "ok": False}
 
     # ── C: 단계 — **상태**로 본다 (사용자 확정 2026-09-18) ──────────
     # C2를 "당일 돌파"라는 **이벤트**로 두면 ① +5~20%인데 당일 돌파가 아닌
     # 상태가 어느 단계에도 안 들어가는 빈틈이 생기고 ② 돌파 다음날 탭에서
-    # 사라진다. 그래서 위치(close vs MA200)로 단계를 정하고, 진돌이/가돌이는
+    # 사라진다. 그래서 위치(close vs 기준선)로 단계를 정하고, 진돌이/가돌이는
     # **돌파봉의 거래량**으로 구분한 뒤 그 라벨을 유지한다.
-    d = last / ma200 - 1
-    out["breakout"] = _find_breakout(close, vol, ma200, cfg)
+    d = last / ma - 1
+    out["breakout"] = _find_breakout(close, vol, cfg)
     c0, c1, c2 = cfg["c0"], cfg["c1"], cfg["c2"]
     if d >= cfg["c3_min"]:
         out["c_stage"] = "C3 이탈"
@@ -216,10 +250,10 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
         out["c_stage"] = "C0 대기"
     else:
         out["c_stage"] = None
-        out["reason"] = f"C 구간 밖 (MA200 대비 {d*100:+.1f}%)"
+        out["reason"] = f"C 구간 밖 ({_ma_label(cfg)} 대비 {d*100:+.1f}%)"
 
-    # ── 매물대: MA200 ~ MA200×1.3에 과거 250봉 중 몇 봉이 머물렀나 ──
-    lo_b, hi_b = ma200 * cfg["supply_band"][0], ma200 * cfg["supply_band"][1]
+    # ── 매물대: 기준선 ~ 기준선×1.3에 과거 250봉 중 몇 봉이 머물렀나 ──
+    lo_b, hi_b = ma * cfg["supply_band"][0], ma * cfg["supply_band"][1]
     c_win = close.iloc[-cfg["a_lookback"]:]
     n_in = int(((c_win >= lo_b) & (c_win <= hi_b)).sum())
     out["supply_above"] = bool(n_in >= cfg["supply_min_bars"])

@@ -201,6 +201,13 @@ def _to_num(v) -> float | None:
         return None
 
 
+# v5.268: 스캔 번들이 쓰는 KR 조회 창(일). ABC 탭 기준선 MA600 요구로 730에서
+# 확대. 이 값을 바꾸면 `app._CACHE_NS`를 **반드시 함께 범프**할 것 — 안 그러면
+# 옛 창으로 만든 디스크 캐시가 그대로 로드된다
+# (test_kr_scan_window.py::test_cache_namespace_moved_with_the_window이 강제).
+KR_SCAN_DAYS = 1900
+
+
 def fetch(ticker: str) -> pd.DataFrame | None:
     """
     한국 종목 일봉 조회. siseJson 자체가 오늘 거래일 데이터를 이미 실시간에
@@ -218,8 +225,14 @@ def fetch(ticker: str) -> pd.DataFrame | None:
     "하루 지연된 값으로 오늘 봉을 덮어쓰거나 새로 만드는" 로직이 오히려 이미
     정확한 오늘 데이터를 하루 전 값으로 오염시키고 있었음(오늘 종가를
     어제 종가로 바꿔써서 등락률이 0%가 됨). 그래서 그 오버레이 자체를 제거.
+    v5.268: 스캔 번들의 KR 창을 **730일 → KR_SCAN_DAYS(1900일)**로 넓힌다.
+    🔺 ABC 탭의 기준선이 MA600이 됐는데 730일은 **487봉**이라 MA600이 한 봉도
+    안 나오기 때문이다(실측). 1900일이면 1,275봉 → MA600이 676봉 유효.
+    비용 실측(유니버스 1,504종목): 콜드 스캔 207s→247s, KR DataFrame
+    19.1MB→45.2MB. `days=` 인자를 여기 박지 않고 상수로 둔 이유는 회귀
+    측정 스크립트가 창을 바꿔 끼울 수 있어야 해서다.
     """
-    return fetch_history(ticker)
+    return fetch_history(ticker, days=KR_SCAN_DAYS)
 
 
 # ── 지수 (코스피/코스닥) ──────────────────────────────

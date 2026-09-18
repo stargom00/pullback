@@ -566,7 +566,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.267</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.268</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3048,12 +3048,17 @@ function _abcNum(v, suffix = '', digits = 1) {
   return `<span class="mono">${v.toFixed(digits)}${suffix}</span>`;
 }
 
-// MA200 대비 %는 부호가 곧 의미다(벽 아래/위) — 색으로 구분.
-function _abcMa200(v) {
+// 기준선 대비 %는 부호가 곧 의미다(벽 아래/위) — 색으로 구분.
+// v5.268: 기준선이 MA600이다. MA200은 **보조 표시 열 하나**로만 남는다.
+function _abcMaPct(v) {
   if (v == null) return '<span style="color:var(--muted)">—</span>';
   const col = v > 0 ? 'var(--px-up)' : v < 0 ? 'var(--px-down)' : 'var(--muted)';
   return `<span class="mono" style="color:${col}">${v > 0 ? '+' : ''}${v.toFixed(1)}%</span>`;
 }
+
+// 더양봉맨식 장기 추세 전환선 = 핫핑크(사용자 지시 v5.268).
+const ABC_MA_COLOR = '#FF4FA3';
+function _abcMaLabel() { return (_abcData && _abcData.ma_label) || 'MA600'; }
 
 const _ABC_GRADE_COLOR = { 'A급': '#4ADE80', 'B급': '#FACC15', 'C급': 'var(--muted)' };
 
@@ -3075,8 +3080,9 @@ function abcRowHtml(h) {
   const name = `<a href="${tvUrl(h.ticker, 'kr')}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${h.name}</a>`;
   // ★ = 추적 추가. 트리거는 **MA200 가격**(C 구간의 벽) — 진입 신호가 아니라
   // "벽에 닿으면 알려달라"는 관찰 등록이다.
-  const star = h.ma200 != null
-    ? `<button class="journal-btn" style="padding:0 5px;font-size:11px;margin-left:2px" onclick="abcWatch(this,'${h.ticker}')" title="MA200(${h.ma200.toLocaleString()}) 도달 시 알림 — 관찰 등록">★</button>`
+  // ★ 트리거는 **기준선 가격**(= C 구간의 벽). v5.268부터 MA600이다.
+  const star = h.ma != null
+    ? `<button class="journal-btn" style="padding:0 5px;font-size:11px;margin-left:2px" onclick="abcWatch(this,'${h.ticker}')" title="${_abcMaLabel()}(${h.ma.toLocaleString()}) 도달 시 알림 — 관찰 등록">★</button>`
     : '';
   const fails = (h.company_fails || []).join(' · ');
   return `<tr>
@@ -3084,7 +3090,8 @@ function abcRowHtml(h) {
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;color:${gcol};font-size:11px"
         title="${fails ? '기업 축 미달: ' + fails : '기업 축 통과'}">${h.grade}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;font-size:11px">${stage}</td>
-    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${_abcMa200(h.ma200_pct)}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right;border-left:2px solid ${ABC_MA_COLOR}">${_abcMaPct(h.ma_pct)}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right;opacity:.6">${_abcMaPct(h.ma200_pct)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right"
         title="${h.breakout_bars_ago != null ? h.breakout_bars_ago + '봉 전 돌파봉 포함 3봉 중 최대 거래량' : ''}">${_abcNum(h.vol_mult, '배', 1)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${_abcNum(h.a_drop_pct, '%', 0)}</td>
@@ -3139,6 +3146,7 @@ function renderAbcPage() {
     <div style="margin:0 0 10px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:#1a1410">
       <div style="color:#FACC15;font-size:12px;font-weight:600">🔺 관심 신호. 진입 근거 없음 — 측정 전.</div>
       <div style="color:var(--muted);font-size:11px;margin-top:3px">
+        기준선 <span style="color:${ABC_MA_COLOR}">${_abcMaLabel()}</span>(더양봉맨식 장기 추세 전환선).
         숫자는 초기 임의값(2026-09-18) — 백테스트로 검증된 조건이 아닙니다.
         스캔·게이트·즉시행동에 아무 영향도 주지 않습니다. KR 전용.</div>
     </div>
@@ -3149,8 +3157,10 @@ function renderAbcPage() {
         <th style="text-align:left;padding:3px 8px">종목</th>
         <th style="padding:3px 8px">등급</th>
         <th style="padding:3px 8px" title="C0 대기 / C1 벽앞 / C2 돌파 / C3 이탈 — 이벤트가 아니라 현재 상태">C단계</th>
-        <th style="text-align:right;padding:3px 8px">MA200대비</th>
-        <th style="text-align:right;padding:3px 8px" title="돌파봉 포함 3봉 중 최대 거래량 / 평균">vol배수</th>
+        <th style="text-align:right;padding:3px 8px;color:${ABC_MA_COLOR}"
+            title="더양봉맨식 장기 추세 전환선. C단계·B밴드·매물대·돌파 판정이 전부 이 선 기준입니다.">${_abcMaLabel()}대비</th>
+        <th style="text-align:right;padding:3px 8px" title="보조 표시 — 판정에 쓰이지 않습니다">MA200</th>
+        <th style="text-align:right;padding:3px 8px" title="${_abcMaLabel()} 돌파봉 포함 3봉 중 최대 거래량 / 평균">vol배수</th>
         <th style="text-align:right;padding:3px 8px" title="A: 고점→저점 하락폭">A하락</th>
         <th style="text-align:right;padding:3px 8px" title="B: 바닥 다지기 봉 수">B일수</th>
         <th style="padding:3px 8px" title="현재가 위에 매물대가 있는가">매물대</th>
@@ -3162,6 +3172,7 @@ function renderAbcPage() {
     : '<div class="empty">조건에 맞는 종목이 없습니다.</div>'}
     <div style="margin-top:10px;font-size:11px;color:var(--muted)">
       차트 판정: ABC ${counts['ABC'] || 0} · 다른 셋업 ${counts['다른 셋업'] || 0} · ABC 아님 ${counts['ABC 아님'] || 0}
+      ${counts[_abcMaLabel() + ' 불가'] ? ` · <span title="봉이 ${_abcMaLabel()} 기간보다 짧아 기준선을 못 그립니다 — 등급에서 제외">${_abcMaLabel()} 불가 ${counts[_abcMaLabel() + ' 불가']}</span>` : ''}
       ${d.flags_loaded ? ` · 수동 플래그 ${d.flags_loaded}건` : ''}
     </div>`;
 }
@@ -3184,14 +3195,14 @@ async function loadAbc() {
   }
 }
 
-// ★ — MA200을 트리거로 한 **관찰** 등록. 눌림목 탭의 quickWatch는 lastHits를
+// ★ — **기준선(MA600)**을 트리거로 한 관찰 등록. 눌림목 탭의 quickWatch는 lastHits를
 // 보는데 ABC는 별도 데이터라 여기서 직접 payload를 만든다.
 async function abcWatch(btn, ticker) {
   const h = (_abcData && _abcData.hits || []).find(x => x.ticker === ticker);
-  if (!h || h.ma200 == null) { btn.textContent = 'MA200없음'; return; }
+  if (!h || h.ma == null) { btn.textContent = `${_abcMaLabel()}없음`; return; }
   await _quickWatchRequest(h, btn, {
     ticker: h.ticker, name: h.name, market: 'kr',
-    pivot: h.ma200, tab: 'ABC', reg_price: h.close,
+    pivot: h.ma, tab: 'ABC', reg_price: h.close,
   });
 }
 

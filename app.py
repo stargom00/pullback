@@ -5,6 +5,27 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.268 [변경] 🔺 ABC 탭 기준선 200MA → **600MA**(사용자 지시 — "핫핑크 =
+    더양봉맨 장기 추세 전환선"). **ABC 탭 내부만, 다른 탭 판정 무영향.**
+    · C 단계·B 중앙값 밴드·매물대 밴드·돌파봉 탐지가 **전부** 기준선을 쓴다.
+      기간은 `ABC_CONFIG["ma_period"]` 한 곳 — 축 하나라도 200에 묶여 있으면
+      test_every_judgement_axis_uses_the_config_period가 FAIL.
+      MA200은 **보조 표시 열 하나**로만 남고 판정에 안 쓰인다(테스트로 강제).
+    · 키 이름에서 200을 뺐다(`b_ma200_band`→`b_ma_band`,
+      `other_above_ma200_bars`→`other_above_ma_bars`, 출력 `ma200_pct`→`ma_pct`).
+      기간이 설정값이 된 이상 이름에 200이 박혀 있으면 값과 어긋난다.
+    · 봉 < 기준선 기간이면 verdict `"MA600 불가"` — **등급 제외, 카운트만**.
+      "ABC 아님"에 섞으면 "패턴이 아님"과 "데이터가 짧음"이 구분되지 않는다.
+      `min_bars`는 `_min_bars()`가 max(250, ma_period)로 계산(리터럴 금지).
+    · [전제] **KR 스캔 창 730일 → 1900일**(`naver_kr.KR_SCAN_DAYS`).
+      730일은 **487봉**이라 MA600이 한 봉도 안 나온다 — "마지막 130봉은 유효"는
+      봉↔일 혼동이었다. 1900일 = 1,275봉 → MA600 676봉 유효.
+      실측(1,504종목): 콜드 스캔 207s→247s(+19%), KR DataFrame 19.1→45.2MB.
+      `fetch_history`의 기본값 730은 **그대로** — 종가베팅 백필 등 다른 호출부는
+      영향받지 않는다. `_CACHE_NS` rs7→rs8(창이 바뀌면 구캐시 무효).
+    · 대안(ABC 대상만 1900일)은 기각: A 조건 통과율이 **72.4%**(250종목 표본)라
+      표적이 안 되고, 별도 경로는 같은 종목의 730/1900 사본을 **둘 다** 들고
+      있게 돼 57MB로 오히려 더 든다(창 확장은 45MB).
 v5.267 [신규] 🔺 ABC 탭 — 더양봉맨식 A(하락)·B(바닥다지기)·C(돌파) 패턴
     스크리너(사용자 지시). **KR 전용 · 관심 신호이지 진입 근거가 아니다** —
     스캔/게이트/즉시행동/EV 계산 어디에도 영향을 주지 않는다.
@@ -7482,7 +7503,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.267"
+VERSION = "v5.268"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -8154,8 +8175,10 @@ def _universe_sig(market: str) -> str:
 # 번에 무효화) — 재발 방지 자체는 아래 스키마 키 집합과
 # _load_disk_cache()의 검증이 담당(사람이 이 상수를 또 깜빡 잊어도
 # 로드 시점에 걸러짐).
-_CACHE_NS = "rs7"   # 현재 디스크캐시 네임스페이스 — 스키마/기간 등이 바뀌어 캐시버스트가
+_CACHE_NS = "rs8"   # 현재 디스크캐시 네임스페이스 — 스키마/기간 등이 바뀌어 캐시버스트가
                     # 필요하면 이 값만 올린다. _save_disk_cache가 자동으로 이전 네임스페이스를 정리한다.
+                    # v5.268: rs7→rs8 — KR 조회 창 730일→1900일(naver_kr.KR_SCAN_DAYS).
+                    # 창이 바뀌면 같은 종목의 봉 수가 달라져 구캐시를 섞어 쓰면 안 된다.
 
 # v5.241(사용자 지시 — 재발방지 작업): _load_disk_cache()가 로드 시점에
 # 검증하는 "유효한 bundle/timing 최소 스키마". _fetch_market_data_inner()가
@@ -12041,7 +12064,10 @@ async def api_abc():
     flags = _load_abc_flags()
     uni = bundle.get("universe") or {}
     sec_by_ticker = ((bundle.get("sector_info") or {}).get("by_ticker") or {})
-    counts = {"ABC": 0, "다른 셋업": 0, "ABC 아님": 0}
+    # v5.268: "MA600 불가"(봉 < 기준선 기간)는 **등급에서 빼고 세기만** 한다.
+    # 라벨을 리터럴로 쓰면 기간을 바꿨을 때 카운트 키만 옛 이름으로 남는다.
+    counts = {"ABC": 0, "다른 셋업": 0, "ABC 아님": 0,
+              f"{abc_screener._ma_label()} 불가": 0}
     cands = []
     for t, df in (bundle.get("data") or {}).items():
         if not naver_kr.is_kr(t):
@@ -12078,12 +12104,14 @@ async def api_abc():
         si = sec_by_ticker.get(t) or {}
         hits.append({
             "ticker": t, "name": uni.get(t) or t, "grade": g,
-            "c_stage": r["c_stage"], "ma200_pct": r["ma200_pct"],
-            "close": r["close"], "ma200": r["ma200"],
+            "c_stage": r["c_stage"], "ma_pct": r["ma_pct"],
+            "ma200_pct": r["ma200_pct"],      # 보조 표시 전용(판정 아님)
+            "close": r["close"], "ma": r["ma"], "ma_period": r["ma_period"],
             "vol_mult": (r["breakout"] or {}).get("vol_mult"),
             "breakout_bars_ago": (r["breakout"] or {}).get("bars_ago"),
             "a_drop_pct": (r["a"] or {}).get("drop_pct"),
             "b_bars": (r["b"] or {}).get("bars"), "b_ok": (r["b"] or {}).get("ok"),
+            "b_median_pct": (r["b"] or {}).get("median_vs_ma_pct"),
             "supply_above": r["supply_above"], "turnover_eok": r["turnover_eok"],
             "rev_yoy_pos": f["rev_yoy_pos"], "rev_yoy_of": f.get("rev_yoy_of"),
             "eps_pos_q": f["eps_pos_q"],
@@ -12101,6 +12129,7 @@ async def api_abc():
                       if h["sector"] and not h["c_stage"].startswith("C3"))
     ts = bundle.get("ts")
     return {"ok": True, "cache_state": "warm", "hits": hits, "counts": counts,
+            "ma_label": abc_screener._ma_label(),
             "sector_clusters": [{"sector": s, "n": n}
                                 for s, n in sec_cnt.most_common() if n >= 2],
             "flags_loaded": len(flags),

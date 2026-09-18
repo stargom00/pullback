@@ -160,16 +160,21 @@ def test_cold_cache_says_so_and_does_not_fetch(monkeypatch):
 
 
 def _synth(kind="abc"):
-    """abc_screener 테스트와 같은 모양의 합성 봉."""
+    """abc_screener 테스트와 같은 모양의 합성 봉.
+
+    v5.268: 봉 수가 기준선 기간(600)보다 짧으면 전부 "MA600 불가"로 빠져
+    이 테스트가 아무것도 검증하지 않게 된다 — 기간을 따라가게 만든다."""
+    import abc_screener as _A
     import numpy as np
-    flat, span, lead = 200, 45, 20
+    span, lead = 45, 20
+    flat = _A._min_bars() + 100
     base = [100.0] * flat
     lo = 100.0 * (1 - 0.45)
     down = list(np.linspace(100.0, lo, span // 2))
     up = list(np.linspace(lo, 100.0, span - span // 2))
     tail = [101.0] * lead
     c = base + down + up + tail
-    idx = pd.bdate_range("2023-01-02", periods=len(c))
+    idx = pd.bdate_range("2019-01-02", periods=len(c))
     return pd.DataFrame({"Open": c, "High": c, "Low": c, "Close": c,
                          "Volume": [1_000_000.0] * len(c)}, index=idx)
 
@@ -185,7 +190,10 @@ def test_route_never_fetches_bars(monkeypatch):
         "rev_yoy_pos": None, "rev_yoy_of": 0, "eps_pos_q": None, "reason": None})
     r = asyncio.run(app.api_abc())
     assert r["cache_state"] == "warm"
-    assert set(r["counts"]) <= {"ABC", "다른 셋업", "ABC 아님"}
+    assert set(r["counts"]) == {"ABC", "다른 셋업", "ABC 아님", "MA600 불가"}
+    assert sum(r["counts"].values()) == 1, r["counts"]
+    assert r["counts"]["MA600 불가"] == 0, "600봉 넘는데 불가로 셌다"
+    assert r["ma_label"] == "MA600"
 
 
 def test_us_tickers_are_excluded(monkeypatch):
@@ -193,6 +201,16 @@ def test_us_tickers_are_excluded(monkeypatch):
         "data": {"AAPL": _synth()}, "universe": {"AAPL": "Apple"}, "ts": 1})
     r = asyncio.run(app.api_abc())
     assert sum(r["counts"].values()) == 0, "KR 전용인데 US가 들어왔다"
+
+
+def test_short_history_is_counted_not_graded(monkeypatch):
+    """v5.268: 봉 부족 종목은 등급에서 빠지되 **카운트에는 남는다**."""
+    short = _synth().iloc[-100:]
+    monkeypatch.setattr(app, "_peek_market_bundle", lambda m: {
+        "data": {"005930.KS": short}, "universe": {"005930.KS": "짧음"}, "ts": 1})
+    r = asyncio.run(app.api_abc())
+    assert r["counts"]["MA600 불가"] == 1, r["counts"]
+    assert r["hits"] == [], "등급이 매겨졌다"
 
 
 def test_config_is_exposed_for_the_ui():
