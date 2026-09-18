@@ -87,13 +87,20 @@ def _cmp(a: dict, b: dict) -> list[str]:
     diffs = []
     for mode in MODES:
         x, y = a[mode], b[mode]
-        if x["n"] != y["n"]:
+        # 구성(어떤 종목인가)과 순위(어떤 차례인가)를 **따로** 본다.
+        # 처음엔 건수만 보고 같으면 순위를 zip 없이 인덱스로 비교했는데,
+        # 길이가 다른데 건수 필드만 같은 입력에서 IndexError가 났다
+        # (사보타주 검증 중 실제로 터짐 — 검사 자체가 죽으면 "차이 없음"과
+        #  구분이 안 된다).
+        if set(x["order"]) != set(y["order"]):
             only_a = [t for t in x["order"] if t not in set(y["order"])]
             only_b = [t for t in y["order"] if t not in set(x["order"])]
-            diffs.append(f"[{mode}] 건수 {x['n']}→{y['n']} · 730만 {only_a[:8]} · 1900만 {only_b[:8]}")
+            diffs.append(f"[{mode}] 구성 다름 {x['n']}→{y['n']} · 730만 {only_a[:8]} · 1900만 {only_b[:8]}")
         elif x["order"] != y["order"]:
-            moved = [t for i, t in enumerate(x["order"]) if y["order"][i] != t]
-            diffs.append(f"[{mode}] 건수 같음({x['n']})인데 **순위 다름** — {moved[:8]}")
+            moved = [t for a, t in zip(x["order"], y["order"]) if a != t]
+            diffs.append(f"[{mode}] 구성 같음({x['n']})인데 **순위 다름** — {moved[:8]}")
+        if x["n"] != len(x["order"]) or y["n"] != len(y["order"]):
+            diffs.append(f"[{mode}] 건수 필드와 목록 길이가 어긋난다 — 집계 버그")
         # 점수가 흔들리면 건수·순위가 같아도 경계 종목이 다음 날 갈린다
         sd = [t for t in x["order"]
               if t in y["score"] and x["score"][t] != y["score"][t]]
