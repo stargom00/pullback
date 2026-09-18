@@ -114,7 +114,7 @@ HITS = [
     {"ticker": "A", "grade": "A급", "c_stage": "C1 벽앞"},
     {"ticker": "B", "grade": "B급", "c_stage": "C2 진돌이"},
     {"ticker": "C", "grade": "A급", "c_stage": "C0 대기"},
-    {"ticker": "D", "grade": "A급 근접", "c_stage": "C3 이탈"},
+    {"ticker": "D", "grade": "C급", "c_stage": "C3 이탈"},
 ]
 
 
@@ -132,6 +132,20 @@ def test_stage_prefix_does_not_leak_across_stages():
 def test_grade_and_stage_combine():
     assert _filtered(HITS, grade="A급", stage="C1") == ["A"]
     assert _filtered(HITS, grade="B급", stage="C1") == []
+    assert _filtered(HITS, grade="C급") == ["D"]
+
+
+def test_grade_chips_and_colors_cover_exactly_the_three_tiers():
+    """칩·색 테이블이 등급 집합과 어긋나면 **해당 등급이 화면에서 사라진다**
+    (색 테이블에 없으면 회색, 칩에 없으면 걸러낼 방법이 없다)."""
+    import ast
+    i = TEXT.index("const _ABC_GRADE_COLOR")
+    table = TEXT[i:TEXT.index("\n", i)]
+    for g in ("A급", "B급", "C급"):
+        assert f"'{g}'" in table, f"{g} 색이 없다: {table}"
+        assert f"setAbcGrade('{g}')" in TEXT, f"{g} 필터 칩이 없다"
+    assert "A급 근접" not in TEXT, "삭제된 라벨이 남아 있다"
+    assert "단타만" not in TEXT and "trading_only" not in TEXT
 
 
 def test_missing_stage_does_not_crash():

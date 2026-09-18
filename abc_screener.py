@@ -230,15 +230,20 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
 def company_axis(turnover_eok: float | None, rev_yoy_pos: int | None,
                  eps_pos_q: int | None, major_holder_issue: bool,
                  cfg: dict = ABC_CONFIG, *, rev_yoy_of: int) -> dict:
-    """기업 축 — 충족/미달 목록과 트레이딩용 여부.
+    """기업 축 — 충족/미달 목록과 거래대금 미달 여부.
+
+    `turnover_fail`은 v5.267에서 `trading_only`를 개명한 것이다 — 값의 의미가
+    "트레이딩용 종목"이 아니라 **"거래대금 기준 미달"** 하나뿐인데 이름이 용도를
+    말하고 있었다(CLAUDE.md "이름이 의미와 어긋나면 개명" 원칙). 등급 매트릭스가
+    3단계로 바뀌면서 이 값은 C급 판정의 입력으로만 쓰인다.
 
     **시총은 보지 않는다**: 번들이 이미 시총 1000억 필터를 통과한 종목만
     담고 있어(app._fetch_market_data_inner가 fetch 이전에 자른다) 전원 충족이라
     변별력이 없다. 사용자 지시로 기준 자체는 남기되 판정에서 제외한다.
     """
     fails = []
-    trading_only = turnover_eok is not None and turnover_eok < cfg["min_turnover_eok"]
-    if trading_only:
+    turnover_fail = turnover_eok is not None and turnover_eok < cfg["min_turnover_eok"]
+    if turnover_fail:
         fails.append(f"거래대금 {turnover_eok:.0f}억 < {cfg['min_turnover_eok']}억")
     # naver 모바일이 분기를 6개만 줘서 YoY를 4분기 전부 볼 수 없는 경우가 많다.
     # **판정 가능한 분기 수(rev_yoy_of)가 기준에 못 미치면 감점하지 않는다** —
@@ -250,14 +255,34 @@ def company_axis(turnover_eok: float | None, rev_yoy_pos: int | None,
         fails.append(f"EPS 흑자 {eps_pos_q}/{cfg['eps_positive_quarters']}분기")
     if major_holder_issue:
         fails.append("최대주주 이슈")
-    return {"ok": not fails, "fails": fails, "trading_only": trading_only}
+    return {"ok": not fails, "fails": fails, "turnover_fail": turnover_fail}
 
 
 def grade(res: dict, comp: dict) -> str | None:
-    """등급. A 없음이면 None(탭에서 제외)."""
+    """등급 3단계 (사용자 확정 2026-09-18).
+
+        A급  = 차트 A·B·C 전부 & 기업 전부 충족
+        B급  = 차트 전부 & 기업 감점  /  또는  기업 충족 & B 미달
+        C급  = 거래대금 미달 또는 C3 이탈
+        제외 = A 없음 (None)
+
+    **판정 순서**: C급 조건을 먼저 본다 — 거래대금 미달·C3 이탈은 차트가
+    아무리 좋아도 위로 못 올라가는 강등 조건이라서다.
+
+    **사양 빈틈(내 판단으로 메움)**: "B 미달 **그리고** 기업 감점"은 위 정의
+    어디에도 없다. B급 두 갈래 중 어느 쪽도 만족하지 못하므로 남는 최하위인
+    C급으로 둔다 — 제외는 A가 없을 때만이다. 사용자 확인 필요.
+    """
     if res.get("verdict") != "ABC":
         return None
-    chart_ok = bool(res.get("b", {}).get("ok")) and res.get("c_stage") is not None
-    if not chart_ok:
+    stage = res.get("c_stage")
+    if comp.get("turnover_fail") or stage == "C3 이탈":
+        return "C급"
+    # 여기부터 comp["ok"]는 거래대금을 뺀 나머지 기업 축의 통과 여부다
+    # (거래대금 미달은 위에서 이미 C급으로 빠졌다).
+    chart_ok = bool(res.get("b", {}).get("ok")) and stage is not None
+    if chart_ok and comp.get("ok"):
+        return "A급"
+    if chart_ok or comp.get("ok"):
         return "B급"
-    return "A급" if comp.get("ok") else "A급 근접"
+    return "C급"

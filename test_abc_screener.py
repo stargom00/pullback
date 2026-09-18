@@ -153,9 +153,9 @@ def test_supply_band_flag():
 # ── 기업 축·등급 ──────────────────────────────────────────────────────
 def test_company_axis_turnover_gate():
     c = A.company_axis(250, 4, 2, False, rev_yoy_of=4)
-    assert c["trading_only"] is True and not c["ok"]
+    assert c["turnover_fail"] is True and not c["ok"]
     c2 = A.company_axis(500, 4, 2, False, rev_yoy_of=4)
-    assert c2["ok"] is True and c2["trading_only"] is False
+    assert c2["ok"] is True and c2["turnover_fail"] is False
 
 
 def test_company_axis_collects_all_fails():
@@ -182,14 +182,52 @@ def test_company_axis_ignores_market_cap():
     assert "mcap" not in src and "시총" in src, "시총 제외 근거 주석이 없다"
 
 
-def test_grade_matrix():
-    ok_chart = {"verdict": "ABC", "b": {"ok": True}, "c_stage": "C1 벽앞"}
-    assert A.grade(ok_chart, {"ok": True}) == "A급"
-    assert A.grade(ok_chart, {"ok": False}) == "A급 근접"
-    assert A.grade({"verdict": "ABC", "b": {"ok": False}, "c_stage": "C1 벽앞"},
-                   {"ok": True}) == "B급"
-    assert A.grade({"verdict": "다른 셋업"}, {"ok": True}) is None
-    assert A.grade({"verdict": "ABC 아님"}, {"ok": True}) is None
+def _g(b_ok, stage, comp_ok, turnover_fail=False, verdict="ABC"):
+    return A.grade({"verdict": verdict, "b": {"ok": b_ok}, "c_stage": stage},
+                   {"ok": comp_ok, "turnover_fail": turnover_fail})
+
+
+def test_grade_matrix_is_three_tiers():
+    """사용자 확정 매트릭스(2026-09-18) 전수. "A급 근접"은 삭제됐다."""
+    assert _g(True, "C1 벽앞", True) == "A급"          # 차트 전부 & 기업 전부
+    assert _g(True, "C1 벽앞", False) == "B급"         # 차트 전부 & 기업 감점
+    assert _g(False, "C1 벽앞", True) == "B급"         # 기업 충족 & B 미달
+    assert _g(True, "C1 벽앞", True, turnover_fail=True) == "C급"
+    assert _g(True, "C3 이탈", True) == "C급"
+    assert _g(True, "C1 벽앞", True, verdict="다른 셋업") is None
+    assert _g(True, "C1 벽앞", True, verdict="ABC 아님") is None
+
+
+def test_obsolete_labels_are_gone():
+    """라벨이 코드에 남아 있으면 화면에 다시 샌다(필터 칩·색 테이블 모두)."""
+    import inspect
+    src = inspect.getsource(A)
+    assert "A급 근접" not in src
+    assert "trading_only" not in src.replace(
+        "`trading_only`를 개명한 것이다", "")      # 개명 근거 주석만 예외
+
+
+def test_demotion_beats_a_good_chart():
+    """거래대금 미달·C3은 **강등** 조건이다 — 차트가 완벽해도 위로 못 간다."""
+    assert _g(True, "C2 진돌이", True, turnover_fail=True) == "C급"
+    assert _g(True, "C3 이탈", True) == "C급"
+
+
+def test_spec_gap_both_failing_lands_in_c():
+    """**사양에 없는 조합**: B 미달 + 기업 감점. B급 두 갈래 어디에도 안 맞아
+    최하위 C급으로 뒀다(제외는 A가 없을 때만). 사용자가 달리 정하면 여기부터."""
+    assert _g(False, "C1 벽앞", False) == "C급"
+
+
+def test_grade_never_returns_an_unknown_label():
+    """등급 문자열이 늘어나면 화면 색 테이블·필터 칩이 조용히 어긋난다."""
+    allowed = {"A급", "B급", "C급", None}
+    for b in (True, False):
+        for stage in ("C0 대기", "C1 벽앞", "C2 진돌이", "C2 가돌이",
+                      "C2 돌파 없음", "C3 이탈", None):
+            for ok in (True, False):
+                for tf in (True, False):
+                    assert _g(b, stage, ok, tf) in allowed
 
 
 def test_config_is_single_source():

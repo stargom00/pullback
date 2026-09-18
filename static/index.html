@@ -3040,7 +3040,7 @@ async function loadThemes() {
 // 숫자(하락폭·기간·배수 등)는 전부 2026-09-18 초기 임의값 — 측정 전이다.
 // ══════════════════════════════════════════════════════════════════════
 let _abcData = null;
-let abcGradeFilter = 'all';      // 'all' | 'A급' | 'A급 근접' | 'B급'
+let abcGradeFilter = 'all';      // 'all' | 'A급' | 'B급' | 'C급'
 let abcStageFilter = 'all';      // 'all' | 'C0' | 'C1' | 'C2' | 'C3'
 
 function _abcNum(v, suffix = '', digits = 1) {
@@ -3055,7 +3055,7 @@ function _abcMa200(v) {
   return `<span class="mono" style="color:${col}">${v > 0 ? '+' : ''}${v.toFixed(1)}%</span>`;
 }
 
-const _ABC_GRADE_COLOR = { 'A급': '#4ADE80', 'A급 근접': '#FACC15', 'B급': 'var(--muted)' };
+const _ABC_GRADE_COLOR = { 'A급': '#4ADE80', 'B급': '#FACC15', 'C급': 'var(--muted)' };
 
 // 매출·EPS 한 칸. **"판정 불가"를 "미달"로 보이게 하면 안 된다** — naver 모바일이
 // 분기를 6개만 줘서 최근 4분기 YoY를 못 채우는 경우가 흔하고, 서버도 그럴 땐
@@ -3082,7 +3082,7 @@ function abcRowHtml(h) {
   return `<tr>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);white-space:nowrap">${name} ${star}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;color:${gcol};font-size:11px"
-        title="${fails ? '기업 축 미달: ' + fails : '기업 축 통과'}">${h.grade}${h.trading_only ? ' <span style="color:var(--muted)">단타만</span>' : ''}</td>
+        title="${fails ? '기업 축 미달: ' + fails : '기업 축 통과'}">${h.grade}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;font-size:11px">${stage}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${_abcMa200(h.ma200_pct)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right"
@@ -3125,8 +3125,8 @@ function renderAbcPage() {
     '<span style="color:var(--muted);font-size:11px;margin-right:4px">등급</span>',
     _abcChip('전체', abcGradeFilter === 'all', "setAbcGrade('all')"),
     _abcChip('A급', abcGradeFilter === 'A급', "setAbcGrade('A급')"),
-    _abcChip('A급 근접', abcGradeFilter === 'A급 근접', "setAbcGrade('A급 근접')"),
     _abcChip('B급', abcGradeFilter === 'B급', "setAbcGrade('B급')"),
+    _abcChip('C급', abcGradeFilter === 'C급', "setAbcGrade('C급')"),
     '<span style="color:var(--muted);font-size:11px;margin:0 4px 0 10px">C단계</span>',
     _abcChip('전체', abcStageFilter === 'all', "setAbcStage('all')"),
     _abcChip('C1 벽앞', abcStageFilter === 'C1', "setAbcStage('C1')"),

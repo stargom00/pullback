@@ -24,6 +24,12 @@ v5.267 [신규] 🔺 ABC 탭 — 더양봉맨식 A(하락)·B(바닥다지기)·
       않고 이유를 화면까지 내보낸다. `company_axis(rev_yoy_of=...)`는 기본값
       없는 필수 키워드 — 호출부가 빼먹으면 축이 조용히 사라지기 때문.
       추정치 셀(`est=true`)은 실적이 아니므로 버린다.
+    · 등급은 3단계(사용자 확정): A급 = 차트 전부 & 기업 전부 / B급 = 차트 전부 &
+      기업 감점, 또는 기업 충족 & B 미달 / C급 = 거래대금 미달 또는 C3 이탈 /
+      제외 = A 없음. "A급 근접"·"트레이딩용(단타만)" 라벨은 삭제.
+      거래대금 미달·C3은 **강등** 조건이라 차트보다 먼저 본다.
+      `company_axis`의 `trading_only` → `turnover_fail` 개명 — 값의 의미가
+      "거래대금 미달" 하나뿐인데 이름이 용도를 말하고 있었다.
     · 수동 플래그는 `abc_flags.json`(없거나 깨져도 전부 false + 로그).
 v5.266 [버그수정] 종가베팅 포워드 백필 미작동 — **근본 원인 확정 후 수정**.
         [원인] `_fetch_market_data_inner()`는 **fetch 이전에** 시총 1000억 필터로
@@ -12082,7 +12088,7 @@ async def api_abc():
             "rev_yoy_pos": f["rev_yoy_pos"], "rev_yoy_of": f.get("rev_yoy_of"),
             "eps_pos_q": f["eps_pos_q"],
             "fin_reason": f["reason"], "company_fails": comp["fails"],
-            "trading_only": comp["trading_only"], "sector": si.get("sector"),
+            "turnover_fail": comp["turnover_fail"], "sector": si.get("sector"),
         })
 
     order = {"C1 벽앞": 0, "C2 진돌이": 1, "C2 가돌이": 1, "C2 돌파 없음": 1,
