@@ -5,6 +5,26 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.267 [신규] 🔺 ABC 탭 — 더양봉맨식 A(하락)·B(바닥다지기)·C(돌파) 패턴
+    스크리너(사용자 지시). **KR 전용 · 관심 신호이지 진입 근거가 아니다** —
+    스캔/게이트/즉시행동/EV 계산 어디에도 영향을 주지 않는다.
+    · `abc_screener.py` 신설 — 네트워크·파일·전역 상태 없는 순수 계산 모듈.
+      임계값은 전부 `ABC_CONFIG` 한 곳(2026-09-18 초기 임의값, **측정 근거
+      없음** — CLAUDE.md "출처 기록" 4번 유형을 명시해둠).
+    · `/api/abc`는 `_peek_market_bundle("kr")`로 **번들 캐시만** 읽는다(새 봉
+      fetch 0건). 실적만 차트 통과분에 한해 조회(상한 `_ABC_EARNINGS_MAX`).
+    · C단계는 **이벤트가 아니라 상태**(C0 대기 / C1 벽앞 / C2 돌파 / C3 이탈).
+      진돌이·가돌이는 돌파봉 포함 3봉 중 최대 거래량으로 가른다(N=3 임의값).
+    · [버그수정, 작성 중 발견] 돌파봉 탐지가 과거 종가를 **오늘의 MA200**과
+      비교하고 있었다 = 룩어헤드. `close.rolling(200).mean()`의 그 봉 값으로
+      고쳤고 회귀 테스트로 고정(test_abc_screener.py).
+    · [데이터 한계] naver 모바일은 분기를 6개만 준다 → "최근 4분기 매출 YoY"에
+      필요한 8분기가 안 나온다. 이걸 "미달"로 뭉개면 **없는 근거로 등급을
+      깎으므로**, 판정 가능한 분기 수(`rev_yoy_of`)가 기준 미만이면 감점하지
+      않고 이유를 화면까지 내보낸다. `company_axis(rev_yoy_of=...)`는 기본값
+      없는 필수 키워드 — 호출부가 빼먹으면 축이 조용히 사라지기 때문.
+      추정치 셀(`est=true`)은 실적이 아니므로 버린다.
+    · 수동 플래그는 `abc_flags.json`(없거나 깨져도 전부 false + 로그).
 v5.266 [버그수정] 종가베팅 포워드 백필 미작동 — **근본 원인 확정 후 수정**.
         [원인] `_fetch_market_data_inner()`는 **fetch 이전에** 시총 1000억 필터로
         유니버스를 자른다(`universe = {... if t in _mcap_allowed}`). 반면 종가베팅
@@ -7162,6 +7182,7 @@ try:
 except Exception as _e:
     print(f"[sectors] kr_sectors_auto 미탑재 -> 자동보완 비활성: {_e}", flush=True)
     KR_SECTORS_AUTO = {}
+import abc_screener      # v5.267: 🔺 ABC 탭 순수 판정(추가 fetch 0건)
 import sector_snapshot   # v5.195 [3]: 섹터 합성지수/RS백분위/신고가비율 등 (추가 fetch 0건)
 import scenario   # v5.196: 시나리오 카드(저항/지지/무효 + 3갈래) — 표시 전용, 재량 훈련용
 
@@ -7455,7 +7476,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.266"
+VERSION = "v5.267"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -11917,6 +11938,168 @@ def _rss_mb() -> float | None:
         return round(rss / 1024 / 1024, 1) if rss > 10 ** 7 else round(rss / 1024, 1)
     except Exception:
         return None
+
+
+# ══════════════════════════════════════════════════════════════════════
+# v5.267(사용자 지시): 🔺 ABC 탭 — 관심 신호 스크리너 (KR 전용)
+# ══════════════════════════════════════════════════════════════════════
+# 스캔·진입 판정·즉시행동에 **영향 0**. 판정 로직은 abc_screener.py(순수 계산)에
+# 있고 여기서는 데이터 조립·노출만 한다(sector_snapshot/theme_reignition과 같은
+# 책임 분리). 일봉은 **이미 있는 번들 캐시만** 읽는다 — 새 fetch 0건.
+_ABC_FLAGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "abc_flags.json")
+_ABC_EARNINGS_MAX = 40      # 실적 조회 상한(임의값) — 차트 통과분만 보므로 보통 한 자릿수
+
+
+def _load_abc_flags() -> dict:
+    """수동 플래그 {ticker: {major_holder_issue: bool}}.
+    파일이 없거나 깨져도 **탭은 정상 동작**한다(전부 false) — 단, 조용히 넘기지 않고
+    로그를 남긴다(themes_kr.json과 같은 fail-open 원칙)."""
+    try:
+        with open(_ABC_FLAGS_FILE, encoding="utf-8") as f:
+            doc = _json.load(f)
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        print(f"[abc] abc_flags.json 파싱 실패: {e} — 플래그 없이 진행", flush=True)
+        return {}
+    out = {}
+    for row in (doc.get("flags") or []):
+        t = (row.get("t") or "").strip()
+        if t:
+            out[t] = {"major_holder_issue": bool(row.get("major_holder_issue"))}
+    return out
+
+
+def _abc_quarterly_axes(ticker: str) -> dict:
+    """매출 YoY+ 분기 수(최근 4분기)와 EPS 흑자 분기 수(최근 2분기).
+
+    **파싱은 earnings.py 것을 그대로 재사용**한다(재구현 금지) — 판정 기준만
+    ABC 전용이다(기존 get_earnings_growth의 verdict는 '3년 EPS 증가 + 분기 YoY
+    25% + 매출 증가'라 기준이 다르다).
+    """
+    cfg = abc_screener.ABC_CONFIG
+    try:
+        code = naver_kr.to_code(ticker)
+        parsed = earnings_mod._parse_kr_mobile(
+            earnings_mod._fetch_kr_finance(code, "annual"),
+            earnings_mod._fetch_kr_finance(code, "quarter"))
+        if not parsed or not parsed.get("revenue") or not parsed.get("eps"):
+            return {"rev_yoy_pos": None, "rev_yoy_of": 0, "eps_pos_q": None,
+                    "reason": "실적 표 없음"}
+
+        def nums(cells):
+            """셀은 {"value": float, "est": bool} 구조다. **추정치(est=True)는
+            버린다** — 아직 안 나온 분기를 실적으로 쓰면 안 된다."""
+            out = []
+            for c in cells:
+                if isinstance(c, dict) and not c.get("est") and c.get("value") is not None:
+                    out.append(float(c["value"]))
+            return out
+
+        na = parsed["n_annual"]
+        rev_q = nums(parsed["revenue"][na:])
+        eps_q = nums(parsed["eps"][na:])
+
+        # 매출 YoY — 같은 분기 전년 대비(4분기 전). **naver 모바일은 분기를 6개만
+        # 준다** → 최근 4분기를 전부 YoY로 보려면 8분기가 필요해 실제로는 2분기만
+        # 계산된다. 그 사실을 숨기지 않고 rev_yoy_of(분모)로 함께 내보내며,
+        # 분모가 기준(3분기)에 못 미치면 company_axis가 **감점하지 않는다**
+        # (판정 불가를 미달로 뭉개지 않는다).
+        w = cfg["rev_yoy_window"]
+        avail = max(0, min(w, len(rev_q) - 4))
+        rev_pos = None
+        if avail:
+            recent = rev_q[-avail:]
+            prior = rev_q[-avail - 4:-4]
+            rev_pos = sum(1 for a, b in zip(recent, prior) if b and a > b)
+        eps_pos = (sum(1 for v in eps_q[-cfg["eps_positive_quarters"]:] if v > 0)
+                   if len(eps_q) >= cfg["eps_positive_quarters"] else None)
+        reason = None if avail >= cfg["rev_yoy_min_quarters"] else (
+            f"매출 YoY 판정 불가(분기 {len(rev_q)}개 — YoY 가능 {avail}분기)")
+        return {"rev_yoy_pos": rev_pos, "rev_yoy_of": avail,
+                "eps_pos_q": eps_pos, "reason": reason}
+    except Exception as e:
+        return {"rev_yoy_pos": None, "rev_yoy_of": 0, "eps_pos_q": None,
+                "reason": f"{type(e).__name__}: {e}"}
+
+
+@app.get("/api/abc")
+async def api_abc():
+    """🔺 ABC 탭 — 번들 캐시만 읽어 종목별 A/B/C를 판정한다(새 fetch 0건).
+    실적은 차트 통과분에 한해 조회(상한 _ABC_EARNINGS_MAX, 실패는 unknown)."""
+    bundle = _peek_market_bundle("kr")
+    if not bundle:
+        return {"ok": True, "cache_state": "cold", "hits": [],
+                "message": "아직 스캔 캐시가 없습니다 — 스캔을 한 번 돌린 뒤 새로고침하세요."}
+
+    flags = _load_abc_flags()
+    uni = bundle.get("universe") or {}
+    sec_by_ticker = ((bundle.get("sector_info") or {}).get("by_ticker") or {})
+    counts = {"ABC": 0, "다른 셋업": 0, "ABC 아님": 0}
+    cands = []
+    for t, df in (bundle.get("data") or {}).items():
+        if not naver_kr.is_kr(t):
+            continue
+        r = abc_screener.analyze_abc(df)
+        counts[r["verdict"]] = counts.get(r["verdict"], 0) + 1
+        if r["verdict"] != "ABC" or r["c_stage"] is None:
+            continue
+        cands.append((t, r))
+
+    # 실적은 차트 통과분만 — 스레드풀로 병렬, 상한 초과분은 unknown
+    loop = asyncio.get_event_loop()
+    fin = {}
+    for i in range(0, min(len(cands), _ABC_EARNINGS_MAX), 6):
+        chunk = cands[i:i + 6]
+        res = await asyncio.gather(*[
+            loop.run_in_executor(_earnings_executor, _abc_quarterly_axes, t)
+            for t, _ in chunk], return_exceptions=True)
+        for (t, _), v in zip(chunk, res):
+            fin[t] = v if isinstance(v, dict) else {"rev_yoy_pos": None,
+                                                    "eps_pos_q": None, "reason": "조회 실패"}
+
+    hits = []
+    for t, r in cands:
+        f = fin.get(t) or {"rev_yoy_pos": None, "rev_yoy_of": 0,
+                           "eps_pos_q": None, "reason": "미조회"}
+        comp = abc_screener.company_axis(
+            r["turnover_eok"], f["rev_yoy_pos"], f["eps_pos_q"],
+            bool((flags.get(t) or {}).get("major_holder_issue")),
+            rev_yoy_of=f.get("rev_yoy_of") or 0)
+        g = abc_screener.grade(r, comp)
+        if g is None:
+            continue
+        si = sec_by_ticker.get(t) or {}
+        hits.append({
+            "ticker": t, "name": uni.get(t) or t, "grade": g,
+            "c_stage": r["c_stage"], "ma200_pct": r["ma200_pct"],
+            "close": r["close"], "ma200": r["ma200"],
+            "vol_mult": (r["breakout"] or {}).get("vol_mult"),
+            "breakout_bars_ago": (r["breakout"] or {}).get("bars_ago"),
+            "a_drop_pct": (r["a"] or {}).get("drop_pct"),
+            "b_bars": (r["b"] or {}).get("bars"), "b_ok": (r["b"] or {}).get("ok"),
+            "supply_above": r["supply_above"], "turnover_eok": r["turnover_eok"],
+            "rev_yoy_pos": f["rev_yoy_pos"], "rev_yoy_of": f.get("rev_yoy_of"),
+            "eps_pos_q": f["eps_pos_q"],
+            "fin_reason": f["reason"], "company_fails": comp["fails"],
+            "trading_only": comp["trading_only"], "sector": si.get("sector"),
+        })
+
+    order = {"C1 벽앞": 0, "C2 진돌이": 1, "C2 가돌이": 1, "C2 돌파 없음": 1,
+             "C0 대기": 2, "C3 이탈": 3}
+    hits.sort(key=lambda h: (order.get(h["c_stage"], 9), -(h["vol_mult"] or 0)))
+
+    # 섹터 묶음 — C0~C2 히트가 같은 섹터에 2개 이상이면 상단에 표시
+    from collections import Counter
+    sec_cnt = Counter(h["sector"] for h in hits
+                      if h["sector"] and not h["c_stage"].startswith("C3"))
+    ts = bundle.get("ts")
+    return {"ok": True, "cache_state": "warm", "hits": hits, "counts": counts,
+            "sector_clusters": [{"sector": s, "n": n}
+                                for s, n in sec_cnt.most_common() if n >= 2],
+            "flags_loaded": len(flags),
+            "asof": datetime.fromtimestamp(ts, KST).strftime("%Y-%m-%d %H:%M") if ts else "",
+            "config": abc_screener.ABC_CONFIG, "version": VERSION}
 
 
 @app.get("/api/debug/memory")

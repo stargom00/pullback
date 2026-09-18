@@ -566,7 +566,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.266</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.267</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -596,6 +596,9 @@ tr.editing{background:rgba(242,179,61,.06)}
          드롭다운의 "⚡급등"(data-mode="surge", analyze_surge 게이트 스캔)과
          완전히 다른 기능이라 별도 mode 키(surge_observe) 사용 — 판정 없이
          당일 급등 종목을 저장해두고 이후 가격을 관찰만 한다. -->
+    <!-- v5.267(사용자 지시): 🔺 ABC — 더양봉맨식 패턴. **관심 신호**이지
+         진입 근거가 아니다(측정 전). 스캔/게이트/즉시행동과 분리. -->
+    <button class="tab" data-mode="abc" title="A(하락)·B(바닥다지기)·C(돌파) 패턴 — KR 전용, 관심 신호(진입 근거 없음, 측정 전)">🔺 ABC</button>
     <button class="tab" data-mode="surge_observe" title="당일 +15%↑ & 거래량 20일평균 10배↑ KR — 판정/EV/진입가 없음, 순수 관찰(2주 실험)">🔥 급등<span class="exp-tag">2주 실험</span></button>
     <span class="tab-group-sep"></span>
     <button class="tab" data-mode="eod">📋 마감정리</button>
@@ -2694,6 +2697,7 @@ async function load(refresh = false) {
   if (mode === 'inverse') { return loadInverse(refresh); }
   if (mode === 'sectors') { return loadSectors(); }
   if (mode === 'themes') { return loadThemes(); }
+  if (mode === 'abc') { return loadAbc(); }
   if (mode === 'eod') { return loadEod(); }
   const content = document.getElementById('content');
   const status = document.getElementById('status');
@@ -3027,6 +3031,168 @@ async function loadThemes() {
   } catch (e) {
     content.innerHTML = `<div class="empty">불러오기에 실패했습니다.<br><span style="font-size:12px;color:var(--muted)">${e}</span></div>`;
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// v5.267(사용자 지시): 🔺 ABC — 더양봉맨식 A(하락)·B(바닥다지기)·C(돌파)
+// 패턴 스크리너. KR 전용, **관심 신호일 뿐 진입 근거가 아니다** — 스캔·게이트·
+// 즉시행동과 완전히 분리돼 있고 /api/abc는 번들 캐시만 읽는다(새 fetch 0건).
+// 숫자(하락폭·기간·배수 등)는 전부 2026-09-18 초기 임의값 — 측정 전이다.
+// ══════════════════════════════════════════════════════════════════════
+let _abcData = null;
+let abcGradeFilter = 'all';      // 'all' | 'A급' | 'A급 근접' | 'B급'
+let abcStageFilter = 'all';      // 'all' | 'C0' | 'C1' | 'C2' | 'C3'
+
+function _abcNum(v, suffix = '', digits = 1) {
+  if (v == null) return '<span style="color:var(--muted)">—</span>';
+  return `<span class="mono">${v.toFixed(digits)}${suffix}</span>`;
+}
+
+// MA200 대비 %는 부호가 곧 의미다(벽 아래/위) — 색으로 구분.
+function _abcMa200(v) {
+  if (v == null) return '<span style="color:var(--muted)">—</span>';
+  const col = v > 0 ? 'var(--px-up)' : v < 0 ? 'var(--px-down)' : 'var(--muted)';
+  return `<span class="mono" style="color:${col}">${v > 0 ? '+' : ''}${v.toFixed(1)}%</span>`;
+}
+
+const _ABC_GRADE_COLOR = { 'A급': '#4ADE80', 'A급 근접': '#FACC15', 'B급': 'var(--muted)' };
+
+// 매출·EPS 한 칸. **"판정 불가"를 "미달"로 보이게 하면 안 된다** — naver 모바일이
+// 분기를 6개만 줘서 최근 4분기 YoY를 못 채우는 경우가 흔하고, 서버도 그럴 땐
+// 감점하지 않는다(fin_reason에 이유가 실려 온다).
+function abcFinCell(h) {
+  const parts = [];
+  if (h.rev_yoy_pos != null && h.rev_yoy_of) parts.push(`매출 ${h.rev_yoy_pos}/${h.rev_yoy_of}`);
+  if (h.eps_pos_q != null) parts.push(`EPS ${h.eps_pos_q}/2`);
+  if (!parts.length) return `<span style="color:var(--muted)" title="${h.fin_reason || '실적 미조회'}">판정 불가</span>`;
+  const warn = h.fin_reason ? ` <span style="color:var(--muted)" title="${h.fin_reason}">*</span>` : '';
+  return `<span class="mono" style="font-size:11px">${parts.join(' · ')}</span>${warn}`;
+}
+
+function abcRowHtml(h) {
+  const gcol = _ABC_GRADE_COLOR[h.grade] || 'var(--muted)';
+  const stage = h.c_stage || '—';
+  const name = `<a href="${tvUrl(h.ticker, 'kr')}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${h.name}</a>`;
+  // ★ = 추적 추가. 트리거는 **MA200 가격**(C 구간의 벽) — 진입 신호가 아니라
+  // "벽에 닿으면 알려달라"는 관찰 등록이다.
+  const star = h.ma200 != null
+    ? `<button class="journal-btn" style="padding:0 5px;font-size:11px;margin-left:2px" onclick="abcWatch(this,'${h.ticker}')" title="MA200(${h.ma200.toLocaleString()}) 도달 시 알림 — 관찰 등록">★</button>`
+    : '';
+  const fails = (h.company_fails || []).join(' · ');
+  return `<tr>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);white-space:nowrap">${name} ${star}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;color:${gcol};font-size:11px"
+        title="${fails ? '기업 축 미달: ' + fails : '기업 축 통과'}">${h.grade}${h.trading_only ? ' <span style="color:var(--muted)">단타만</span>' : ''}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;font-size:11px">${stage}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${_abcMa200(h.ma200_pct)}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right"
+        title="${h.breakout_bars_ago != null ? h.breakout_bars_ago + '봉 전 돌파봉 포함 3봉 중 최대 거래량' : ''}">${_abcNum(h.vol_mult, '배', 1)}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${_abcNum(h.a_drop_pct, '%', 0)}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${h.b_bars != null ? h.b_bars : '—'}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center">${h.supply_above ? '<span style="color:var(--px-down)" title="위에 매물대가 있다">있음</span>' : '<span style="color:var(--muted)">—</span>'}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${_abcNum(h.turnover_eok, '억', 0)}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center">${abcFinCell(h)}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${h.sector || '—'}</td>
+  </tr>`;
+}
+
+function abcFilteredHits() {
+  const hits = (_abcData && _abcData.hits) || [];
+  return hits.filter(h =>
+    (abcGradeFilter === 'all' || h.grade === abcGradeFilter) &&
+    (abcStageFilter === 'all' || (h.c_stage || '').startsWith(abcStageFilter)));
+}
+
+function _abcChip(label, active, onclick) {
+  return `<button class="journal-btn" onclick="${onclick}" style="${active ? 'background:#1b2a3a;border-color:#3b6ea5;color:#cfe6ff' : ''}">${label}</button>`;
+}
+
+function setAbcGrade(g) { abcGradeFilter = g; renderAbcPage(); }
+function setAbcStage(s) { abcStageFilter = s; renderAbcPage(); }
+
+function renderAbcPage() {
+  const content = document.getElementById('content');
+  const d = _abcData;
+  if (!d) return;
+  if (d.cache_state === 'cold') {
+    content.innerHTML = `<div class="empty">${d.message}</div>`;
+    return;
+  }
+  const rows = abcFilteredHits();
+  const counts = d.counts || {};
+  const clusters = (d.sector_clusters || []).map(c => `${c.sector} ${c.n}`).join(' · ');
+  const chips = [
+    '<span style="color:var(--muted);font-size:11px;margin-right:4px">등급</span>',
+    _abcChip('전체', abcGradeFilter === 'all', "setAbcGrade('all')"),
+    _abcChip('A급', abcGradeFilter === 'A급', "setAbcGrade('A급')"),
+    _abcChip('A급 근접', abcGradeFilter === 'A급 근접', "setAbcGrade('A급 근접')"),
+    _abcChip('B급', abcGradeFilter === 'B급', "setAbcGrade('B급')"),
+    '<span style="color:var(--muted);font-size:11px;margin:0 4px 0 10px">C단계</span>',
+    _abcChip('전체', abcStageFilter === 'all', "setAbcStage('all')"),
+    _abcChip('C1 벽앞', abcStageFilter === 'C1', "setAbcStage('C1')"),
+    _abcChip('C2 돌파', abcStageFilter === 'C2', "setAbcStage('C2')"),
+    _abcChip('C0 대기', abcStageFilter === 'C0', "setAbcStage('C0')"),
+    _abcChip('C3 이탈', abcStageFilter === 'C3', "setAbcStage('C3')"),
+  ].join(' ');
+
+  content.innerHTML = `
+    <div style="margin:0 0 10px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:#1a1410">
+      <div style="color:#FACC15;font-size:12px;font-weight:600">🔺 관심 신호. 진입 근거 없음 — 측정 전.</div>
+      <div style="color:var(--muted);font-size:11px;margin-top:3px">
+        숫자는 초기 임의값(2026-09-18) — 백테스트로 검증된 조건이 아닙니다.
+        스캔·게이트·즉시행동에 아무 영향도 주지 않습니다. KR 전용.</div>
+    </div>
+    <div style="margin-bottom:8px">${chips}</div>
+    ${clusters ? `<div style="margin-bottom:8px;font-size:11px;color:var(--muted)">섹터 묶음: ${clusters}</div>` : ''}
+    ${rows.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="color:var(--muted);font-size:11px">
+        <th style="text-align:left;padding:3px 8px">종목</th>
+        <th style="padding:3px 8px">등급</th>
+        <th style="padding:3px 8px" title="C0 대기 / C1 벽앞 / C2 돌파 / C3 이탈 — 이벤트가 아니라 현재 상태">C단계</th>
+        <th style="text-align:right;padding:3px 8px">MA200대비</th>
+        <th style="text-align:right;padding:3px 8px" title="돌파봉 포함 3봉 중 최대 거래량 / 평균">vol배수</th>
+        <th style="text-align:right;padding:3px 8px" title="A: 고점→저점 하락폭">A하락</th>
+        <th style="text-align:right;padding:3px 8px" title="B: 바닥 다지기 봉 수">B일수</th>
+        <th style="padding:3px 8px" title="현재가 위에 매물대가 있는가">매물대</th>
+        <th style="text-align:right;padding:3px 8px">거래대금</th>
+        <th style="padding:3px 8px">매출·EPS</th>
+        <th style="text-align:left;padding:3px 8px">섹터</th>
+      </tr></thead>
+      <tbody>${rows.map(abcRowHtml).join('')}</tbody></table></div>`
+    : '<div class="empty">조건에 맞는 종목이 없습니다.</div>'}
+    <div style="margin-top:10px;font-size:11px;color:var(--muted)">
+      차트 판정: ABC ${counts['ABC'] || 0} · 다른 셋업 ${counts['다른 셋업'] || 0} · ABC 아님 ${counts['ABC 아님'] || 0}
+      ${d.flags_loaded ? ` · 수동 플래그 ${d.flags_loaded}건` : ''}
+    </div>`;
+}
+
+async function loadAbc() {
+  const content = document.getElementById('content');
+  const status = document.getElementById('status');
+  document.getElementById('searchBar').style.display = 'none';
+  document.getElementById('diagBar').style.display = 'none';
+  content.innerHTML = '<div class="loading"><div class="spinner"></div>불러오는 중…</div>';
+  status.innerHTML = '';
+  try {
+    _abcData = await fetch('/api/abc', { cache: 'no-store' }).then(r => r.json());
+    const n = (_abcData.hits || []).length;
+    status.innerHTML = `<span>${_abcData.asof ? `스캔 기준 ${_abcData.asof} KST` : ''}</span>`
+      + `<span>${n}건 · 번들 캐시만 읽음(새 조회 없음)</span>`;
+    renderAbcPage();
+  } catch (e) {
+    content.innerHTML = `<div class="empty">불러오기에 실패했습니다.<br><span style="font-size:12px;color:var(--muted)">${e}</span></div>`;
+  }
+}
+
+// ★ — MA200을 트리거로 한 **관찰** 등록. 눌림목 탭의 quickWatch는 lastHits를
+// 보는데 ABC는 별도 데이터라 여기서 직접 payload를 만든다.
+async function abcWatch(btn, ticker) {
+  const h = (_abcData && _abcData.hits || []).find(x => x.ticker === ticker);
+  if (!h || h.ma200 == null) { btn.textContent = 'MA200없음'; return; }
+  await _quickWatchRequest(h, btn, {
+    ticker: h.ticker, name: h.name, market: 'kr',
+    pivot: h.ma200, tab: 'ABC', reg_price: h.close,
+  });
 }
 
 // v4.83: 코스피/코스닥 마감 정리 — 상한가 종목 + 거래대금 상위
