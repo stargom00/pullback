@@ -5,6 +5,21 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.269 [접근] 포워드 검증 두 경로를 `_BOT_READ_EXACT_PATHS`에 추가(사용자 지시)
+    — `/api/jongga/forward`, `/api/paper-track`. 세션 쿠키 없이 상태 확인을
+    하려다 401에 막혀 매번 사람 손을 빌려야 했다(2026-09-19 09-18 백필 확인).
+    **게이트 우회가 아니다** — API_READ_TOKEN 헤더로 통과하는 GET·읽기 전용
+    (`_SYNC_TOKEN_GATED_PATHS`와 성격이 다르다, CLAUDE.md 보안 메모 참고).
+    [부수 발견] 이 작업에 붙인 test_bot_read_paths.py가 **이미 열려 있던**
+    `/api/market/gate`가 GET에서 `_save_index_gate_cache()`로 파일을 쓴다는
+    걸 찾아냈다. 지수 조회 실패용 "직전 정상값" 캐시라 사용자 데이터가 아니고
+    요청 내용이 반영되지도 않아 그대로 두되, `KNOWN_WRITERS`에 이유와 함께
+    명시해 **다음에 생기는 쓰기는 테스트가 실패로 잡도록** 했다.
+    [테스트] 목록의 모든 경로가 실제 GET 라우트인가 / 앱에 등록됐는가 /
+    쓰기를 안 하는가(알려진 예외만 통과, 그 예외도 여전히 유효한가) /
+    GET 외 메서드는 전부 거부 / 우회 집합과 겹치지 않는가.
+    사보타주 4종(없는 경로 추가 / 경로 누락 / 새 경로에 쓰기 주입 /
+    예외 목록이 낡음) 전부 FAIL 확인 후 원복.
 v5.268 [변경] 🔺 ABC 탭 기준선 200MA → **600MA**(사용자 지시 — "핫핑크 =
     더양봉맨 장기 추세 전환선"). **ABC 탭 내부만, 다른 탭 판정 무영향.**
     · C 단계·B 중앙값 밴드·매물대 밴드·돌파봉 탐지가 **전부** 기준선을 쓴다.
@@ -7358,6 +7373,13 @@ _BOT_READ_EXACT_PATHS = {
     # 값을 준다**(그 외엔 enabled=false만 반환). 진단이 끝나면 환경변수와
     # 함께 이 경로도 제거할 것 — 1회성이다.
     "/api/debug/memory",
+    # v5.269(사용자 지시): 포워드 검증 두 경로를 토큰 읽기로 개방.
+    # 세션 쿠키 없이 상태를 확인하려다 401에 막혀 매번 사람 손을 빌려야 했다
+    # (2026-09-19 09-18 백필 확인). **둘 다 GET·읽기 전용**임을 본문에서 확인
+    # 했다(_save_*/json.dump/open 호출 0건) — 쓰기 경로가 생기면 여기서 빼야
+    # 한다. 이건 `_SYNC_TOKEN_GATED_PATHS`류의 **게이트 우회가 아니다**:
+    # API_READ_TOKEN 헤더로 통과하며 읽기 전용이다(위 보안 메모 참고).
+    "/api/jongga/forward", "/api/paper-track",
 }
 _BOT_READ_PATH_PREFIXES = ("/api/dist/", "/api/ma/", "/api/pullback-signal/", "/api/vol/")
 
@@ -7503,7 +7525,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.268"
+VERSION = "v5.269"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
