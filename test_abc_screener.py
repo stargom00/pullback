@@ -448,24 +448,31 @@ def test_ma_period_is_600():
     assert CFG["ma_period"] == 600, f"기준선이 {CFG['ma_period']}로 돌아갔다"
 
 
-def test_ma200_is_display_only_never_a_gate():
-    """MA200은 보조 표시 열 하나로만 남는다(사용자 지시) — 판정에 쓰면 안 된다.
+def test_ma200_is_never_the_baseline():
+    """MA200이 **기준선 노릇을 하면** 안 된다.
 
-    `ma200_pct`를 만드는 두 줄 말고 다른 곳에서 200을 기준으로 쓰면 실패한다.
+    v5.268엔 "표시 전용"이었지만 v5.271에서 역배열(MA200 < MA600) 판정이
+    생겨 용도가 둘로 늘었다. 그래서 불변식을 좁힌다 — 허용되는 건
+    ① 화면 표시(`ma200_pct`) ② 두 이평의 **순서** 비교뿐이고,
+    C 단계·B 밴드·매물대·돌파의 **기준선**으로 쓰는 건 여전히 금지다.
     """
     import inspect
     src = inspect.getsource(A.analyze_abc)
     uses = [l.strip() for l in src.splitlines()
             if "_ma(close, 200)" in l or "rolling(200)" in l]
     assert len(uses) == 1, f"200 기준 계산이 여러 곳이다: {uses}"
-    assert "보조" in uses[0], "보조 표시 전용이라는 표시가 없다"
-    # 보조값을 **계산한 이후**로는 ma200을 다시 읽으면 안 된다.
-    # (앵커를 "ma200_pct" 첫 등장으로 잡으면 out 딕셔너리 초기화가 먼저
-    #  걸려 검사 범위가 통째로 어긋난다 — 작성 중 실제로 그랬다.)
-    anchor = 'out["ma200_pct"] ='
-    body = src[src.index(anchor) + len(anchor):]
+
+    # 허용된 두 용도 외에 ma200을 읽는 줄이 있으면 잡는다
+    anchor = 'out["ma_inverted"]'
+    body = src[src.index(anchor):]
     body = body[body.index("\n"):]
-    assert "ma200" not in body, f"판정 구간에서 ma200을 다시 읽는다: {body[:200]}"
+    assert "ma200" not in body, f"기준선 판정 구간에서 ma200을 읽는다: {body[:200]}"
+
+    # 판정 축 4개는 전부 `ma`(=기준선)를 써야 한다
+    for axis, needle in (("C 단계", "d = last / ma - 1"),
+                         ("B 밴드", "med / ma - 1"),
+                         ("매물대", "lo_b, hi_b = ma *")):
+        assert needle in src, f"{axis}가 기준선을 안 쓴다"
 
 
 def test_every_judgement_axis_uses_the_config_period():
@@ -496,3 +503,122 @@ def test_config_has_no_ma200_named_keys():
     """키 이름에 200이 박혀 있으면 값(600)과 이름이 어긋난다."""
     bad = [k for k in CFG if "ma200" in k or "200" in k]
     assert not bad, f"기간이 박힌 키가 남아 있다: {bad}"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# v5.271 — 역배열(MA200 < MA600) · 거래대금 상한
+# ══════════════════════════════════════════════════════════════════════
+def _comp(ok=True, turnover_fail=False, turnover_large=False):
+    return {"ok": ok, "turnover_fail": turnover_fail, "turnover_large": turnover_large}
+
+
+def _inverted_shape(rise_to=95.0, c2_pct=0.05):
+    """**C2 구간이면서 역배열**인 모양 — 두 조건이 같이 성립해야 규칙이 검증된다.
+
+    첫 시도는 "끝 200봉을 눌러 MA200만 내린다"였는데, 그러면 **새 저점이 생겨
+    A가 깨졌다**(하락 56%/31봉 → span 미달). 역배열은 만들어졌지만 종목이
+    ABC가 아니게 돼 C 단계 자체가 안 나왔다.
+
+    대신 순서를 뒤집는다: 기준선 창의 **앞쪽(600봉 중 옛 350봉)을 높게** 깔면
+    MA600이 올라가고, 최근 200봉은 바닥 근처라 MA200이 낮게 남는다.
+    마지막 25봉을 끌어올려 종가를 MA600 바로 위(C2 구간)에 놓는다.
+
+        [앞 350봉 = P] [상승 20] [하락 45] [바닥 160] [급등 25]
+                        └─ A 패턴(a_lookback 250봉 안) ─┘
+
+    P는 "MA600 == 종가/(1+c2_pct)"가 되도록 역산한다.
+
+    `rise_to`는 **A 고점(100)보다 낮아야 한다.** 처음에 120으로 뒀더니 마지막
+    급등이 250봉 안의 최고점이 돼서 A가 "고점 직후 하락 0봉"으로 무너졌다
+    (argmax가 마지막 봉을 집는다).
+    """
+    lead, span, flat_n, rise_n = 20, 45, 160, 25
+    hi, lo = 100.0, 55.0
+    recent = (list(np.linspace(hi * 0.9, hi, lead))
+              + list(np.linspace(hi, lo, span + 1))[1:]
+              + [lo] * flat_n
+              + list(np.linspace(lo, rise_to, rise_n)))
+    assert len(recent) == CFG["a_lookback"], len(recent)
+    N = CFG["ma_period"]
+    pre_n = N - len(recent)
+    target_ma = rise_to / (1 + c2_pct)
+    P = (target_ma * N - sum(recent)) / pre_n
+    assert P > 0, f"역산이 음수({P:.1f})"
+    assert rise_to < hi, "급등이 A 고점보다 높으면 A가 깨진다"
+    return [P] * (pre_n + 30) + recent
+
+
+def test_inverted_ma_is_detected():
+    r = A.analyze_abc(make(_inverted_shape()))
+    assert r["ma_inverted"] is True, (r["ma_pct"], r["ma200_pct"])
+    base = A.analyze_abc(make(abc_shape()))
+    assert base["ma_inverted"] is False, "정배열 모양이 역배열로 잡힌다"
+
+
+def test_inverted_ma_blocks_the_jindori_label():
+    """역배열이면 C2 구간이어도 진돌이/가돌이를 매기지 않는다(사용자 지시)."""
+    r = A.analyze_abc(make(_inverted_shape()))
+    assert r["c_stage"] == "C2 역배열", r["c_stage"]
+    assert "진돌이" not in r["c_stage"] and "가돌이" not in r["c_stage"]
+
+
+def test_inverted_stage_still_appears_in_the_tab():
+    """단계를 None으로 만들면 종목이 **탭에서 사라진다** — 구간은 유지한다."""
+    r = A.analyze_abc(make(_inverted_shape()))
+    assert r["c_stage"] is not None
+    assert r["c_stage"].startswith("C2"), r["c_stage"]
+    assert r["c_stage"] in A.C_STAGES, f"{r['c_stage']}가 C_STAGES에 없다"
+
+
+def test_volume_alone_cannot_make_jindori_when_inverted():
+    """거래량이 아무리 커도 정배열 회복 전이면 진돌이가 아니다."""
+    closes = _inverted_shape()
+    vols = [1000.0] * len(closes)
+    vols[-1] = 1000.0 * 50          # 50배
+    r = A.analyze_abc(make(closes, vols=vols))
+    assert r["c_stage"] == "C2 역배열", r["c_stage"]
+
+
+def test_turnover_cap_is_above_the_floor():
+    """상한이 하한과 같거나 낮으면 **A급 구간이 사라진다**.
+
+    최초 지시가 상한 300억(=하한과 동일)이었고, 그러면 A급이 가능한 거래대금이
+    정확히 300억 한 점뿐이 된다. 지적 후 1,000억으로 확정된 값을 여기 고정한다.
+    """
+    assert CFG["max_turnover_eok"] > CFG["min_turnover_eok"], (
+        f"상한({CFG['max_turnover_eok']}) ≤ 하한({CFG['min_turnover_eok']}) — A급 구간이 없다")
+    mid = (CFG["min_turnover_eok"] + CFG["max_turnover_eok"]) / 2
+    c = A.company_axis(mid, 4, 2, False, rev_yoy_of=4)
+    assert c["ok"] and not c["turnover_fail"] and not c["turnover_large"]
+
+
+def test_turnover_bands():
+    lo, hi = CFG["min_turnover_eok"], CFG["max_turnover_eok"]
+    under = A.company_axis(lo - 1, 4, 2, False, rev_yoy_of=4)
+    over = A.company_axis(hi + 1, 4, 2, False, rev_yoy_of=4)
+    assert under["turnover_fail"] and not under["turnover_large"]
+    assert over["turnover_large"] and not over["turnover_fail"]
+    # **상한 초과는 미달이 아니다** — fails에 넣으면 C급까지 떨어진다
+    assert over["fails"] == [], over["fails"]
+    assert over["ok"] is True, "상한 초과를 기업 축 탈락으로 처리했다"
+
+
+def test_large_turnover_caps_the_grade_at_b():
+    ok_chart = {"verdict": "ABC", "b": {"ok": True}, "c_stage": "C2 진돌이"}
+    assert A.grade(ok_chart, _comp()) == "A급"
+    assert A.grade(ok_chart, _comp(turnover_large=True)) == "B급", "천장이 안 걸린다"
+
+
+def test_large_turnover_does_not_rescue_a_c_grade():
+    """천장은 **내리기만** 한다 — C급을 B급으로 올리면 안 된다."""
+    ok_chart = {"verdict": "ABC", "b": {"ok": True}, "c_stage": "C3 이탈"}
+    assert A.grade(ok_chart, _comp(turnover_large=True)) == "C급"
+    bad = {"verdict": "ABC", "b": {"ok": True}, "c_stage": "C2 진돌이"}
+    assert A.grade(bad, _comp(ok=False, turnover_fail=True, turnover_large=True)) == "C급"
+
+
+def test_both_new_values_are_marked_arbitrary():
+    import inspect
+    src = inspect.getsource(A)
+    i = src.index('"max_turnover_eok"')
+    assert "임의값" in src[max(0, i - 600):i], "상한의 출처 표시가 없다"

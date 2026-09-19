@@ -566,7 +566,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.270</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.271</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3074,6 +3074,17 @@ function abcFinCell(h) {
   return `<span class="mono" style="font-size:11px">${parts.join(' · ')}</span>${warn}`;
 }
 
+// v5.271 배지 2종. 둘 다 **측정 근거 없는 초기 조건**이라 표시로 이유를 남긴다.
+//   역배열 = MA200 < MA600. "정배열 회복이 진돌이 전제"(사용자 지시)라
+//            이 상태에서는 C2에 진돌이/가돌이를 안 매긴다.
+//   대형   = 거래대금이 상한 초과. A급을 B급으로 내리는 천장(미달이 아니다).
+function _abcBadges(h) {
+  const b = [];
+  if (h.ma_inverted) b.push(`<span style="font-size:10px;color:#FF9F6B;border:1px solid #6b3f2a;border-radius:3px;padding:0 3px" title="MA200 < MA600 — 정배열 회복 전이라 진돌이/가돌이를 매기지 않습니다">역배열</span>`);
+  if (h.turnover_large) b.push(`<span style="font-size:10px;color:#9FB7FF;border:1px solid #2a3f6b;border-radius:3px;padding:0 3px" title="거래대금이 상한을 넘었습니다 — 소형 성장주 셋업이라는 전제상 A급 대신 B급">대형</span>`);
+  return b.length ? ' ' + b.join(' ') : '';
+}
+
 function abcRowHtml(h) {
   const gcol = _ABC_GRADE_COLOR[h.grade] || 'var(--muted)';
   const stage = h.c_stage || '—';
@@ -3089,7 +3100,7 @@ function abcRowHtml(h) {
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);white-space:nowrap">${name} ${star}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;color:${gcol};font-size:11px"
         title="${fails ? '기업 축 미달: ' + fails : '기업 축 통과'}">${h.grade}</td>
-    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;font-size:11px">${stage}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;font-size:11px">${stage}${_abcBadges(h)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right;border-left:2px solid ${ABC_MA_COLOR}">${_abcMaPct(h.ma_pct)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right;opacity:.6">${_abcMaPct(h.ma200_pct)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right"

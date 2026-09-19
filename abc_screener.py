@@ -52,7 +52,15 @@ ABC_CONFIG = {
     # 다른 셋업(ABC 아님) 판정
     "other_above_ma_bars": 60,     # 기준선 위 60봉 이상이면 박스/눌림
     # 기업 축
-    "min_turnover_eok": 300,       # 판정일 거래대금(억) — close×volume
+    "min_turnover_eok": 300,       # 판정일 거래대금(억) — close×volume. 미달 → C급
+    # v5.271(사용자 지시): **상한**. "양봉맨 ABC는 소형 성장주"라 거래대금이
+    # 너무 큰 대형주는 등급을 B로 막는다. 1,000억은 **임의값**(측정 근거 없음).
+    # 처음 지시는 상한도 300억이었는데 그러면 하한과 같아져 **A급 가능 구간이
+    # 정확히 300억 한 점**으로 사라진다 — 지적 후 1,000억으로 확정.
+    #   < 300억      → C급(강등)
+    #   300~1,000억  → A급 가능
+    #   > 1,000억    → "대형", B 이하
+    "max_turnover_eok": 1000,
     "rev_yoy_min_quarters": 3,     # 최근 4분기 중 매출 YoY+ 분기 수
     "rev_yoy_window": 4,
     "eps_positive_quarters": 2,    # 최근 2분기 EPS 흑자
@@ -62,7 +70,8 @@ ABC_CONFIG = {
     "min_bars_floor": 250,
 }
 
-C_STAGES = ("C0 대기", "C1 벽앞", "C2 진돌이", "C2 가돌이", "C3 이탈")
+C_STAGES = ("C0 대기", "C1 벽앞", "C2 진돌이", "C2 가돌이", "C2 역배열",
+            "C2 돌파 없음", "C3 이탈")
 
 
 def _min_bars(cfg: dict = ABC_CONFIG) -> int:
@@ -135,7 +144,7 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
            "c_stage": None, "ma_pct": None, "ma200_pct": None, "vol_mult": None,
            "supply_above": False, "supply_bars": 0, "turnover_eok": None,
            "breakout": None, "close": None, "ma": None,
-           "ma_period": cfg["ma_period"]}
+           "ma_period": cfg["ma_period"], "ma_inverted": None}
     n_bars = 0 if df is None or getattr(df, "empty", True) else len(df)
     need = _min_bars(cfg)
     if n_bars < need:
@@ -158,8 +167,13 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
     out["close"], out["ma"] = last, round(ma, 2)
     # MA200은 v5.268부터 **판정에 안 쓰인다** — 화면 보조 열 하나로만 남긴다
     # (사용자 지시). 어떤 게이트도 이 값을 읽으면 안 된다.
-    ma200 = _ma(close, 200)          # ← 보조 표시 전용, 판정 금지
+    ma200 = _ma(close, 200)          # ← 표시용 + 배열 판정(v5.271)에만 사용
     out["ma200_pct"] = round((last / ma200 - 1) * 100, 1) if ma200 else None
+    # v5.271(사용자 지시): MA200 < MA600 = **역배열**. "정배열 회복이 진돌이
+    # 전제"라 역배열이면 C2에서 진돌이/가돌이를 매기지 않는다. 가격 위치가
+    # 아니라 **두 이평의 순서**를 보는 것이라, C 단계(가격 vs 기준선)와는
+    # 다른 축이다.
+    out["ma_inverted"] = bool(ma200 < ma) if ma200 else None
 
     v_avg = float(vol.iloc[-cfg["vol_avg_bars"] - 1:-1].mean()) if len(vol) > cfg["vol_avg_bars"] else 0.0
     out["vol_mult"] = round(float(vol.iloc[-1]) / v_avg, 2) if v_avg > 0 else None
@@ -239,7 +253,12 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
         out["c_stage"] = "C3 이탈"
     elif c2[0] <= d < c2[1]:
         bo = out["breakout"]
-        if bo is None:
+        if out["ma_inverted"]:
+            # v5.271: 역배열(MA200 < MA600)에서는 진돌이/가돌이를 매기지 않는다.
+            # 구간(C2)은 상태라 그대로 두고 **라벨만** 판정 불가로 남긴다 —
+            # 단계를 통째로 None으로 만들면 종목이 탭에서 사라진다.
+            out["c_stage"] = "C2 역배열"
+        elif bo is None:
             out["c_stage"] = "C2 돌파 없음"    # 60봉 내 돌파 없이 계속 위 — 등급엔 무관
         else:
             out["c_stage"] = ("C2 진돌이" if (bo["vol_mult"] or 0) >= cfg["c2_vol_mult"]
@@ -279,6 +298,10 @@ def company_axis(turnover_eok: float | None, rev_yoy_pos: int | None,
     turnover_fail = turnover_eok is not None and turnover_eok < cfg["min_turnover_eok"]
     if turnover_fail:
         fails.append(f"거래대금 {turnover_eok:.0f}억 < {cfg['min_turnover_eok']}억")
+    # v5.271: 상한 초과는 **미달이 아니다** — fails에 넣으면 기업 축 탈락으로
+    # 읽혀 C급까지 떨어진다. 지시는 "B 이하"라 별도 플래그로 내보내고
+    # grade()가 상한선으로만 쓴다.
+    turnover_large = turnover_eok is not None and turnover_eok > cfg["max_turnover_eok"]
     # naver 모바일이 분기를 6개만 줘서 YoY를 4분기 전부 볼 수 없는 경우가 많다.
     # **판정 가능한 분기 수(rev_yoy_of)가 기준에 못 미치면 감점하지 않는다** —
     # "판정 불가"를 "미달"로 뭉개면 없는 근거로 등급을 깎는 셈이다.
@@ -289,15 +312,17 @@ def company_axis(turnover_eok: float | None, rev_yoy_pos: int | None,
         fails.append(f"EPS 흑자 {eps_pos_q}/{cfg['eps_positive_quarters']}분기")
     if major_holder_issue:
         fails.append("최대주주 이슈")
-    return {"ok": not fails, "fails": fails, "turnover_fail": turnover_fail}
+    return {"ok": not fails, "fails": fails, "turnover_fail": turnover_fail,
+            "turnover_large": turnover_large}
 
 
 def grade(res: dict, comp: dict) -> str | None:
     """등급 3단계 (사용자 확정 2026-09-18).
 
-        A급  = 차트 A·B·C 전부 & 기업 전부 충족
+        A급  = 차트 A·B·C 전부 & 기업 전부 충족 & 거래대금 ≤ 상한
         B급  = 차트 전부 & 기업 감점  /  또는  기업 충족 & B 미달
         C급  = 거래대금 미달 또는 C3 이탈
+        천장 = 거래대금 상한 초과("대형") → A급은 B급으로 내린다(v5.271)
         제외 = A 없음 (None)
 
     **판정 순서**: C급 조건을 먼저 본다 — 거래대금 미달·C3 이탈은 차트가
@@ -316,7 +341,9 @@ def grade(res: dict, comp: dict) -> str | None:
     # (거래대금 미달은 위에서 이미 C급으로 빠졌다).
     chart_ok = bool(res.get("b", {}).get("ok")) and stage is not None
     if chart_ok and comp.get("ok"):
-        return "A급"
+        # v5.271: 거래대금 상한 초과("대형")는 **A를 막는 천장**이지 미달이 아니다.
+        # 양봉맨 ABC가 소형 성장주 셋업이라는 전제(사용자 지시, 측정 근거 없음).
+        return "B급" if comp.get("turnover_large") else "A급"
     if chart_ok or comp.get("ok"):
         return "B급"
     return "C급"

@@ -217,4 +217,7 @@ def test_config_is_exposed_for_the_ui():
     """화면이 '초기 임의값'을 보여주려면 값 자체가 응답에 있어야 한다."""
     src = Path(app.__file__).read_text(encoding="utf-8")
     i = src.index('@app.get("/api/abc")')
-    assert '"config": abc_screener.ABC_CONFIG' in src[i:i + 4000]
+    # 고정 길이로 자르면 라우트가 길어질 때 조용히 검사 범위를 벗어난다
+    # (v5.271에서 실제로 그랬다) — 다음 라우트까지로 경계를 잡는다.
+    body = src[i:src.index('@app.get("/api/debug/memory")')]
+    assert '"config": abc_screener.ABC_CONFIG' in body
