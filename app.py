@@ -16,6 +16,15 @@ v5.271 [조건추가] ABC 등급에 역배열·거래대금 상한 2건(사용�
       사라지는 걸 지적해 1,000억으로 확정.
     · MA200 불변식을 좁혔다: v5.268의 "표시 전용"에서 "표시 + 이평 **순서**
       비교만 허용, 기준선 노릇 금지"로(테스트도 같이).
+    [수정 2026-09-20, 사용자 지시]
+      · 하한 300억 → **30억**("B구간 횡보 종목의 평소 수준", 임의값).
+        미달 → C급(호가가 얇아 진입 불가). 상한 1,000억 유지.
+      · 거래대금 기준 시점을 **판정일 → B구간 앞 20봉 평균**으로.
+        판정일 값은 돌파 당일 급등이라 "평소 유동성"이 아니다. 실측 차이가
+        크다: 우리넷 B평균 7억 vs 당일 582억(83배), 빛샘전자 62억 vs 2,076억.
+        필드명도 기준이 드러나게 `turnover_eok` → `b_turnover_eok`(판정) +
+        `turnover_today_eok`(표시 전용)로 쪼갰다. 봉이 20개 미만이면 0이 아니라
+        **None** — 0으로 두면 조용히 "거래대금 미달"이 된다.
     [실측 — 두 조건이 실제로 하는 일] KR 403종목 표본, ABC 후보 153건:
       역배열 14건(9%) 중 **진돌이 판정이 실제로 막힌 건 1건**(동양우) —
       나머지 13건은 C0/C1이라 애초에 진돌이 대상이 아니다.
@@ -12165,7 +12174,7 @@ async def api_abc():
         f = fin.get(t) or {"rev_yoy_pos": None, "rev_yoy_of": 0,
                            "eps_pos_q": None, "reason": "미조회"}
         comp = abc_screener.company_axis(
-            r["turnover_eok"], f["rev_yoy_pos"], f["eps_pos_q"],
+            r["b_turnover_eok"], f["rev_yoy_pos"], f["eps_pos_q"],
             bool((flags.get(t) or {}).get("major_holder_issue")),
             rev_yoy_of=f.get("rev_yoy_of") or 0)
         g = abc_screener.grade(r, comp)
@@ -12182,7 +12191,11 @@ async def api_abc():
             "a_drop_pct": (r["a"] or {}).get("drop_pct"),
             "b_bars": (r["b"] or {}).get("bars"), "b_ok": (r["b"] or {}).get("ok"),
             "b_median_pct": (r["b"] or {}).get("median_vs_ma_pct"),
-            "supply_above": r["supply_above"], "turnover_eok": r["turnover_eok"],
+            "supply_above": r["supply_above"],
+            # v5.271: 판정은 **B구간 평균**, 당일 값은 표시 전용(왜 바꿨는지가
+            # 화면에서 바로 보이도록 둘 다 내보낸다).
+            "b_turnover_eok": r["b_turnover_eok"],
+            "turnover_today_eok": r["turnover_today_eok"],
             "rev_yoy_pos": f["rev_yoy_pos"], "rev_yoy_of": f.get("rev_yoy_of"),
             "eps_pos_q": f["eps_pos_q"],
             "fin_reason": f["reason"], "company_fails": comp["fails"],

@@ -212,14 +212,17 @@ def test_supply_band_flag():
 
 # ── 기업 축·등급 ──────────────────────────────────────────────────────
 def test_company_axis_turnover_gate():
-    c = A.company_axis(250, 4, 2, False, rev_yoy_of=4)
+    """하한/상한은 **리터럴로 쓰지 않는다** — v5.271에서 하한이 300→30으로
+    바뀌면서 250을 '미달'로 쓰던 이 테스트가 통과값이 돼버렸다."""
+    lo, hi = CFG["min_turnover_eok"], CFG["max_turnover_eok"]
+    c = A.company_axis(lo - 1, 4, 2, False, rev_yoy_of=4)
     assert c["turnover_fail"] is True and not c["ok"]
-    c2 = A.company_axis(500, 4, 2, False, rev_yoy_of=4)
+    c2 = A.company_axis((lo + hi) / 2, 4, 2, False, rev_yoy_of=4)
     assert c2["ok"] is True and c2["turnover_fail"] is False
 
 
 def test_company_axis_collects_all_fails():
-    c = A.company_axis(100, 1, 0, True, rev_yoy_of=4)
+    c = A.company_axis(CFG["min_turnover_eok"] - 1, 1, 0, True, rev_yoy_of=4)
     assert len(c["fails"]) == 4, c["fails"]
 
 
@@ -622,3 +625,79 @@ def test_both_new_values_are_marked_arbitrary():
     src = inspect.getsource(A)
     i = src.index('"max_turnover_eok"')
     assert "임의값" in src[max(0, i - 600):i], "상한의 출처 표시가 없다"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# v5.271 수정 — 거래대금 기준: 판정일 → B구간 20봉 평균
+# ══════════════════════════════════════════════════════════════════════
+def _with_volume(closes, base_vol=1_000_000.0, last_vol=None):
+    vols = [base_vol] * len(closes)
+    if last_vol is not None:
+        vols[-1] = last_vol
+    return make(closes, vols=vols)
+
+
+def test_turnover_is_measured_in_the_base_not_today():
+    """**돌파 당일 급등이 판정에 새면 안 된다**(사용자 지시의 핵심).
+
+    마지막 봉 거래량만 100배로 부풀려도 B구간 평균은 그대로여야 한다.
+    """
+    closes = abc_shape()
+    calm = A.analyze_abc(_with_volume(closes))
+    spike = A.analyze_abc(_with_volume(closes, last_vol=100_000_000.0))
+    assert calm["b_turnover_eok"] == spike["b_turnover_eok"], "당일 급등이 샜다"
+    # 당일 값은 **표시용으로는** 움직여야 한다(둘을 구분해 보여주는 게 목적)
+    assert spike["turnover_today_eok"] > calm["turnover_today_eok"] * 10
+
+
+def test_base_turnover_uses_the_configured_bar_count():
+    closes = abc_shape()
+    r = A.analyze_abc(_with_volume(closes))
+    # 저점 직후 N봉의 close×volume 평균과 일치해야 한다
+    n_since = r["a"]["bars_since_low"]
+    lo_idx = len(closes) - 1 - n_since
+    tb = CFG["turnover_avg_bars"]
+    seg = closes[lo_idx:lo_idx + tb]
+    want = round(sum(c * 1_000_000.0 for c in seg) / len(seg) / 1e8, 1)
+    assert r["b_turnover_eok"] == want, (r["b_turnover_eok"], want)
+
+
+def test_short_base_reports_none_not_zero():
+    """봉이 모자라면 0이 아니라 None — 0으로 두면 조용히 '거래대금 미달'이 된다."""
+    closes = abc_shape(flat=3)          # 저점 직후 3봉뿐
+    r = A.analyze_abc(_with_volume(closes))
+    assert r["b_turnover_eok"] is None, r["b_turnover_eok"]
+    c = A.company_axis(None, 4, 2, False, rev_yoy_of=4)
+    assert c["turnover_fail"] is False and c["ok"] is True, "모름을 미달로 처리했다"
+
+
+def test_judgement_reads_the_base_value_not_today():
+    """라우트가 어느 값을 넘기는지 고정 — 필드명이 비슷해 바꿔 끼우기 쉽다."""
+    src = Path(app_path()).read_text(encoding="utf-8")
+    i = src.index("comp = abc_screener.company_axis(")
+    call = src[i:src.index(")", src.index("rev_yoy_of", i))]
+    assert 'r["b_turnover_eok"]' in call, call
+    assert "turnover_today" not in call, "당일 값을 판정에 넘긴다"
+
+
+def app_path():
+    import app
+    return app.__file__
+
+
+def test_floor_is_30_and_cap_is_1000():
+    """사용자 확정값(둘 다 임의값). 되돌리면 여기서 걸린다.
+
+    하한 300억일 때 실측: 후보 153건 중 126건(82%)이 잘려나갔고 남은 A급이
+    POSCO홀딩스였다 — 소형 성장주 전제와 반대였다.
+    """
+    assert CFG["min_turnover_eok"] == 30, CFG["min_turnover_eok"]
+    assert CFG["max_turnover_eok"] == 1000, CFG["max_turnover_eok"]
+    assert CFG["turnover_avg_bars"] == 20
+
+
+def test_field_names_say_which_basis():
+    """`turnover_eok` 한 이름에 두 기준이 섞이면 반드시 오독된다."""
+    r = A.analyze_abc(_with_volume(abc_shape()))
+    assert "turnover_eok" not in r, "기준이 안 드러나는 옛 이름이 남아 있다"
+    assert "b_turnover_eok" in r and "turnover_today_eok" in r

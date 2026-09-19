@@ -3108,7 +3108,8 @@ function abcRowHtml(h) {
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${_abcNum(h.a_drop_pct, '%', 0)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${h.b_bars != null ? h.b_bars : '—'}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center">${h.supply_above ? '<span style="color:var(--px-down)" title="위에 매물대가 있다">있음</span>' : '<span style="color:var(--muted)">—</span>'}</td>
-    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${_abcNum(h.turnover_eok, '억', 0)}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right"
+        title="B구간(바닥 다지기) 앞 20봉 평균 — 돌파 당일이 아니라 평소 유동성입니다${h.turnover_today_eok != null ? '. 당일 ' + h.turnover_today_eok.toFixed(0) + '억' : ''}">${_abcNum(h.b_turnover_eok, '억', 0)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center">${abcFinCell(h)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${h.sector || '—'}</td>
   </tr>`;
@@ -3175,7 +3176,7 @@ function renderAbcPage() {
         <th style="text-align:right;padding:3px 8px" title="A: 고점→저점 하락폭">A하락</th>
         <th style="text-align:right;padding:3px 8px" title="B: 바닥 다지기 봉 수">B일수</th>
         <th style="padding:3px 8px" title="현재가 위에 매물대가 있는가">매물대</th>
-        <th style="text-align:right;padding:3px 8px">거래대금</th>
+        <th style="text-align:right;padding:3px 8px" title="B구간 20봉 평균 거래대금(평소 유동성). 판정 기준입니다 — 당일 값이 아닙니다.">거래대금<span style="font-size:9px;color:var(--muted)">(B평균)</span></th>
         <th style="padding:3px 8px">매출·EPS</th>
         <th style="text-align:left;padding:3px 8px">섹터</th>
       </tr></thead>

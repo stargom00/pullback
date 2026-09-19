@@ -52,13 +52,20 @@ ABC_CONFIG = {
     # 다른 셋업(ABC 아님) 판정
     "other_above_ma_bars": 60,     # 기준선 위 60봉 이상이면 박스/눌림
     # 기업 축
-    "min_turnover_eok": 300,       # 판정일 거래대금(억) — close×volume. 미달 → C급
+    # v5.271 수정(사용자 지시): 하한 300억 → **30억**. 실측에서 하한 300억이
+    # 후보의 82%를 잘라내고 남은 A급이 POSCO홀딩스였다 — "소형 성장주"라는
+    # 전제와 반대로 **하한이 대형주를 고르고 있었다**. 30억은 "B구간 횡보
+    # 종목의 평소 수준"(사용자 지시)이며 **임의값**이다. 미달 → C급
+    # (호가가 얇아 진입 자체가 어렵다).
+    "min_turnover_eok": 30,
+    # 거래대금 평균을 낼 B구간 봉 수(사용자 지시 "B구간 20봉 평균").
+    "turnover_avg_bars": 20,
     # v5.271(사용자 지시): **상한**. "양봉맨 ABC는 소형 성장주"라 거래대금이
     # 너무 큰 대형주는 등급을 B로 막는다. 1,000억은 **임의값**(측정 근거 없음).
     # 처음 지시는 상한도 300억이었는데 그러면 하한과 같아져 **A급 가능 구간이
     # 정확히 300억 한 점**으로 사라진다 — 지적 후 1,000억으로 확정.
-    #   < 300억      → C급(강등)
-    #   300~1,000억  → A급 가능
+    #   < 30억       → C급(강등)
+    #   30~1,000억   → A급 가능
     #   > 1,000억    → "대형", B 이하
     "max_turnover_eok": 1000,
     "rev_yoy_min_quarters": 3,     # 최근 4분기 중 매출 YoY+ 분기 수
@@ -142,7 +149,8 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
     """
     out = {"verdict": "ABC 아님", "reason": None, "a": None, "b": None,
            "c_stage": None, "ma_pct": None, "ma200_pct": None, "vol_mult": None,
-           "supply_above": False, "supply_bars": 0, "turnover_eok": None,
+           "supply_above": False, "supply_bars": 0,
+           "b_turnover_eok": None, "turnover_today_eok": None,
            "breakout": None, "close": None, "ma": None,
            "ma_period": cfg["ma_period"], "ma_inverted": None}
     n_bars = 0 if df is None or getattr(df, "empty", True) else len(df)
@@ -177,7 +185,9 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
 
     v_avg = float(vol.iloc[-cfg["vol_avg_bars"] - 1:-1].mean()) if len(vol) > cfg["vol_avg_bars"] else 0.0
     out["vol_mult"] = round(float(vol.iloc[-1]) / v_avg, 2) if v_avg > 0 else None
-    out["turnover_eok"] = round(last * float(vol.iloc[-1]) / 1e8, 1)
+    # **당일** 거래대금 — v5.271부터 판정에 안 쓴다(표시 전용). 급등 당일 값이라
+    # B구간 횡보 종목의 "평소 유동성"을 왜곡한다는 게 기준을 바꾼 이유다.
+    out["turnover_today_eok"] = round(last * float(vol.iloc[-1]) / 1e8, 1)
 
     # ── A: 최근 250봉 고점 → 그 이후 저점 ──────────────────────────
     win_h = high.iloc[-cfg["a_lookback"]:]
@@ -241,6 +251,17 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
     out["b"] = best or {"bars": n_since, "range_pct": None,
                         "median_vs_ma_pct": None, "ok": False}
 
+    # ── 거래대금: **B구간 앞 N봉 평균**(사용자 지시 v5.271) ──────────
+    # 판정일 거래대금을 쓰면 돌파 당일 급등 값이 잡혀 "평소 유동성"이 아니다.
+    # 저점 직후(= 바닥 다지기) 구간의 평균이 그 종목이 평소에 소화하는 양이다.
+    # 봉이 모자라면 **추정하지 않고 None** — 없는 값을 0으로 두면 "거래대금
+    # 미달"로 읽혀 조용히 C급이 된다.
+    tb = cfg["turnover_avg_bars"]
+    seg_c = close.iloc[lo_idx:lo_idx + tb]
+    seg_v = vol.iloc[lo_idx:lo_idx + tb]
+    out["b_turnover_eok"] = (round(float((seg_c * seg_v).mean()) / 1e8, 1)
+                             if len(seg_c) >= tb else None)
+
     # ── C: 단계 — **상태**로 본다 (사용자 확정 2026-09-18) ──────────
     # C2를 "당일 돌파"라는 **이벤트**로 두면 ① +5~20%인데 당일 돌파가 아닌
     # 상태가 어느 단계에도 안 들어가는 빈틈이 생기고 ② 돌파 다음날 탭에서
@@ -280,7 +301,7 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
     return out
 
 
-def company_axis(turnover_eok: float | None, rev_yoy_pos: int | None,
+def company_axis(b_turnover_eok: float | None, rev_yoy_pos: int | None,
                  eps_pos_q: int | None, major_holder_issue: bool,
                  cfg: dict = ABC_CONFIG, *, rev_yoy_of: int) -> dict:
     """기업 축 — 충족/미달 목록과 거래대금 미달 여부.
@@ -295,13 +316,15 @@ def company_axis(turnover_eok: float | None, rev_yoy_pos: int | None,
     변별력이 없다. 사용자 지시로 기준 자체는 남기되 판정에서 제외한다.
     """
     fails = []
-    turnover_fail = turnover_eok is not None and turnover_eok < cfg["min_turnover_eok"]
+    turnover_fail = (b_turnover_eok is not None
+                     and b_turnover_eok < cfg["min_turnover_eok"])
     if turnover_fail:
-        fails.append(f"거래대금 {turnover_eok:.0f}억 < {cfg['min_turnover_eok']}억")
+        fails.append(f"B구간 거래대금 {b_turnover_eok:.0f}억 < {cfg['min_turnover_eok']}억")
     # v5.271: 상한 초과는 **미달이 아니다** — fails에 넣으면 기업 축 탈락으로
     # 읽혀 C급까지 떨어진다. 지시는 "B 이하"라 별도 플래그로 내보내고
     # grade()가 상한선으로만 쓴다.
-    turnover_large = turnover_eok is not None and turnover_eok > cfg["max_turnover_eok"]
+    turnover_large = (b_turnover_eok is not None
+                      and b_turnover_eok > cfg["max_turnover_eok"])
     # naver 모바일이 분기를 6개만 줘서 YoY를 4분기 전부 볼 수 없는 경우가 많다.
     # **판정 가능한 분기 수(rev_yoy_of)가 기준에 못 미치면 감점하지 않는다** —
     # "판정 불가"를 "미달"로 뭉개면 없는 근거로 등급을 깎는 셈이다.
