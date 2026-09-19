@@ -5,6 +5,22 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.270 [메모리] 디스크 캐시 저장을 `pickle.dump(..., protocol=5)`로(사용자 지시,
+    한 줄). Python 3.13의 기본 프로토콜은 **4**라 명시하지 않으면 4로 쓴다.
+    실측(1,500종목×1,275봉 = 53.5MB 번들, 프로세스 격리 — `ru_maxrss`는 최고
+    수위라 한 프로세스에서 순차 측정하면 값이 섞인다):
+        pickle.dump 기본(protocol 4)  peak +80MB
+        protocol=5                    peak +21MB   ← 이번 변경
+        종목별 chunk dump             peak  +0MB   (로더·포맷 동반 변경 필요, 보류)
+    파일 크기는 54MB로 동일. **로더 무변경**(`pickle.load`가 프로토콜을 자동
+    인식), **`_CACHE_NS` 무변경**(파일 구조가 바뀌는 게 아니라 구 protocol 4
+    캐시도 그대로 읽힌다 — 범프하면 배포 당일 EOD가 통째로 콜드 fetch가 된다).
+    [테스트] test_disk_cache_protocol.py(8) — 저장→로드 왕복 동일성(값·dtype·
+    인덱스), float32 유지, 파일이 **실제로** protocol 5인가(PROTO 헤더 바이트),
+    로더/네임스페이스 무변경, 구 protocol 4 파일도 로드, v5.241 스키마 검증
+    생존. 사보타주 4종(명시 제거 / protocol=4 / 불필요한 NS 범프 / 저장 중
+    dtype 오염) 전부 FAIL 확인 후 원복.
+    [보류] chunk 저장·`_executor` 8→4·`malloc_trim(0)`은 저녁 RSS 수치 확인 후.
 v5.269 [접근] 포워드 검증 두 경로를 `_BOT_READ_EXACT_PATHS`에 추가(사용자 지시)
     — `/api/jongga/forward`, `/api/paper-track`. 세션 쿠키 없이 상태 확인을
     하려다 401에 막혀 매번 사람 손을 빌려야 했다(2026-09-19 09-18 백필 확인).
@@ -7525,7 +7541,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.269"
+VERSION = "v5.270"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -8279,7 +8295,16 @@ def _save_disk_cache(market: str, daykey: str, bundle: dict):
     try:
         tmp = path + ".tmp"
         with open(tmp, "wb") as f:
-            pickle.dump(bundle, f)
+            # v5.270(사용자 지시): protocol=5 명시. Python 3.13의 기본값은
+            # **4**라 그냥 두면 4로 쓴다. 5는 out-of-band 버퍼를 써서 저장 중
+            # 피크가 크게 준다 — 실측(1,500종목×1,275봉, 53.5MB 번들, 프로세스
+            # 격리): peak 증가 **+80MB → +21MB**, 파일 크기는 54MB로 동일.
+            # 로더(_load_disk_cache)는 `pickle.load`가 프로토콜을 자동 인식하므로
+            # **무변경**이고, 파일 구조가 바뀌는 게 아니라 `_CACHE_NS` 범프도
+            # 불필요하다(구 protocol 4 파일도 그대로 읽힌다).
+            # 더 줄이려면 종목별 chunk dump가 +0MB지만 로더와 포맷을 같이
+            # 바꿔야 해서 분리했다(저녁 RSS 수치 보고 결정).
+            pickle.dump(bundle, f, protocol=5)
         os.replace(tmp, path)
         # 오래된 캐시 정리 — 은퇴한 네임스페이스(_CACHE_NS와 다름)는 날짜
         # 상관없이 전부 삭제, 현재 네임스페이스는 오늘(daykey) 아닌 것만
