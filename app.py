@@ -5,6 +5,32 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.272 [구조변경] ABC의 C 단계를 **두 선으로 분리**(사용자 지시).
+    v5.268에서 MA600 하나가 모든 판정을 맡자 13종목 중 **11개가 C3 이탈**로
+    쏠렸다 — MA600은 2.4년 평균이라 그간 오른 종목은 기준선이 한참 아래 남는다.
+    역할을 쪼갰다:
+      · **게이트 MA600** — 후보/탈락만. 아래면 그것만으로 C0 대기(장기 추세 미전환).
+      · **단계 MA200** — 게이트 통과분의 C단계·B중앙값밴드·매물대·돌파 판정.
+        C1 벽앞 −5~0% / C2 0~+20% / C3 +20%~. B밴드·매물대는 v5.267 기준 복귀.
+    · 돌파봉을 **MA200의 첫 상향돌파**로(마지막 → 첫). 뒤의 재돌파를 잡으면
+      원래 돌파의 거래량이 사라져 진돌이/가돌이 근거가 날아간다.
+    · **역배열은 표시 전용으로 격하**("장기>중기 역전", 등급 무관). v5.271에선
+      C2 진돌이를 막았는데 그 역할을 MA600 게이트가 가져갔다 — 같은 뜻을 두 곳
+      에서 강제하면 어긋난다. `"C2 역배열"` 단계도 삭제.
+    · 거래대금 하한 30억 → **10억**(임의값). 나무가 6억·우리넷 7억은 여전히
+      C급이고 사용자가 그게 맞다고 확인("그 유동성이면 호가가 얇다").
+    · [지시에 없던 조합] 게이트선 **위**인데 MA200보다 5% 넘게 아래. 처음엔
+      "단계 없음"으로 뒀는데 13종목 실측에서 선익·비나텍·나무가 3건이 여기
+      빠졌고 **사용자 예상은 셋 다 C0 대기**였다 → C0로 확정. 즉 C0는
+      "게이트 아래"가 아니라 **"MA200 벽 아래 대기"**이고 게이트 아래는 그
+      부분집합이다. 사유 문자열로 둘을 구분한다.
+    [13종목 재판정 — 사용자 예상 대비 5/6 적중]
+      RFHIC C2(예상 C1, MA200 +0.5%로 벽 바로 위) · 선익 C0 ✓ · 한선 C1 ✓ ·
+      우리넷 C2 ✓ · 나무가 C0 ✓ · LS에코 C3 ✓
+    [사보타주] 6종 중 **1종이 통과**했다 — "첫 돌파"를 검사하던
+    `assert "break" in src`가 함수명 `_find_break`out`에 걸려 **항상 참인
+    tautology**였다(CLAUDE.md "in 검사" 패턴). 창 안에 돌파 2회를 만들어
+    앞의 것을 잡는지 **동작으로** 검증하도록 바꾼 뒤 재시도해 탐지 확인.
 v5.271 [조건추가] ABC 등급에 역배열·거래대금 상한 2건(사용자 지시, 둘 다 임의값).
     · **역배열**: MA200 < MA600이면 C2에서 진돌이/가돌이를 안 매긴다
       ("정배열 회복이 진돌이 전제"). 단계는 `"C2 역배열"`로 **유지** —
@@ -7573,7 +7599,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.271"
+VERSION = "v5.272"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -12183,9 +12209,13 @@ async def api_abc():
         si = sec_by_ticker.get(t) or {}
         hits.append({
             "ticker": t, "name": uni.get(t) or t, "grade": g,
-            "c_stage": r["c_stage"], "ma_pct": r["ma_pct"],
-            "ma200_pct": r["ma200_pct"],      # 보조 표시 전용(판정 아님)
-            "close": r["close"], "ma": r["ma"], "ma_period": r["ma_period"],
+            "c_stage": r["c_stage"],
+            # v5.272: 게이트(MA600)와 판정(MA200)을 둘 다 내보낸다 — 어느 선
+            # 때문에 그 단계가 됐는지 화면에서 바로 보여야 한다.
+            "gate_pct": r["gate_pct"], "stage_pct": r["stage_pct"],
+            "close": r["close"], "ma_gate": r["ma_gate"], "ma_stage": r["ma_stage"],
+            "gate_ma_period": r["gate_ma_period"],
+            "stage_ma_period": r["stage_ma_period"],
             "vol_mult": (r["breakout"] or {}).get("vol_mult"),
             "breakout_bars_ago": (r["breakout"] or {}).get("bars_ago"),
             "a_drop_pct": (r["a"] or {}).get("drop_pct"),
@@ -12206,7 +12236,7 @@ async def api_abc():
         })
 
     order = {"C1 벽앞": 0, "C2 진돌이": 1, "C2 가돌이": 1, "C2 돌파 없음": 1,
-             "C2 역배열": 1, "C0 대기": 2, "C3 이탈": 3}
+             "C0 대기": 2, "C3 이탈": 3}
     hits.sort(key=lambda h: (order.get(h["c_stage"], 9), -(h["vol_mult"] or 0)))
 
     # 섹터 묶음 — C0~C2 히트가 같은 섹터에 2개 이상이면 상단에 표시

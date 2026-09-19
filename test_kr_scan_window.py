@@ -32,13 +32,13 @@ def test_window_covers_the_abc_baseline():
     아래 test_real_fetch_has_enough_bars가 실제 조회로 한 번 더 확인한다.
     """
     bars = naver_kr.KR_SCAN_DAYS * 0.685
-    assert bars >= abc_screener.ABC_CONFIG["ma_period"] * 1.5, (
+    assert bars >= abc_screener.ABC_CONFIG["gate_ma_period"] * 1.5, (
         f"{naver_kr.KR_SCAN_DAYS}일 ≈ {bars:.0f}봉 — MA600에 여유가 없다")
 
 
 def test_old_window_would_not_have_worked():
     """730일이 왜 부족했는지를 테스트로 남긴다(다시 줄이려는 시도를 막는다)."""
-    assert 730 * 0.685 < abc_screener.ABC_CONFIG["ma_period"], (
+    assert 730 * 0.685 < abc_screener.ABC_CONFIG["gate_ma_period"], (
         "730일로 MA600이 된다면 이 확대의 근거가 사라진다 — 재검토할 것")
 
 
@@ -86,5 +86,5 @@ def test_real_fetch_has_enough_bars():
         pytest.skip("빈 응답")
     need = abc_screener._min_bars()
     assert len(df) >= need, f"{len(df)}봉 — {need}봉이 필요한데 벤더가 덜 준다"
-    ma = df["Close"].rolling(abc_screener.ABC_CONFIG["ma_period"]).mean()
+    ma = df["Close"].rolling(abc_screener.ABC_CONFIG["gate_ma_period"]).mean()
     assert int(ma.notna().sum()) > 0, "MA600이 한 봉도 안 나온다"

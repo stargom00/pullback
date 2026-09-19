@@ -13,12 +13,16 @@ from __future__ import annotations
 
 # ── 임계값 — 전부 한 곳에. 근거 없음(초기 임의값, 2026-09-18) ──────────
 ABC_CONFIG = {
-    # ── 기준선 ────────────────────────────────────────────────────
-    # v5.268(사용자 지시): 200 → **600**. "핫핑크 = 더양봉맨 장기 추세 전환선".
-    # C 단계·B 중앙값 밴드·매물대 밴드·돌파봉 탐지가 **전부** 이 값을 쓴다.
-    # 아래 키 이름에서 "ma200"을 뺀 이유: 기간이 설정값이 된 이상 이름에 200이
-    # 박혀 있으면 값과 이름이 어긋난다(CLAUDE.md "이름이 의미와 어긋나면 개명").
-    "ma_period": 600,
+    # ── 두 기준선: 역할이 다르다 (v5.272, 사용자 지시) ──────────────
+    # v5.268에서 MA600이 **모든** 판정을 맡았더니 13종목 중 11개가 C3 이탈로
+    # 쏠렸다(MA600은 2.4년 평균이라 그간 오른 종목은 기준선이 한참 아래 남는다).
+    # 그래서 역할을 쪼갠다:
+    #   gate  MA600 — **후보/탈락만** 가른다. 위면 ABC 후보, 아래면 C0 대기
+    #                 (장기 추세 미전환).
+    #   stage MA200 — **그 안에서** C 단계·B 중앙값 밴드·매물대·돌파를 판정.
+    # 이름에 역할을 박아 어느 선이 무엇을 하는지 값만 봐도 알게 한다.
+    "gate_ma_period": 600,
+    "stage_ma_period": 200,
     # A: 긴 하락
     "a_lookback": 250,        # 고점 탐색 구간(봉) ≈ 52주
     "a_drop_min": 0.40,       # 고점→저점 하락폭 ≥ 40%
@@ -27,17 +31,12 @@ ABC_CONFIG = {
     "b_min_bars": 20,         # 저점 **직후** 횡보로 인정할 최소 봉수
     "b_max_bars": 60,         # 같은 구간의 최대 — 20~60 중 가장 긴 것을 고른다
     "b_range_max": 0.25,      # 그 구간 고저 범위 ≤ 25%
-    "b_ma_band": 0.15,        # 구간 중앙값이 기준선 ±15% 안
-    # C: 단계 (close vs 기준선)
-    "c0": (-0.15, -0.05),     # 대기
-    "c1": (-0.05, 0.05),      # 벽앞 — **c2와 [0,+5%)에서 겹친다**(사용자 정의
-                              #   C1 −5~+5 / C2 0~+20 그대로). 판정 순서가 C2를
-                              #   먼저 보므로 겹침 구간은 C2다(= C1 실질 −5~0%).
-                              #   **사용자 확정 2026-09-18**("C2 우선 유지. 확정").
-                              #   test_c1_and_c2_overlap_is_resolved_toward_c2가
-                              #   이 해소 방향을 고정한다 — 바꾸려면 그 테스트부터.
-    "c2": (0.00, 0.20),       # 진돌이/가돌이 (돌파 동반)
-    "c3_min": 0.20,           # 이탈
+    "b_ma_band": 0.15,        # 구간 중앙값이 **MA200** ±15% 안(v5.267 기준 복귀)
+    # C: 단계 — **MA600 위인 종목만** MA200 기준으로 가른다(v5.272).
+    # C0는 더 이상 MA200 구간이 아니다: "MA600 아래" 자체가 C0 대기다.
+    "c1": (-0.05, 0.00),      # 벽앞 — MA200 바로 아래
+    "c2": (0.00, 0.20),       # 상태 — MA200 위, 진돌이/가돌이
+    "c3_min": 0.20,           # 이탈 — MA200 +20% 이상
     "c2_vol_mult": 3.0,       # 진돌이 기준 거래량 배수(돌파봉/직전 5일평균)
     "vol_avg_bars": 5,
     "breakout_lookback": 60,  # 돌파봉 탐지 창(봉) — 이 안에 돌파가 없으면 "돌파 없음"
@@ -47,48 +46,50 @@ ABC_CONFIG = {
                               # "가돌이"로 잘못 부른다(LS에코 09-15 2.09배 →
                               # 09-16 13.01배).
     # 매물대
-    "supply_band": (1.00, 1.30),   # 기준선 ~ 기준선×1.3
+    "supply_band": (1.00, 1.30),   # **MA200** ~ MA200×1.3 (v5.267 기준 복귀)
     "supply_min_bars": 30,         # 그 구간에 과거 250봉 중 ≥30봉
     # 다른 셋업(ABC 아님) 판정
-    "other_above_ma_bars": 60,     # 기준선 위 60봉 이상이면 박스/눌림
+    "other_above_ma_bars": 60,     # 게이트선 위 60봉 이상이면 박스/눌림
     # 기업 축
     # v5.271 수정(사용자 지시): 하한 300억 → **30억**. 실측에서 하한 300억이
     # 후보의 82%를 잘라내고 남은 A급이 POSCO홀딩스였다 — "소형 성장주"라는
     # 전제와 반대로 **하한이 대형주를 고르고 있었다**. 30억은 "B구간 횡보
     # 종목의 평소 수준"(사용자 지시)이며 **임의값**이다. 미달 → C급
     # (호가가 얇아 진입 자체가 어렵다).
-    "min_turnover_eok": 30,
+    # v5.272 재조정: 30억 → **10억**(임의값). 나무가 6억·우리넷 7억은 여전히
+    # C급이고 사용자가 그게 맞다고 확인했다 — "그 유동성이면 호가가 얇다".
+    "min_turnover_eok": 10,
     # 거래대금 평균을 낼 B구간 봉 수(사용자 지시 "B구간 20봉 평균").
     "turnover_avg_bars": 20,
     # v5.271(사용자 지시): **상한**. "양봉맨 ABC는 소형 성장주"라 거래대금이
     # 너무 큰 대형주는 등급을 B로 막는다. 1,000억은 **임의값**(측정 근거 없음).
     # 처음 지시는 상한도 300억이었는데 그러면 하한과 같아져 **A급 가능 구간이
     # 정확히 300억 한 점**으로 사라진다 — 지적 후 1,000억으로 확정.
-    #   < 30억       → C급(강등)
-    #   30~1,000억   → A급 가능
+    #   < 10억       → C급(강등)
+    #   10~1,000억   → A급 가능
     #   > 1,000억    → "대형", B 이하
     "max_turnover_eok": 1000,
     "rev_yoy_min_quarters": 3,     # 최근 4분기 중 매출 YoY+ 분기 수
     "rev_yoy_window": 4,
     "eps_positive_quarters": 2,    # 최근 2분기 EPS 흑자
     # 판정에 필요한 최소 봉수 — **기준선 기간과 같이 움직여야 한다.**
-    # 250으로 두면 MA600이 NaN인 종목이 게이트를 통과해 들어온다.
+    # 250으로 두면 게이트선(MA600)이 NaN인 종목이 그대로 통과한다.
     # `_min_bars(cfg)`가 max(250, ma_period)로 계산한다(리터럴 금지).
     "min_bars_floor": 250,
 }
 
-C_STAGES = ("C0 대기", "C1 벽앞", "C2 진돌이", "C2 가돌이", "C2 역배열",
+C_STAGES = ("C0 대기", "C1 벽앞", "C2 진돌이", "C2 가돌이",
             "C2 돌파 없음", "C3 이탈")
 
 
 def _min_bars(cfg: dict = ABC_CONFIG) -> int:
     """판정 최소 봉수. 기준선 기간보다 짧으면 MA가 NaN이라 판정 자체가 불가."""
-    return max(cfg["min_bars_floor"], cfg["ma_period"])
+    return max(cfg["min_bars_floor"], cfg["gate_ma_period"])
 
 
 def _ma_label(cfg: dict = ABC_CONFIG) -> str:
-    """화면·사유 문자열용. 리터럴 "MA600"을 박으면 기간을 바꿔도 안 따라온다."""
-    return f"MA{cfg['ma_period']}"
+    """게이트선 라벨. 리터럴 "MA600"을 박으면 기간을 바꿔도 안 따라온다."""
+    return f"MA{cfg['gate_ma_period']}"
 
 
 def _ma(close, n: int):
@@ -96,7 +97,12 @@ def _ma(close, n: int):
 
 
 def _find_breakout(close, vol, cfg: dict):
-    """최근 `breakout_lookback`봉 중 **기준선 아래→위로 넘어간 마지막 봉**.
+    """최근 `breakout_lookback`봉 중 **MA200을 아래→위로 넘어간 첫 봉**.
+
+    v5.272(사용자 지시): 기준을 게이트선(MA600)에서 **MA200**으로, 그리고
+    마지막 교차 → **첫 교차**로. 진돌이/가돌이는 "그 돌파가 어떤 성격이었나"라
+    처음 넘은 순간이 기준이다 — 뒤에 되밟고 다시 넘은 봉을 집으면 원래 돌파의
+    거래량이 사라진다.
 
     없으면 None("돌파 없음" — 60봉 내내 위에 있었다는 뜻).
     vol_mult는 **그 돌파봉의** 거래량 ÷ 직전 5일평균이다(오늘 거래량이 아니다) —
@@ -109,7 +115,7 @@ def _find_breakout(close, vol, cfg: dict):
     """
     n = len(close)
     look = min(cfg["breakout_lookback"], n - 1)
-    ma_series = close.rolling(cfg["ma_period"]).mean()
+    ma_series = close.rolling(cfg["stage_ma_period"]).mean()
     found = None
     for i in range(n - look, n):
         if i < 1:
@@ -119,6 +125,7 @@ def _find_breakout(close, vol, cfg: dict):
             continue
         if float(close.iloc[i - 1]) <= float(m) < float(close.iloc[i]):
             found = i
+            break                       # v5.272: **첫** 상향돌파에서 멈춘다
     if found is None:
         return None
     k = cfg["vol_avg_bars"]
@@ -148,11 +155,13 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
       "ABC 아님"    — 그 외(데이터 부족 포함)
     """
     out = {"verdict": "ABC 아님", "reason": None, "a": None, "b": None,
-           "c_stage": None, "ma_pct": None, "ma200_pct": None, "vol_mult": None,
+           "c_stage": None, "gate_pct": None, "stage_pct": None, "vol_mult": None,
            "supply_above": False, "supply_bars": 0,
            "b_turnover_eok": None, "turnover_today_eok": None,
-           "breakout": None, "close": None, "ma": None,
-           "ma_period": cfg["ma_period"], "ma_inverted": None}
+           "breakout": None, "close": None,
+           "ma_gate": None, "ma_stage": None,
+           "gate_ma_period": cfg["gate_ma_period"],
+           "stage_ma_period": cfg["stage_ma_period"], "ma_inverted": None}
     n_bars = 0 if df is None or getattr(df, "empty", True) else len(df)
     need = _min_bars(cfg)
     if n_bars < need:
@@ -165,23 +174,21 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
 
     close, high, low, vol = df["Close"], df["High"], df["Low"], df["Volume"]
     last = float(close.iloc[-1])
-    ma = _ma(close, cfg["ma_period"])
-    if not ma:
+    ma_gate = _ma(close, cfg["gate_ma_period"])
+    ma_stage = _ma(close, cfg["stage_ma_period"])
+    if not ma_gate or not ma_stage:
         out["verdict"] = f"{_ma_label(cfg)} 불가"
         out["reason"] = f"{_ma_label(cfg)} 계산 불가"
         return out
-    out["ma_pct"] = round((last / ma - 1) * 100, 1)
+    out["gate_pct"] = round((last / ma_gate - 1) * 100, 1)
+    out["stage_pct"] = round((last / ma_stage - 1) * 100, 1)
     # ★ 추적 트리거로 쓰려면 비율이 아니라 **가격**이 필요하다(화면에서 재계산 금지).
-    out["close"], out["ma"] = last, round(ma, 2)
-    # MA200은 v5.268부터 **판정에 안 쓰인다** — 화면 보조 열 하나로만 남긴다
-    # (사용자 지시). 어떤 게이트도 이 값을 읽으면 안 된다.
-    ma200 = _ma(close, 200)          # ← 표시용 + 배열 판정(v5.271)에만 사용
-    out["ma200_pct"] = round((last / ma200 - 1) * 100, 1) if ma200 else None
-    # v5.271(사용자 지시): MA200 < MA600 = **역배열**. "정배열 회복이 진돌이
-    # 전제"라 역배열이면 C2에서 진돌이/가돌이를 매기지 않는다. 가격 위치가
-    # 아니라 **두 이평의 순서**를 보는 것이라, C 단계(가격 vs 기준선)와는
-    # 다른 축이다.
-    out["ma_inverted"] = bool(ma200 < ma) if ma200 else None
+    out["close"] = last
+    out["ma_gate"], out["ma_stage"] = round(ma_gate, 2), round(ma_stage, 2)
+    # v5.272: 역배열은 **표시 전용**이 됐다(사용자 지시 "등급 무관. 정보만").
+    # v5.271에선 이게 C2 진돌이를 막았는데, 게이트/판정을 분리하면서 그 역할을
+    # MA600 게이트가 가져갔다 — 같은 뜻을 두 곳에서 강제하면 어긋난다.
+    out["ma_inverted"] = bool(ma_stage < ma_gate)
 
     v_avg = float(vol.iloc[-cfg["vol_avg_bars"] - 1:-1].mean()) if len(vol) > cfg["vol_avg_bars"] else 0.0
     out["vol_mult"] = round(float(vol.iloc[-1]) / v_avg, 2) if v_avg > 0 else None
@@ -206,7 +213,7 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
 
     if not a_ok:
         # 다른 셋업: 기준선 위에 오래 머문 종목 — 탭에서 빼되 카운트는 남긴다
-        ma_series = close.rolling(cfg["ma_period"]).mean()
+        ma_series = close.rolling(cfg["gate_ma_period"]).mean()
         above = (close.iloc[-cfg["other_above_ma_bars"]:]
                  > ma_series.iloc[-cfg["other_above_ma_bars"]:]).sum()
         if int(above) >= cfg["other_above_ma_bars"]:
@@ -220,7 +227,7 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
     out["verdict"] = "ABC"
 
     # ── B: **저점 직후** 횡보 (사용자 확정 2026-09-18, 안 (b)) ──────
-    # 저점 이후 **전 구간**으로 재면 −70% 빠졌다가 기준선까지 올라온 종목은
+    # 저점 이후 **전 구간**으로 재면 −70% 빠졌다가 MA200까지 올라온 종목은
     # 범위가 60%대라 **C2에 도달한 종목이 B를 구조적으로 통과할 수 없었다**
     # (A급이 원리적으로 안 나옴). 그래서 저점 **직후**만 보고, 그 뒤 상승분은
     # B 판정에서 제외한다 — 상승은 C가 담당한다.
@@ -240,9 +247,9 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
         rng = (float(seg_h.max()) - lo_s) / lo_s
         med = float(seg_c.median())
         cand = {"bars": n, "range_pct": round(rng * 100, 1),
-                "median_vs_ma_pct": round((med / ma - 1) * 100, 1),
+                "median_vs_ma_pct": round((med / ma_stage - 1) * 100, 1),
                 "ok": bool(rng <= cfg["b_range_max"]
-                           and abs(med / ma - 1) <= cfg["b_ma_band"])}
+                           and abs(med / ma_stage - 1) <= cfg["b_ma_band"])}
         if best is None:
             best = cand                         # 가장 긴 후보(조건 불문) — 표시용
         if cand["ok"]:
@@ -262,38 +269,45 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
     out["b_turnover_eok"] = (round(float((seg_c * seg_v).mean()) / 1e8, 1)
                              if len(seg_c) >= tb else None)
 
-    # ── C: 단계 — **상태**로 본다 (사용자 확정 2026-09-18) ──────────
-    # C2를 "당일 돌파"라는 **이벤트**로 두면 ① +5~20%인데 당일 돌파가 아닌
-    # 상태가 어느 단계에도 안 들어가는 빈틈이 생기고 ② 돌파 다음날 탭에서
-    # 사라진다. 그래서 위치(close vs 기준선)로 단계를 정하고, 진돌이/가돌이는
-    # **돌파봉의 거래량**으로 구분한 뒤 그 라벨을 유지한다.
-    d = last / ma - 1
+    # ── C: 단계 — **게이트(MA600) 통과분만 MA200으로** (v5.272) ────
+    # C2를 "당일 돌파"라는 **이벤트**로 두면 ① 사이 구간이 어느 단계에도 안
+    # 들어가고 ② 돌파 다음날 탭에서 사라진다. 그래서 위치로 단계를 정하고,
+    # 진돌이/가돌이는 **첫 돌파봉의 거래량**으로 구분한 뒤 라벨을 유지한다.
+    #
+    # v5.272 구조: 게이트선 **아래면 그것만으로 C0 대기**(장기 추세 미전환).
+    # 위에 있을 때만 MA200 대비 위치로 C1/C2/C3을 가르고, MA200보다 한참
+    # 아래(벽앞 구간에도 못 든 경우)면 역시 C0 대기다 — 아래 주석 참고.
     out["breakout"] = _find_breakout(close, vol, cfg)
-    c0, c1, c2 = cfg["c0"], cfg["c1"], cfg["c2"]
-    if d >= cfg["c3_min"]:
-        out["c_stage"] = "C3 이탈"
-    elif c2[0] <= d < c2[1]:
-        bo = out["breakout"]
-        if out["ma_inverted"]:
-            # v5.271: 역배열(MA200 < MA600)에서는 진돌이/가돌이를 매기지 않는다.
-            # 구간(C2)은 상태라 그대로 두고 **라벨만** 판정 불가로 남긴다 —
-            # 단계를 통째로 None으로 만들면 종목이 탭에서 사라진다.
-            out["c_stage"] = "C2 역배열"
-        elif bo is None:
-            out["c_stage"] = "C2 돌파 없음"    # 60봉 내 돌파 없이 계속 위 — 등급엔 무관
-        else:
-            out["c_stage"] = ("C2 진돌이" if (bo["vol_mult"] or 0) >= cfg["c2_vol_mult"]
-                              else "C2 가돌이")
-    elif c1[0] <= d < c1[1]:
-        out["c_stage"] = "C1 벽앞"
-    elif c0[0] <= d < c0[1]:
+    c1, c2 = cfg["c1"], cfg["c2"]
+    if last < ma_gate:
         out["c_stage"] = "C0 대기"
+        out["reason"] = f"장기 추세 미전환 ({_ma_label(cfg)} 대비 {out['gate_pct']:+.1f}%)"
     else:
-        out["c_stage"] = None
-        out["reason"] = f"C 구간 밖 ({_ma_label(cfg)} 대비 {d*100:+.1f}%)"
+        d = last / ma_stage - 1          # ← 단계는 **MA200** 기준
+        if d >= cfg["c3_min"]:
+            out["c_stage"] = "C3 이탈"
+        elif c2[0] <= d < c2[1]:
+            bo = out["breakout"]
+            if bo is None:
+                out["c_stage"] = "C2 돌파 없음"   # 창 안에 돌파 없음 — 등급엔 무관
+            else:
+                out["c_stage"] = ("C2 진돌이" if (bo["vol_mult"] or 0) >= cfg["c2_vol_mult"]
+                                  else "C2 가돌이")
+        elif c1[0] <= d < c1[1]:
+            out["c_stage"] = "C1 벽앞"
+        else:
+            # 게이트선 위인데 MA200보다 c1 하한(-5%)보다 더 아래 — 지시문에
+            # 없던 조합이라 처음엔 "단계 없음"으로 뒀는데, 13종목 실측에서
+            # 선익·비나텍·나무가 3건이 여기 빠졌고 **사용자 예상은 셋 다
+            # C0 대기**였다. 즉 C0는 "게이트 아래"가 아니라 **"MA200 벽 아래에서
+            # 대기"**가 맞는 해석이다(게이트 아래도 그 부분집합).
+            out["c_stage"] = "C0 대기"
+            out["reason"] = (f"MA{cfg['stage_ma_period']} 벽 아래 대기 "
+                             f"({d*100:+.1f}%)")
 
-    # ── 매물대: 기준선 ~ 기준선×1.3에 과거 250봉 중 몇 봉이 머물렀나 ──
-    lo_b, hi_b = ma * cfg["supply_band"][0], ma * cfg["supply_band"][1]
+    # ── 매물대: MA200 ~ MA200×1.3에 과거 250봉 중 몇 봉이 머물렀나 ──
+    # (v5.272에서 v5.267 기준으로 복귀 — 사용자 지시 "MA200 기준 유지")
+    lo_b, hi_b = ma_stage * cfg["supply_band"][0], ma_stage * cfg["supply_band"][1]
     c_win = close.iloc[-cfg["a_lookback"]:]
     n_in = int(((c_win >= lo_b) & (c_win <= hi_b)).sum())
     out["supply_above"] = bool(n_in >= cfg["supply_min_bars"])

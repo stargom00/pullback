@@ -28,8 +28,8 @@ def make(closes, vols=None, highs=None, lows=None):
     }, index=idx)
 
 
-def abc_shape(drop_pct=0.45, span=45, flat=None, lead=20):
-    """ABC 모양 합성 — 기준선이 바닥 수준과 같아지도록 **앞쪽을 역산해 채운다**.
+def abc_shape(drop_pct=0.45, span=45, flat=None, lead=20, gate_margin=0.15):
+    """ABC 모양 합성 — 게이트선(MA600)을 바닥보다 아래로 두고 앞쪽을 역산한다.
 
     v5.268 재설계. 이전엔 "마지막 200봉을 전부 횡보로 채워 MA200 == 횡보가"로
     만들었는데, 기준선이 600으로 올라가자 그 방식이 **스스로 모순**이 됐다:
@@ -46,17 +46,20 @@ def abc_shape(drop_pct=0.45, span=45, flat=None, lead=20):
     lead는 완만한 상승이라 고점이 하락 직전 한 봉으로 유일하다.
     (평탄한 고원으로 두면 argmax가 첫 봉을 집어 span이 부풀려진다.)
     """
-    n_ma = CFG["ma_period"]
+    n_gate = CFG["gate_ma_period"]
     hi, lo = 100.0, 100.0 * (1 - drop_pct)
     up = list(np.linspace(hi * 0.9, hi, lead))
     down = list(np.linspace(hi, lo, span + 1))[1:]
     if flat is None:
         flat = CFG["a_lookback"] - lead - span        # A가 탐색창에 꼭 맞게
     recent = up + down + [lo] * flat
-    pre_n = max(0, n_ma - len(recent))
+    pre_n = max(0, n_gate - len(recent))
     if pre_n:
-        # (pre_n·P + sum(recent)) / n_ma == lo  →  P를 푼다
-        pre_v = (n_ma * lo - sum(recent)) / pre_n
+        # v5.272: 게이트선(MA600)을 **바닥보다 gate_margin만큼 아래**로 맞춘다.
+        # 이전엔 MA == 바닥이라 게이트 통과가 소수점에서 갈렸는데, 이제 게이트가
+        # 후보/탈락을 가르므로 통과 여부가 애매하면 단계 테스트가 전부 흔들린다.
+        target_gate = lo / (1 + gate_margin)
+        pre_v = (target_gate * n_gate - sum(recent)) / pre_n
         assert pre_v > 0, f"픽스처 역산이 음수({pre_v:.1f}) — flat/span 조합을 줄여라"
         pre = [pre_v] * (pre_n + 30)                  # +30은 min_bars 여유
     else:
@@ -80,9 +83,10 @@ def with_crossing(closes, above=1.05, below=0.95, n=5):
     return out
 
 
-def ma_of(closes):
-    """픽스처가 의도한 기준선 값 — 테스트가 직접 200/600을 쓰지 않게."""
-    n = CFG["ma_period"]
+def ma_of(closes, which="stage"):
+    """픽스처가 의도한 이평 값 — 테스트가 200/600을 직접 쓰지 않게.
+    which: "stage"(MA200, 단계 판정) | "gate"(MA600, 후보 게이트)."""
+    n = CFG["stage_ma_period"] if which == "stage" else CFG["gate_ma_period"]
     return float(np.mean(closes[-n:]))
 
 
@@ -145,9 +149,10 @@ def test_b_range_boundary():
 
 
 def _at_ma(pct, vol_mult=1.0, breakout=False):
-    """마지막 봉을 **기준선** 대비 pct 위치로 놓은 ABC 모양."""
+    """마지막 봉을 **단계선(MA200)** 대비 pct 위치로 놓은 ABC 모양.
+    (v5.272: 단계는 MA200이 정한다 — 게이트선 MA600은 후보/탈락만 가른다.)"""
     df = make(abc_shape())
-    n = CFG["ma_period"]
+    n = CFG["stage_ma_period"]
     ma = float(df["Close"].iloc[-n:].mean())
     if breakout:
         df.iloc[-2, df.columns.get_loc("Close")] = ma * 0.99
@@ -158,17 +163,11 @@ def _at_ma(pct, vol_mult=1.0, breakout=False):
 
 
 def test_c_stage_boundaries():
-    assert _at_ma(-0.10)["c_stage"] == "C0 대기"
+    """v5.272 밴드: C0(벽 아래) / C1(-5~0) / C2(0~+20) / C3(+20~), 전부 MA200 기준."""
+    assert _at_ma(-0.10)["c_stage"] == "C0 대기"      # 벽에서 멀다
     assert _at_ma(-0.02)["c_stage"] == "C1 벽앞"
     assert _at_ma(0.25)["c_stage"] == "C3 이탈"
-    # C 구간 밖: C0 하단(-15%)보다 더 아래면 어느 단계도 아니다
-    deep = _at_ma(-0.30)
-    assert deep["c_stage"] is None and "C 구간 밖" in deep["reason"], deep
-
-    # 이 픽스처는 횡보가 == MA200이라 **어제 종가가 MA200 이하**다 →
-    # 위로 올라가면 정의상 "오늘 돌파"가 성립한다(broke_today).
-    # 처음엔 이걸 못 보고 "돌파 없이 +10%면 구간 밖"이라 잘못 기대했다.
-    assert _at_ma(0.10)["c_stage"] in ("C2 진돌이", "C2 가돌이")
+    assert _at_ma(0.10)["c_stage"].startswith("C2")
 
 
 def test_c2_vol_mult_boundary():
@@ -179,7 +178,7 @@ def test_c2_vol_mult_boundary():
 
 def test_other_setup_counted_not_hit():
     """A 없음 + 기준선 위 장기 → '다른 셋업'."""
-    r = A.analyze_abc(make(list(np.linspace(50, 120, CFG["ma_period"] + 100))))
+    r = A.analyze_abc(make(list(np.linspace(50, 120, CFG["gate_ma_period"] + 100))))
     assert r["verdict"] == "다른 셋업", r
     assert "박스/눌림" in r["reason"]
 
@@ -190,16 +189,16 @@ def test_short_history_gets_its_own_verdict():
     "ABC 아님"에 섞어 넣으면 화면에서 "패턴이 아니라서 빠진 것"과
     "데이터가 짧아서 못 본 것"이 구분되지 않는다.
     """
-    r = A.analyze_abc(make([100.0] * (CFG["ma_period"] - 1)))
-    assert r["verdict"] == f"MA{CFG['ma_period']} 불가", r["verdict"]
-    assert "계산 불가" in r["reason"] and str(CFG["ma_period"]) in r["reason"]
+    r = A.analyze_abc(make([100.0] * (CFG["gate_ma_period"] - 1)))
+    assert r["verdict"] == f"MA{CFG['gate_ma_period']} 불가", r["verdict"]
+    assert "계산 불가" in r["reason"] and str(CFG["gate_ma_period"]) in r["reason"]
     assert A.grade(r, {"ok": True, "turnover_fail": False}) is None, "등급이 매겨졌다"
 
 
 def test_min_bars_follows_the_ma_period():
     """최소 봉수가 기준선 기간과 따로 놀면 MA가 NaN인 종목이 게이트를 통과한다."""
-    assert A._min_bars() >= CFG["ma_period"]
-    assert A._min_bars({**CFG, "ma_period": 900}) == 900
+    assert A._min_bars() >= CFG["gate_ma_period"]
+    assert A._min_bars({**CFG, "gate_ma_period": 900}) == 900
 
 
 def test_supply_band_flag():
@@ -316,11 +315,35 @@ def test_breakout_uses_the_ma_at_that_bar_not_today():
     """
     import inspect
     src = inspect.getsource(A._find_breakout)
-    assert 'rolling(cfg["ma_period"])' in src, "각 봉 시점의 기준선을 안 쓴다"
+    assert 'rolling(cfg["stage_ma_period"])' in src, "각 봉 시점의 MA200을 안 쓴다"
     assert "rolling(200)" not in src, "기간이 리터럴로 굳었다"
     # 기준선을 상수로 받는 인자가 비교에 쓰이면 안 된다
     body = src[src.index("n = len(close)"):]
     assert "< float(close.iloc[i])" in body and "float(m)" in body, body
+
+
+def test_breakout_reports_the_first_cross_not_the_last():
+    """v5.272(사용자 지시): "MA200 **첫** 상향돌파 후 3봉 내 vol 최대".
+
+    창 안에 상향돌파가 두 번 있으면 **앞의 것**을 잡아야 한다. 뒤의 것을 잡으면
+    원래 돌파의 거래량(= 진돌이/가돌이를 가르는 근거)이 사라진다.
+
+    ⚠️ 이 테스트는 원래 `assert "break" in src`라는 **텍스트 검사**였는데,
+    함수 이름이 `_find_breakout`이라 "break"가 항상 들어 있어 **무조건 통과하는
+    tautology**였다(사보타주에서 잡혔다). 그래서 동작으로 바꿨다.
+    """
+    closes = abc_shape()
+    lo = closes[-1]
+    # 마지막 24봉: 아래 → 위(1차 돌파) → 아래 → 위(2차 돌파)
+    closes[-24:] = ([lo * 0.95] * 6 + [lo * 1.06] * 6
+                    + [lo * 0.95] * 6 + [lo * 1.06] * 6)
+    vols = [1000.0] * len(closes)
+    vols[-18] = 4000.0       # 1차 돌파봉: 4배  ← 이게 잡혀야 한다
+    vols[-6] = 40000.0       # 2차 돌파봉: 40배
+    bo = A.analyze_abc(make(closes, vols=vols))["breakout"]
+    assert bo is not None, "돌파를 아예 못 찾았다"
+    assert bo["bars_ago"] == 17, f"첫 돌파(17봉 전)가 아니라 {bo['bars_ago']}봉 전을 잡았다"
+    assert bo["vol_mult"] < 10, f"2차 돌파의 거래량을 썼다({bo['vol_mult']})"
 
 
 def test_breakout_detects_the_crossing_bar():
@@ -375,7 +398,7 @@ def test_c2_stage_is_state_not_event():
 
 # ── C 경계: 겹침·빈틈 (v5.267) ────────────────────────────────────────
 def _stage_at(pct, vol_mult=10.0):
-    """마지막 봉을 **기준선** 대비 pct%에 정확히 놓고 C단계를 읽는다.
+    """마지막 봉을 **단계선(MA200)** 대비 pct%에 정확히 놓고 C단계를 읽는다.
 
     마지막 종가도 기준선에 들어가므로(1/N 가중) 그냥 `ma*(1+p)`로 두면 목표에서
     어긋난다. x = MA×(1+p)를 만족하는 x를 직접 푼다:
@@ -384,7 +407,7 @@ def _stage_at(pct, vol_mult=10.0):
     """
     closes = abc_shape()
     p = pct / 100
-    N = CFG["ma_period"]
+    N = CFG["stage_ma_period"]
     S = sum(closes[-(N - 1):])
     x = S * (1 + p) / (N - (1 + p))
     closes = closes[:-1] + [x]
@@ -394,17 +417,15 @@ def _stage_at(pct, vol_mult=10.0):
     return A.analyze_abc(make(closes, vols=vols))["c_stage"]
 
 
-def test_c1_and_c2_overlap_is_resolved_toward_c2():
-    """**사양이 겹친다**: 사용자 정의 C1 = −5~+5%, C2 = 0~+20% → [0,+5%)가 양쪽.
-
-    코드는 C2를 먼저 본다 → 겹치는 구간은 C2다(= C1은 실질 −5~0%).
-    내가 임의로 해소한 뒤 사용자가 확정했다("C2 우선 유지. 확정", 2026-09-18).
-    바꾸려면 이 테스트부터 고칠 것.
+def test_c1_and_c2_no_longer_overlap():
+    """v5.267~v5.271에는 C1(-5~+5)과 C2(0~+20)가 [0,+5%)에서 겹쳤고 순서로
+    해소했다. v5.272에서 C1이 (-5~0)으로 좁아지며 **겹침 자체가 사라졌다** —
+    순서에 기대지 않고 밴드만으로 결정된다(순서를 바꿔도 결과가 같아야 한다).
     """
-    assert _stage_at(2.0) == "C2 진돌이", "겹침 구간이 C1로 넘어갔다"
+    c1, c2 = CFG["c1"], CFG["c2"]
+    assert c1[1] <= c2[0], f"다시 겹친다: C1{c1} C2{c2}"
+    assert _stage_at(2.0).startswith("C2")
     assert _stage_at(-2.0) == "C1 벽앞"
-    cfg = A.ABC_CONFIG
-    assert cfg["c1"][1] > cfg["c2"][0], "겹침이 사라졌다면 이 테스트를 지울 것"
 
 
 def test_c_bands_have_no_silent_gap():
@@ -413,11 +434,24 @@ def test_c_bands_have_no_silent_gap():
         assert _stage_at(float(pct)) is not None, f"{pct}%에서 단계가 비었다"
 
 
-def test_outside_the_bands_is_excluded_with_a_reason():
-    closes = abc_shape()
-    closes = closes[:-1] + [closes[-1] * 0.5]      # −50% — C 구간 밖
-    r = A.analyze_abc(make(closes))
-    assert r["c_stage"] is None and "C 구간 밖" in r["reason"]
+def test_far_below_the_wall_is_c0_not_a_hole():
+    """게이트선 위인데 MA200보다 한참 아래 — 지시문에 없던 조합.
+
+    처음엔 "단계 없음"으로 뒀는데 13종목 실측에서 선익·비나텍·나무가 3건이
+    여기 빠졌고 **사용자 예상은 셋 다 C0 대기**였다. 구멍을 남기면 그 종목들이
+    탭에서 조용히 사라진다.
+    """
+    r = _at_ma(-0.10)
+    assert r["gate_pct"] > 0, f"게이트선 아래라 다른 갈래를 탔다({r['gate_pct']})"
+    assert r["stage_pct"] < CFG["c1"][0] * 100, r["stage_pct"]
+    assert r["c_stage"] == "C0 대기", r["c_stage"]
+    assert "벽 아래" in (r["reason"] or ""), r["reason"]
+
+    # 게이트선 **아래**도 C0지만 사유가 달라야 한다 — 둘을 구분 못 하면
+    # "왜 대기인지"를 화면에서 알 수 없다.
+    below = _at_ma(-0.30)
+    assert below["c_stage"] == "C0 대기"
+    assert "미전환" in (below["reason"] or ""), below["reason"]
 
 
 def test_c2_c3_boundary_sits_at_the_config_value():
@@ -433,7 +467,7 @@ def test_c2_c3_boundary_sits_at_the_config_value():
     # 상수를 낮추면 경계도 따라 내려와야 한다(리터럴 하드코딩 감지)
     cfg = dict(A.ABC_CONFIG, c3_min=0.10)
     closes = abc_shape()
-    N = CFG["ma_period"]
+    N = CFG["stage_ma_period"]
     S = sum(closes[-(N - 1):]); x = S * 1.15 / (N - 1.15)
     r = A.analyze_abc(make(closes[:-1] + [x]), cfg)
     assert r["c_stage"] == "C3 이탈", r["c_stage"]
@@ -442,40 +476,30 @@ def test_c2_c3_boundary_sits_at_the_config_value():
 # ══════════════════════════════════════════════════════════════════════
 # v5.268 — 기준선 600 (사용자 지시: "200으로 되돌리면 FAIL")
 # ══════════════════════════════════════════════════════════════════════
-def test_ma_period_is_600():
-    """사용자 지시로 확정된 값. 되돌리면 여기서 걸린다.
-
-    "ABC 탭 기준선 200MA → 600MA. 핫핑크 = 더양봉맨 장기 추세 전환선."
-    (2026-09-18). 측정 근거는 **없다** — 나머지 ABC 임계값과 같은 초기 임의값.
-    """
-    assert CFG["ma_period"] == 600, f"기준선이 {CFG['ma_period']}로 돌아갔다"
+def test_the_two_periods_are_600_and_200():
+    """사용자 확정값. 역할이 다르다 — 게이트 600, 단계 200(v5.272)."""
+    assert CFG["gate_ma_period"] == 600, CFG["gate_ma_period"]
+    assert CFG["stage_ma_period"] == 200, CFG["stage_ma_period"]
+    assert CFG["gate_ma_period"] > CFG["stage_ma_period"], "장기/중기가 뒤바뀌었다"
 
 
-def test_ma200_is_never_the_baseline():
-    """MA200이 **기준선 노릇을 하면** 안 된다.
+def test_gate_and_stage_roles_are_separated():
+    """v5.272의 핵심 — 두 선이 **서로 다른 일**을 한다.
 
-    v5.268엔 "표시 전용"이었지만 v5.271에서 역배열(MA200 < MA600) 판정이
-    생겨 용도가 둘로 늘었다. 그래서 불변식을 좁힌다 — 허용되는 건
-    ① 화면 표시(`ma200_pct`) ② 두 이평의 **순서** 비교뿐이고,
-    C 단계·B 밴드·매물대·돌파의 **기준선**으로 쓰는 건 여전히 금지다.
+    · 게이트(MA600): 후보/탈락만. `last < ma_gate` 한 곳에서만 쓰인다.
+    · 단계(MA200): C단계·B밴드·매물대·돌파.
+    한쪽이 다른 쪽 일을 하기 시작하면 v5.268의 "전부 C3 쏠림"이 재발한다.
     """
     import inspect
     src = inspect.getsource(A.analyze_abc)
-    uses = [l.strip() for l in src.splitlines()
-            if "_ma(close, 200)" in l or "rolling(200)" in l]
-    assert len(uses) == 1, f"200 기준 계산이 여러 곳이다: {uses}"
-
-    # 허용된 두 용도 외에 ma200을 읽는 줄이 있으면 잡는다
-    anchor = 'out["ma_inverted"]'
-    body = src[src.index(anchor):]
-    body = body[body.index("\n"):]
-    assert "ma200" not in body, f"기준선 판정 구간에서 ma200을 읽는다: {body[:200]}"
-
-    # 판정 축 4개는 전부 `ma`(=기준선)를 써야 한다
-    for axis, needle in (("C 단계", "d = last / ma - 1"),
-                         ("B 밴드", "med / ma - 1"),
-                         ("매물대", "lo_b, hi_b = ma *")):
-        assert needle in src, f"{axis}가 기준선을 안 쓴다"
+    assert "if last < ma_gate:" in src, "게이트가 후보 판정에 안 쓰인다"
+    for axis, needle in (("C 단계", "d = last / ma_stage - 1"),
+                         ("B 밴드", "med / ma_stage - 1"),
+                         ("매물대", "lo_b, hi_b = ma_stage *")):
+        assert needle in src, f"{axis}가 단계선을 안 쓴다"
+    # 단계 판정 구간에서 게이트선을 다시 읽으면 안 된다
+    body = src[src.index("d = last / ma_stage - 1"):src.index("# ── 매물대")]
+    assert "ma_gate" not in body, f"단계 판정이 게이트선을 읽는다: {body[:200]}"
 
 
 def test_every_judgement_axis_uses_the_config_period():
@@ -483,13 +507,13 @@ def test_every_judgement_axis_uses_the_config_period():
     묶여 있으면 기간을 바꿨을 때 그 축만 조용히 옛 기준으로 남는다."""
     closes = abc_shape()
     base = A.analyze_abc(make(closes))
-    short_cfg = {**CFG, "ma_period": 300}
+    short_cfg = {**CFG, "stage_ma_period": 300}
     other = A.analyze_abc(make(closes), short_cfg)
     # 기간이 다르면 기준선 값이 달라야 한다(= 축이 cfg를 실제로 읽는다)
-    assert base["ma"] != other["ma"], "기간을 바꿔도 기준선이 그대로다"
-    assert base["ma_period"] == 600 and other["ma_period"] == 300
+    assert base["ma_stage"] != other["ma_stage"], "기간을 바꿔도 단계선이 그대로다"
+    assert base["stage_ma_period"] == 200 and other["stage_ma_period"] == 300
     # 그리고 그 차이가 판정 축들에 전달돼야 한다
-    assert base["ma_pct"] != other["ma_pct"]
+    assert base["stage_pct"] != other["stage_pct"]
     assert base["b"]["median_vs_ma_pct"] != other["b"]["median_vs_ma_pct"]
 
 
@@ -499,7 +523,7 @@ def test_supply_band_is_anchored_to_the_config_ma():
     src = inspect.getsource(A.analyze_abc)
     i = src.index("lo_b, hi_b =")
     line = src[i:src.index("\n", i)]
-    assert "ma *" in line and "200" not in line, line
+    assert "ma_stage *" in line and "200" not in line, line
 
 
 def test_config_has_no_ma200_named_keys():
@@ -542,7 +566,7 @@ def _inverted_shape(rise_to=95.0, c2_pct=0.05):
               + [lo] * flat_n
               + list(np.linspace(lo, rise_to, rise_n)))
     assert len(recent) == CFG["a_lookback"], len(recent)
-    N = CFG["ma_period"]
+    N = CFG["gate_ma_period"]
     pre_n = N - len(recent)
     target_ma = rise_to / (1 + c2_pct)
     P = (target_ma * N - sum(recent)) / pre_n
@@ -558,28 +582,47 @@ def test_inverted_ma_is_detected():
     assert base["ma_inverted"] is False, "정배열 모양이 역배열로 잡힌다"
 
 
-def test_inverted_ma_blocks_the_jindori_label():
-    """역배열이면 C2 구간이어도 진돌이/가돌이를 매기지 않는다(사용자 지시)."""
-    r = A.analyze_abc(make(_inverted_shape()))
-    assert r["c_stage"] == "C2 역배열", r["c_stage"]
-    assert "진돌이" not in r["c_stage"] and "가돌이" not in r["c_stage"]
+def test_inverted_ma_is_information_only():
+    """v5.272(사용자 지시): 역배열은 **등급 무관, 정보만**.
 
-
-def test_inverted_stage_still_appears_in_the_tab():
-    """단계를 None으로 만들면 종목이 **탭에서 사라진다** — 구간은 유지한다."""
-    r = A.analyze_abc(make(_inverted_shape()))
-    assert r["c_stage"] is not None
-    assert r["c_stage"].startswith("C2"), r["c_stage"]
-    assert r["c_stage"] in A.C_STAGES, f"{r['c_stage']}가 C_STAGES에 없다"
-
-
-def test_volume_alone_cannot_make_jindori_when_inverted():
-    """거래량이 아무리 커도 정배열 회복 전이면 진돌이가 아니다."""
+    v5.271에선 이게 C2 진돌이를 막았다. 게이트/판정을 분리하면서 그 역할을
+    MA600 게이트가 가져갔고, 같은 뜻을 두 곳에서 강제하면 반드시 어긋난다.
+    """
     closes = _inverted_shape()
+    r = A.analyze_abc(make(closes))
+    assert r["ma_inverted"] is True
+
+    # 역배열 여부가 단계·등급을 바꾸면 안 된다 — 판정 함수 어디에도
+    # ma_inverted를 읽는 분기가 없어야 한다.
+    import inspect
+    body = inspect.getsource(A.analyze_abc)
+    after = body[body.index('out["ma_inverted"]'):]
+    after = after[after.index("\n"):]
+    assert "ma_inverted" not in after, f"판정이 역배열을 읽는다: {after[:200]}"
+    assert "ma_inverted" not in inspect.getsource(A.grade)
+    assert "ma_inverted" not in inspect.getsource(A.company_axis)
+
+
+def test_inverted_label_does_not_appear_in_stage_names():
+    """v5.271의 "C2 역배열" 단계는 사라졌다 — 남아 있으면 등급에 새어든다."""
+    assert not any("역배열" in st for st in A.C_STAGES), A.C_STAGES
+    r = A.analyze_abc(make(_inverted_shape()))
+    assert "역배열" not in (r["c_stage"] or "")
+
+
+def test_volume_can_still_make_jindori_when_inverted():
+    """역배열이어도 거래량 조건만 맞으면 진돌이다(v5.271에서 뒤집힌 규칙)."""
+    closes = _inverted_shape(rise_to=95.0, c2_pct=0.05)
+    # 단계선 기준 C2 구간으로 옮긴 뒤 돌파 거래량을 실어준다
+    N = CFG["stage_ma_period"]
+    S = sum(closes[-(N - 1):])
+    closes = closes[:-1] + [S * 1.05 / (N - 1.05)]
     vols = [1000.0] * len(closes)
-    vols[-1] = 1000.0 * 50          # 50배
+    vols[-1] = 1000.0 * 50
     r = A.analyze_abc(make(closes, vols=vols))
-    assert r["c_stage"] == "C2 역배열", r["c_stage"]
+    if r["c_stage"] and r["c_stage"].startswith("C2"):
+        assert r["ma_inverted"] is True
+        assert r["c_stage"] in ("C2 진돌이", "C2 가돌이", "C2 돌파 없음"), r["c_stage"]
 
 
 def test_turnover_cap_is_above_the_floor():
@@ -685,13 +728,15 @@ def app_path():
     return app.__file__
 
 
-def test_floor_is_30_and_cap_is_1000():
+def test_floor_is_10_and_cap_is_1000():
     """사용자 확정값(둘 다 임의값). 되돌리면 여기서 걸린다.
 
     하한 300억일 때 실측: 후보 153건 중 126건(82%)이 잘려나갔고 남은 A급이
-    POSCO홀딩스였다 — 소형 성장주 전제와 반대였다.
+    POSCO홀딩스였다 — 소형 성장주 전제와 반대였다. v5.272에서 30 → 10으로
+    한 번 더 내렸다(나무가 6억·우리넷 7억은 여전히 미달이고, 사용자가 그게
+    맞다고 확인했다 — "그 유동성이면 호가가 얇다").
     """
-    assert CFG["min_turnover_eok"] == 30, CFG["min_turnover_eok"]
+    assert CFG["min_turnover_eok"] == 10, CFG["min_turnover_eok"]
     assert CFG["max_turnover_eok"] == 1000, CFG["max_turnover_eok"]
     assert CFG["turnover_avg_bars"] == 20
 

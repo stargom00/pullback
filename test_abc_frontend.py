@@ -173,23 +173,29 @@ def test_warning_banner_is_present_and_unambiguous():
     assert "초기 임의값(2026-09-18)" in TEXT
 
 
-def test_star_uses_the_baseline_price_not_a_recomputed_percent():
-    """v5.268: 트리거는 **기준선(MA600) 가격**. MA200으로 되돌아가면 안 된다."""
+def test_star_uses_the_stage_baseline_price():
+    """v5.272: 트리거는 **단계선(MA200) 가격** — 벽이 MA200으로 옮겨갔다.
+
+    v5.268엔 MA600이었다. 게이트/판정 분리 후 "도달을 기다리는 벽"은 단계선이다.
+    """
     src = _extract_function("abcWatch")
-    assert "pivot: h.ma," in src, src
-    assert "ma200" not in src, "★가 보조 표시 열(MA200)을 트리거로 쓴다"
+    assert "pivot: h.ma_stage," in src, src
+    assert "ma_gate" not in src, "★가 게이트선을 트리거로 쓴다"
     assert "_pct" not in src, "화면에서 비율로 가격을 되돌리려 한다"
 
 
-def test_baseline_is_the_main_column_and_ma200_is_secondary():
-    """MA600이 주 판정 축, MA200은 보조 — 화면에서 뒤바뀌면 오독한다."""
+def test_both_baselines_are_shown_with_their_roles():
+    """v5.272: 두 선이 **역할과 함께** 보여야 한다 — 어느 선 때문에 그 단계가
+    됐는지 화면에서 바로 읽히지 않으면 사용자가 판정을 재구성할 수 없다."""
     i = TEXT.index("function abcRowHtml")
     row = TEXT[i:TEXT.index("\nfunction abcFilteredHits")]
-    main = row.index("h.ma_pct")
-    sub = row.index("h.ma200_pct")
-    assert main < sub, "MA200 열이 기준선 열보다 앞에 있다"
-    assert "ABC_MA_COLOR" in row[:main], "기준선 열에 핫핑크 표시가 없다"
-    assert "opacity:.6" in row[sub - 200:sub], "보조 열이 주 열과 같은 비중으로 보인다"
+    gate = row.index("h.gate_pct")
+    stage = row.index("h.stage_pct")
+    assert gate < stage, "게이트 열이 단계 열보다 뒤에 있다"
+    assert "ABC_MA_COLOR" in row[:gate], "게이트 열에 핫핑크 표시가 없다"
+    # 헤더가 역할을 말하는가
+    assert "(게이트)" in TEXT and "(단계)" in TEXT, "열 이름에 역할 표시가 없다"
+    assert "장기&gt;중기 역전" in TEXT, "역배열 라벨이 v5.272 문구가 아니다"
 
 
 def test_baseline_label_comes_from_the_server_not_a_literal():

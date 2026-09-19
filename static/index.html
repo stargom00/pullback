@@ -566,7 +566,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.271</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.272</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3059,6 +3059,11 @@ function _abcMaPct(v) {
 // 더양봉맨식 장기 추세 전환선 = 핫핑크(사용자 지시 v5.268).
 const ABC_MA_COLOR = '#FF4FA3';
 function _abcMaLabel() { return (_abcData && _abcData.ma_label) || 'MA600'; }
+// v5.272: 게이트선(MA600)은 후보/탈락만 가르고, 단계는 MA200이 정한다.
+function _abcStageLabel() {
+  const h = (_abcData && _abcData.hits || [])[0];
+  return 'MA' + ((h && h.stage_ma_period) || 200);
+}
 
 const _ABC_GRADE_COLOR = { 'A급': '#4ADE80', 'B급': '#FACC15', 'C급': 'var(--muted)' };
 
@@ -3080,7 +3085,7 @@ function abcFinCell(h) {
 //   대형   = 거래대금이 상한 초과. A급을 B급으로 내리는 천장(미달이 아니다).
 function _abcBadges(h) {
   const b = [];
-  if (h.ma_inverted) b.push(`<span style="font-size:10px;color:#FF9F6B;border:1px solid #6b3f2a;border-radius:3px;padding:0 3px" title="MA200 < MA600 — 정배열 회복 전이라 진돌이/가돌이를 매기지 않습니다">역배열</span>`);
+  if (h.ma_inverted) b.push(`<span style="font-size:10px;color:#FF9F6B;border:1px solid #6b3f2a;border-radius:3px;padding:0 3px" title="MA200 < MA600 — 중기선이 장기선 아래입니다. 정보 표시일 뿐 등급에는 영향이 없습니다(v5.272).">장기&gt;중기 역전</span>`);
   if (h.turnover_large) b.push(`<span style="font-size:10px;color:#9FB7FF;border:1px solid #2a3f6b;border-radius:3px;padding:0 3px" title="거래대금이 상한을 넘었습니다 — 소형 성장주 셋업이라는 전제상 A급 대신 B급">대형</span>`);
   return b.length ? ' ' + b.join(' ') : '';
 }
@@ -3092,8 +3097,8 @@ function abcRowHtml(h) {
   // ★ = 추적 추가. 트리거는 **MA200 가격**(C 구간의 벽) — 진입 신호가 아니라
   // "벽에 닿으면 알려달라"는 관찰 등록이다.
   // ★ 트리거는 **기준선 가격**(= C 구간의 벽). v5.268부터 MA600이다.
-  const star = h.ma != null
-    ? `<button class="journal-btn" style="padding:0 5px;font-size:11px;margin-left:2px" onclick="abcWatch(this,'${h.ticker}')" title="${_abcMaLabel()}(${h.ma.toLocaleString()}) 도달 시 알림 — 관찰 등록">★</button>`
+  const star = h.ma_stage != null
+    ? `<button class="journal-btn" style="padding:0 5px;font-size:11px;margin-left:2px" onclick="abcWatch(this,'${h.ticker}')" title="${_abcStageLabel()}(${h.ma_stage.toLocaleString()}) 도달 시 알림 — 관찰 등록">★</button>`
     : '';
   const fails = (h.company_fails || []).join(' · ');
   return `<tr>
@@ -3101,8 +3106,8 @@ function abcRowHtml(h) {
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;color:${gcol};font-size:11px"
         title="${fails ? '기업 축 미달: ' + fails : '기업 축 통과'}">${h.grade}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;font-size:11px">${stage}${_abcBadges(h)}</td>
-    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right;border-left:2px solid ${ABC_MA_COLOR}">${_abcMaPct(h.ma_pct)}</td>
-    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right;opacity:.6">${_abcMaPct(h.ma200_pct)}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right;border-left:2px solid ${ABC_MA_COLOR}">${_abcMaPct(h.gate_pct)}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${_abcMaPct(h.stage_pct)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right"
         title="${h.breakout_bars_ago != null ? h.breakout_bars_ago + '봉 전 돌파봉 포함 3봉 중 최대 거래량' : ''}">${_abcNum(h.vol_mult, '배', 1)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${_abcNum(h.a_drop_pct, '%', 0)}</td>
@@ -3170,8 +3175,8 @@ function renderAbcPage() {
         <th style="padding:3px 8px">등급</th>
         <th style="padding:3px 8px" title="C0 대기 / C1 벽앞 / C2 돌파 / C3 이탈 — 이벤트가 아니라 현재 상태">C단계</th>
         <th style="text-align:right;padding:3px 8px;color:${ABC_MA_COLOR}"
-            title="더양봉맨식 장기 추세 전환선. C단계·B밴드·매물대·돌파 판정이 전부 이 선 기준입니다.">${_abcMaLabel()}대비</th>
-        <th style="text-align:right;padding:3px 8px" title="보조 표시 — 판정에 쓰이지 않습니다">MA200</th>
+            title="장기 추세 전환선 — **후보/탈락만** 가릅니다. 아래면 C0 대기(장기 추세 미전환).">${_abcMaLabel()}<span style="font-size:9px">(게이트)</span></th>
+        <th style="text-align:right;padding:3px 8px" title="C단계·B밴드·매물대·돌파 판정 기준선입니다.">${_abcStageLabel()}<span style="font-size:9px">(단계)</span></th>
         <th style="text-align:right;padding:3px 8px" title="${_abcMaLabel()} 돌파봉 포함 3봉 중 최대 거래량 / 평균">vol배수</th>
         <th style="text-align:right;padding:3px 8px" title="A: 고점→저점 하락폭">A하락</th>
         <th style="text-align:right;padding:3px 8px" title="B: 바닥 다지기 봉 수">B일수</th>
@@ -3207,14 +3212,14 @@ async function loadAbc() {
   }
 }
 
-// ★ — **기준선(MA600)**을 트리거로 한 관찰 등록. 눌림목 탭의 quickWatch는 lastHits를
+// ★ — **단계 기준선(MA200)**을 트리거로 한 관찰 등록(v5.272: 벽은 MA200이다). 눌림목 탭의 quickWatch는 lastHits를
 // 보는데 ABC는 별도 데이터라 여기서 직접 payload를 만든다.
 async function abcWatch(btn, ticker) {
   const h = (_abcData && _abcData.hits || []).find(x => x.ticker === ticker);
-  if (!h || h.ma == null) { btn.textContent = `${_abcMaLabel()}없음`; return; }
+  if (!h || h.ma_stage == null) { btn.textContent = `${_abcStageLabel()}없음`; return; }
   await _quickWatchRequest(h, btn, {
     ticker: h.ticker, name: h.name, market: 'kr',
-    pivot: h.ma, tab: 'ABC', reg_price: h.close,
+    pivot: h.ma_stage, tab: 'ABC', reg_price: h.close,
   });
 }
 

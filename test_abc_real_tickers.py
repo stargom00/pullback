@@ -9,16 +9,21 @@ C3 이탈로 넘어갔다 — "오늘" 기준으로 단언하면 이 테스트�
 그래서 봉을 2026-09-17까지 자른 뒤 판정한다(자르는 것 자체가 그날 프로덕션이
 본 데이터와 같은 상태다).
 
-**v5.268에서 세 종목 전부 판정이 바뀌었다** — 기준선이 MA200에서 MA600으로
-가면서 같은 날 같은 봉인데 위치가 달라졌기 때문이다(사용자에게 보고한 값):
+**v5.268에서 셋 다 C3로 쏠렸다가 v5.272에서 다시 갈렸다.** MA600 하나로 전부
+판정하니 13종목 중 11개가 C3 이탈이 됐고(2.4년 평균이라 그간 오른 종목은
+기준선이 한참 아래 남는다), 그래서 역할을 쪼갰다 — MA600은 후보 게이트,
+MA200이 단계를 정한다.
 
-    LS에코   MA200 +9.3%  C2 진돌이  →  MA600 +39.9%  C3 이탈
-    RFHIC   MA200 −11.2% C0 대기    →  MA600 +66.0%  C3 이탈
-    타이거일렉 다른 셋업            →  다른 셋업(동일, MA600 +152.1%)
+    (2026-09-17 고정봉 기준)
+    LS에코   게이트 +39.9% 통과 · MA200  +9.3% → C2 진돌이
+    RFHIC   게이트 +66.0% 통과 · MA200 −11.2% → C0 대기(벽 아래)
+    타이거일렉 다른 셋업(게이트 +152.1%)
 
-MA600은 2.4년 평균이라 그 사이 크게 오른 종목은 기준선이 한참 아래에 남는다.
-"기준선 위/아래"의 의미 자체가 달라진 것이지 버그가 아니다 — 그래서 이
-앵커들은 **새 값으로 다시 고정**한다.
+    v5.268(MA600 단독)에선 **셋 다 C3 이탈**이었다. 두 선을 나누자 "장기 추세는
+    돌았지만 중기 벽과의 거리는 제각각"이라는 실제 상태가 드러난다.
+
+앵커는 **그때그때의 판정 구조로 다시 고정**한다 — 값이 바뀌는 것 자체는
+설계 변경의 결과지 회귀가 아니다.
 
 네트워크가 필요한 테스트라 조회 실패는 skip이다 — 도구/망 부재는 로직 결함과
 다른 종류의 문제. 단, **조회는 됐는데 봉이 모자라면 skip이 아니라 실패**다
@@ -57,30 +62,30 @@ def bars():
     return out
 
 
-def test_ls_eco_is_c3_under_the_600_baseline(bars):
-    """LS에코에너지 — MA200 기준 C2 진돌이(+9.3%)였으나 **MA600 기준 C3 이탈**.
-
-    기준선이 바뀌면 같은 봉이라도 단계가 달라진다는 걸 실데이터로 고정한다.
-    MA200 값도 함께 확인해 "옛 기준이 사라진 게 아니라 보조로 내려갔을 뿐"임을
-    드러낸다(그래야 나중에 회귀인지 설계인지 구분된다).
-    """
+def test_ls_eco_is_c2_jindori_again_after_the_split(bars):
+    """LS에코 — v5.267에서 C2 진돌이였다가 v5.268(MA600 단독)에서 C3로 밀렸고,
+    v5.272에서 **다시 C2 진돌이**로 돌아왔다. 게이트는 +39.9%로 통과하고
+    단계는 MA200 +9.3%라 C2 구간이다."""
     r = A.analyze_abc(bars["229640.KQ"])
     assert r["verdict"] == "ABC", r
-    assert r["c_stage"] == "C3 이탈", r["c_stage"]
-    assert r["ma_pct"] > 20, r["ma_pct"]                  # C3 문턱 위
-    assert 8 < r["ma200_pct"] < 11, r["ma200_pct"]        # 보조 열은 옛 값 그대로
-    assert A.grade(r, {"ok": True, "turnover_fail": False}) == "C급"
+    assert r["gate_pct"] > 0, "게이트선 아래로 떨어졌다"
+    assert r["c_stage"] == "C2 진돌이", r["c_stage"]
+    assert 0 <= r["stage_pct"] < A.ABC_CONFIG["c3_min"] * 100, r["stage_pct"]
 
 
-def test_rfhic_is_also_c3_under_the_600_baseline(bars):
-    """RFHIC — MA200으론 −11.2%(C0 대기)인데 MA600으론 +66%(C3 이탈).
+def test_rfhic_passes_the_gate_but_waits_below_the_stage_wall(bars):
+    """RFHIC — 게이트 +66%(장기 추세는 돌았다)인데 **MA200 대비 −11.2%**라
+    아직 벽 아래 대기다.
 
-    두 기준선이 **부호까지 반대**로 갈리는 실례다.
+    v5.268은 MA600 하나로 재서 이걸 "C3 이탈"(이미 떠남)로 분류했다. 두 선을
+    나눠야 "추세는 돌았지만 아직 안 왔다"가 표현된다 — v5.272의 목적이다.
     """
     r = A.analyze_abc(bars["218410.KQ"])
     assert r["verdict"] == "ABC", r
-    assert r["c_stage"] == "C3 이탈", r["c_stage"]
-    assert r["ma_pct"] > 20 and r["ma200_pct"] < 0, (r["ma_pct"], r["ma200_pct"])
+    assert r["gate_pct"] > 20, r["gate_pct"]
+    assert r["c_stage"] == "C0 대기", r["c_stage"]
+    assert r["stage_pct"] < A.ABC_CONFIG["c1"][0] * 100, r["stage_pct"]
+    assert "벽 아래" in (r["reason"] or ""), r["reason"]
 
 
 def test_tiger_elec_is_excluded(bars):
@@ -91,10 +96,17 @@ def test_tiger_elec_is_excluded(bars):
 
 
 def test_the_two_baselines_actually_disagree(bars):
-    """MA200을 그냥 복사해 쓰고 있으면 이 테스트가 잡는다."""
+    """한 선을 복사해 쓰고 있으면 이 테스트가 잡는다."""
     for t in ("229640.KQ", "218410.KQ"):
         r = A.analyze_abc(bars[t])
-        assert abs(r["ma_pct"] - r["ma200_pct"]) > 20, (t, r["ma_pct"], r["ma200_pct"])
+        assert abs(r["gate_pct"] - r["stage_pct"]) > 20, (t, r["gate_pct"], r["stage_pct"])
+
+
+def test_gate_and_stage_disagree_on_rfhic_by_design(bars):
+    """게이트만 보면 "많이 올랐다"(+88%), 단계선으로 보면 "벽 바로 위"(+0.5%).
+    v5.268이 이 둘을 한 선으로 뭉개 C3로 잘못 분류했던 바로 그 사례다."""
+    r = A.analyze_abc(bars["218410.KQ"])
+    assert r["gate_pct"] > 60 and r["stage_pct"] < 0, (r["gate_pct"], r["stage_pct"])
 
 
 def test_short_history_ticker_is_excluded_not_crashed(bars):
@@ -114,7 +126,7 @@ def test_c_stage_is_a_state_that_moves_with_price(bars):
     later = A.analyze_abc(full)
     pinned = A.analyze_abc(bars["229640.KQ"])
     if full.index[-1].normalize() > ASOF:
-        assert later["ma_pct"] != pinned["ma_pct"], "봉이 늘었는데 값이 같다"
+        assert later["stage_pct"] != pinned["stage_pct"], "봉이 늘었는데 값이 같다"
 
 
 def test_breakout_bar_is_dated_not_looked_ahead(bars):
