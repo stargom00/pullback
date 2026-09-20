@@ -5,6 +5,26 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.273 [버그수정] 🚀 파비콘이 탭·북마크에 안 뜨던 문제.
+    [조사] **사라진 게 아니었다.** `<link rel="icon">`은 v4.1.1(09853af)에
+    추가된 뒤 한 번도 안 바뀌었다(`git log -L4,4:static/index.html`) —
+    처음부터 안 먹고 있었다.
+    [원인] **순서.** 그 링크가 `<meta charset>`보다 앞이라(실측: 이모지 바이트
+    136번 vs charset 선언 202번) 브라우저가 문서를 UTF-8로 알기 전에 href의
+    🚀를 폴백 인코딩으로 읽었고, data URI 속 SVG가 깨졌다.
+    [수정] ① charset을 `<head>` 첫 줄로 ② data URI를 퍼센트 인코딩해 **ASCII
+    만** 남김(🚀 → %F0%9F%9A%80) — ②만으로도 순서와 무관해지지만 ①은 앞으로
+    다른 비ASCII 속성이 추가될 때를 위한 근본 조치다.
+    ③ `/favicon.ico` 라우트 신설 — 브라우저가 링크 태그와 **별개로** 찍는
+    경로인데 없으면 `_auth_gate`가 /login으로 302시킨다(수정 전 실측: 302,
+    0바이트). **로그인 게이트는 안 건드렸다** — 세션이 있으면 통과하고,
+    없으면 로그인 화면이라 아이콘이 없어도 무방하다.
+    별도 .ico 파일은 만들지 않는다(사용자 지시).
+    [테스트] test_favicon.py(8) — charset 앞 비ASCII 금지(이번 버그 자체),
+    URI가 ASCII 전용, 디코딩하면 유효한 SVG, 라우트 등록·SVG 반환,
+    **링크와 라우트가 같은 그림**, 게이트 우회 목록 불변, 별도 파일 없음.
+    사보타주 4종(charset 앞 이모지 삽입=원래 버그 재현 / 퍼센트 인코딩 해제 /
+    링크·라우트 불일치 / 라우트 경로 변경) 전부 FAIL 확인 후 원복.
 v5.272 [구조변경] ABC의 C 단계를 **두 선으로 분리**(사용자 지시).
     v5.268에서 MA600 하나가 모든 판정을 맡자 13종목 중 **11개가 C3 이탈**로
     쏠렸다 — MA600은 2.4년 평균이라 그간 오른 종목은 기준선이 한참 아래 남는다.
@@ -7549,6 +7569,25 @@ __ERROR__
 </body></html>"""
 
 
+# v5.273(사용자 지시): 브라우저가 `<link rel="icon">`과 **별개로** 직접
+# 요청하는 /favicon.ico. 없으면 `_auth_gate`가 비-API 경로를 /login으로
+# 302시켜 북마크·탭에 아이콘이 안 붙는다(실측: 302 → /login, 0바이트).
+# 링크 태그와 **같은 SVG**를 돌려준다 — 두 곳에 다른 그림이 생기지 않도록
+# 문자열을 한 곳(_FAVICON_SVG)에만 둔다.
+# 게이트는 건드리지 않았다: 로그인 세션이 있으면 그대로 통과하고, 없으면
+# 로그인 화면이라 아이콘이 없어도 무방하다.
+_FAVICON_SVG = (
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>"
+    "<text y='.9em' font-size='90'>\U0001F680</text></svg>"
+)
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    return Response(_FAVICON_SVG, media_type="image/svg+xml",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/login")
 async def login_page():
     if not APP_PASSWORD:
@@ -7599,7 +7638,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.272"
+VERSION = "v5.273"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

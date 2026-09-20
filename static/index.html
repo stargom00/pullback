@@ -1,8 +1,17 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
 <meta charset="UTF-8">
+<!-- v5.273 [버그수정] 🚀 파비콘이 탭·북마크에 안 뜨던 문제.
+     [원인] 링크가 사라진 게 아니었다 — v4.1.1(09853af)에 추가된 뒤 한 번도
+     안 바뀌었다. 문제는 **순서**였다: 이 링크가 `<meta charset>`보다 앞에
+     있어서, 브라우저가 문서를 UTF-8로 알기 전에 href 안의 🚀 바이트를 폴백
+     인코딩으로 읽었다(실측: 이모지 바이트 136번, charset 선언 202번).
+     그 결과 data URI 안의 SVG에 깨진 문자가 들어가 렌더링이 실패했다.
+     [수정] ① charset을 head의 첫 줄로 올리고 ② data URI를 **퍼센트 인코딩**해
+     ASCII만 남겼다(🚀 → %F0%9F%9A%80). ②만으로도 순서에 영향받지 않지만,
+     ①은 다른 비ASCII 속성이 앞에 추가될 때를 위한 근본 조치다. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9A%80%3C/text%3E%3C/svg%3E">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>돌파·눌림 스캐너</title>
 <!-- v4.79: PWA — 앱스토어 없이 홈 화면에 설치해서 앱처럼 쓰기 -->
@@ -566,7 +575,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.272</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.273</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
