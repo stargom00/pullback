@@ -5,8 +5,11 @@
 확정된 정의(2026-09-20):
   · **D+0 = 종가 > 피벗인 첫 날.** 고가 터치는 돌파가 아니다. D+1~3도 종가 기준.
   · 등록일(`since`) **이후**만 본다 — 등록 전 과거 돌파는 내 매매와 무관하다.
-  · **재돌파**: D+0 이후 종가가 피벗 아래로 내려가면 그 기록은 리셋되고, 다음
-    종가 > 피벗이 **새 D+0**이 된다. 리셋된 이전 시도는 `failed`로 세기만 한다.
+  · **D+0은 한 번 잡히면 안 바뀐다**(2026-09-20 재확정). 처음엔 "종가가 피벗
+    아래로 내려가면 리셋하고 다음 돌파가 새 D+0"이었는데, 그러면 살아남은 D+0
+    뒤의 봉은 **정의상 전부 피벗 위**라 ✓/✗의 ✗가 구조적으로 나올 수 없었다
+    (64패턴 전수로 확인). **돌파 실패를 기록하는 게 목적**이므로 리셋을 버리고
+    첫 D+0을 고정한다 — D+1~3 종가가 피벗 아래면 그대로 ✗로 남는다.
   · **빈칸 두 종류를 구분한다**(뭉치면 "데이터가 없다"와 "아직 안 왔다"가 같아
     보인다):
         "—"  아직 그 날이 안 지났다
@@ -47,7 +50,8 @@ def analyze_breakout_record(dates, closes, volumes, pivot, since=None, asof=None
 
     반환:
         {"ok": bool, "reason": str|None,
-         "d0_index": int, "d0_date": date, "failed": int,
+         "d0_index": int, "d0_date": date,
+         "failed": int,            # D+1~3 중 종가가 피벗 아래였던 날 수(= ✗ 개수)
          "d0_vol_mult": float|None,
          "follow": [{"day": 1, "vol_mult": .., "above": bool} | {"day":1,"blank":"—"} ...]}
     """
@@ -65,38 +69,37 @@ def analyze_breakout_record(dates, closes, volumes, pivot, since=None, asof=None
         while start < n and dates[start] <= since:
             start += 1
 
-    # ── D+0 탐색: 종가가 피벗을 넘은 첫 날. 넘었다가 다시 내려가면 리셋. ──
+    # ── D+0 = 종가가 피벗을 넘은 **첫** 날. 한 번 잡히면 안 바뀐다. ──
     d0 = None
-    failed = 0
     for i in range(start, n):
-        above = float(closes[i]) > float(pivot)
-        if d0 is None:
-            if above:
-                d0 = i
-        elif not above:
-            failed += 1          # 지켜내지 못한 돌파 1회
-            d0 = None
-    out["failed"] = failed
+        if float(closes[i]) > float(pivot):
+            d0 = i
+            break
 
     if d0 is None:
-        out["reason"] = "아직 돌파 없음" if not failed else f"돌파 실패 {failed}회"
+        out["reason"] = "아직 돌파 없음"
         return out
 
     out.update(ok=True, d0_index=d0, d0_date=dates[d0],
                d0_vol_mult=_vol_mult(volumes, d0))
 
     # ── D+1..3 ──
+    failed = 0
     last_date = dates[-1]
     ref = asof if asof is not None else last_date
     for k in range(1, FOLLOW_DAYS + 1):
         j = d0 + k
         if j < n:
+            above = float(closes[j]) > float(pivot)
+            if not above:
+                failed += 1       # 돌파를 지켜내지 못한 날 — ✗로 남는다
             out["follow"].append({"day": k, "vol_mult": _vol_mult(volumes, j),
-                                  "above": float(closes[j]) > float(pivot)})
+                                  "above": above})
             continue
         # 봉이 없다 — 아직 안 온 건가, 있어야 하는데 없는 건가?
         elapsed_cal = (ref - dates[d0]).days
         elapsed_bars = elapsed_cal * TRADING_DAY_RATIO
         blank = MISSING if elapsed_bars >= k else NOT_YET
         out["follow"].append({"day": k, "blank": blank})
+    out["failed"] = failed
     return out

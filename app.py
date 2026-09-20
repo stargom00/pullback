@@ -5,6 +5,37 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.274 [재설계·1단계] 내 일지 — 자동 상태 전환 제거 + 돌파 기록 계산기.
+    [자동 진입 전면 제거, 사용자 지시] 가격이 피벗에 닿으면 `updateTracking()`이
+    status를 'entered'로 바꾸고 **`r.date`까지 오늘로 덮어썼다**. 실제로 사지
+    않은 거래가 보유로 올라가 R 통계를 오염시키고, 등록일이 덮여 복구도 안 됐다.
+    세 경로를 전부 삭제: ① updateTracking의 pending→entered ②
+    `_promoteConfirmCloseEntries()`(캘린더 확정가 승격) ③
+    `_archiveExpiredPending()`(대기 만료 자동 보관). 이제 상태 전환은 **사용자
+    클릭으로만** 일어나고, 도달 사실은 "피벗 도달 ↑" 배지로만 표시한다.
+    **기존 16건 상태는 불변**(마이그레이션 없음).
+    관찰(watch)은 원래도 전환 대상이 아니었다(조사로 확인) — 테스트로 고정.
+    [돌파 기록] `journal_breakout.py` 신설(순수 계산, IO 없음).
+    D+0 = **종가 > 피벗인 첫 날**(고가 터치는 아님), D+1~3도 종가 기준,
+    등록일 **이후**만. **D+0은 한 번 잡히면 안 바뀐다** — 처음 사양이던
+    "재돌파 시 리셋"은 ✗가 **구조적으로 불가능**해진다는 걸 64패턴 전수로
+    확인해 보고했고(살아남은 D+0 뒤는 정의상 전부 피벗 위), 사용자가
+    "첫 D+0 고정"으로 재확정했다. 빈칸은 "—"(아직 안 지남)과 "?"(지났는데
+    봉 없음)를 구분한다.
+    [봇 오알림 차단] `/api/watch/positions`가 **status 빈 레코드를 열린
+    포지션으로 취급**하고 있었다(프로덕션 2건). v4.53.5가 고치려던 오알림의
+    남은 절반이다 — 'entered'만 통과시키도록 좁혔다. 화면에는 "상태 미기록"
+    회색 배지로 드러내 사람이 고칠 수 있게 했다.
+    [이름-의미] `archived` 배지 "관찰종료" → **"대기만료"**. 이 상태는
+    pending 만료에서만 생겨 관찰(watch)과 무관했다. watch 레코드의
+    `closed_reason`("관찰종료(무산)" 등)은 진짜 관찰이라 그대로 둔다.
+    [테스트] test_journal_breakout.py(18) + test_journal_no_auto_entry.py(9).
+    사보타주 5종(자동진입 복구 / 서버 빈 status 통과 / 첫 D+0 고정 해제 /
+    실패 카운트 제거 / 리셋 재도입) 전부 FAIL 확인 후 원복.
+    작성 중 자체 결함 2건을 사보타주가 잡았다: ① `status='entered'` 검사가
+    **내가 쓴 주석**에 걸려 오탐 → 실행 코드만 보도록 좁힘 ② "관찰종료"
+    전역 금지가 watch의 정상 사유 문자열까지 잡음 → 배지 라벨만 검사.
+    [남은 작업] 4열 테이블 재구성·돌파 기록 행 배선은 2단계.
 v5.273 [버그수정] 🚀 파비콘이 탭·북마크에 안 뜨던 문제.
     [조사] **사라진 게 아니었다.** `<link rel="icon">`은 v4.1.1(09853af)에
     추가된 뒤 한 번도 안 바뀌었다(`git log -L4,4:static/index.html`) —
@@ -7638,7 +7669,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.273"
+VERSION = "v5.274"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -15107,12 +15138,15 @@ async def watch_positions():
         # 관찰은 status 무관하게 항상 제외 (진입가를 적어놔도 R 감시 안 함)
         if cat == "관찰":
             continue
-        # status가 있으면 그걸로 판정 (entered만). status 없는 구 레코드는
-        # 관찰이 아니고 진입가·손절이 있으면 진입으로 간주(하위호환).
-        if status:
-            if status != "entered":
-                continue
-        # status 없는 구 레코드: 아래 entry/stop 검증으로 걸러짐
+        # v5.274(사용자 지시): **status가 비어 있으면 제외한다.**
+        # 이전엔 "구 레코드 하위호환"으로 진입가·손절만 있으면 진입으로
+        # 간주했는데, 그게 v4.53.5가 고치려던 오알림의 **남은 절반**이었다:
+        # 프로덕션에 status=null 레코드가 2건 있고, 이 경로가 그걸 열린
+        # 포지션으로 취급해 봇이 R 알림을 보낸다. 상태를 모르는 레코드에
+        # 알림을 보내는 것보다 안 보내는 쪽이 옳다 — 화면에는 "상태 미기록"
+        # 으로 회색 표시해 사람이 고칠 수 있게 한다(static/index.html).
+        if status != "entered":
+            continue
         if r.get("result_r") not in ("", None):
             continue
         try:

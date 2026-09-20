@@ -1,8 +1,13 @@
 """v5.274 — 일지 "돌파 기록" 3칸.
 
 확정 정의(사용자, 2026-09-20): D+0 = **종가 > 피벗인 첫 날**(고가 터치는 아님),
-D+1~3도 종가 기준, 등록일 이후만, 재돌파 시 리셋 + 이전 시도는 "실패 N회",
+D+1~3도 종가 기준, 등록일 이후만, **D+0은 한 번 잡히면 안 바뀐다**,
 빈칸은 "—"(아직 안 지남)과 "?"(지났는데 봉 없음)를 **구분**한다.
+
+재설계 경위: 처음엔 "종가가 피벗 아래로 가면 리셋, 다음 돌파가 새 D+0"이었다.
+그런데 그러면 살아남은 D+0 뒤의 봉은 **정의상 전부 피벗 위**라 ✗가 구조적으로
+나올 수 없었다(64패턴 전수로 확인해 테스트에 고정했었다). "돌파 실패를 기록"이
+목적이므로 리셋을 버리고 첫 D+0을 고정했다.
 """
 import sys
 from datetime import date, timedelta
@@ -53,14 +58,14 @@ def test_registration_date_cuts_off_earlier_breakouts():
     assert r["d0_index"] == 3, r            # 등록일(2) **다음** 봉부터
 
 
-def test_registration_cutoff_also_drops_earlier_failures():
-    """등록 전의 실패한 돌파도 내 기록이 아니다."""
+def test_registration_cutoff_moves_d0_past_earlier_breakouts():
+    """등록 전 돌파는 D+0이 될 수 없다."""
     closes = [101, 95, 102, 94] + [90] * 3 + [105] * 3
     dates, c, v = mk(closes)
     before = J.analyze_breakout_record(dates, c, v, PIVOT)
     after = J.analyze_breakout_record(dates, c, v, PIVOT, since=dates[5])
-    assert before["failed"] == 2, before["failed"]
-    assert after["failed"] == 0, "등록 전 실패가 딸려 들어왔다"
+    assert before["d0_index"] == 0, before["d0_index"]
+    assert after["d0_index"] == 7, after["d0_index"]
 
 
 def test_registration_day_itself_is_excluded():
@@ -70,24 +75,35 @@ def test_registration_day_itself_is_excluded():
     assert r["d0_index"] == 1, r
 
 
-# ── 재돌파 ──────────────────────────────────────────────────────────
-def test_falling_back_below_resets_and_counts_a_failure():
-    #      0-2 아래   3 돌파   4 이탈    5-8 재돌파
-    r, _ = run([90, 90, 90, 101, 99, 103, 104, 105, 106])
-    assert r["ok"] and r["d0_index"] == 5, r
-    assert r["failed"] == 1, r["failed"]
+# ── D+0 고정 / 돌파 실패 ────────────────────────────────────────────
+def test_d0_stays_put_when_price_falls_back_below():
+    """**핵심 규칙.** D+0 뒤에 피벗을 잃어도 D+0은 안 옮겨진다 — 그래야 실패가
+    기록으로 남는다(옮기면 성공한 돌파만 보이게 된다)."""
+    r, _ = run([90, 90, 101, 99, 98, 105, 106, 107])
+    assert r["d0_index"] == 2, r["d0_index"]
+    got = [(f["day"], f["above"]) for f in r["follow"]]
+    assert got == [(1, False), (2, False), (3, True)], got
 
 
-def test_multiple_failures_are_counted():
-    r, _ = run([90, 101, 95, 102, 94, 103, 96, 105, 106, 107])
+def test_failed_counts_the_days_that_lost_the_pivot():
+    """failed = D+1~3 중 종가가 피벗 아래였던 날 수(= 화면의 ✗ 개수)."""
+    r, _ = run([90, 101, 99, 98, 97])
+    assert r["d0_index"] == 1
     assert r["failed"] == 3, r["failed"]
-    assert r["d0_index"] == 7, r["d0_index"]
+    assert all(f["above"] is False for f in r["follow"])
 
 
-def test_all_attempts_failed_reports_the_count():
-    r, _ = run([90, 101, 95, 102, 94])
-    assert not r["ok"]
-    assert r["failed"] == 2 and "실패 2회" in r["reason"], r
+def test_clean_breakout_has_no_failures():
+    r, _ = run([90, 101, 102, 103, 104])
+    assert r["failed"] == 0
+    assert all(f["above"] is True for f in r["follow"])
+
+
+def test_a_later_breakout_does_not_replace_d0():
+    """D+3 뒤에 더 큰 돌파가 나와도 D+0은 그대로다."""
+    r, _ = run([90, 101, 95, 94, 93, 120, 130])
+    assert r["d0_index"] == 1, r["d0_index"]
+    assert r["failed"] == 3
 
 
 # ── 거래량 배수 ─────────────────────────────────────────────────────
@@ -109,24 +125,20 @@ def test_follow_days_report_volume_and_above_flag():
         assert f[k]["vol_mult"] is not None, f[k]
 
 
-def test_above_is_structurally_always_true_after_the_reset_rule():
-    """**사양 충돌을 테스트로 고정한다.**
-
-    "재돌파 시 리셋"과 "D+1·2·3 피벗 위 여부(✓/✗)"는 같이 성립할 수 없다:
-    D+0 뒤에 종가가 피벗 아래로 가면 그 순간 D+0이 리셋되므로, 살아남은 D+0의
-    뒤 봉들은 **정의상 전부 피벗 위**다. 즉 ✗는 절대 안 나온다.
-
-    지금은 사양대로 두되(리셋 우선) 이 결과를 명시해 둔다 — 사용자가 ✗를
-    보고 싶다면 "첫 D+0을 고정 표시"로 규칙을 바꿔야 한다.
-    """
+def test_the_cross_mark_is_actually_reachable():
+    """리셋을 쓰던 시절 ✗는 **구조적으로 불가능**했다(64패턴 전수로 확인).
+    첫 D+0 고정으로 바꾼 뒤에는 실제로 나와야 한다 — 안 나오면 열이 무의미하다."""
     import itertools
+    seen = {True: 0, False: 0}
     for pattern in itertools.product([95.0, 105.0], repeat=6):
         closes = [90.0] * 5 + list(pattern)
         dates, c, v = mk(closes)
         r = J.analyze_breakout_record(dates, c, v, PIVOT, asof=dates[-1])
         for f in r["follow"]:
             if "above" in f:
-                assert f["above"] is True, (pattern, r)
+                seen[f["above"]] += 1
+    assert seen[False] > 0, "✗가 한 번도 안 나온다 — 리셋 규칙이 살아 있다"
+    assert seen[True] > 0
 
 
 # ── 빈칸 두 종류 ────────────────────────────────────────────────────
