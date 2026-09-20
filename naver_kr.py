@@ -531,3 +531,43 @@ def fetch_high_marketcap_allowed(min_eok: int = 1000, page_size: int = _MSTOCK_P
         return set(), stats
     stats["n_allowed"] = len(allowed)
     return allowed, stats
+
+
+# ══════════════════════════════════════════════════════════════════════
+# v5.275: 투자자별 순매수 이력 (기관·외국인)
+# ══════════════════════════════════════════════════════════════════════
+INVESTOR_TREND_DAYS = 20      # 받아서 캐시할 일수. 화면은 5일만 쓴다
+                              # (측정 E에서 더 긴 창이 필요할 수 있어 미리 받아둔다 —
+                              #  요청 수는 pageSize만 바뀌어 동일하다)
+
+
+def fetch_investor_trend(ticker: str, days: int = INVESTOR_TREND_DAYS) -> list | None:
+    """투자자별 매매동향 — 최근 `days` 거래일. 실패하면 **None**(빈 리스트 아님).
+
+    None과 []를 구분하는 이유: []는 "조회는 됐는데 데이터가 없다"고 읽히고,
+    None은 "못 받았다"다. 같은 값으로 뭉개면 v5.246~v5.252에서 겪은 **조용한
+    빈 결과**(200 OK · 0건 · 예외 없음)를 또 놓친다.
+
+    `/integration`의 `dealTrendInfos`와 같은 스키마지만 그쪽은 **5일 고정**이다.
+    이 엔드포인트는 기본 10일, `pageSize`로 확장된다(실측 20일 확인).
+
+    ⚠️ **기타법인은 이 소스에 없다.** 외국인/기관/개인 셋뿐이고, 셋의 합으로
+    잔차를 내도 기타법인이 아니다 — 삼성전자 5일 잔차가 +1.7M~+2.0M으로
+    부호·크기가 거의 고정이라 실제 순매수 계열일 수 없다(계통 오차).
+    docs/kr_us_strategy_map.md에 별건 기록.
+
+    ⚠️ **1거래일 지연이 있을 수 있다.** 장중~마감 직후엔 bizdate[0]이 전 거래일
+    이다(2026-09-14 19:32 조회 시 09-11). 호출부는 bizdate를 화면에 같이 띄워
+    사용자가 기준일을 알 수 있게 할 것.
+    """
+    code = to_code(ticker)
+    url = f"https://m.stock.naver.com/api/stock/{code}/trend?pageSize={int(days)}"
+    try:
+        resp = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+        resp.raise_for_status()
+        rows = resp.json()
+    except (requests.RequestException, ValueError):
+        return None
+    if not isinstance(rows, list):
+        return None
+    return rows

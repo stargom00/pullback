@@ -575,7 +575,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.274</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.275</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3099,6 +3099,20 @@ function _abcBadges(h) {
   return b.length ? ' ' + b.join(' ') : '';
 }
 
+// v5.275: 기관·외국인 5일 순매수 한 줄. **표시 전용 — 필터·정렬에 안 쓴다.**
+// 기타법인은 naver에 없어서 외국인으로 대체했다(사용자 확정). 근거는
+// docs/kr_us_strategy_map.md.
+function abcFlowHtml(h) {
+  const f = h.flow;
+  if (!f) return '';                    // C1~C2가 아니거나 상한에 걸려 미조회
+  if (!f.ok) {
+    return `<div style="font-size:10px;color:var(--muted)" title="${f.reason || ''}">수급 —</div>`;
+  }
+  // 기준일을 같이 띄운다: 이 소스는 장중~마감 직후 1거래일 뒤처질 수 있다.
+  return `<div style="font-size:10px;color:var(--muted)" title="최근 ${f.of}거래일 중 순매수였던 날 수입니다. 표시 전용 — 등급·정렬에 쓰이지 않습니다.">`
+    + `${f.text} <span style="opacity:.7">· 기준 ${f.asof || '?'}</span></div>`;
+}
+
 function abcRowHtml(h) {
   const gcol = _ABC_GRADE_COLOR[h.grade] || 'var(--muted)';
   const stage = h.c_stage || '—';
@@ -3111,7 +3125,7 @@ function abcRowHtml(h) {
     : '';
   const fails = (h.company_fails || []).join(' · ');
   return `<tr>
-    <td style="padding:4px 8px;border-bottom:1px solid var(--line);white-space:nowrap">${name} ${star}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);white-space:nowrap">${name} ${star}${abcFlowHtml(h)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;color:${gcol};font-size:11px"
         title="${fails ? '기업 축 미달: ' + fails : '기업 축 통과'}">${h.grade}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;font-size:11px">${stage}${_abcBadges(h)}</td>
@@ -3142,6 +3156,20 @@ function _abcChip(label, active, onclick) {
 
 function setAbcGrade(g) { abcGradeFilter = g; renderAbcPage(); }
 function setAbcStage(s) { abcStageFilter = s; renderAbcPage(); }
+
+// v5.252 방식 방어 3종 중 "화면 배지" — 조용한 빈 결과를 사람이 볼 수 있게.
+function _abcFlowSourceHtml(fs) {
+  if (!fs) return '';
+  if (fs.source === 'failed') {
+    return `<div style="margin-bottom:8px;font-size:11px;color:#FF6B6B" title="naver 투자자별 매매동향을 한 건도 못 받았습니다. 벤더 개편일 수 있습니다.">⚠️ 기관·외국인 수급 조회 실패 (${fs.failed + fs.empty}건)</div>`;
+  }
+  const parts = [];
+  if (fs.capped) parts.push(`상한 초과 ${fs.capped}건 미조회`);
+  if (fs.failed) parts.push(`실패 ${fs.failed}`);
+  if (fs.empty) parts.push(`데이터 없음 ${fs.empty}`);
+  if (!parts.length) return '';
+  return `<div style="margin-bottom:8px;font-size:11px;color:var(--muted)">수급: ${parts.join(' · ')}</div>`;
+}
 
 function renderAbcPage() {
   const content = document.getElementById('content');
@@ -3178,6 +3206,7 @@ function renderAbcPage() {
     </div>
     <div style="margin-bottom:8px">${chips}</div>
     ${clusters ? `<div style="margin-bottom:8px;font-size:11px;color:var(--muted)">섹터 묶음: ${clusters}</div>` : ''}
+    ${_abcFlowSourceHtml(d.flow_source)}
     ${rows.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead><tr style="color:var(--muted);font-size:11px">
         <th style="text-align:left;padding:3px 8px">종목</th>

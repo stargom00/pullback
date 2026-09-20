@@ -5,6 +5,30 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.275 [신규] 기관·외국인 순매수 5일 표시(사용자 지시). **표시 전용 — 필터
+    아님.** 화면: `"기관 +3/5 · 외국인 +2/5 · 기준 09-18"`.
+    [소스 한계 — 지시 변경] 원래 지시는 "기관·**기타법인**"이었는데 naver
+    모바일 API에 **기타법인 필드가 없다**(외국인·기관·개인 셋뿐, 최상위 15키
+    전수 확인). 잔차로 유도하는 것도 틀렸다 — 삼성전자 5일 잔차가
+    +1.7M~+2.0M, SK하이닉스 +575K~+663K로 **부호·크기가 거의 고정**이라
+    실제 순매수 계열일 수 없는 계통 오차다. 보고 후 **외국인으로 확정**.
+    기타법인은 `docs/kr_us_strategy_map.md`에 별건 기록(KRX 별도 소스 필요).
+    [소스] `/api/stock/{code}/trend?pageSize=20` — `dealTrendInfos`는 5일
+    고정인데 이 경로는 20일을 준다. **20일 받아 캐시, 화면은 5일**(측정 E
+    대비, 요청 수는 동일).
+    [기준일] 이 소스는 장중~마감 직후 **1거래일 지연**이 있다(2026-09-14
+    19:32 조회 시 09-11). 그래서 `bizdate[0]`을 화면에 같이 띄운다.
+    [범위] ABC 탭은 **C1~C2만**(153건 표본에서 52건) — C0·C3·다른 셋업 제외로
+    요청이 절반이 된다.
+    [격리·상한·캐시] `_flow_executor`(4워커, 실적 풀과 **분리** — 한쪽이 느릴
+    때 다른 쪽이 막히면 안 된다), 스캔당 신규 조회 **60건 상한**, TTL **4시간**.
+    상한 초과분은 조용히 빠지지 않고 `capped`로 세어 화면에 표시한다.
+    [방어 3종, v5.252 방식] `_flow_source` 상태 필드 / 전량 실패 시 경고 로그
+    / 화면 배지. **없는 종목도 200 OK에 `[]`를 준다**(실측) — "못 받음"·
+    "0건"·"정상"을 전부 구분하고, 스키마가 바뀌면 0/5가 아니라 사유를 낸다.
+    [테스트] test_investor_flow.py(15) + test_investor_flow_route.py(12).
+    사보타주 6종(0을 순매수로 / 분모 5 고정 / 스키마 변경을 0으로 뭉갬 /
+    상한 제거 / 전량실패 경고 제거 / 범위 제한 제거) 전부 FAIL 확인 후 원복.
 v5.274 [재설계·1단계] 내 일지 — 자동 상태 전환 제거 + 돌파 기록 계산기.
     [자동 진입 전면 제거, 사용자 지시] 가격이 피벗에 닿으면 `updateTracking()`이
     status를 'entered'로 바꾸고 **`r.date`까지 오늘로 덮어썼다**. 실제로 사지
@@ -7350,6 +7374,7 @@ except Exception as _e:
     print(f"[sectors] kr_sectors_auto 미탑재 -> 자동보완 비활성: {_e}", flush=True)
     KR_SECTORS_AUTO = {}
 import abc_screener      # v5.267: 🔺 ABC 탭 순수 판정(추가 fetch 0건)
+import investor_flow     # v5.275: 기관·외국인 순매수 5일 (표시 전용)
 import sector_snapshot   # v5.195 [3]: 섹터 합성지수/RS백분위/신고가비율 등 (추가 fetch 0건)
 import scenario   # v5.196: 시나리오 카드(저항/지지/무효 + 3갈래) — 표시 전용, 재량 훈련용
 
@@ -7669,7 +7694,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.274"
+VERSION = "v5.275"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -7699,6 +7724,87 @@ _executor = ThreadPoolExecutor(max_workers=8)  # v4.39.x 원복(동시성 과다
 # v5.17: RS70+ 전체를 훑게 되면서 종목 수가 확 늘어(수백~천여 개) 4워커로는
 # 너무 오래 걸림 — 격리 풀이라 다른 엔드포인트에 영향 없이 늘려도 안전.
 _earnings_executor = ThreadPoolExecutor(max_workers=6)
+
+# ══════════════════════════════════════════════════════════════════════
+# v5.275(사용자 지시): 기관·외국인 순매수 5일 — **표시 전용, 필터 아님**
+# ══════════════════════════════════════════════════════════════════════
+# 격리 풀을 따로 둔다. `_earnings_executor`를 같이 쓰면 실적 조회가 느릴 때
+# 수급 표시가 같이 막히고, 반대도 마찬가지다(v5.17에서 `_executor` 공유로
+# 겪은 것과 같은 구조).
+_flow_executor = ThreadPoolExecutor(max_workers=4)
+_FLOW_CACHE: dict = {}                 # {ticker: (ts, summary)}
+_FLOW_TTL = 4 * 3600                   # 4시간(사용자 지시)
+_FLOW_MAX_PER_SCAN = 60                # 한 번의 스캔에서 새로 조회할 상한(사용자 지시)
+# v5.252 방식의 방어 3종 중 "상태 필드" — 매 조회 배치의 결과를 여기 남기고
+# TIMING·화면 배지가 같이 읽는다. 조용한 빈 결과(200 OK·0건·예외 없음)는
+# 이 필드가 없으면 몇 달 뒤에나 발견된다.
+_flow_source = {"source": "unknown", "ok": 0, "empty": 0, "failed": 0,
+                "cached": 0, "capped": 0, "asof": None}
+
+
+def _flow_peek(ticker: str):
+    """캐시에 있으면 요약을 준다. 없으면 None — **여기서 조회하지 않는다**."""
+    hit = _FLOW_CACHE.get(ticker)
+    if hit and time.time() - hit[0] < _FLOW_TTL:
+        return hit[1]
+    return None
+
+
+def _flow_fetch_one(ticker: str) -> dict:
+    """한 종목 조회 + 요약. 실패해도 예외를 올리지 않는다(표시 전용이라
+    한 종목 때문에 응답 전체가 죽으면 안 된다)."""
+    try:
+        rows = naver_kr.fetch_investor_trend(ticker)
+    except Exception:
+        rows = None
+    return investor_flow.summarize(rows)
+
+
+async def _flow_fill(tickers: list) -> dict:
+    """캐시에 없는 종목만 **상한 내에서** 병렬 조회하고 {ticker: summary} 반환.
+
+    상한을 넘긴 몫은 조회하지 않고 `capped`로 센다 — 조용히 빠지면 "수급이
+    없는 종목"과 "안 본 종목"이 화면에서 같아 보인다.
+    """
+    out, todo = {}, []
+    for t in tickers:
+        hit = _flow_peek(t)
+        if hit is not None:
+            out[t] = hit
+        elif naver_kr.is_kr(t):
+            todo.append(t)
+    stats = {"ok": 0, "empty": 0, "failed": 0,
+             "cached": len(out), "capped": max(0, len(todo) - _FLOW_MAX_PER_SCAN)}
+    todo = todo[:_FLOW_MAX_PER_SCAN]
+    if todo:
+        loop = asyncio.get_event_loop()
+        res = await asyncio.gather(*[
+            loop.run_in_executor(_flow_executor, _flow_fetch_one, t) for t in todo],
+            return_exceptions=True)
+        now = time.time()
+        for t, r in zip(todo, res):
+            if not isinstance(r, dict):
+                r = {"ok": False, "reason": "조회 예외", "text": None, "asof": None}
+            _FLOW_CACHE[t] = (now, r)
+            out[t] = r
+    for r in out.values():
+        if r.get("ok"):
+            stats["ok"] += 1
+        elif r.get("reason") == "데이터 없음":
+            stats["empty"] += 1
+        else:
+            stats["failed"] += 1
+    asof = next((r.get("asof") for r in out.values() if r.get("asof")), None)
+    total = stats["ok"] + stats["empty"] + stats["failed"]
+    # v5.252 방식 "경고 로그" — 전량 실패/0건이면 조용히 넘기지 않는다.
+    if total and not stats["ok"]:
+        print(f"[flow] ⚠️ 기관·외국인 순매수 전량 실패 — 조회 {total}건 "
+              f"(빈결과 {stats['empty']} · 실패 {stats['failed']}). naver 개편 의심",
+              flush=True)
+    _flow_source.update(source=("mobile_api" if stats["ok"] else
+                                ("failed" if total else "idle")),
+                        asof=asof, **stats)
+    return out
 
 
 # v5.242(사용자 지시 — 데이터 소스 오염 방어): 이 앱이 실제로 쓰는 가장
@@ -12265,6 +12371,12 @@ async def api_abc():
             fin[t] = v if isinstance(v, dict) else {"rev_yoy_pos": None,
                                                     "eps_pos_q": None, "reason": "조회 실패"}
 
+    # v5.275(사용자 지시): 수급 표시는 **C1~C2만**. C0 대기·C3 이탈·다른 셋업은
+    # 빼서 요청 수를 절반으로 줄인다(153건 표본에서 C1 15 + C2 37 = 52건).
+    flow_targets = [t for t, r in cands
+                    if (r["c_stage"] or "").startswith(("C1", "C2"))]
+    flow = await _flow_fill(flow_targets)
+
     hits = []
     for t, r in cands:
         f = fin.get(t) or {"rev_yoy_pos": None, "rev_yoy_of": 0,
@@ -12302,6 +12414,8 @@ async def api_abc():
             "turnover_fail": comp["turnover_fail"],
             "turnover_large": comp["turnover_large"],   # v5.271 "대형" 배지
             "ma_inverted": r["ma_inverted"],            # v5.271 "역배열" 배지
+            # v5.275: 기관·외국인 5일 순매수. **표시 전용** — 등급·정렬에 안 쓴다.
+            "flow": flow.get(t),
             "sector": si.get("sector"),
         })
 
@@ -12316,6 +12430,7 @@ async def api_abc():
     ts = bundle.get("ts")
     return {"ok": True, "cache_state": "warm", "hits": hits, "counts": counts,
             "ma_label": abc_screener._ma_label(),
+            "flow_source": dict(_flow_source),   # v5.275 방어: 화면 배지가 읽는다
             "sector_clusters": [{"sector": s, "n": n}
                                 for s, n in sec_cnt.most_common() if n >= 2],
             "flags_loaded": len(flags),
