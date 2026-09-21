@@ -5,6 +5,23 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.278 [핫픽스] `_release_memory()`를 **이벤트 루프 밖으로**(사용자 지시).
+    v5.277에서 EOD 끝의 정리(`gc.collect()` + `malloc_trim(0)`)를 루프에서
+    **직접** 불렀다. 둘 다 블로킹이라(수백 MB 힙에서 gc는 수 초, malloc_trim은
+    아레나 락) 그동안 **모든 HTTP 요청이 멈춘다** — 2026-09-22 장애 조사 중
+    실측으로 드러났다: `/api/debug/memory` **11.2초**, 한 번은 **45초 타임아웃**.
+    `run_in_executor`로 뺐다. 블로킹 본체는 `_release_memory_blocking()`으로
+    남기고 async 래퍼가 감싼다.
+    ⚠️ 이날 홈 무한 로딩의 **주원인은 이게 아니었다** — `_warmed` 가드 덕에
+    하루 1회라 상시 장애는 아니다. 주원인은 v5.277의 `_CACHE_NS` rs8→rs9로
+    디스크 캐시가 무효가 되면서 배포 직후 **전량 콜드 fetch**(KR 1,505종목 ×
+    1,900일 + US 2,120종목)가 돈 것이다. 네임스페이스 범프 비용이 v5.268의
+    창 확대(730→1900일)로 **2.6배**가 됐는데 그걸 반영 못 했다.
+    → **교훈: `_CACHE_NS` 범프는 이제 "무료"가 아니다.** 창이 넓어진 뒤로는
+      배포 시점을 장 시작 전·한산한 시간으로 고르거나, 범프 없이 되는 변경인지
+      먼저 따질 것(v5.270의 protocol 변경이 범프 없이 된 선례).
+    [테스트] test_disk_cache_protocol.py 16→17. 사보타주 2종(루프에서 직접
+    호출=v5.277 버그 재현 / await 누락) 전부 FAIL 확인 후 원복.
 v5.277 [메모리] 디스크 캐시 **청크 저장** + EOD 직후 `malloc_trim`(사용자 지시).
     [청크 저장] 번들을 통째로 dump하지 않고 종목별로 나눠 쓴다. `_CACHE_NS`
     **rs8→rs9**(v5.270의 protocol 변경과 달리 파일 구조가 실제로 바뀐다).
@@ -7741,7 +7758,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.277"
+VERSION = "v5.278"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -11385,7 +11402,7 @@ async def _maybe_run_weekly_money_flow():
             asyncio.create_task(_run_money_flow_bg(market, daykey))
 
 
-def _release_memory(tag: str) -> None:
+def _release_memory_blocking(tag: str) -> None:
     """v5.277(사용자 지시): EOD 직후 **쓰고 남은 메모리를 OS로 돌려준다.**
 
     RSS는 오르는데 tracemalloc은 평평한 패턴이 계속 관측됐다(09-22 실측:
@@ -11413,6 +11430,22 @@ def _release_memory(tag: str) -> None:
           + (f" · malloc_trim {'반환' if trimmed else '반환분 없음'}"
              if trimmed is not None else " · malloc_trim 미지원(glibc 아님)"),
           flush=True)
+
+
+async def _release_memory(tag: str) -> None:
+    """`_release_memory_blocking()`을 **스레드풀에서** 돌려 이벤트 루프를
+    막지 않는다(v5.278 교정).
+
+    v5.277은 이걸 루프에서 직접 불렀다. `_warmed` 가드 덕에 하루 1회라 상시
+    장애는 아니었지만, 그 몇 초 동안 홈·API가 전부 멈춘다 — 응답 시간
+    11초·45초 타임아웃으로 실측됐다. 정리 작업이 사용자 요청을 막는 건
+    본말전도다.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _release_memory_blocking, tag)
+    except Exception as e:
+        print(f"[mem] {tag} 정리 실패(무시): {e}", flush=True)
 
 
 async def _warm_market(market: str):
@@ -11518,7 +11551,7 @@ async def _warm_market(market: str):
                 print(f"[decision-log] EOD 기록 실패: {e2}")
         except Exception as e:
             print(f"[scheduler] warm {market} failed: {e}")
-        _release_memory(f"EOD {market}")
+        await _release_memory(f"EOD {market}")
         # v5.147(사용자 지시, 비용 절감): 돈의흐름 자동실행을 여기(매일
         # EOD 시점)에서 뺐다 — 주 1회(토요일)로 전환, 실제 트리거는
         # `_maybe_run_weekly_money_flow()`(스케줄러 루프에서 별도 호출).

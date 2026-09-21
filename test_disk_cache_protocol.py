@@ -179,6 +179,21 @@ def test_schema_validation_still_runs(cache_dir):
 # ══════════════════════════════════════════════════════════════════════
 # v5.277 — EOD 직후 메모리 반환
 # ══════════════════════════════════════════════════════════════════════
+def test_release_memory_never_runs_on_the_event_loop():
+    """**v5.278 교정.** v5.277은 루프에서 직접 불러 정리 몇 초 동안 홈·API가
+    전부 멈췄다(실측: /api/debug/memory 11.2초, 한 번은 45초 타임아웃).
+    `gc.collect()`는 수백 MB 힙에서 수 초가 걸린다 — executor로 빼야 한다."""
+    import inspect
+    assert inspect.iscoroutinefunction(app._release_memory), "동기 함수로 되돌아갔다"
+    src = inspect.getsource(app._release_memory)
+    assert "run_in_executor" in src, "루프에서 직접 돈다"
+    assert not inspect.iscoroutinefunction(app._release_memory_blocking)
+    # 호출부가 await 하는지 — 안 하면 코루틴이 안 돌고 경고만 뜬다
+    full = Path(app.__file__).read_text(encoding="utf-8")
+    i = full.index('_release_memory(f"EOD')
+    assert full[i - 6:i].strip().endswith("await"), full[i - 40:i + 40]
+
+
 def test_release_memory_is_called_at_the_end_of_eod():
     src = Path(app.__file__).read_text(encoding="utf-8")
     i = src.index("async def _warm_market")
@@ -192,12 +207,12 @@ def test_release_memory_is_called_at_the_end_of_eod():
 
 def test_release_memory_survives_without_glibc():
     """개발 머신(macOS)엔 `malloc_trim`이 없다. 여기서 예외가 나면 EOD가 죽는다."""
-    app._release_memory("테스트")          # 예외 없이 끝나면 통과
+    app._release_memory_blocking("테스트")   # 예외 없이 끝나면 통과
 
 
 def test_release_memory_reports_which_path_ran(capsys):
     """조용히 지나가면 프로덕션에서 **실제로 trim이 됐는지** 알 수 없다."""
-    app._release_memory("EOD kr")
+    app._release_memory_blocking("EOD kr")
     out = capsys.readouterr().out
     assert "[mem] EOD kr" in out and "gc" in out, out
     assert "malloc_trim" in out, out
@@ -212,7 +227,7 @@ def test_release_memory_swallows_a_hostile_ctypes(monkeypatch):
             raise AttributeError(name)
 
     monkeypatch.setattr(ctypes, "CDLL", lambda *a, **k: NoTrim())
-    app._release_memory("musl")            # 예외 없이 끝나면 통과
+    app._release_memory_blocking("musl")            # 예외 없이 끝나면 통과
 
 
 def test_gc_runs_even_when_trim_is_unavailable(monkeypatch):
@@ -222,5 +237,5 @@ def test_gc_runs_even_when_trim_is_unavailable(monkeypatch):
     import gc as _gc
     real = _gc.collect
     monkeypatch.setattr(_gc, "collect", lambda *a: (calls.append(1), real())[1])
-    app._release_memory("no-libc")
+    app._release_memory_blocking("no-libc")
     assert calls, "malloc_trim이 없다고 gc까지 건너뛴다"
