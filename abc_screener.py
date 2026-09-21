@@ -39,6 +39,15 @@ ABC_CONFIG = {
     "c3_min": 0.20,           # 이탈 — MA200 +20% 이상
     "c2_vol_mult": 3.0,       # 진돌이 기준 거래량 배수(돌파봉/직전 5일평균)
     "vol_avg_bars": 5,
+    # ── 🩷 MA600 첫 상향돌파 이벤트 (v5.276, 사용자 지시) ──────────
+    # 양봉맨 정의 A급 = **게이트선(MA600) 첫 상향돌파(종가) + 돌파 3봉 내
+    # 거래량 ≥ 1.5×(50일 평균)**. C 단계와 **독립**이다 — C는 "지금 어디
+    # 있나"(상태)이고 이건 "언제 넘었나"(사건)라, 같은 종목이 C3여도 최근
+    # 돌파면 여기 잡힌다.
+    "gate_break_window": 10,       # 최근 N봉 내 돌파만 표시(임의값)
+    "gate_break_vol_bars": 3,      # 돌파봉 포함 N봉 중 최대 거래량(임의값)
+    "gate_break_vol_mult": 1.5,    # 그 최대 거래량 ÷ 50일 평균 기준(임의값)
+    "gate_break_vol_avg": 50,      # 기준 평균 일수(임의값)
     "breakout_lookback": 60,  # 돌파봉 탐지 창(봉) — 이 안에 돌파가 없으면 "돌파 없음"
     "breakout_vol_window": 3, # 돌파봉 포함 N봉 중 **최대 거래량**으로 진돌이/가돌이
                               # 판정(임의값). 첫 교차봉이 소량이고 다음날 대량이
@@ -143,6 +152,48 @@ def _find_breakout(close, vol, cfg: dict):
             "vol_mult": round(float(vol.iloc[peak_i]) / avg, 2) if avg > 0 else None}
 
 
+def _find_gate_break(close, vol, cfg: dict):
+    """게이트선(MA600)을 **아래→위로 넘은 첫 봉**을 최근 `gate_break_window`봉
+    안에서 찾는다. 없으면 None.
+
+    C 단계의 돌파(`_find_breakout`, MA200 기준)와 **다른 선·다른 목적**이다:
+      · `_find_breakout`  MA200 첫 돌파 → C2의 진돌이/가돌이 라벨
+      · 이 함수           MA600 첫 돌파 → "장기 추세 전환 사건"을 시간축으로
+    둘을 한 함수로 합치면 어느 선 기준인지가 호출부에서 사라진다.
+
+    거래량은 **돌파봉 포함 N봉 중 최대**를 50일 평균으로 나눈다 — 교차봉이
+    소량이고 다음날 대량이 터지는 형태가 흔해서다(v5.267에서 같은 이유로
+    MA200 쪽에 도입).
+    """
+    n = len(close)
+    look = min(cfg["gate_break_window"], n - 1)
+    if look < 1:
+        return None
+    ma = close.rolling(cfg["gate_ma_period"]).mean()
+    found = None
+    for i in range(n - look, n):
+        if i < 1:
+            continue
+        m = ma.iloc[i]
+        if m != m:
+            continue
+        if float(close.iloc[i - 1]) <= float(m) < float(close.iloc[i]):
+            found = i
+            break                      # **첫** 돌파
+    if found is None:
+        return None
+    k = cfg["gate_break_vol_avg"]
+    prev = vol.iloc[max(0, found - k):found]
+    avg = float(prev.mean()) if len(prev) else 0.0
+    w = cfg["gate_break_vol_bars"]
+    seg = vol.iloc[found:min(n, found + w)]
+    peak = float(seg.max()) if len(seg) else 0.0
+    mult = round(peak / avg, 2) if avg > 0 else None
+    return {"bars_ago": n - 1 - found,
+            "vol_mult": mult,
+            "vol_ok": bool(mult is not None and mult >= cfg["gate_break_vol_mult"])}
+
+
 def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
     """일봉 df → ABC 판정.
 
@@ -161,7 +212,8 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
            "breakout": None, "close": None,
            "ma_gate": None, "ma_stage": None,
            "gate_ma_period": cfg["gate_ma_period"],
-           "stage_ma_period": cfg["stage_ma_period"], "ma_inverted": None}
+           "stage_ma_period": cfg["stage_ma_period"], "ma_inverted": None,
+           "gate_break": None}
     n_bars = 0 if df is None or getattr(df, "empty", True) else len(df)
     need = _min_bars(cfg)
     if n_bars < need:
@@ -278,6 +330,8 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
     # 위에 있을 때만 MA200 대비 위치로 C1/C2/C3을 가르고, MA200보다 한참
     # 아래(벽앞 구간에도 못 든 경우)면 역시 C0 대기다 — 아래 주석 참고.
     out["breakout"] = _find_breakout(close, vol, cfg)
+    # v5.276: MA600 돌파 **사건**. C 단계와 독립이라 여기서 따로 잡는다.
+    out["gate_break"] = _find_gate_break(close, vol, cfg)
     c1, c2 = cfg["c1"], cfg["c2"]
     if last < ma_gate:
         out["c_stage"] = "C0 대기"

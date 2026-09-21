@@ -575,7 +575,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.275</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.276</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3051,6 +3051,7 @@ async function loadThemes() {
 let _abcData = null;
 let abcGradeFilter = 'all';      // 'all' | 'A급' | 'B급' | 'C급'
 let abcStageFilter = 'all';      // 'all' | 'C0' | 'C1' | 'C2' | 'C3'
+let abcGateBreakOnly = false;    // v5.276: 🩷 600돌파만
 
 function _abcNum(v, suffix = '', digits = 1) {
   if (v == null) return '<span style="color:var(--muted)">—</span>';
@@ -3113,6 +3114,19 @@ function abcFlowHtml(h) {
     + `${f.text} <span style="opacity:.7">· 기준 ${f.asof || '?'}</span></div>`;
 }
 
+// v5.276: 🩷 MA600 첫 돌파 사건. **C 단계와 독립** — 같은 종목이 C3여도
+// 최근 10봉 안에 게이트를 넘었으면 여기 잡힌다. "지금 어디 있나"가 아니라
+// "언제 넘었나"를 시간축으로 보여주는 열이다.
+// 양봉맨 정의 A급 = MA600 첫 상향돌파(종가) + 돌파 3봉 내 vol ≥1.5×(50일 평균).
+function abcGateBreakHtml(h) {
+  const g = h.gate_break;
+  if (!g) return '<span style="color:var(--muted)">—</span>';
+  const ok = g.vol_ok;
+  const col = ok ? ABC_MA_COLOR : 'var(--muted)';
+  const mult = g.vol_mult != null ? `${g.vol_mult.toFixed(1)}×` : '?';
+  return `<span style="color:${col};font-size:11px" title="${_abcMaLabel()}을 ${g.bars_ago}봉 전에 종가로 처음 넘었습니다. 돌파 3봉 내 최대 거래량이 50일 평균의 ${mult}${ok ? ' — 기준(1.5×) 충족' : ' — 기준 미달'}. C단계와 무관한 사건 표시입니다.">600돌파 D+${g.bars_ago} · vol ${mult}</span>`;
+}
+
 function abcRowHtml(h) {
   const gcol = _ABC_GRADE_COLOR[h.grade] || 'var(--muted)';
   const stage = h.c_stage || '—';
@@ -3129,6 +3143,7 @@ function abcRowHtml(h) {
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;color:${gcol};font-size:11px"
         title="${fails ? '기업 축 미달: ' + fails : '기업 축 통과'}">${h.grade}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;font-size:11px">${stage}${_abcBadges(h)}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;white-space:nowrap">${abcGateBreakHtml(h)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right;border-left:2px solid ${ABC_MA_COLOR}">${_abcMaPct(h.gate_pct)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${_abcMaPct(h.stage_pct)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right"
@@ -3147,7 +3162,8 @@ function abcFilteredHits() {
   const hits = (_abcData && _abcData.hits) || [];
   return hits.filter(h =>
     (abcGradeFilter === 'all' || h.grade === abcGradeFilter) &&
-    (abcStageFilter === 'all' || (h.c_stage || '').startsWith(abcStageFilter)));
+    (abcStageFilter === 'all' || (h.c_stage || '').startsWith(abcStageFilter)) &&
+    (!abcGateBreakOnly || !!h.gate_break));
 }
 
 function _abcChip(label, active, onclick) {
@@ -3156,6 +3172,7 @@ function _abcChip(label, active, onclick) {
 
 function setAbcGrade(g) { abcGradeFilter = g; renderAbcPage(); }
 function setAbcStage(s) { abcStageFilter = s; renderAbcPage(); }
+function toggleAbcGateBreak() { abcGateBreakOnly = !abcGateBreakOnly; renderAbcPage(); }
 
 // v5.252 방식 방어 3종 중 "화면 배지" — 조용한 빈 결과를 사람이 볼 수 있게.
 function _abcFlowSourceHtml(fs) {
@@ -3194,6 +3211,8 @@ function renderAbcPage() {
     _abcChip('C2 돌파', abcStageFilter === 'C2', "setAbcStage('C2')"),
     _abcChip('C0 대기', abcStageFilter === 'C0', "setAbcStage('C0')"),
     _abcChip('C3 이탈', abcStageFilter === 'C3', "setAbcStage('C3')"),
+    '<span style="margin-left:10px"></span>',
+    _abcChip('🩷 600돌파', abcGateBreakOnly, "toggleAbcGateBreak()"),
   ].join(' ');
 
   content.innerHTML = `
@@ -3212,6 +3231,7 @@ function renderAbcPage() {
         <th style="text-align:left;padding:3px 8px">종목</th>
         <th style="padding:3px 8px">등급</th>
         <th style="padding:3px 8px" title="C0 대기 / C1 벽앞 / C2 돌파 / C3 이탈 — 이벤트가 아니라 현재 상태">C단계</th>
+        <th style="padding:3px 8px;color:${ABC_MA_COLOR}" title="${_abcMaLabel()}을 종가로 처음 넘은 사건. 최근 10봉 내만 표시하며 C단계와 독립입니다.">🩷 600돌파</th>
         <th style="text-align:right;padding:3px 8px;color:${ABC_MA_COLOR}"
             title="장기 추세 전환선 — **후보/탈락만** 가릅니다. 아래면 C0 대기(장기 추세 미전환).">${_abcMaLabel()}<span style="font-size:9px">(게이트)</span></th>
         <th style="text-align:right;padding:3px 8px" title="C단계·B밴드·매물대·돌파 판정 기준선입니다.">${_abcStageLabel()}<span style="font-size:9px">(단계)</span></th>

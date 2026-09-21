@@ -746,3 +746,114 @@ def test_field_names_say_which_basis():
     r = A.analyze_abc(_with_volume(abc_shape()))
     assert "turnover_eok" not in r, "기준이 안 드러나는 옛 이름이 남아 있다"
     assert "b_turnover_eok" in r and "turnover_today_eok" in r
+
+
+# ══════════════════════════════════════════════════════════════════════
+# v5.276 — 🩷 MA600 첫 돌파 **사건** (C 단계와 독립)
+# ══════════════════════════════════════════════════════════════════════
+def _gate_cross(bars_ago=1, vol_mult=3.0, gate_margin=0.15):
+    """마지막 bars_ago+1봉에서 게이트선을 아래→위로 넘는 모양.
+
+    `abc_shape`는 게이트선을 바닥보다 gate_margin만큼 **아래**에 두므로
+    (종가가 이미 게이트 위), 돌파를 만들려면 먼저 게이트 아래로 내렸다가
+    올려야 한다.
+    """
+    closes = abc_shape(gate_margin=gate_margin)
+    n_gate = CFG["gate_ma_period"]
+    gate = float(np.mean(closes[-n_gate:]))
+    # 돌파봉이 끝에서 bars_ago번째가 되도록 배치한다.
+    # 마지막 인덱스가 n-1, 돌파봉이 n-1-bars_ago → 그 **직전** 봉이 게이트 아래.
+    k = bars_ago + 2                      # [게이트 아래 1봉] + [게이트 위 bars_ago+1봉]
+    closes = closes[:-k] + [gate * 0.97] + [gate * 1.05] * (k - 1)
+    vols = [1000.0] * len(closes)
+    vols[-(bars_ago + 1)] = 1000.0 * vol_mult   # 돌파봉에 거래량을 싣는다
+    return closes, vols
+
+
+def test_gate_break_is_detected_and_dated():
+    closes, vols = _gate_cross(bars_ago=1)
+    g = A.analyze_abc(make(closes, vols=vols))["gate_break"]
+    assert g is not None, "게이트 돌파를 못 찾았다"
+    assert g["bars_ago"] == 1, g
+
+
+def test_gate_break_only_within_the_window():
+    """최근 N봉 내 돌파만 표시(사용자 지시) — 오래된 돌파는 사건이 아니다."""
+    w = CFG["gate_break_window"]
+    inside, v1 = _gate_cross(bars_ago=w - 2)
+    outside, v2 = _gate_cross(bars_ago=w + 5)
+    assert A.analyze_abc(make(inside, vols=v1))["gate_break"] is not None
+    assert A.analyze_abc(make(outside, vols=v2))["gate_break"] is None
+
+
+def test_gate_break_volume_threshold():
+    """vol ≥ 1.5×(50일 평균)이면 충족 — 양봉맨 A급 정의의 나머지 절반."""
+    lo, _ = _gate_cross(bars_ago=2, vol_mult=1.4)
+    hi, vh = _gate_cross(bars_ago=2, vol_mult=1.6)
+    _, vl = _gate_cross(bars_ago=2, vol_mult=1.4)
+    assert A.analyze_abc(make(lo, vols=vl))["gate_break"]["vol_ok"] is False
+    assert A.analyze_abc(make(hi, vols=vh))["gate_break"]["vol_ok"] is True
+
+
+def test_gate_break_uses_the_gate_line_not_the_stage_line():
+    """MA200 돌파(`_find_breakout`)와 **다른 선**이다 — 섞이면 의미가 사라진다."""
+    import inspect
+    src = inspect.getsource(A._find_gate_break)
+    assert 'cfg["gate_ma_period"]' in src, src
+    assert "stage_ma_period" not in src, "단계선을 쓰고 있다"
+    stage_src = inspect.getsource(A._find_breakout)
+    assert 'cfg["stage_ma_period"]' in stage_src
+    assert "gate_ma_period" not in stage_src
+
+
+def test_gate_break_is_independent_of_the_c_stage():
+    """**C3여도 최근에 게이트를 넘었으면 잡혀야 한다**(사용자 지시: 독립).
+    C 단계 분기 안에서 계산하면 이 성질이 조용히 깨진다."""
+    import inspect
+    src = inspect.getsource(A.analyze_abc)
+    i = src.index('out["gate_break"] = _find_gate_break')
+    j = src.index("if last < ma_gate:")
+    assert i < j, "게이트 돌파가 C 단계 분기 **안**에서 계산된다"
+
+
+def test_gate_break_takes_the_first_cross_not_the_last():
+    """창 안에 두 번 넘으면 **앞의 것** — 뒤를 잡으면 원래 돌파의 거래량이 사라진다.
+
+    ⚠️ 이 테스트는 원래 `assert "break" in ...`라는 텍스트 검사였는데,
+    함수 안의 `cfg["gate_break_vol_avg"]`에 "break"가 들어 있어 **항상 통과**
+    했다(사보타주에서 잡힘). v5.272에서 `_find_breakout`에 똑같은 실수를 했고
+    두 번째다 — 텍스트로 제어흐름을 검사하지 말 것.
+    """
+    closes = abc_shape()
+    n_gate = CFG["gate_ma_period"]
+    gate = float(np.mean(closes[-n_gate:]))
+    # 창 안에서 두 번 교차: 아래-위(1차)-아래-위(2차)
+    closes = closes[:-9] + [gate * 0.97, gate * 1.05, gate * 1.05,
+                            gate * 0.97, gate * 1.05, gate * 1.05,
+                            gate * 1.05, gate * 1.05, gate * 1.05]
+    vols = [1000.0] * len(closes)
+    vols[-8] = 2000.0        # 1차 돌파봉:  2배  ← 이게 잡혀야 한다
+    vols[-5] = 30000.0       # 2차 돌파봉: 30배
+    g = A.analyze_abc(make(closes, vols=vols))["gate_break"]
+    assert g is not None
+    assert g["bars_ago"] == 7, f"1차(7봉 전)가 아니라 {g['bars_ago']}봉 전을 잡았다"
+    assert g["vol_mult"] < 10, f"2차 돌파의 거래량을 썼다({g['vol_mult']})"
+
+
+def test_gate_break_config_values_are_marked_arbitrary():
+    import inspect
+    src = inspect.getsource(A)
+    i = src.index('"gate_break_window"')
+    assert "임의값" in src[i - 400:i + 400], "출처 표시가 없다"
+    assert CFG["gate_break_window"] == 10
+    assert CFG["gate_break_vol_mult"] == 1.5
+    assert CFG["gate_break_vol_bars"] == 3
+    assert CFG["gate_break_vol_avg"] == 50
+
+
+def test_no_gate_break_returns_none_not_a_blank_dict():
+    """빈 dict를 주면 화면이 "돌파 있음"으로 오해한다."""
+    r = A.analyze_abc(make(abc_shape()))
+    assert r["gate_break"] is None or isinstance(r["gate_break"], dict)
+    short = A.analyze_abc(make([100.0] * 10))
+    assert short["gate_break"] is None
