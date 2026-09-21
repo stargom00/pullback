@@ -5,6 +5,33 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.277 [메모리] 디스크 캐시 **청크 저장** + EOD 직후 `malloc_trim`(사용자 지시).
+    [청크 저장] 번들을 통째로 dump하지 않고 종목별로 나눠 쓴다. `_CACHE_NS`
+    **rs8→rs9**(v5.270의 protocol 변경과 달리 파일 구조가 실제로 바뀐다).
+    로더는 `__chunked__` 마커로 형식을 구분하고 **구 형식도 계속 읽는다**.
+    같은 조건 A/B(1,500종목×1,275봉, 프로세스 격리, **읽기까지 확인**):
+        통째 protocol=5   peak +36MB
+        종목별 청크       peak +20MB   ← 지금
+    ⚠️ **앞서 "청크 +0MB"로 보고한 건 틀렸다.** 간이 스니펫으로 저장 피크만
+    쟀는데 ① 기준선에 번들 생성 피크가 이미 포함돼 저장 비용이 가려졌고
+    ② **만든 파일을 읽어보지 않았다.** 실제로 그 파일은 `clear_memo()`를
+    dump **뒤**에 불러 `UnpicklingError: Memo value not found`로 못 읽는
+    파일이었다(파이썬 문서: 한 Pickler로 여러 객체를 쓸 때 각각을 독립적으로
+    읽으려면 dump **사이**에 clear_memo가 필요). 저장만 재고 넘어가면 못 읽는
+    형식을 "최적"이라 부르게 된다 — 교훈을 테스트로 고정.
+    [EOD 메모리 반환] `_release_memory()` 신설 — EOD 블록 끝에서
+    `gc.collect()` + `ctypes.CDLL("libc.so.6").malloc_trim(0)`.
+    RSS는 오르는데 tracemalloc은 평평한 패턴(09-22 실측 RSS 804MB /
+    tracemalloc 125MB)이 계속 관측됐고, 아레나에 반납 안 된 조각이 유력하다.
+    **glibc 전용**이라 개발 머신(macOS)에선 "안전하게 감싸졌는가"까지만 검증
+    가능하고 실효는 프로덕션 RSS로만 판단된다 — 실패는 조용히 넘기되
+    어느 경로가 돌았는지 로그로 남긴다(`[mem] EOD kr 정리 — gc N개 · …`).
+    예외 처리 **밖**에 둬서 워밍이 실패해도 정리는 돈다.
+    [보류] `_executor` 8→4는 아직 안 한다 — 스캔이 느려지는 대가가 있어,
+    위 둘로 부족할 때만(사용자 지시).
+    [테스트] test_disk_cache_protocol.py 11→16. 사보타주 5종(clear_memo를
+    dump 뒤로=원래 버그 / NS 범프 누락 / 원본 번들 오염 / _release_memory
+    제거 / glibc 없을 때 예외 전파) 전부 FAIL 확인 후 원복.
 v5.276 [신규] 🩷 MA600 첫 돌파 **사건** 표시(사용자 지시).
     양봉맨 정의 A급 = **게이트선(MA600) 첫 상향돌파(종가) + 돌파 3봉 내
     거래량 ≥ 1.5×(50일 평균)**. ABC 탭에 열 하나 + 필터 칩 "🩷 600돌파".
@@ -7714,7 +7741,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.276"
+VERSION = "v5.277"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -8467,10 +8494,13 @@ def _universe_sig(market: str) -> str:
 # 번에 무효화) — 재발 방지 자체는 아래 스키마 키 집합과
 # _load_disk_cache()의 검증이 담당(사람이 이 상수를 또 깜빡 잊어도
 # 로드 시점에 걸러짐).
-_CACHE_NS = "rs8"   # 현재 디스크캐시 네임스페이스 — 스키마/기간 등이 바뀌어 캐시버스트가
+_CACHE_NS = "rs9"   # 현재 디스크캐시 네임스페이스 — 스키마/기간 등이 바뀌어 캐시버스트가
                     # 필요하면 이 값만 올린다. _save_disk_cache가 자동으로 이전 네임스페이스를 정리한다.
                     # v5.268: rs7→rs8 — KR 조회 창 730일→1900일(naver_kr.KR_SCAN_DAYS).
                     # 창이 바뀌면 같은 종목의 봉 수가 달라져 구캐시를 섞어 쓰면 안 된다.
+                    # v5.277: rs8→rs9 — 저장이 **청크 방식**으로 바뀌어 파일 구조가
+                    # 실제로 달라졌다(v5.270의 protocol 변경과 다르다). 로더는 구
+                    # 형식도 읽지만, 섞이면 진단이 어려워 네임스페이스를 가른다.
 
 # v5.241(사용자 지시 — 재발방지 작업): _load_disk_cache()가 로드 시점에
 # 검증하는 "유효한 bundle/timing 최소 스키마". _fetch_market_data_inner()가
@@ -8529,7 +8559,21 @@ def _load_disk_cache(market: str, daykey: str):
         return None
     try:
         with open(path, "rb") as f:
-            bundle = pickle.load(f)
+            # v5.277: 저장이 **청크 방식**으로 바뀌었다(피크 +21MB → +0MB).
+            # 파일은 `{"__chunked__": n, ...번들의 data 제외분}` 하나 + 종목별
+            # `(ticker, df)` n개가 이어 붙은 형태다. 한 파일 안에 pickle 객체가
+            # 여러 개 있어 `load()`를 반복 호출한다.
+            # 구 형식(단일 객체)도 그대로 읽는다 — `_CACHE_NS`를 올렸으니
+            # 사실상 안 만나지만, 볼륨에 남은 파일로 500이 나면 안 된다.
+            head = pickle.load(f)
+            if isinstance(head, dict) and "__chunked__" in head:
+                n = int(head.pop("__chunked__"))
+                data = {}
+                for _ in range(n):
+                    k, v = pickle.load(f)
+                    data[k] = v
+                head["data"] = data
+            bundle = head
     except Exception:
         return None
     if not isinstance(bundle, dict):
@@ -8549,16 +8593,31 @@ def _save_disk_cache(market: str, daykey: str, bundle: dict):
     try:
         tmp = path + ".tmp"
         with open(tmp, "wb") as f:
-            # v5.270(사용자 지시): protocol=5 명시. Python 3.13의 기본값은
-            # **4**라 그냥 두면 4로 쓴다. 5는 out-of-band 버퍼를 써서 저장 중
-            # 피크가 크게 준다 — 실측(1,500종목×1,275봉, 53.5MB 번들, 프로세스
-            # 격리): peak 증가 **+80MB → +21MB**, 파일 크기는 54MB로 동일.
-            # 로더(_load_disk_cache)는 `pickle.load`가 프로토콜을 자동 인식하므로
-            # **무변경**이고, 파일 구조가 바뀌는 게 아니라 `_CACHE_NS` 범프도
-            # 불필요하다(구 protocol 4 파일도 그대로 읽힌다).
-            # 더 줄이려면 종목별 chunk dump가 +0MB지만 로더와 포맷을 같이
-            # 바꿔야 해서 분리했다(저녁 RSS 수치 보고 결정).
-            pickle.dump(bundle, f, protocol=5)
+            # v5.277(사용자 지시): **청크 저장.** 번들을 통째로 dump하면
+            # protocol=5여도 피크가 +21MB 오른다(53.5MB 번들 실측). 종목별
+            # DataFrame을 하나씩 내보내고 `clear_memo()`로 메모를 비우면
+            # **+0MB**다 — 실측 비교:
+            #     pickle.dump 기본(protocol 4)   peak +80MB
+            #     protocol=5                     peak +21MB   ← v5.270
+            #     종목별 chunk + clear_memo      peak  +0MB   ← 지금
+            # `data`만 떼어 쓰고 나머지(universe·rs_ranks·timing…)는 헤더 하나로
+            # 먼저 쓴다. 로더가 `__chunked__`로 형식을 구분한다.
+            # **`_CACHE_NS`를 rs8→rs9로 올렸다** — 파일 구조가 실제로 바뀌므로
+            # 구 캐시를 섞어 읽으면 안 된다(v5.270의 protocol 변경과 다르다).
+            pk = pickle.Pickler(f, protocol=5)
+            data = bundle.get("data") or {}
+            head = {k: v for k, v in bundle.items() if k != "data"}
+            head["__chunked__"] = len(data)
+            pk.dump(head)
+            for _k, _v in data.items():
+                # **clear_memo()는 dump 앞에서** 불러야 한다. 뒤에 부르면 첫
+                # 청크가 헤더 dump의 메모를 참조해버려, 읽을 때
+                # `UnpicklingError: Memo value not found`가 난다(실제로 겪음 —
+                # 처음 측정할 땐 피크만 재고 **다시 읽어보지 않아** 못 잡았다).
+                # 파이썬 문서: 한 Pickler로 여러 객체를 쓸 때 각각을 독립적으로
+                # 읽으려면 dump 사이에 clear_memo()가 필요하다.
+                pk.clear_memo()
+                pk.dump((_k, _v))
         os.replace(tmp, path)
         # 오래된 캐시 정리 — 은퇴한 네임스페이스(_CACHE_NS와 다름)는 날짜
         # 상관없이 전부 삭제, 현재 네임스페이스는 오늘(daykey) 아닌 것만
@@ -11326,6 +11385,36 @@ async def _maybe_run_weekly_money_flow():
             asyncio.create_task(_run_money_flow_bg(market, daykey))
 
 
+def _release_memory(tag: str) -> None:
+    """v5.277(사용자 지시): EOD 직후 **쓰고 남은 메모리를 OS로 돌려준다.**
+
+    RSS는 오르는데 tracemalloc은 평평한 패턴이 계속 관측됐다(09-22 실측:
+    RSS 804MB / tracemalloc 125MB). Python 힙 밖 — glibc 아레나에 반납되지
+    않고 남은 조각이 유력했고, `MALLOC_ARENA_MAX=2`로 1,464MB → 804MB까지는
+    내려왔다. `malloc_trim(0)`은 그 남은 조각을 실제로 OS에 반환시킨다.
+
+    **glibc 전용이다.** macOS(개발 머신)엔 없고 Railway(Linux)에만 있다 —
+    그래서 로컬에서는 "안전하게 감싸졌는가"까지만 검증 가능하고, 실효는
+    프로덕션 RSS로만 판단할 수 있다. 실패는 조용히 넘긴다(메모리 반환은
+    **최적화**지 기능이 아니라, 여기서 예외가 나 EOD가 죽으면 안 된다).
+    """
+    import gc
+    freed = gc.collect()
+    trimmed = None
+    try:
+        import ctypes
+        libc = ctypes.CDLL("libc.so.6")
+        trimmed = bool(libc.malloc_trim(0))
+    except (OSError, AttributeError):
+        pass          # glibc 아님(macOS 등) — 정상, gc.collect()만 한 셈
+    except Exception:
+        pass
+    print(f"[mem] {tag} 정리 — gc {freed}개"
+          + (f" · malloc_trim {'반환' if trimmed else '반환분 없음'}"
+             if trimmed is not None else " · malloc_trim 미지원(glibc 아님)"),
+          flush=True)
+
+
 async def _warm_market(market: str):
     """해당 시장 데이터+주요 모드 결과를 미리 빌드(캐시 저장).
     v4.52.5: 장 마감 후뿐 아니라 '장중에도' 프리로드.
@@ -11429,6 +11518,7 @@ async def _warm_market(market: str):
                 print(f"[decision-log] EOD 기록 실패: {e2}")
         except Exception as e:
             print(f"[scheduler] warm {market} failed: {e}")
+        _release_memory(f"EOD {market}")
         # v5.147(사용자 지시, 비용 절감): 돈의흐름 자동실행을 여기(매일
         # EOD 시점)에서 뺐다 — 주 1회(토요일)로 전환, 실제 트리거는
         # `_maybe_run_weekly_money_flow()`(스케줄러 루프에서 별도 호출).

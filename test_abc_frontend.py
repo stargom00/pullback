@@ -103,10 +103,14 @@ def test_zero_denominator_is_not_rendered_as_a_fraction():
 
 # ── 2. 필터 ────────────────────────────────────────────────────────
 
-def _filtered(hits, grade="all", stage="all"):
+def _filtered(hits, grade="all", stage="all", gate_break_only=False):
+    """v5.276에서 필터가 `abcGateBreakOnly`를 읽기 시작해 하네스에 추가했다 —
+    전역을 안 넘기면 ReferenceError로 **전 필터 테스트가 한꺼번에 깨진다**
+    (실제로 그렇게 잡혔다). 의존이 늘면 여기도 같이 늘려야 한다."""
     src = (f"let _abcData = {json.dumps({'hits': hits}, ensure_ascii=False)};\n"
            f"let abcGradeFilter = {json.dumps(grade, ensure_ascii=False)};\n"
-           f"let abcStageFilter = {json.dumps(stage, ensure_ascii=False)};\n" + FILTER_SRC)
+           f"let abcStageFilter = {json.dumps(stage, ensure_ascii=False)};\n"
+           f"let abcGateBreakOnly = {json.dumps(gate_break_only)};\n" + FILTER_SRC)
     return [h["ticker"] for h in _run(src, "abcFilteredHits()")]
 
 
@@ -146,6 +150,25 @@ def test_grade_chips_and_colors_cover_exactly_the_three_tiers():
         assert f"setAbcGrade('{g}')" in TEXT, f"{g} 필터 칩이 없다"
     assert "A급 근접" not in TEXT, "삭제된 라벨이 남아 있다"
     assert "단타만" not in TEXT and "trading_only" not in TEXT
+
+
+def test_gate_break_chip_filters_to_the_event():
+    """v5.276 🩷 — **C 단계와 독립**이라 C0든 C3든 사건이 있으면 남는다."""
+    hits = [
+        {"ticker": "A", "grade": "B급", "c_stage": "C0 대기",
+         "gate_break": {"bars_ago": 0, "vol_mult": 8.6, "vol_ok": True}},
+        {"ticker": "B", "grade": "B급", "c_stage": "C2 진돌이", "gate_break": None},
+        {"ticker": "C", "grade": "C급", "c_stage": "C3 이탈",
+         "gate_break": {"bars_ago": 3, "vol_mult": 2.0, "vol_ok": True}},
+    ]
+    assert _filtered(hits) == ["A", "B", "C"]
+    assert _filtered(hits, gate_break_only=True) == ["A", "C"], "C단계에 묶였다"
+
+
+def test_gate_break_column_is_rendered():
+    src = _extract_function("abcGateBreakHtml")
+    assert "gate_break" in src and "600돌파" in src, src
+    assert "ABC_MA_COLOR" in src, "기준 충족을 핫핑크로 구분하지 않는다"
 
 
 def test_missing_stage_does_not_crash():

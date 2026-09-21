@@ -1,8 +1,15 @@
-"""v5.270 — 디스크 캐시 pickle protocol=5.
+"""v5.270/v5.277 — 디스크 캐시 pickle 저장 방식.
 
-Python 3.13의 `pickle.DEFAULT_PROTOCOL`은 **4**라, 명시하지 않으면 4로 쓴다.
-5는 out-of-band 버퍼를 써서 저장 중 피크가 크게 준다 — 실측(1,500종목 ×
-1,275봉, 53.5MB 번들, 프로세스 격리): peak 증가 **+80MB → +21MB**.
+v5.270: Python 3.13의 `pickle.DEFAULT_PROTOCOL`은 **4**라, 명시하지 않으면 4로
+쓴다. 5는 out-of-band 버퍼를 써서 저장 중 피크가 준다.
+
+v5.277: 번들을 통째로 쓰지 않고 **종목별로 나눠** 쓴다. 같은 조건 A/B(1,500종목
+× 1,275봉, 프로세스 격리, **읽기까지 확인**): 통째 **+36MB** → 청크 **+20MB**.
+⚠️ 처음엔 "청크 +0MB"로 보고했는데 **틀렸다.** 그때는 간이 스니펫으로 저장
+피크만 쟀고 ① 기준선에 번들 생성 피크가 이미 포함돼 저장 비용이 가려졌으며
+② **만든 파일을 읽어보지 않았다** — 실제로 그 파일은 `clear_memo()`를 dump
+**뒤**에 불러 `UnpicklingError`로 못 읽는 파일이었다. 저장만 재고 넘어가면
+못 읽는 형식을 "최적"이라 부르게 된다.
 
 이 파일이 지키는 것:
   1. **저장 → 로드 왕복이 동일한가.** DataFrame은 `==` 비교가 안 되니
@@ -111,21 +118,54 @@ def test_loader_was_not_changed():
     assert "protocol" not in body, "로더에 프로토콜 분기가 생겼다 — 불필요하다"
 
 
-def test_cache_namespace_was_not_bumped():
-    """파일 구조가 안 바뀌므로 범프 불필요 — 범프했다면 그날 EOD가 콜드가 된다."""
-    assert app._CACHE_NS == "rs8", (
-        f"_CACHE_NS가 {app._CACHE_NS}로 바뀌었다 — protocol 변경만으로는 범프하지 않는다")
+def test_cache_namespace_moved_for_the_format_change():
+    """v5.277은 **파일 구조가 실제로 바뀌었다** — v5.270(protocol만 변경)과
+    달리 네임스페이스를 올려야 한다."""
+    assert app._CACHE_NS == "rs9", app._CACHE_NS
 
 
-def test_old_protocol_4_files_still_load(cache_dir):
-    """배포 순간 볼륨에 남아 있는 구 캐시가 못 읽히면 EOD가 통째로 콜드가 된다."""
-    src = _bundle()
-    path = app._disk_cache_path("kr", "2026-09-20")
-    with open(path, "wb") as f:
-        pickle.dump(src, f, protocol=4)          # 배포 전에 쓰인 형태
+def test_old_whole_bundle_files_still_load(cache_dir):
+    """구 형식(통째 dump)도 읽혀야 한다 — 네임스페이스를 올렸으니 사실상 안
+    만나지만, 볼륨에 남은 파일로 500이 나면 안 된다."""
+    for proto in (4, 5):
+        src = _bundle()
+        path = app._disk_cache_path("kr", "2026-09-20")
+        with open(path, "wb") as f:
+            pickle.dump(src, f, protocol=proto)
+        got = app._load_disk_cache("kr", "2026-09-20")
+        assert got is not None, f"구 protocol {proto} 캐시를 못 읽는다"
+        _assert_same(src, got)
+
+
+def test_chunked_file_has_the_marker_and_one_object_per_ticker(cache_dir):
+    """형식 자체를 고정 — 헤더 1개 + 종목 수만큼의 객체."""
+    src = _bundle(n_tickers=4)
+    app._save_disk_cache("kr", "2026-09-20", src)
+    with open(app._disk_cache_path("kr", "2026-09-20"), "rb") as f:
+        head = pickle.load(f)
+        assert head.get("__chunked__") == 4, head.get("__chunked__")
+        assert "data" not in head, "헤더에 data가 통째로 들어갔다"
+        seen = [pickle.load(f) for _ in range(4)]
+    assert sorted(k for k, _ in seen) == sorted(src["data"]), seen
+
+
+def test_memo_is_cleared_before_each_chunk(cache_dir):
+    """`clear_memo()`를 dump **뒤**에 부르면 첫 청크가 헤더의 메모를 참조해
+    `UnpicklingError`가 난다 — 작성 중 실제로 그랬고, 저장 피크만 재느라
+    **못 읽는 파일을 최적이라 부를 뻔했다**."""
+    src = _bundle(n_tickers=3)
+    app._save_disk_cache("kr", "2026-09-20", src)
     got = app._load_disk_cache("kr", "2026-09-20")
-    assert got is not None, "구 protocol 4 캐시를 못 읽는다"
+    assert got is not None, "메모 순서가 틀려 못 읽는다"
     _assert_same(src, got)
+
+
+def test_saving_does_not_mutate_the_caller_bundle(cache_dir):
+    """`__chunked__`가 원본에 남으면 메모리 캐시가 오염된다."""
+    src = _bundle()
+    app._save_disk_cache("kr", "2026-09-20", src)
+    assert "__chunked__" not in src
+    assert "data" in src and len(src["data"]) == 3
 
 
 def test_schema_validation_still_runs(cache_dir):
@@ -134,3 +174,53 @@ def test_schema_validation_still_runs(cache_dir):
     del bad["rs_ranks"]
     app._save_disk_cache("kr", "2026-09-20", bad)
     assert app._load_disk_cache("kr", "2026-09-20") is None, "깨진 스키마가 통과했다"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# v5.277 — EOD 직후 메모리 반환
+# ══════════════════════════════════════════════════════════════════════
+def test_release_memory_is_called_at_the_end_of_eod():
+    src = Path(app.__file__).read_text(encoding="utf-8")
+    i = src.index("async def _warm_market")
+    body = src[i:i + 9000]
+    assert "_release_memory(" in body, "EOD 끝에서 안 부른다"
+    # 예외 처리 **밖**이어야 한다 — 워밍이 실패해도 정리는 돌아야 한다
+    j = body.index("_release_memory(")
+    k = body.index('print(f"[scheduler] warm {market} failed')
+    assert j > k, "실패 처리 안쪽에 있다 — 성공 경로에서 안 돈다"
+
+
+def test_release_memory_survives_without_glibc():
+    """개발 머신(macOS)엔 `malloc_trim`이 없다. 여기서 예외가 나면 EOD가 죽는다."""
+    app._release_memory("테스트")          # 예외 없이 끝나면 통과
+
+
+def test_release_memory_reports_which_path_ran(capsys):
+    """조용히 지나가면 프로덕션에서 **실제로 trim이 됐는지** 알 수 없다."""
+    app._release_memory("EOD kr")
+    out = capsys.readouterr().out
+    assert "[mem] EOD kr" in out and "gc" in out, out
+    assert "malloc_trim" in out, out
+
+
+def test_release_memory_swallows_a_hostile_ctypes(monkeypatch):
+    """libc가 있는데 malloc_trim이 없는 환경(musl 등)에서도 죽지 않아야 한다."""
+    import ctypes
+
+    class NoTrim:
+        def __getattr__(self, name):
+            raise AttributeError(name)
+
+    monkeypatch.setattr(ctypes, "CDLL", lambda *a, **k: NoTrim())
+    app._release_memory("musl")            # 예외 없이 끝나면 통과
+
+
+def test_gc_runs_even_when_trim_is_unavailable(monkeypatch):
+    import ctypes
+    calls = []
+    monkeypatch.setattr(ctypes, "CDLL", lambda *a, **k: (_ for _ in ()).throw(OSError("no libc")))
+    import gc as _gc
+    real = _gc.collect
+    monkeypatch.setattr(_gc, "collect", lambda *a: (calls.append(1), real())[1])
+    app._release_memory("no-libc")
+    assert calls, "malloc_trim이 없다고 gc까지 건너뛴다"
