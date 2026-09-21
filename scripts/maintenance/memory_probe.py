@@ -42,6 +42,30 @@ def _token() -> str:
     raise SystemExit("API_READ_TOKEN을 .env에서 못 찾음")
 
 
+def _probe_latency() -> dict:
+    """캐시가 살아 있으면 응답이 빠르다 — **청크 캐시가 실제로 로드되는지**를
+    로그 없이 가늠할 유일한 외부 신호다(TIMING은 API로 안 나온다).
+
+    홈(302, 캐시 무관)과 진단 API(번들을 들고 있어야 빠름)를 같이 재서,
+    "서버가 느린 것"과 "스캔이 안 끝난 것"을 구분한다.
+    """
+    import time as _t
+    out = {}
+    for name, url, hdr in (("home", "https://pullback2-production.up.railway.app/", False),
+                           ("diag", URL, True)):
+        cmd = ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code} %{time_total}",
+               "--max-time", "60"]
+        if hdr:
+            cmd += ["-H", f"X-Api-Read-Token: {_token()}"]
+        cmd.append(url)
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=70).stdout.split()
+            out[name] = {"status": r[0], "sec": round(float(r[1]), 2)}
+        except Exception as e:
+            out[name] = {"error": str(e)[:60]}
+    return out
+
+
 def main() -> int:
     label = sys.argv[1] if len(sys.argv) > 1 else "manual"
     try:
@@ -70,6 +94,8 @@ def main() -> int:
                                   if tm.get("peak_mb") is not None else None),
         "data_cache_mb": dc.get("mb"), "data_cache_len": dc.get("len"),
         "top_alloc": (tm.get("top") or [{}])[0].get("where"),
+        # v5.278: 캐시가 로드됐는지 가늠할 외부 신호(TIMING은 API로 안 나온다)
+        "latency": _probe_latency(),
         "vs_baseline_pct": (round(d["rss_mb"] / BASELINE * 100, 1)
                             if d.get("rss_mb") else None),
         "vs_0917_pct": (round(d["rss_mb"] / BASELINE_0917 * 100, 1)
@@ -84,6 +110,9 @@ def main() -> int:
           f"  (차 {rec['tm_peak_minus_current']} — 작으면 무거운 fetch 미경험 = 재시작 의심)")
     print(f"  _data_cache {rec['data_cache_mb']}MB / {rec['data_cache_len']}개"
           f"  | 최대할당 {rec['top_alloc']}")
+    lat = rec.get("latency") or {}
+    print(f"  응답  홈 {lat.get('home', {})}  진단 {lat.get('diag', {})}"
+          f"   ← 진단이 느리면 번들이 아직 안 올라온 것")
     print(f"  → {OUT}")
     return 0
 
