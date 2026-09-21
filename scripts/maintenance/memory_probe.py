@@ -27,7 +27,11 @@ from pathlib import Path
 KST = timezone(timedelta(hours=9))
 URL = "https://pullback2-production.up.railway.app/api/debug/memory"
 OUT = Path(__file__).resolve().parent / "memory_probe.jsonl"
-BASELINE_0917 = 1464.6          # 09-17 EOD 직후 실측 — 대조 기준
+# v5.277 비교점(사용자 지시): **804.1MB** — 09-22 07:07 KST, US EOD까지 통과한
+# 프로세스의 RSS. 09-17의 1,464.6MB는 MALLOC_ARENA_MAX 이전 값이라 이제
+# 1차 기준이 아니다(둘 다 표시한다).
+BASELINE = 804.1
+BASELINE_0917 = 1464.6          # 아레나 설정 이전 — 참고용
 
 
 def _token() -> str:
@@ -66,13 +70,16 @@ def main() -> int:
                                   if tm.get("peak_mb") is not None else None),
         "data_cache_mb": dc.get("mb"), "data_cache_len": dc.get("len"),
         "top_alloc": (tm.get("top") or [{}])[0].get("where"),
+        "vs_baseline_pct": (round(d["rss_mb"] / BASELINE * 100, 1)
+                            if d.get("rss_mb") else None),
         "vs_0917_pct": (round(d["rss_mb"] / BASELINE_0917 * 100, 1)
                         if d.get("rss_mb") else None),
     }
     with OUT.open("a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     print(f"[memory-probe] {rec['label']} {rec['at']}")
-    print(f"  RSS {rec['rss_mb']}MB  (09-17 {BASELINE_0917}MB 대비 {rec['vs_0917_pct']}%)")
+    print(f"  RSS {rec['rss_mb']}MB  (v5.277 전 {BASELINE}MB 대비 "
+          f"{rec['vs_baseline_pct']}% · 09-17 {BASELINE_0917}MB 대비 {rec['vs_0917_pct']}%)")
     print(f"  tracemalloc cur {rec['tm_current_mb']} / peak {rec['tm_peak_mb']}"
           f"  (차 {rec['tm_peak_minus_current']} — 작으면 무거운 fetch 미경험 = 재시작 의심)")
     print(f"  _data_cache {rec['data_cache_mb']}MB / {rec['data_cache_len']}개"

@@ -33,9 +33,11 @@ LABEL = "com.seulkicho.pullback.memoryprobe"
 PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 
 # (라벨, 예정 시각) — **로컬 시계(NZST)** 기준. KST = 로컬 − 3시간.
+# v5.277 재등록(사용자 지시): **같은 두 시각**, 하루 뒤. 비교점은 804.1MB
+# (09-22 07:07, US EOD 통과분)이며 그날과 같은 국면에서 재야 의미가 있다.
 SCHEDULE = [
-    ("KR-EOD-통과", "2026-09-21 23:15"),   # KST 09-21 20:15 — KR EOD 1회 통과
-    ("US-EOD-통과", "2026-09-22 10:00"),   # KST 09-22 07:00 — US EOD까지 통과
+    ("KR-EOD-통과-v5277", "2026-09-22 23:15"),   # KST 09-22 20:15
+    ("US-EOD-통과-v5277", "2026-09-23 10:00"),   # KST 09-23 07:00
 ]
 
 
