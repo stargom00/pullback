@@ -197,14 +197,20 @@ def test_warning_banner_is_present_and_unambiguous():
 
 
 def test_star_uses_the_stage_baseline_price():
-    """v5.272: 트리거는 **단계선(MA200) 가격** — 벽이 MA200으로 옮겨갔다.
-
-    v5.268엔 MA600이었다. 게이트/판정 분리 후 "도달을 기다리는 벽"은 단계선이다.
+    """트리거는 **단계선(MA200) 가격**. v5.268엔 MA600이었고 v5.272에서
+    옮겼다. v5.278에서 필드명이 `pivot` → `my_trigger_price`로 바뀌었다
+    (`/api/watch/quick`의 409를 피하려고 내 추적 형태로 전환) — **어느 선을
+    쓰는가**는 그대로 검사한다.
     """
     src = _extract_function("abcWatch")
-    assert "pivot: h.ma_stage," in src, src
+    assert "my_trigger_price: h.ma_stage," in src, src
     assert "ma_gate" not in src, "★가 게이트선을 트리거로 쓴다"
-    assert "_pct" not in src, "화면에서 비율로 가격을 되돌리려 한다"
+    # 등록 값은 **가격만** 쓴다 — 비율(h.stage_pct)은 메모 문구에만 허용한다.
+    # `_pct`로 통째 금지하면 레코드의 `risk_pct: ''` 필드에 걸려 오탐한다
+    # (실제로 그랬다) — 읽는 대상(`h.`)으로 좁힌다.
+    body = src[:src.index("note:")] if "note:" in src else src
+    assert "h.stage_pct" not in body, "가격 대신 비율을 쓴다"
+    assert "h.gate_pct" not in body
 
 
 def test_both_baselines_are_shown_with_their_roles():

@@ -3272,14 +3272,60 @@ async function loadAbc() {
 
 // ★ — **단계 기준선(MA200)**을 트리거로 한 관찰 등록(v5.272: 벽은 MA200이다). 눌림목 탭의 quickWatch는 lastHits를
 // 보는데 ABC는 별도 데이터라 여기서 직접 payload를 만든다.
+// v5.278(사용자 지시): ★ 등록을 **`/api/watch/quick` 대신 내 추적 형태**로.
+//
+// [왜 바꿨나] `/api/watch/quick`은 v5.106 안전장치로
+//   `reg_price >= pivot` 이면 409(`already_above_pivot`)를 돌려준다.
+// 그런데 ABC의 C2·C3는 **정의상 close > MA200**이라 ★을 누를 만한 종목이
+// 100% 409였다. 프론트는 409를 받으면 `openPivotChoiceModal(s, ...)`을 띄우는데
+// 그 모달은 **스캔 히트 모양**을 기대해서 ABC 히트로는 제대로 안 뜨고,
+// 결과적으로 **레코드가 아무것도 안 생겼다**("409인데 일지에 없음"의 정체).
+// `myTrackSaveAdd()`와 같은 형태(`my_trigger_price` + `setJournal`)로 가면
+// pivot 비교 자체가 없어 409 경로를 안 탄다.
+//
+// [트리거] 항상 **MA200(벽)**, 방향만 가격 위치로 가른다.
+//   · 벽 아래(C0·C1) → `above`: 넘어오면 알림
+//   · 벽 위(C2·C3)   → `below`: 되돌아 벽을 다시 만나면 알림(눌림 재터치)
+// 사용자 초안은 C2·C3를 "트리거 없이 관찰만"이었는데, `my_trigger_price`가
+// null인 pending은 **14일 뒤 자동 무산**된다(WATCH_DAYS, updateTracking).
+// 관찰만 하려던 레코드가 조용히 사라지므로 방향을 뒤집는 쪽을 택했다.
 async function abcWatch(btn, ticker) {
   const h = (_abcData && _abcData.hits || []).find(x => x.ticker === ticker);
   if (!h || h.ma_stage == null) { btn.textContent = `${_abcStageLabel()}없음`; return; }
-  await _quickWatchRequest(h, btn, {
-    ticker: h.ticker, name: h.name, market: 'kr',
-    pivot: h.ma_stage, tab: 'ABC', reg_price: h.close,
-  });
+  if ((getJournal() || []).some(r => r.ticker === h.ticker && r.tab === 'ABC'
+      && !['closed', 'missed', 'archived'].includes(r.status))) {
+    btn.textContent = '✓ 추적중'; btn.disabled = true; return;
+  }
+  btn.disabled = true; btn.textContent = '등록중…';
+  const above = h.close != null && h.close > h.ma_stage;
+  const rec = {
+    id: Date.now(), date: kstStr(), ticker: h.ticker, name: h.name, market: 'KR',
+    status: 'pending', category: '재량', cat: '재량', tab: 'ABC',
+    signal: '', pivot_type: 'custom_trigger', setup_score: '', rs: '',
+    entry: null, stop: null, pivot: null, risk_pct: '',
+    sig_level: '', sig_flags: '', avwap_zone: '', rr_at_entry: '',
+    tracking: false, target: '',
+    last_price: null, last_checked: '', closed_reason: '',
+    manual: true,
+    my_trigger_price: h.ma_stage,
+    my_trigger_dir: above ? 'below' : 'above',
+    reg_price: null,
+    entry_source: null, entry_actual: null, entry_actual_date: null,
+    sector: h.sector || '', alert: '', note:
+      `🔺 ABC ${h.c_stage || ''} · ${_abcStageLabel()} ${h.stage_pct > 0 ? '+' : ''}${h.stage_pct}%`
+      + (h.gate_break ? ` · 600돌파 D+${h.gate_break.bars_ago}` : ''),
+    scenario: null,
+    exit: '', result_r: '', held_days: '', review: '',
+  };
+  try {
+    const j = getJournal(); j.unshift(rec);
+    await setJournal(j);
+    btn.textContent = '✓ 추적중';
+  } catch (e) {
+    btn.disabled = false; btn.textContent = '★';
+  }
 }
+
 
 // v4.83: 코스피/코스닥 마감 정리 — 상한가 종목 + 거래대금 상위
 async function loadEod() {

@@ -5,6 +5,34 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.278 [버그수정] 🔺 ABC ★ 등록이 **일지에 안 들어가던 문제**(사용자 보고).
+    [증상] ★ → `/api/watch/quick` → **409**, 그런데 일지엔 아무것도 없음.
+    [원인] v5.106 안전장치 `reg_price >= pivot → 409(already_above_pivot)`.
+    `abcWatch`가 `pivot=MA200`, `reg_price=현재가`를 보내는데 **C2·C3는 정의상
+    close > MA200**이라 ★을 누를 만한 종목이 **100% 409**였다. 프론트는 409를
+    받으면 `openPivotChoiceModal(s,…)`을 띄우지만 그 모달은 **스캔 히트 모양**을
+    기대해서 ABC 히트로는 제대로 안 뜨고, 결국 **레코드가 하나도 안 생겼다**.
+    [조사 정정 2건]
+      · `/api/watch/quick`은 **일지(`journal_user.json`)에 쓴다** — 어제 죽은
+        코드로 확인된 watch 서브시스템이 아니다. `status='watch'`는
+        `category=='관찰'`일 때만이고 ★은 그걸 안 보낸다.
+      · **v5.274(eb63756)가 바꾼 게 아니다.** `abcWatch` 이력은 v5.267 신설 →
+        v5.268 → v5.272뿐. v5.272에서 트리거를 MA600→MA200으로 옮기며 409
+        적중률이 올라갔을 뿐이다(MA600 대비로는 C2도 아래일 수 있었다).
+    [수정] `myTrackSaveAdd()`와 같은 형태 — `my_trigger_price` + `setJournal`.
+    pivot 비교가 없으니 409 경로 자체를 안 탄다.
+    `tab:'ABC'`(출처) · `category:'재량'` · `manual:true` · `pivot/entry/stop=null`.
+    [트리거 — 초안에서 바꿈] 항상 **MA200(벽)**, 방향만 가격 위치로:
+    벽 아래(C0·C1) `above` / 벽 위(C2·C3) `below`(눌림 재터치).
+    사용자 초안은 "C2·C3는 트리거 없이 관찰만"이었는데, `my_trigger_price`가
+    null인 pending은 **14일 뒤 자동 무산**된다(WATCH_DAYS, updateTracking) —
+    관찰만 하려던 레코드가 조용히 사라지므로 방향을 뒤집는 쪽을 택했다.
+    [테스트] test_abc_watch.py(14) — production `abcWatch`를 **Node로 그대로
+    실행**해(CLAUDE.md 레시피) C0·C1·C2·C3 **네 단계 전부 등록**·네트워크 호출
+    0건·트리거 방향·null 금지·중복 거부·종료분 재등록 허용을 확인.
+    사보타주 5종(방향 고정 / C2·C3 트리거 null / 옛 경로 복귀 / manual=false /
+    종료 레코드도 중복 처리) 전부 FAIL 확인 후 원복.
+
 v5.278 [핫픽스] `_release_memory()`를 **이벤트 루프 밖으로**(사용자 지시).
     v5.277에서 EOD 끝의 정리(`gc.collect()` + `malloc_trim(0)`)를 루프에서
     **직접** 불렀다. 둘 다 블로킹이라(수백 MB 힙에서 gc는 수 초, malloc_trim은
