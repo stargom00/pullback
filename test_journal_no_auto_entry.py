@@ -129,3 +129,40 @@ def test_server_excludes_null_status_from_bot_alerts():
     body = src[i:i + 3000]
     assert 'if status != "entered":' in body, body[:400]
     assert 'if status:' not in body, "빈 status를 통과시키는 분기가 남아 있다"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# v5.279 — **계산만 하고 안 그리는** 배지 (사용자 발견)
+# ══════════════════════════════════════════════════════════════════════
+def _rendered_count(name: str) -> int:
+    """`${name}`으로 **실제 출력에 끼워진** 횟수."""
+    return len(re.findall(r"\$\{" + name + r"\b", TEXT))
+
+
+def test_reached_badge_is_actually_rendered():
+    """v5.274에서 "피벗 도달 ↑"를 **const로 만들어 놓고 어디에도 안 넣었다.**
+    자동 진입을 없앤 자리에 표시를 남기는 게 목적이었는데 그 표시가 안 떴다 —
+    사용자가 "표시는 뜨나? 안 뜨면 그게 버그"로 짚어 발견됐다."""
+    assert "피벗 도달 ↑" in TEXT, "배지 문구가 없다"
+    assert _rendered_count("reachedBadge") >= 1, "정의만 하고 출력에 안 넣었다"
+
+
+def test_no_status_badge_is_actually_rendered():
+    """v5.277의 "상태 미기록"도 같은 실수였다(정의 1회, 사용 0회)."""
+    assert _rendered_count("noStatus") >= 1, "정의만 하고 출력에 안 넣었다"
+
+
+def test_every_badge_const_in_viewrow_reaches_the_output():
+    """**같은 실수가 두 번 났다** — 구조적으로 막는다.
+
+    `viewRow` 안에서 `const ...Badge =`로 만든 값은 전부 `${...}`로 출력에
+    들어가야 한다. 안 들어가면 화면에 없는 배지를 "넣었다"고 착각하게 된다.
+    """
+    src = _fn("viewRow")
+    made = set(re.findall(r"const\s+(\w*(?:Badge|badge))\s*=", src))
+    assert made, "배지 const를 하나도 못 찾음 — 이름 규칙이 바뀌었나"
+    used = set(re.findall(r"\$\{(\w*(?:Badge|badge))\b", src))
+    # 조건식 안에서 쓰이는 것도 사용으로 친다(예: watchActive ? watchBadge : ...)
+    used |= {m for m in made if re.search(r"[?:]\s*" + m + r"\b", src)}
+    missing = made - used
+    assert not missing, f"만들어 놓고 안 그리는 배지: {sorted(missing)}"

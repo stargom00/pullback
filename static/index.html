@@ -575,7 +575,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.278</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.279</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -8171,7 +8171,7 @@ function viewRow(r) {
   const subInfo = [r.tab, r.rs != null ? 'RS '+r.rs : '', r.sector].filter(Boolean).join(' · ');
   return `<tr class="${r.result_r===''&&st!=='missed'&&!broken?'open-pos':''}" style="border-left:3px solid ${borderCol};${st==='missed'||broken?'opacity:.5':st==='closed'?'opacity:.78':''}">
     <td class="mono">${r.date}</td>
-    <td style="white-space:nowrap">${watchActive ? watchBadge : stBadge}${stActions}${broken?`<div class="st-badge" style="background:#3a2020;color:#ff6b6b;margin-top:3px" title="손절가가 진입가보다 높음 — 과거 버그로 저장된 깨진 데이터. 통계에서 제외됨. 삭제 권장.">⚠️데이터오류</div>`:''}</td>
+    <td style="white-space:nowrap">${watchActive ? watchBadge : stBadge}${noStatus}${reachedBadge}${stActions}${broken?`<div class="st-badge" style="background:#3a2020;color:#ff6b6b;margin-top:3px" title="손절가가 진입가보다 높음 — 과거 버그로 저장된 깨진 데이터. 통계에서 제외됨. 삭제 권장.">⚠️데이터오류</div>`:''}</td>
     <td><a href="${tvUrl(r.ticker, r.market)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${r.name} <span style="font-size:9px;opacity:.5">↗</span>${r.manual?`<span class="st-badge" style="background:#1e3a2e;color:#5fd99a;margin-left:4px;font-size:9px">수동</span>`:''}<div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div>${subInfo?`<div style="font-size:10px;color:var(--muted);opacity:.8">${subInfo}</div>`:''}</a></td>
     <td class="mono">${(() => {
       const isKr = /\.(KS|KQ)$/i.test(r.ticker || '');
