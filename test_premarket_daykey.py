@@ -108,8 +108,66 @@ def test_open_constant_is_not_a_literal():
 
 
 def test_previous_day_uses_the_existing_helper():
-    """새 휴장일 로직을 만들지 않았는지 — 판정 지점이 둘로 갈리면 안 된다."""
+    """새 휴장일 **로직**을 만들지 않았는지 — 판정 지점이 둘로 갈리면 안 된다.
+
+    `holiday`라는 **단어**를 금지하면 안 된다(처음엔 그렇게 썼다) — 휴장일
+    분기를 추가하면 지역변수 이름만으로 실패한다. 금지 대상은 **자체 날짜
+    목록·자체 판정식**이지 이름이 아니다.
+    """
     import inspect
     src = inspect.getsource(app._market_session_key)
     assert "_last_trading_daykey(" in src, src
-    assert "holiday" not in src.lower()
+    assert "is_trading_day(" in src, "휴장 판정을 직접 구현했다"
+    # 자체 날짜 목록을 들고 있으면 안 된다
+    import re
+    assert not re.search(r'"\d{4}-\d{2}-\d{2}"', src), "함수 안에 날짜 리터럴이 있다"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# v5.281(추가) — 평일 **휴장일**도 종일 확정
+# ══════════════════════════════════════════════════════════════════════
+# v5.281 1차는 장전(00:00~09:00)만 덮었다. 평일 휴장일의 09:00~20:10은 여전히
+# None이라, 장이 열리지도 않는 11시간 동안 디스크 캐시를 못 쓰고 49분 주기로
+# 전량 재수집했다 — 추석 연휴(2026-09-24 목·09-25 금) 이틀이면 약 27회.
+# 휴장 판정은 기존 `is_trading_day()` 재사용(새 목록 금지).
+
+def test_holiday_source_has_the_chuseok_dates():
+    """전제 확인 — 이 날짜가 실제로 휴장으로 등록돼 있는가."""
+    assert app.is_trading_day("kr", "2026-09-24") is False
+    assert app.is_trading_day("kr", "2026-09-25") is False
+    assert app.is_trading_day("kr", "2026-09-23") is True
+    assert app.is_trading_day("kr", "2026-09-28") is True
+
+
+def test_holiday_midday_returns_previous_trading_day():
+    """**이번 수정의 핵심.** 예전엔 여기가 None이었다."""
+    assert key_at("2026-09-24 10:00") == "2026-09-23"
+
+
+def test_holiday_after_close_returns_previous_trading_day():
+    """휴장일 마감 후는 예전에도 `_confirmed_daykey`가 보정했지만,
+    `_market_session_key` 단계에서 이미 맞게 나와야 둘이 안 갈린다."""
+    assert key_at("2026-09-25 22:00") == "2026-09-23"
+
+
+def test_monday_after_a_holiday_weekend_skips_back_to_wednesday():
+    """금·토·일이 전부 비거래일 → 월 장전은 수요일로."""
+    assert key_at("2026-09-28 07:00") == "2026-09-23"
+
+
+def test_trading_day_intraday_is_still_none():
+    """휴장일 분기가 **거래일 장중까지 삼키면 안 된다**."""
+    assert key_at("2026-09-23 10:00") is None
+    assert key_at("2026-09-23 15:00") is None
+
+
+def test_holiday_branch_reuses_is_trading_day():
+    """새 휴장일 로직을 만들지 않았는지 — 목록이 둘로 갈리면 안 된다."""
+    import inspect
+    src = inspect.getsource(app._market_session_key)
+    assert "is_trading_day(" in src, src
+
+
+def test_holiday_does_not_leak_into_us():
+    """KR 휴장일이 US 판정을 바꾸면 안 된다(9/24는 US 정상 거래일)."""
+    assert key_at("2026-09-24 10:00", market="us") == "2026-09-24"

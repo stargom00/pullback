@@ -13,6 +13,10 @@ v5.281 [성능] 평일 **장전(00:00~09:00 KST)을 "확정 거래일"로** 본�
     성질이 같은데 캐시만 못 쓰고 있었다. 실측: 1,136종목 전량 재수집이
     `kr_sec` 1,028~1,110초.
     [수정] `KR_OPEN_HM`(09:00) 신설, 장전을 `kr_closed`에 포함.
+    **+ 평일 휴장일도 종일 확정**(2026-09-23 추가). 1차는 장전만 덮어서
+    평일 휴장일의 09:00~20:10 11시간이 여전히 None이었다 — 장이 열리지도
+    않는데 49분 주기 전량 재수집이 돌았다(추석 2026-09-24·25 이틀이면 약 27회).
+    휴장 판정은 **기존 `is_trading_day()` 재사용**(새 목록 금지).
     키는 **오늘이 아니라 직전 거래일** — 오늘 장이 아직 안 열렸는데 오늘
     날짜를 주면 "열리지도 않은 장의 데이터를 확정"이라 부르는 셈이다.
     직전 거래일 탐색은 **기존 `_last_trading_daykey()` 재사용**(사용자 지시:
@@ -8245,7 +8249,14 @@ def _market_session_key(market: str) -> str | None:
     # v5.281: 평일 장 시작 전(00:00~09:00 KST)도 "확정". 데이터가 직전 거래일
     # 종가 그대로라 장 마감 후와 성질이 같다.
     kr_premarket = (wd <= 4) and hm < KR_OPEN_HM
-    kr_closed = weekend or kr_premarket or (wd <= 4 and hm >= KR_CLOSE_CONFIRMED_HM)
+    # v5.281(추가): **평일 휴장일은 종일 확정.** 장이 아예 안 열리므로 09:00~20:10
+    # 에도 값이 안 바뀐다. 이걸 빼놨더니 추석 연휴(2026-09-24·25) 같은 평일
+    # 휴장일의 그 11시간이 `None`이 되어 디스크 캐시를 못 쓰고 49분 주기로
+    # 전량 재수집했다(이틀이면 약 27회). 휴장 판정은 **기존 `is_trading_day()`
+    # 재사용** — 새 휴장일 목록을 만들지 않는다.
+    kr_holiday = (wd <= 4) and not is_trading_day("kr", now.strftime("%Y-%m-%d"))
+    kr_closed = (weekend or kr_premarket or kr_holiday
+                 or (wd <= 4 and hm >= KR_CLOSE_CONFIRMED_HM))
     # 미국장 데이터는 KST 새벽에 확정. 06:00~다음 한국장 데이터 갱신 전까지 안정.
     us_closed = weekend or (hm >= 6 * 60)
 
@@ -8264,6 +8275,10 @@ def _market_session_key(market: str) -> str | None:
     # 새 휴장일 로직을 만들지 않는다(그러면 판정 지점이 둘로 갈린다).
     if market == "kr" and kr_premarket and not weekend:
         return _last_trading_daykey("kr", now - timedelta(days=1))
+    # 평일 휴장일은 **오늘(포함)부터** 거슬러 찾는다 — 오늘이 거래일이 아니므로
+    # `_last_trading_daykey`가 자연히 직전 거래일로 내려간다.
+    if market == "kr" and kr_holiday:
+        return _last_trading_daykey("kr", now)
     return now.strftime("%Y-%m-%d")
 
 
