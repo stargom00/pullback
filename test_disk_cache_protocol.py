@@ -223,7 +223,15 @@ def test_release_memory_reports_which_path_ran(capsys):
 
 
 def test_release_memory_swallows_a_hostile_ctypes(monkeypatch):
-    """libc가 있는데 malloc_trim이 없는 환경(musl 등)에서도 죽지 않아야 한다."""
+    """libc는 열렸는데 **심볼이 없는** 경우에도 죽지 않아야 한다.
+
+    ⚠️ 이 경로를 "musl 등"이라 부르면 틀린다(v5.283 정정). musl에는
+    `libc.so.6` 파일 자체가 없어(`/lib/ld-musl-*.so.1`) `CDLL()`이
+    **OSError**로 끊기지, `AttributeError`가 아니다. 즉 musl은 로그에
+    "미지원"으로 나오고, `trim=0`은 **glibc에서 반환할 메모리가 없었다**는
+    뜻이지 musl이 아니다 — trim의 기여는 플래그가 아니라 **B→C 차이(MB)**로
+    읽어야 한다.
+    """
     import ctypes
 
     class NoTrim:

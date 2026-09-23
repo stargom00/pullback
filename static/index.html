@@ -575,7 +575,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.282</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.283</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -595,11 +595,23 @@ tr.editing{background:rgba(242,179,61,.06)}
          (일일 등락 3패널)는 드롭다운에 그대로 둔다 — 다른 화면이다. -->
     <button class="tab" data-mode="themes" title="업종·테마별 구성종목 — 스캐너가 이미 계산한 값만 표시(새 계산 없음)">🧭 업종/테마</button>
     <span class="tab-group-sep"></span>
-    <button class="tab" data-mode="pullback">눌림목</button>
-    <button class="tab" data-mode="imminent">돌파임박</button>
-    <button class="tab" data-mode="boxbreak">박스돌파</button>
-    <button class="tab" data-mode="breakout">돌파</button>
+    <!-- v5.283(사용자 지시): 라벨만 "US눌림목". **내부 키(data-mode="pullback")와
+         저장 식별자는 그대로다** — `MODE_TAB_LABEL.pullback`이 일지 `tab` 필드로
+         저장되고(`"눌림목"`), app.py의 EV 조회키·분기(`tab == "눌림목"`)가 같은
+         문자열을 쓴다. 라벨을 키까지 따라 바꾸면 기존 일지 레코드가 끊긴다. -->
+    <button class="tab" data-mode="pullback" title="진입 시 시장 필터가 미국으로 전환됩니다(탭을 벗어나면 원래대로).">US눌림목</button>
     <button class="tab" data-mode="turnaround">추세전환</button>
+    <!-- v5.283(사용자 지시): 메인 과밀 해소 — 돌파임박·박스돌파·돌파를
+         "추추" 하위로. **위치만 이동**이고 스캔·알림·forward 기록·내부 키는
+         전부 불변이다(탭 전환 핸들러에 이 세 모드 전용 분기가 원래 없다).
+         ⋯실험 그룹과 같은 방식(display:contents 토글)이라 모바일에서도
+         같은 폭 규칙으로 줄바꿈된다. -->
+    <button class="tab" id="chuchuToggle" type="button" title="돌파 계열 3탭">추추 ▾</button>
+    <span id="chuchuGroup" style="display:none">
+      <button class="tab" data-mode="imminent">돌파임박</button>
+      <button class="tab" data-mode="boxbreak">박스돌파</button>
+      <button class="tab" data-mode="breakout">돌파</button>
+    </span>
     <button class="tab" data-mode="jongga" title="T일 종가매수→T+1일 시가매도, 단기 오버나이트 전략(v5.97)">종가베팅</button>
     <!-- v5.228(사용자 지시): 🔥 급등 관찰 — 임시 2주 실험. 기존 ⋯실험
          드롭다운의 "⚡급등"(data-mode="surge", analyze_surge 게이트 스캔)과
@@ -5906,6 +5918,43 @@ function setMarket(newMarket) {
   market = newMarket;
   document.querySelectorAll('[data-market]').forEach(x => x.classList.toggle('active', x.dataset.market === newMarket));
 }
+// ══════════════════════════════════════════════════════════════════
+// v5.283(사용자 지시): **시장 강제 탭**의 진입/이탈 규칙을 한 곳에서 처리.
+// ══════════════════════════════════════════════════════════════════
+// 예전엔 종가베팅만 `setMarket('kr')`을 탭 클릭 핸들러에 직접 박아뒀고
+// **복원이 없었다** — 종가베팅을 보고 나오면 다른 탭에도 kr이 남았다.
+// US눌림목이 같은 방식으로 us를 남기면 ABC 등에서 미국만 보이게 된다.
+// 규칙을 탭별로 복붙하지 않고 여기 하나로 둔다.
+const FORCED_MARKET_BY_MODE = { jongga: 'kr', pullback: 'us' };
+let _marketBeforeForce = null;     // **최초 비강제 탭**의 값 (강제→강제 직행에도 유지)
+let _userPickedInForcedTab = false;
+
+// ⚠️ 여기서 기존 `userMarketOverride`를 그대로 쓰지 않는 이유:
+// 그건 **세션 전체** 플래그라(한 번 누르면 새로고침 전까지 true) "이번 강제
+// 탭 방문 중에 눌렀는가"를 표현하지 못한다. 세션 플래그로 판정하면 과거에
+// 시장 버튼을 한 번이라도 누른 사용자는 **영영 복원이 안 된다**.
+// 그래서 방문 단위 플래그를 따로 둔다(기존 플래그는 건드리지 않는다 —
+// 캘린더 기본값 억제라는 다른 일을 한다).
+function applyForcedMarket(prevMode, nextMode) {
+  const prevForced = FORCED_MARKET_BY_MODE[prevMode];
+  const nextForced = FORCED_MARKET_BY_MODE[nextMode];
+  if (nextForced) {
+    if (!prevForced) {              // 비강제 → 강제: 되돌아갈 값을 저장
+      _marketBeforeForce = market;
+      _userPickedInForcedTab = false;
+    }
+    // 강제 → 강제 직행: 저장값을 **덮어쓰지 않는다**(kr/us가 저장되면
+    // 최초 비강제 탭의 값을 잃는다).
+    setMarket(nextForced);
+  } else if (prevForced) {          // 강제 → 비강제: 이탈
+    if (!_userPickedInForcedTab && _marketBeforeForce != null) {
+      setMarket(_marketBeforeForce);
+    }
+    _marketBeforeForce = null;
+    _userPickedInForcedTab = false;
+  }
+}
+
 // v5.232(사용자 지시 — 즉시행동 카드 시장 전환 버그 수정): 시간대별
 // 기본 시장 필터를 프론트에서 직접 계산하던 v5.166/v5.215의
 // timeBasedDefaultMarket()/isUsMarketOpen()을 제거했다. 근본 원인은
@@ -5924,6 +5973,8 @@ let userMarketOverride = false;
 const MARKET_FILTER_KEY = 'marketFilterLast';
 document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('click', () => {
   userMarketOverride = true;
+  // v5.283: 강제 탭 안에서 사용자가 직접 고르면 이탈 시 복원하지 않는다.
+  if (FORCED_MARKET_BY_MODE[mode]) _userPickedInForcedTab = true;
   localStorage.setItem(MARKET_FILTER_KEY, t.dataset.market);
   setMarket(t.dataset.market);
   // v5.199(사용자 지시 — 버그수정): 캘린더 탭은 #content가 아니라
@@ -5937,6 +5988,14 @@ document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('clic
 // v5.92: "⋯ 실험" 접기 그룹 — 패턴/Stage2/IBD9/강한피벗/실적우수/급등 6개.
 // 상태 저장 안 함(새로고침마다 항상 접힘부터 시작, 사용자 지시).
 let expTabsExpanded = false;
+// v5.283: 추추 그룹 토글 — ⋯실험과 같은 방식(display:contents).
+let chuchuExpanded = false;
+document.getElementById('chuchuToggle').addEventListener('click', (e) => {
+  chuchuExpanded = !chuchuExpanded;
+  document.getElementById('chuchuGroup').style.display = chuchuExpanded ? 'contents' : 'none';
+  e.target.textContent = chuchuExpanded ? '추추 ▴' : '추추 ▾';
+});
+
 document.getElementById('expTabsToggle').addEventListener('click', (e) => {
   expTabsExpanded = !expTabsExpanded;
   document.getElementById('expTabsGroup').style.display = expTabsExpanded ? 'contents' : 'none';
@@ -5980,9 +6039,12 @@ function applyTabViewState() {
 document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click', () => {
   document.querySelectorAll('[data-mode]').forEach(x => x.classList.remove('active'));
   t.classList.add('active');
+  const _prevMode = mode;
   mode = t.dataset.mode;
-  // 종가베팅은 KR 전용 데이터라 시장 필터를 강제 동기화.
-  if (mode === 'jongga') { setMarket('kr'); loadJonggaForwardStats(); }
+  // v5.283: 시장 강제/복원은 `applyForcedMarket()` 한 곳에서. 예전엔 여기
+  // 종가베팅에만 `setMarket('kr')`이 박혀 있었고 복원이 없었다.
+  applyForcedMarket(_prevMode, mode);
+  if (mode === 'jongga') { loadJonggaForwardStats(); }
   // v5.125: 대장관찰 탭 진입 시 🔁 재점화 대기 섹션 데이터 로드(KR 전용
   // 데이터라 이 탭 자체의 시장 필터는 안 건드림 — 미국 대장후보도 계속
   // 그대로 보이게).
