@@ -43,10 +43,23 @@ def _fn(name: str) -> str:
 
 
 def _top_level_modes() -> list:
-    """최상위(드롭다운 밖) 탭의 data-mode 목록."""
-    head = TEXT[:TEXT.index('<button class="tab" id="chuchuToggle"')]
-    head = head[head.index('data-mode="calendar"'):]
-    return re.findall(r'<button class="tab[^"]*" data-mode="(\w+)"', head)
+    """최상위(드롭다운 밖) 탭의 data-mode 목록 — 등장 순서 그대로.
+
+    v5.284: 예전엔 `chuchuToggle` **앞까지만** 잘라서 목록을 만들었다. 그건
+    추추가 맨 뒤에 있을 때만 맞는 방식이라, 순서가 바뀌어 추추 뒤로 최상위
+    탭이 가면 그 탭들이 조용히 목록에서 빠진다(순서 검사를 무력화). 그래서
+    자르지 않고 `#modeTabs` 전체에서 **그룹 <span> 안쪽만 제거**한다.
+    """
+    i = TEXT.index('id="modeTabs"')
+    body = TEXT[i:TEXT.index("</div>", i)]
+    for gid in ("chuchuGroup", "expTabsGroup"):
+        a = body.index(f'<span id="{gid}"')
+        # 그룹의 닫는 태그는 버튼과 같은 줄에 안 붙어 있다(4칸 들여쓰기 전용
+        # 줄). 단순히 "다음 </span>"을 찾으면 버튼 **안쪽** <span>(예: 돈의흐름
+        # 미확인 점 .mf-unread-dot)에 먼저 걸려 그룹이 덜 잘린다.
+        b = body.index("\n    </span>", a)
+        body = body[:a] + body[b:]
+    return re.findall(r'<button class="tab[^"]*" data-mode="(\w+)"', body)
 
 
 def _group_modes(group_id: str) -> list:
@@ -56,6 +69,42 @@ def _group_modes(group_id: str) -> list:
 
 
 # ── 메뉴 구조 ───────────────────────────────────────────────────────
+# 구분선 오른쪽 최상위 순서(v5.284, 사용자 지시). 왼쪽(캘린더·업종/테마)과
+# 🔥급등 뒤 항목(마감정리·포지션·내 일지·⋯실험)은 이 검사 대상이 아니다.
+EXPECTED_MAIN_ORDER = ["pullback", "abc", "jongga", "turnaround", "surge_observe"]
+
+
+def test_main_tab_order():
+    """추추(드롭다운 토글)를 포함한 6개 순서:
+    US눌림목 · 🔺ABC · 종가베팅 · 추세전환 · 추추 ▾ · 🔥급등.
+
+    추추는 data-mode가 없는 토글 버튼이라 data-mode 목록만으론 위치가 안
+    잡힌다 — HTML 상의 실제 offset으로 추세전환 뒤·급등 앞임을 따로 본다.
+    """
+    top = _top_level_modes()
+    right = top[top.index("pullback"):]
+    assert right[:len(EXPECTED_MAIN_ORDER)] == EXPECTED_MAIN_ORDER, right
+
+    pos = lambda s: TEXT.index(s)
+    assert (pos('data-mode="turnaround"')
+            < pos('id="chuchuToggle"')
+            < pos('data-mode="surge_observe"')), "추추 ▾ 위치가 추세전환~급등 사이가 아니다"
+
+
+def test_left_of_the_separator_is_unchanged():
+    top = _top_level_modes()
+    assert top[:2] == ["calendar", "themes"], top
+
+
+def test_tabs_after_surge_observe_are_unchanged():
+    top = _top_level_modes()
+    assert top[top.index("surge_observe") + 1:] == ["eod", "positions", "journal"], top
+
+
+def test_default_tab_is_still_calendar():
+    assert '<button class="tab active" data-mode="calendar">' in TEXT
+
+
 def test_three_tabs_left_the_top_level():
     top = _top_level_modes()
     for m in ("imminent", "boxbreak", "breakout"):

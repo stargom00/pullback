@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.284 [UI] 최상위 메뉴 **순서만** 변경(사용자 지시) — 구분선 오른쪽이
+    US눌림목 · 🔺ABC · 종가베팅 · 추세전환 · 추추 ▾ · 🔥급등 순.
+    구분선 왼쪽(캘린더·업종/테마)과 🔥급등 뒤(마감정리·포지션·내 일지·
+    ⋯실험)는 위치 불변. `data-mode`·라벨·추추 하위메뉴·시장 강제/복원
+    (`FORCED_MARKET_BY_MODE`)·기본 탭(캘린더) 전부 불변이다.
+    [테스트] `test_tab_market.py`에 `test_main_tab_order` 신설(추추는
+    `data-mode`가 없는 토글이라 HTML offset으로 위치를 따로 검사).
+    같이 고친 것: `_top_level_modes()`가 `chuchuToggle` **앞까지만** 잘라
+    목록을 만들고 있었다 — 추추 뒤로 최상위 탭이 가면 그 탭들이 조용히
+    빠져 순서 검사가 무력화되는 모양이라, 자르지 말고 그룹 `<span>`
+    안쪽만 제거하도록 바꿨다(그룹 닫는 태그를 "다음 `</span>`"으로 찾으면
+    버튼 안쪽 `<span>`(돈의흐름 미확인 점)에 먼저 걸리는 것도 같이 수정).
+    사보타주 확인: ABC↔종가베팅 순서를 뒤바꾸면 `test_main_tab_order` FAIL.
 v5.283 [UI·구조] 메인 메뉴 정리 + **시장 강제 탭 규칙 일원화**(사용자 지시).
     [메뉴] 돌파임박·박스돌파·돌파 3개를 최상위에서 빼고 **"추추" 하위**로.
     ⋯실험 그룹과 같은 방식(`display:contents` 토글)이라 모바일 폭에서도
@@ -7922,7 +7935,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.283"
+VERSION = "v5.284"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
