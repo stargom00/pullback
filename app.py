@@ -5,6 +5,33 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.285 [버그수정·계측] 2026-09-24 재배포 직후 KR 스캔 사고 후속(사용자 지시).
+    [1 — 시총 허용목록, 확정 원인] 저장소가 프로세스 메모리 하나뿐이고
+    (`_mcap_allowed_cache`) 슬롯키가 다르면 직전 목록을 버리는 구조라,
+    **재배포 직후 첫 KR 스캔은 구조적으로 fail-open**이었다(10:11 배포 →
+    10:12 스캔이 허용목록 0건으로 1,505종목 스캔 → 10:13:56에야 1,858 충전).
+    성공 목록을 `/data/kr_mcap_allowed.json`에 저장하고 기동 시 로드한다.
+    이번 슬롯이 미충전이면 직전 목록으로 **필터를 적용하되** source를
+    `stale_disk`로 구분 — 목록이 아예 없을 때만 `fail_open`. 판정은
+    `_get_mcap_allowed_with_source()` 한 곳에서만 한다(TIMING의 리터럴
+    삼항식을 제거, CONFIG 동기화 원칙과 같은 이유).
+    [2 — 배지] 배지 함수는 있었는데 **호출부가 스캔 탭 하나뿐**이라 캘린더
+    (첫 화면)에선 사고가 안 보였다. `/api/calendar`가 예전부터 보내던
+    `immediate_pipeline_health.kr_mcap_filter_source`를 읽어 같은 함수로
+    렌더 — fail_open 빨강, stale_disk 노랑(위험도가 다르다).
+    [3 — 계측만, 동작 불변] `_load_disk_cache` hit/miss/스키마불일치를
+    파일명과 함께 1줄, miss면 같은 market의 실제 파일 목록도 1줄.
+    `_save_disk_cache`는 `except Exception: pass`를 없애고 성공(파일명·크기)/
+    실패(예외 메시지)를 각각 1줄 — fail-safe 동작은 그대로다. 기동 시
+    `/data`의 datacache 목록도 1줄. **캐시 미스 자체는 안 고쳤다** —
+    u{N} 불일치인지 어젯밤 저장 실패인지 원인 미확정(사용자 지시).
+    [4] `/api/apiguard/status`에 `"version"` — 토큰 경로 중 배포 버전을
+    주는 엔드포인트가 하나도 없어 매번 사람이 브라우저로 확인해야 했다.
+    [테스트] test_mcap_stale_disk.py(6) / test_mcap_badge.py(5, node 실행) /
+    test_disk_cache_logging.py(6) / test_apiguard_version.py(3).
+    사보타주 4종 전부 FAIL 확인: stale_disk 폴백 제거 / 캘린더 배지 호출부
+    제거 / stale_disk를 빨강으로 / save 실패 로그를 except pass로 / version
+    키 제거.
 v5.284 [UI] 최상위 메뉴 **순서만** 변경(사용자 지시) — 구분선 오른쪽이
     US눌림목 · 🔺ABC · 종가베팅 · 추세전환 · 추추 ▾ · 🔥급등 순.
     구분선 왼쪽(캘린더·업종/테마)과 🔥급등 뒤(마감정리·포지션·내 일지·
@@ -7935,7 +7962,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.284"
+VERSION = "v5.285"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -8767,6 +8794,21 @@ def _disk_cache_path(market: str, daykey: str) -> str:
     return os.path.join(_disk_cache_dir(), f"datacache_{_CACHE_NS}_{market}_{_universe_sig(market)}_{daykey}.pkl")
 
 
+def _log_existing_disk_caches(market: str):
+    """miss/스키마불일치일 때 같은 market의 실제 파일명을 한 줄로(v5.285).
+    찾던 이름과 있는 이름을 나란히 봐야 u{N} 불일치인지 저장 누락인지가
+    구분된다 — 판정은 사람이 하고, 이 함수는 사실만 남긴다."""
+    d = _disk_cache_dir()
+    try:
+        files = sorted(fn for fn in os.listdir(d)
+                       if fn.startswith("datacache_") and fn.endswith(".pkl")
+                       and f"_{market}_" in fn)
+    except OSError as e:
+        print(f"[disk-cache] 목록 조회 실패({d}): {type(e).__name__}: {e}", flush=True)
+        return
+    print(f"[disk-cache] 현재 {market} 파일 {len(files)}개: {files}", flush=True)
+
+
 def _load_disk_cache(market: str, daykey: str):
     """v5.241(사용자 지시 — 재발방지 작업): 언피클 직후 스키마를 검증한다
     — 프로덕션 500 사고(KeyError: 'n_fetch_failed_us')의 근본 원인이
@@ -8780,6 +8822,14 @@ def _load_disk_cache(market: str, daykey: str):
     import pickle
     path = _disk_cache_path(market, daykey)
     if not os.path.exists(path):
+        # v5.285(계측 전용 — 동작 불변): miss를 무음으로 넘기지 않는다.
+        # 2026-09-24 KR 콜드 스캔(n_reused=0) 조사에서 "파일명이 안 맞은
+        # 건지 저장이 안 된 건지" 로그만으로는 구분이 불가능했다 —
+        # 찾던 파일명과 실제로 있는 파일명을 같이 남겨 다음엔 한 줄로
+        # 대조되게 한다. **여기서 캐시 미스 자체를 고치지는 않는다**
+        # (원인 미확정, 사용자 지시).
+        print(f"[disk-cache] miss {os.path.basename(path)}", flush=True)
+        _log_existing_disk_caches(market)
         return None
     try:
         with open(path, "rb") as f:
@@ -8807,7 +8857,9 @@ def _load_disk_cache(market: str, daykey: str):
     if missing_bundle or missing_timing:
         print(f"[disk-cache] 스키마 불일치({path}) — bundle 누락:{sorted(missing_bundle)} "
               f"timing 누락:{sorted(missing_timing)} → 무시하고 새로 fetch", flush=True)
+        _log_existing_disk_caches(market)
         return None
+    print(f"[disk-cache] hit {os.path.basename(path)} ({len(bundle.get('data') or {})}종목)", flush=True)
     return bundle
 
 
@@ -8863,8 +8915,20 @@ def _save_disk_cache(market: str, daykey: str, bundle: dict):
                     os.remove(os.path.join(d, fn))
                 except OSError:
                     pass
-    except Exception:
-        pass
+        # v5.285(계측 전용): 저장 성공을 한 줄로. 예전엔 성공도 실패도
+        # 무음이라(아래 except가 pass였다) "어젯밤 EOD가 실제로 저장했는가"를
+        # 사후에 확인할 방법이 없었다 — 2026-09-24 캐시 미스 조사에서
+        # 그대로 막혔던 지점이다.
+        try:
+            size_mb = round(os.path.getsize(path) / 1024 / 1024, 1)
+        except OSError:
+            size_mb = None
+        print(f"[disk-cache] saved {os.path.basename(path)} ({size_mb}MB)", flush=True)
+    except Exception as e:
+        # 동작은 그대로 fail-safe다 — 저장 실패가 스캔을 죽이지 않는다.
+        # 다만 **조용히** 넘어가지는 않는다(CLAUDE.md "침묵을 성공으로
+        # 읽지 말 것").
+        print(f"[disk-cache] ⚠️ 저장 실패({path}): {type(e).__name__}: {e}", flush=True)
 # ────────────────────────────────────────────────────────────
 
 
@@ -9282,7 +9346,7 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
     # v4.91: 시총 1000억원 미만 국장 종목 제외 (예: 시총 700억짜리가 돌파임박에
     # 뜨는 문제). 허용목록이 아직 준비 안 됐으면(서버 갓 재시작 등) 필터 없이
     # 통과 — fail-open, 백그라운드 채워지면 다음 스캔부터 적용됨.
-    _mcap_allowed = _get_mcap_allowed()
+    _mcap_allowed, _mcap_source = _get_mcap_allowed_with_source()
     _n_kr_before_mcap = sum(1 for t in universe if naver_kr.is_kr(t))
     if _mcap_allowed:
         universe = {t: n for t, n in universe.items()
@@ -9291,6 +9355,13 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
         # v5.251(사용자 지시): fail-open을 조용히 넘기지 않는다 — 매 KR
         # 스캔마다 경고(TIMING의 kr_mcap_filter_source와 짝).
         print(f"[mcap] ⚠️ 시총 허용목록 없음 — KR {_n_kr_before_mcap}종목을 시총 필터 없이 스캔(fail-open)",
+              flush=True)
+    if market == "kr" and _mcap_source == "stale_disk":
+        # v5.285: 필터는 켜졌지만 목록이 이번 슬롯 것이 아니다 — 무음으로
+        # 넘기면 "정상 적용"과 구분이 안 된다(fail-open을 v5.251에서
+        # 가시화한 것과 같은 이유).
+        print(f"[mcap] ⚠️ 이번 슬롯 허용목록 미충전 — 직전 성공 목록"
+              f"({(_mcap_last_good or {}).get('saved_at')}, {len(_mcap_allowed)}종목)으로 필터 적용(stale_disk)",
               flush=True)
     _kr_mcap_dropped = _n_kr_before_mcap - sum(1 for t in universe if naver_kr.is_kr(t))
     loop = asyncio.get_event_loop()
@@ -9450,7 +9521,10 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
         # v5.251(사용자 지시 — 시총 필터 fail-open 가시화, kr_universe_source와
         # 같은 방식): "mobile_api"=허용목록 적용, "fail_open"=허용목록 0건이라
         # 필터 미적용. US 타이밍엔 해당 없음(None/0).
-        "kr_mcap_filter_source": ("mobile_api" if _mcap_allowed else "fail_open") if market == "kr" else None,
+        # v5.285: 3값 — mobile_api(이번 슬롯) / stale_disk(직전 성공 목록으로
+        # 필터는 켜짐) / fail_open(목록 없음, 필터 꺼짐). 판정은
+        # _get_mcap_allowed_with_source() 한 곳에서만 한다(사본 금지).
+        "kr_mcap_filter_source": _mcap_source if market == "kr" else None,
         "kr_mcap_allowed_count": len(_mcap_allowed) if market == "kr" else 0,
         "kr_mcap_dropped_count": _kr_mcap_dropped if market == "kr" else 0,
     }
@@ -11804,29 +11878,93 @@ async def _warm_market(market: str):
 _MCAP_MIN_EOK = 1000  # 시총 1000억원 미만 국장 종목은 스캔 제외 (v4.91)
 _mcap_allowed_cache: dict = {}   # {"slotkey": "...", "tickers": set(...)}
 _mcap_fetch_in_progress = False
+# v5.285(사용자 지시 — 2026-09-24 재배포 직후 fail-open 확정 원인): 마지막
+# 성공 목록. 위 _mcap_allowed_cache가 **이번 슬롯** 전용인 것과 달리 이쪽은
+# 슬롯과 무관하게 "가장 최근에 성공한 목록"을 들고 있다(디스크에도 같은
+# 내용을 쓴다). {"slotkey","tickers","saved_at"}.
+_mcap_last_good: dict = {}
+_MCAP_STATE_FILE = "kr_mcap_allowed.json"
+
+
+def _mcap_state_path() -> str:
+    return os.path.join(_disk_cache_dir(), _MCAP_STATE_FILE)
+
+
+def _save_mcap_allowed(slotkey: str, tickers: set):
+    """성공한 허용목록을 /data에 남긴다 — 재배포/재시작으로 메모리가 비어도
+    직전 목록으로 버틸 수 있게(v5.285).
+
+    [왜 필요한가] 2026-09-24 10:11 NZST 재배포 직후 첫 KR 스케줄러 스캔이
+    허용목록 0건으로 돌아 시총 필터가 꺼진 채 1,505종목을 스캔했다(1분 44초
+    뒤 1,858종목으로 충전 완료). 저장소가 프로세스 메모리 하나뿐이고
+    (_mcap_allowed_cache) 슬롯키가 다르면 직전 목록을 버리는 구조라,
+    **재배포 직후 첫 KR 스캔은 구조적으로 fail-open**이었다."""
+    global _mcap_last_good
+    state = {"slotkey": slotkey, "tickers": sorted(tickers),
+              "saved_at": datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")}
+    _mcap_last_good = {"slotkey": slotkey, "tickers": set(tickers), "saved_at": state["saved_at"]}
+    path = _mcap_state_path()
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(state, f)
+        os.replace(tmp, path)
+    except OSError as e:
+        print(f"[mcap] ⚠️ 허용목록 디스크 저장 실패({path}): {type(e).__name__}: {e}", flush=True)
+
+
+def _load_mcap_allowed_from_disk() -> dict:
+    """기동 시 1회 — 디스크에 남은 마지막 성공 목록을 메모리로 올린다.
+    반환값은 로그용 요약(비어 있으면 {})."""
+    global _mcap_last_good
+    path = _mcap_state_path()
+    try:
+        with open(path, encoding="utf-8") as f:
+            state = _json.load(f)
+    except (OSError, ValueError):
+        return {}
+    tickers = set(state.get("tickers") or [])
+    if not tickers:
+        return {}
+    _mcap_last_good = {"slotkey": state.get("slotkey"), "tickers": tickers,
+                        "saved_at": state.get("saved_at")}
+    return {"slotkey": state.get("slotkey"), "n": len(tickers), "saved_at": state.get("saved_at")}
+
+
+def _get_mcap_allowed_with_source() -> tuple[set, str]:
+    """(허용목록, source) — source는 TIMING/배지가 쓰는 그 값이다.
+
+    - "mobile_api": 이번 슬롯으로 방금 받은 목록(정상)
+    - "stale_disk": 이번 슬롯은 아직 못 받았지만 **직전 성공 목록**이 있어
+      그걸 쓴다(v5.285). 필터는 켜져 있고 목록만 한 슬롯 낡았다 —
+      필터가 통째로 꺼지는 fail_open과 구분해야 하므로 별도 값이다.
+    - "fail_open": 목록이 아예 없다(디스크에도 없음) → 필터 미적용.
+
+    v5.231(사용자 지시 [c] — 삼미금속 012210 사고): 슬롯 키는 예전 "date"
+    (하루 1회)가 아니라 universe.load_kr_dynamic()과 동일한 _kr_cache_slot
+    (장중 KR_INTRADAY_REFRESH_MIN분·장외 하루 1회)이다."""
+    slotkey = _kr_cache_slot()
+    if _mcap_allowed_cache.get("slotkey") == slotkey:
+        fresh = _mcap_allowed_cache.get("tickers", set())
+        if fresh:
+            return fresh, "mobile_api"
+    stale = (_mcap_last_good or {}).get("tickers") or set()
+    if stale:
+        return stale, "stale_disk"
+    return set(), "fail_open"
 
 
 def _get_mcap_allowed() -> set:
-    """이번 슬롯 기준으로 준비된 시총 허용목록. 아직 없으면 빈 set(필터
-    없이 통과 — fail-open).
-    v5.231(사용자 지시 [c] — 삼미금속 012210 사고): 예전엔 "date"(하루
-    1회) 키였다 — 장중에 시총 1000억 문턱을 새로 넘는 종목이 그날 다음날
-    까지 4탭(눌림목/돌파/박스돌파/돌파임박) + 🔥급등 관찰 전부에서
-    누락됐다(실사고, docs/surge_observe_experiment_2026-09.md 참고).
-    universe.load_kr_dynamic()이 이미 쓰는 것과 동일한 슬롯 함수
-    (_kr_cache_slot — 장중 KR_INTRADAY_REFRESH_MIN분·장외 하루 1회)로
-    맞춰 같은 주기로 갱신되게 통일."""
-    slotkey = _kr_cache_slot()
-    if _mcap_allowed_cache.get("slotkey") == slotkey:
-        return _mcap_allowed_cache.get("tickers", set())
-    return set()
+    """호환 유지용 얇은 래퍼 — 목록만 필요한 호출부용."""
+    return _get_mcap_allowed_with_source()[0]
 
 
 def _kr_mcap_filter_info() -> dict:
     """v5.251: 현재 슬롯의 시총 필터 상태(순수 상태 읽기, 추가 fetch 없음) —
-    TIMING과 같은 키 이름으로 /api/calendar immediate_pipeline_health에 노출."""
-    allowed = _get_mcap_allowed()
-    return {"kr_mcap_filter_source": "mobile_api" if allowed else "fail_open",
+    TIMING과 같은 키 이름으로 /api/calendar immediate_pipeline_health에 노출.
+    v5.285: source가 3값(mobile_api/stale_disk/fail_open)으로 늘었다."""
+    allowed, source = _get_mcap_allowed_with_source()
+    return {"kr_mcap_filter_source": source,
             "kr_mcap_allowed_count": len(allowed)}
 
 
@@ -11849,6 +11987,9 @@ async def _ensure_mcap_allowed():
         if allowed:
             _mcap_allowed_cache["slotkey"] = slotkey
             _mcap_allowed_cache["tickers"] = allowed
+            # v5.285: 같은 목록을 디스크에도 — 다음 재배포 직후 첫 스캔이
+            # fail-open으로 떨어지지 않도록(stale_disk로 버틴다).
+            _save_mcap_allowed(slotkey, allowed)
             print(f"[mcap] {slotkey} 시총 {_MCAP_MIN_EOK}억↑ 허용목록 {len(allowed)}종목")
         else:
             # v5.251(사용자 지시 — "fail-open은 유지하되 조용히 넘기지 마라"):
@@ -11989,8 +12130,33 @@ async def _scheduler_loop():
 MEMORY_DIAG = os.environ.get("MEMORY_DIAG") == "1"
 
 
+def _log_startup_disk_state():
+    """기동 시 1회 — 시총 허용목록 복원 결과와 /data에 남아 있는 디스크
+    캐시 파일 목록을 각각 한 줄로 남긴다(v5.285, 계측 전용).
+
+    2026-09-24 캐시 미스 조사에서 "파일이 있었는지조차 로그로 알 수 없다"가
+    가장 큰 걸림돌이었다 — _load_disk_cache()는 파일이 없으면 무음으로
+    None을 반환한다(app.py의 os.path.exists 분기). 이 줄이 있으면 다음번엔
+    기동 시점의 파일명(=u{N}과 daykey)을 바로 대조할 수 있다."""
+    restored = _load_mcap_allowed_from_disk()
+    if restored:
+        print(f"[mcap] 시작 시 허용목록 복원 — slotkey={restored['slotkey']} "
+              f"{restored['n']}종목 (저장 {restored['saved_at']})", flush=True)
+    else:
+        print("[mcap] 시작 시 복원할 허용목록 없음 — 첫 충전 전까지 fail-open", flush=True)
+    d = _disk_cache_dir()
+    try:
+        files = sorted(fn for fn in os.listdir(d)
+                       if fn.startswith("datacache_") and fn.endswith(".pkl"))
+    except OSError as e:
+        print(f"[disk-cache] 시작 시 목록 조회 실패({d}): {type(e).__name__}: {e}", flush=True)
+        return
+    print(f"[disk-cache] 시작 시 {d} 내 datacache 파일 {len(files)}개: {files}", flush=True)
+
+
 @app.on_event("startup")
 async def _start_scheduler():
+    _log_startup_disk_state()
     if MEMORY_DIAG:
         import tracemalloc
         # frames=5: 할당처를 호출 스택 5단계까지 — 1이면 pandas 내부만 찍혀
@@ -17689,8 +17855,14 @@ async def api_guard_status():
     도달 시 경고·20회 도달 시 차단 메시지가 pending_alert에 한 번 채워진다.
     이 레포엔 텔레그램 발송 코드가 없다(얼마냐봇은 별도 레포, money_flow.py
     류와 같은 원칙) — 이 엔드포인트는 얼마냐봇이 폴링해서 텔레그램으로
-    전달하는 걸 전제로 한다(얼마냐봇 쪽 폴링 코드는 이 레포 범위 밖)."""
-    return JSONResponse(api_call_guard.status())
+    전달하는 걸 전제로 한다(얼마냐봇 쪽 폴링 코드는 이 레포 범위 밖).
+
+    v5.285(사용자 지시): 응답에 **"version"**을 싣는다. 이 경로는
+    `_BOT_READ_EXACT_PATHS`라 `X-Api-Read-Token` 헤더만으로 읽히므로,
+    로그인 세션 없이 **배포된 VERSION을 직접 확인**할 수 있는 유일한
+    창구가 된다(2026-09-24 v5.284 배포 확인에서 토큰 경로 중 version을
+    주는 엔드포인트가 하나도 없다는 걸 전수 확인한 데 따른 것)."""
+    return JSONResponse({**api_call_guard.status(), "version": VERSION})
 
 
 @app.get("/moneyflow")

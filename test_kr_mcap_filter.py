@@ -164,14 +164,20 @@ def test_ensure_mcap_allowed_empty_warns_and_keeps_fail_open(monkeypatch, capsys
     assert "필터 미적용(fail-open)" in capsys.readouterr().out
 
 
-def test_ensure_mcap_allowed_success_fills_cache(monkeypatch):
+def test_ensure_mcap_allowed_success_fills_cache(monkeypatch, tmp_path):
     monkeypatch.setattr(app, "_mcap_allowed_cache", {})
     monkeypatch.setattr(app, "_mcap_fetch_in_progress", False)
+    # v5.285: 충전 성공은 이제 디스크에도 쓴다(stale_disk 폴백의 원천) —
+    # 레포 폴더에 상태 파일을 남기지 않도록 tmp로 돌린다.
+    monkeypatch.setattr(app, "_mcap_last_good", {})
+    monkeypatch.setattr(app, "_disk_cache_dir", lambda: str(tmp_path))
     monkeypatch.setattr(app.naver_kr, "fetch_high_marketcap_allowed",
                         lambda min_eok: ({"005930.KS", "0011A0.KQ"}, {"incomplete": False, "n_allowed": 2}))
     asyncio.run(app._ensure_mcap_allowed())
     info = app._kr_mcap_filter_info()
     assert info == {"kr_mcap_filter_source": "mobile_api", "kr_mcap_allowed_count": 2}
+    # v5.285: 같은 목록이 디스크에도 남아야 다음 재배포가 stale_disk로 버틴다.
+    assert (tmp_path / app._MCAP_STATE_FILE).exists()
 
 
 # ---------------------------------------------------------------------------

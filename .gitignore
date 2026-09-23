@@ -40,3 +40,6 @@ scripts/measurements/*.stage[0-9].json
 # v5.271 메모리 측정 산출물 — 실행할 때마다 늘어나는 기록이라 커밋하지 않는다
 # (*.log는 위 규칙이 이미 잡는다). 결과 해석은 changelog/보고에 남긴다.
 scripts/maintenance/memory_probe.jsonl
+
+# v5.285: 시총 허용목록 상태 파일 — 프로덕션은 /data, 로컬 실행 시 레포 폴더에 생긴다
+kr_mcap_allowed.json

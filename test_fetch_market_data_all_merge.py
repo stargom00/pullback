@@ -107,7 +107,7 @@ async def _fake_jongga_candidates():
 
 
 @pytest.fixture
-def mocked_env(monkeypatch):
+def mocked_env(monkeypatch, tmp_path):
     """네트워크 전부 차단 + 전역 캐시 상태 초기화. call_log에 실제 _fetch/
     _fetch_us_batch에 들어간 티커를 순서대로 기록(중복 fetch 검증용).
 
@@ -137,6 +137,12 @@ def mocked_env(monkeypatch):
     # v5.231이 만든 시총 허용목록도 fail-open(빈 set)이 되도록 초기화 —
     # 실제 프로덕션 상태와 무관하게 매 테스트가 같은 조건에서 시작하게.
     monkeypatch.setattr(app, "_mcap_allowed_cache", {})
+    # v5.285: 직전 성공 목록(stale_disk 폴백의 원천)도 같이 비운다 — 이걸
+    # 안 비우면 앞서 돈 테스트가 채워둔 목록 때문에 "fail_open이어야 할"
+    # 테스트가 stale_disk를 보게 된다(실제로 겪음). 디스크 쪽도 tmp로
+    # 돌려 테스트가 레포 폴더에 상태 파일을 남기지 않게 한다.
+    monkeypatch.setattr(app, "_mcap_last_good", {})
+    monkeypatch.setattr(app, "_disk_cache_dir", lambda: str(tmp_path))
     # 전역 캐시/락 상태 초기화 — 테스트 간 오염 방지(모듈 전역 dict라
     # 그대로 두면 이전 테스트의 _data_cache["data:kr"]가 남아 재사용이
     # 섞여버린다).
