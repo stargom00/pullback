@@ -5,6 +5,27 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.281 [성능] 평일 **장전(00:00~09:00 KST)을 "확정 거래일"로** 본다(사용자 지시).
+    [문제] `_market_session_key("kr")`가 평일 **00:00~20:10 전체를 None**으로
+    돌려줬다. None이면 `_fetch_market_data_inner()`가 디스크 캐시를 **읽지도
+    쓰지도 않는다**(`if daykey and not force:` 읽기 / `if daykey:` 쓰기).
+    그런데 장전 데이터는 **직전 거래일 확정 종가와 동일**하다 — 마감 후와
+    성질이 같은데 캐시만 못 쓰고 있었다. 실측: 1,136종목 전량 재수집이
+    `kr_sec` 1,028~1,110초.
+    [수정] `KR_OPEN_HM`(09:00) 신설, 장전을 `kr_closed`에 포함.
+    키는 **오늘이 아니라 직전 거래일** — 오늘 장이 아직 안 열렸는데 오늘
+    날짜를 주면 "열리지도 않은 장의 데이터를 확정"이라 부르는 셈이다.
+    직전 거래일 탐색은 **기존 `_last_trading_daykey()` 재사용**(사용자 지시:
+    새 휴장일 로직 금지 — 판정 지점이 둘로 갈린다). 주말·US 경로는 무변경.
+    장중(09:00~20:10)도 무변경(None) — 값이 계속 바뀐다.
+    [테스트] test_premarket_daykey.py(10) — 화 07:00→월 / 월 07:00→금(주말
+    건너뜀) / 화 10:00→None / 화 20:15→화 / 08:59↔09:00 경계 / 주말·US 불변 /
+    `_confirmed_daykey` 통과 / 상수 사용 / 기존 헬퍼 재사용.
+    사보타주 4종(장전 분기 제거=원래 동작 / 오늘 날짜 반환 / 직접 -1일 계산
+    으로 주말 못 건너뜀 / 경계를 20:10으로) 전부 FAIL 확인 후 원복.
+    ⚠️ 테스트 작성 중: `datetime`을 통째로 목업하면 `is_trading_day()` 내부까지
+    MagicMock이 되어 깨진다 — `app.datetime.now`만 바꿀 것.
+
 v5.280 [UX·설계] 일지 3건(사용자 지시).
     [1] **종목코드 칸에 한글 종목명** → 코드 자동 해석. "대한항공" → 003490.KS.
         `/api/lookup`으로 **프로덕션 리졸버**(`universe.resolve_name_to_ticker`)를
@@ -7842,7 +7863,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.280"
+VERSION = "v5.281"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -8195,12 +8216,22 @@ KST = timezone(timedelta(hours=9))
 # 그래서 "마감 후" 판정을 애프터 종료(20:00) + 여유 10분으로 옮긴다.
 # 여유 10분은 임의값 — 체결/집계 반영 지연을 감안한 값이고 측정 근거는 없다.
 KR_CLOSE_CONFIRMED_HM = 20 * 60 + 10   # KST 20:10
+# v5.281: KR 정규장 개장. **이 시각 전까지는 직전 거래일 데이터가 그대로다** —
+# `_market_session_key()`가 장전을 "확정"으로 보는 경계. 리터럴 `9*60`이
+# `_is_market_open_now()`(app.py) 등에 흩어져 있지만, 그쪽은 "지금 장중인가"를
+# 보는 다른 판정이라 이 상수로 통합하지 않는다(v5.281 범위는 캐시 키 하나).
+KR_OPEN_HM = 9 * 60                    # KST 09:00
 
 
 def _market_session_key(market: str) -> str | None:
     """둘 다 마감했으면 '확정된 거래일 키'(YYYY-MM-DD)를 반환, 아니면 None.
     None이면 장중/애매한 시간 → 기존 10분 메모리 TTL로 동작.
     - 한국장 마감: 평일 KST 20:10 이후 (v5.263 — 애프터마켓 16:00~20:00 종료 후)
+      **+ 평일 장 시작 전(00:00~09:00)도 확정으로 본다(v5.281).** 그 시간대의
+      KR 데이터는 **직전 거래일 확정 종가와 동일**한데 예전엔 None이라
+      디스크 캐시를 읽지도 쓰지도 않았다 — 그래서 재시작·전량만료 때마다
+      1,100여 종목을 통째로 다시 받았다(실측 kr_sec 1,028~1,110초).
+      단 키는 **오늘이 아니라 직전 거래일**이다(오늘 장이 아직 안 열렸다).
     - 미국장 마감: KST 06:00 이후(서머타임 포함 안전)~ 한국장 시작(09:00) 전 종일
     market=all 은 둘 다 마감해야 확정. kr/us 단독은 해당 장만 따짐.
     """
@@ -8211,7 +8242,10 @@ def _market_session_key(market: str) -> str | None:
     # 주말은 항상 '마감 확정'(데이터 안 바뀜) — 직전 거래일 날짜로 키 고정
     weekend = wd >= 5
 
-    kr_closed = weekend or (wd <= 4 and hm >= KR_CLOSE_CONFIRMED_HM)   # v5.263: 15:40 → 20:10(애프터마켓)
+    # v5.281: 평일 장 시작 전(00:00~09:00 KST)도 "확정". 데이터가 직전 거래일
+    # 종가 그대로라 장 마감 후와 성질이 같다.
+    kr_premarket = (wd <= 4) and hm < KR_OPEN_HM
+    kr_closed = weekend or kr_premarket or (wd <= 4 and hm >= KR_CLOSE_CONFIRMED_HM)
     # 미국장 데이터는 KST 새벽에 확정. 06:00~다음 한국장 데이터 갱신 전까지 안정.
     us_closed = weekend or (hm >= 6 * 60)
 
@@ -8224,6 +8258,12 @@ def _market_session_key(market: str) -> str | None:
 
     if not needed():
         return None
+    # v5.281: 장전은 **직전 거래일** 키. 오늘 날짜를 주면 아직 열리지도 않은
+    # 장의 데이터를 "확정"이라고 부르는 셈이 된다.
+    # 직전 거래일 탐색은 **기존 `_last_trading_daykey()`를 재사용**한다 —
+    # 새 휴장일 로직을 만들지 않는다(그러면 판정 지점이 둘로 갈린다).
+    if market == "kr" and kr_premarket and not weekend:
+        return _last_trading_daykey("kr", now - timedelta(days=1))
     return now.strftime("%Y-%m-%d")
 
 
