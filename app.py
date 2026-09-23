@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.282 [관측] `[mem]` 로그에 **RSS 3점**(사용자 지시). 동작 변경 없음.
+        [mem] EOD kr — rss 731.7 → gc 728.4 → trim 620.1 (trim=1) · gc 812개
+    예전엔 "gc N개"뿐이라 **실제로 메모리가 돌아왔는지** 알 수 없었다. 특히
+    `malloc_trim`이 Linux에서 진짜 잡히는지 판단할 근거가 전혀 없었다
+    (개발 머신은 macOS라 로컬에선 "미지원"만 확인된다).
+    RSS 소스는 `_rss_mb()` — `/api/debug/memory`와 같은 함수라 `memory_probe`
+    기록과 그대로 대조된다. `trim=0/1`은 **반환값**이고, glibc가 아니면 "미지원".
+    [테스트] test_disk_cache_protocol.py 17→24. 사보타주 4종 — **지시된
+    "C자리에 B 넣기"가 처음엔 통과**했다: 세 값을 측정만 하고 출력에서
+    `rss_c` 대신 `rss_b`를 찍으면 측정 순서·횟수 검사를 전부 빠져나간다.
+    **출력 포맷에 세 변수가 각각 쓰이는지**까지 보도록 고친 뒤 탐지 확인.
+    나머지 3종(3점→2점 / trim 반환값 대신 "호출함" / gc 후 측정 제거)도 확인.
+
 v5.281 [성능] 평일 **장전(00:00~09:00 KST)을 "확정 거래일"로** 본다(사용자 지시).
     [문제] `_market_session_key("kr")`가 평일 **00:00~20:10 전체를 None**으로
     돌려줬다. None이면 `_fetch_market_data_inner()`가 디스크 캐시를 **읽지도
@@ -7867,7 +7880,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.281"
+VERSION = "v5.282"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -11555,7 +11568,14 @@ def _release_memory_blocking(tag: str) -> None:
     **최적화**지 기능이 아니라, 여기서 예외가 나 EOD가 죽으면 안 된다).
     """
     import gc
+    # v5.282(사용자 지시): RSS를 **3점** 찍는다 — 정리 전 / gc 후 / trim 후.
+    # 예전 로그는 "gc N개"뿐이라 **실제로 메모리가 돌아왔는지** 알 수 없었고,
+    # 특히 `malloc_trim`이 Linux에서 진짜 잡히는지 판단할 근거가 없었다.
+    # 소스는 `_rss_mb()` — `/api/debug/memory`와 동일해 memory_probe 기록과
+    # 그대로 대조된다. **동작은 안 바꾼다**(측정만 추가).
+    rss_a = _rss_mb()
     freed = gc.collect()
+    rss_b = _rss_mb()
     trimmed = None
     try:
         import ctypes
@@ -11565,10 +11585,14 @@ def _release_memory_blocking(tag: str) -> None:
         pass          # glibc 아님(macOS 등) — 정상, gc.collect()만 한 셈
     except Exception:
         pass
-    print(f"[mem] {tag} 정리 — gc {freed}개"
-          + (f" · malloc_trim {'반환' if trimmed else '반환분 없음'}"
-             if trimmed is not None else " · malloc_trim 미지원(glibc 아님)"),
-          flush=True)
+    rss_c = _rss_mb()
+
+    def _f(v):
+        return f"{v:.1f}" if isinstance(v, (int, float)) else "?"
+
+    trim_s = "미지원" if trimmed is None else f"trim={int(trimmed)}"
+    print(f"[mem] {tag} — rss {_f(rss_a)} → gc {_f(rss_b)} → trim {_f(rss_c)} "
+          f"({trim_s}) · gc {freed}개", flush=True)
 
 
 async def _release_memory(tag: str) -> None:

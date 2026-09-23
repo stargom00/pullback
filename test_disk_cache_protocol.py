@@ -211,11 +211,15 @@ def test_release_memory_survives_without_glibc():
 
 
 def test_release_memory_reports_which_path_ran(capsys):
-    """조용히 지나가면 프로덕션에서 **실제로 trim이 됐는지** 알 수 없다."""
+    """조용히 지나가면 프로덕션에서 **실제로 trim이 됐는지** 알 수 없다.
+
+    v5.282에서 포맷이 바뀌었다(`malloc_trim …` → `trim=0/1` 또는 `미지원`) —
+    문구가 아니라 **결과가 드러나는가**를 본다.
+    """
     app._release_memory_blocking("EOD kr")
     out = capsys.readouterr().out
     assert "[mem] EOD kr" in out and "gc" in out, out
-    assert "malloc_trim" in out, out
+    assert ("trim=0" in out or "trim=1" in out or "미지원" in out), out
 
 
 def test_release_memory_swallows_a_hostile_ctypes(monkeypatch):
@@ -239,3 +243,78 @@ def test_gc_runs_even_when_trim_is_unavailable(monkeypatch):
     monkeypatch.setattr(_gc, "collect", lambda *a: (calls.append(1), real())[1])
     app._release_memory_blocking("no-libc")
     assert calls, "malloc_trim이 없다고 gc까지 건너뛴다"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# v5.282 — `[mem]` 로그에 RSS 3점 (사용자 지시)
+# ══════════════════════════════════════════════════════════════════════
+# 예전 로그는 "gc N개"뿐이라 **실제로 메모리가 돌아왔는지** 알 수 없었다.
+# 특히 `malloc_trim`이 Linux에서 진짜 잡히는지 판단할 근거가 없었다.
+# 소스는 `_rss_mb()` — `/api/debug/memory`와 같아 memory_probe 기록과 대조된다.
+
+def _mem_line(capsys, tag="EOD kr") -> str:
+    app._release_memory_blocking(tag)
+    out = [l for l in capsys.readouterr().out.splitlines() if l.startswith("[mem]")]
+    assert out, "로그가 안 찍혔다"
+    return out[-1]
+
+
+def test_log_has_three_rss_points_in_order(capsys):
+    line = _mem_line(capsys)
+    assert "rss" in line and "→ gc" in line and "→ trim" in line, line
+    assert line.index("rss") < line.index("→ gc") < line.index("→ trim"), line
+
+
+def test_the_three_points_are_measured_separately(capsys):
+    """세 값이 **각각** 측정돼야 한다 — 같은 변수를 세 번 쓰면 무의미하다."""
+    import inspect
+    src = inspect.getsource(app._release_memory_blocking)
+    # 주석에도 `_rss_mb()`가 적혀 있어 통째로 세면 4가 된다(작성 중 겪음) —
+    # **대입문만** 센다.
+    import re
+    assigns = re.findall(r"rss_[abc] = _rss_mb\(\)", src)
+    assert len(assigns) == 3, f"측정 대입이 3회가 아니다: {assigns}"
+    # 순서 검사는 **실행 코드에서만** — docstring에도 `gc.collect()`가 적혀
+    # 있어 통째로 index()하면 본문보다 앞선다(작성 중 겪음).
+    body = src[src.index("    import gc"):]
+    order = [body.index(k) for k in ("rss_a = _rss_mb()", "freed = gc.collect()",
+                                     "rss_b = _rss_mb()", "malloc_trim(0)",
+                                     "rss_c = _rss_mb()")]
+    assert order == sorted(order), f"측정 순서가 어긋났다: {order}"
+    # **출력에 세 값이 각각 들어가는지**까지 본다 — 측정만 하고 `rss_c` 대신
+    # `rss_b`를 찍으면 위 검사는 전부 통과한다(사용자가 지시한 사보타주 CL이
+    # 실제로 그렇게 빠져나갔다).
+    fmt = body[body.index('print(f"[mem]'):]
+    for var in ("rss_a", "rss_b", "rss_c"):
+        assert f"_f({var})" in fmt, f"{var}가 출력에 안 쓰인다: {fmt[:200]}"
+    assert fmt.count("_f(rss_b)") == 1, "같은 값을 두 자리에 찍는다"
+    assert fmt.count("_f(rss_c)") == 1
+
+
+def test_trim_flag_is_zero_or_one_or_unsupported(capsys):
+    """`trim=0/1`로 **반환값**이 드러나야 한다 — 호출 여부가 아니라 결과."""
+    line = _mem_line(capsys)
+    assert ("trim=0" in line or "trim=1" in line or "미지원" in line), line
+
+
+def test_uses_the_same_rss_source_as_the_probe():
+    """memory_probe가 읽는 `/api/debug/memory`와 같은 함수여야 대조가 된다."""
+    import inspect
+    assert "_rss_mb()" in inspect.getsource(app._release_memory_blocking)
+    assert "VmRSS" in inspect.getsource(app._rss_mb)
+
+
+def test_gc_count_is_still_reported(capsys):
+    line = _mem_line(capsys)
+    assert "gc" in line and "개" in line, line
+
+
+def test_tag_is_in_the_line(capsys):
+    assert "EOD us" in _mem_line(capsys, "EOD us")
+
+
+def test_missing_rss_does_not_crash(capsys, monkeypatch):
+    """`/proc` 없고 resource도 실패하면 None이 온다 — 포맷이 죽으면 안 된다."""
+    monkeypatch.setattr(app, "_rss_mb", lambda: None)
+    line = _mem_line(capsys)
+    assert "?" in line, line
