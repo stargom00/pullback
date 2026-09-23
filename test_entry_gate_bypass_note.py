@@ -266,33 +266,74 @@ def test_jm_calc_line_shows_open_risk_warning_with_enforcement_note():
     assert "저장은" in r["html"] and "관찰(대기)" in r["html"] and "로만 가능" in r["html"]
 
 
-# ---------------------------------------------------------------------------
-# saveJournal()/markEntered() 차단 다이얼로그 — 우회로 안내 문구 포함 확인.
-# 두 곳 다 DOM/confirm/alert 의존이라 전체 함수를 실행하지 않고, 공유
-# 상수 _ENTRY_GATE_BYPASS_HINT를 추출해 두 곳의 실제 소스 문자열 안에
-# 그대로 박혀 있는지(재구현 아님, grep 방식) 확인한다.
-# ---------------------------------------------------------------------------
+# ── v5.280: 우회 안내가 사라진 이유 ─────────────────────────────────
+# 원래 이 두 테스트는 "차단 다이얼로그에 우회 안내(`_ENTRY_GATE_BYPASS_HINT`)가
+# 붙어 있는가"를 봤다. v5.280에서 **게이트가 기록을 막지 않게** 되면서
+# (사용자 지시: "게이트는 신규 진입 권장 안 함 경고까지만") 우회할 대상 자체가
+# 없어졌고, 상수도 죽어 삭제했다.
+#
+# ⚠️ 이 전환에서 잡힌 것: `markEntered` 쪽 테스트는 수정 후에도 **통과**했는데,
+# 실제 코드가 아니라 **낡은 주석**에 남아 있던 상수 이름에 걸린 tautology였다.
+# 문자열 존재 검사로 동작을 확인하면 이런 식으로 조용히 무력해진다.
 
-def test_bypass_hint_constant_exists():
+def test_bypass_hint_is_gone_along_with_the_block():
     text = INDEX_PATH.read_text(encoding="utf-8")
-    assert "_ENTRY_GATE_BYPASS_HINT" in text
-    m = re.search(r'const _ENTRY_GATE_BYPASS_HINT = "([^"]+)"', text)
-    assert m, "_ENTRY_GATE_BYPASS_HINT 상수 선언을 못 찾음"
-    hint = m.group(1)
-    assert "+직접 추가" in hint and "진입" in hint
+    # 정의·사용·주석 어디에도 남으면 안 된다(주석에 남으면 위 tautology 재발)
+    hits = [l.strip() for l in text.splitlines()
+            if "_ENTRY_GATE_BYPASS_HINT" in l and not l.strip().startswith("//")]
+    assert not hits, f"우회 안내가 살아 있다: {hits}"
 
 
-def test_save_journal_dialog_includes_bypass_hint():
+def _fn_body(name: str) -> str:
+    """중괄호 깊이로 함수를 정확히 자른다.
+
+    `text.index("async function", start+10)`로 끝을 잡으면 **다음 함수까지
+    통째로 삼켜** 엉뚱한 곳의 문자열이 이 함수 것으로 보인다(v5.280 전환에서
+    실제로 오탐했다) — test_price_basis_note.py가 쓰는 방식으로 맞춘다.
+    """
     text = INDEX_PATH.read_text(encoding="utf-8")
-    start = text.index("async function saveJournal()")
-    end = text.index("async function", start + 10)
-    body = text[start:end]
-    assert "_ENTRY_GATE_BYPASS_HINT" in body, "saveJournal()의 차단 confirm에 안내 문구가 없음"
+    for decl in (f"async function {name}(", f"function {name}("):
+        i = text.find(decl)
+        if i != -1:
+            break
+    assert i != -1, name
+    b = text.index("{", i)
+    d = 0
+    for k in range(b, len(text)):
+        if text[k] == "{":
+            d += 1
+        elif text[k] == "}":
+            d -= 1
+            if d == 0:
+                return text[i:k + 1]
+    raise AssertionError(name)
 
 
-def test_mark_entered_alert_includes_bypass_hint():
-    text = INDEX_PATH.read_text(encoding="utf-8")
-    start = text.index("async function markEntered(")
-    end = text.index("\n}\n", start)
-    body = text[start:end]
-    assert "_ENTRY_GATE_BYPASS_HINT" in body, "markEntered()의 차단 alert에 안내 문구가 없음"
+def _code_only(src: str) -> str:
+    """`//` 주석 제거.
+
+    변경 이력을 적은 주석("예전엔 …진입 대신…을 물어")에 걸려 **고친 코드가
+    안 고쳐진 것처럼** 보인다 — 이 세션에서만 세 번째로 겪은 오탐이라
+    검사는 실행 코드에만 건다.
+    """
+    out = []
+    for line in src.splitlines():
+        if line.lstrip().startswith("//"):
+            continue
+        out.append(line.split("//")[0] if "//" in line and "://" not in line else line)
+    return "\n".join(out)
+
+
+def test_save_journal_warns_but_does_not_force_pending():
+    """게이트 🔴이어도 **진입으로 저장**된다 — 이미 산 종목의 R이 유실되면 안 된다."""
+    body = _code_only(_fn_body("saveJournal"))
+    assert "gate.reason" in body, "경고 사유를 안 보여준다"
+    assert "진입 대신" not in body, "강제 대기 전환이 남아 있다"
+    assert "forcePending = true" not in body
+
+
+def test_mark_entered_warns_but_still_converts():
+    body = _code_only(_fn_body("markEntered"))
+    assert "gate.reason" in body
+    assert "대기 상태를 유지합니다" not in body, "아직 전환을 막는다"
+    assert "gate_defiance" in body, "역행 태그를 안 남긴다"
