@@ -5,6 +5,35 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.286 [버그수정] 디스크 캐시 파일명에서 **u{N} 제거** + 교집합 부분 재사용
+    (사용자 지시 — 2026-09-24 전량 콜드 스캔의 확정 원인).
+    [확정 원인] 09-25 기동 로그의 /data에 `datacache_rs9_kr_u1504_2026-09-23.pkl`
+    (09-23 EOD)과 `..._u1505_2026-09-23.pkl`(09-24 아침 콜드)이 **같은 날짜로
+    나란히** 있었다. 09-24 아침 스캔은 u1505를 찾다가 바로 옆 u1504를 보지도
+    못하고 miss → 1,505종목 전량 콜드(kr_sec 1425.5). KR 유니버스는 거래대금
+    상위 1500 ∪ 정적 254 ∪ 워치리스트라 **하루 1종목만 달라져도** 캐시가
+    통째로 무효화되는 구조였다.
+    [1] 파일명 `datacache_{NS}_{market}_{daykey}.pkl`. 로드 시 파일∩유니버스는
+    재사용, 유니버스에만 있는 종목만 fetch, 파일에만 있는 종목은 버림. 저장은
+    합친 결과로 덮어쓴다. 신규 종목은 **기존 fetch 경로를 그대로** 타므로
+    품질검사(_downcast/_filter_invalid_bars, gap truncate 집계)가 동일 적용된다
+    — 신규 전용 분기를 만들지 않았다. 로그: `[disk-cache] hit <파일명> 재사용
+    X · 신규 fetch Y · 제외 Z`. 전환기: 새 이름이 없으면 같은 NS·market·daykey의
+    구 u{N} 파일 중 최신 1개를 읽어 같은 규칙으로 쓴다.
+    [부수] 시총 필터 적용을 `_scan_universe()` 한 곳으로 모았다 — 디스크 전량
+    일치 판정과 실제 스캔이 다른 집합을 보면 캐시가 영원히 안 맞는다.
+    저장 시 정리도 "방금 쓴 파일 하나만" 남기도록(예전 조건은 같은 날짜의
+    구 u{N} 이름을 통과시켜 사고 당시 볼륨 상태를 허용했다).
+    [2] 기동 시 **은퇴한 네임스페이스 파일만** 삭제 + 삭제 목록 1줄 로그.
+    09-25 로그에서 datacache_all_2026-06-23 / datacache_kr_2026-06-23 /
+    datacache_rs6_all_u3625_2026-09-09 / datacache_us_2026-06-24 가 몇 달째
+    남아 있었다(저장 시 정리는 그 market을 실제로 저장할 때만 도는데 "all"
+    같은 은퇴한 이름은 저장될 일이 없어 영원히 안 지워진다). **현재 NS
+    파일은 날짜·시장 무관 절대 미삭제** — 오늘 쓸 캐시를 기동이 지우면 그게
+    바로 전량 콜드다.
+    [테스트] test_disk_cache_partial_reuse.py(7) + test_disk_cache_logging.py(8).
+    사보타주 3종 전부 FAIL 확인: 교집합→완전일치 / 신규 종목 stats_sink 제거 /
+    기동 삭제에서 NS 조건 제거.
 v5.285 [버그수정·계측] 2026-09-24 재배포 직후 KR 스캔 사고 후속(사용자 지시).
     [1 — 시총 허용목록, 확정 원인] 저장소가 프로세스 메모리 하나뿐이고
     (`_mcap_allowed_cache`) 슬롯키가 다르면 직전 목록을 버리는 구조라,
@@ -7962,7 +7991,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.285"
+VERSION = "v5.286"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -8790,8 +8819,40 @@ _TIMING_SCHEMA_KEYS = frozenset({
 
 
 def _disk_cache_path(market: str, daykey: str) -> str:
-    # u{N} = 유니버스 크기 시그니처(위 _universe_sig 참고).
-    return os.path.join(_disk_cache_dir(), f"datacache_{_CACHE_NS}_{market}_{_universe_sig(market)}_{daykey}.pkl")
+    """v5.286(사용자 지시 — 2026-09-24 전량 콜드 스캔의 확정 원인):
+    **파일명에서 u{N}(유니버스 크기)을 뺐다.**
+
+    [사고] 09-25 기동 로그에서 `/data`에 `datacache_rs9_kr_u1504_2026-09-23.pkl`
+    (09-23 EOD 저장)과 `..._u1505_2026-09-23.pkl`(09-24 아침 콜드 저장)이 나란히
+    있는 게 확인됐다. 09-24 아침 스캔은 u1505 이름을 찾다가 u1504 파일을 **보지도
+    못하고** miss로 떨어져 1,505종목을 전량 다시 받았다(24분). KR 유니버스는
+    거래대금 상위 1500 ∪ 정적 254 ∪ 워치리스트라 **하루에 1종목만 달라져도**
+    파일명이 바뀌어 전체 캐시가 무효화되는 구조였다.
+
+    [지금] 이름은 날짜·시장·네임스페이스만으로 정하고, 유니버스가 달라진 만큼은
+    _load_disk_cache() 쪽에서 **교집합 재사용 + 차집합만 fetch**로 흡수한다.
+    """
+    return os.path.join(_disk_cache_dir(), f"datacache_{_CACHE_NS}_{market}_{daykey}.pkl")
+
+
+def _legacy_disk_cache_path(market: str, daykey: str) -> str | None:
+    """전환기(v5.286): 새 이름 파일이 아직 없을 때 같은 NS·market·daykey의
+    **구 u{N} 파일 중 최신 1개**를 돌려준다. 볼륨에 남아 있는 09-23·09-24
+    저장분을 버리지 않고 그대로 부분 재사용하기 위한 한시 경로 —
+    새 이름으로 한 번 저장되고 나면(저장 시 정리 로직이 나머지를 지운다)
+    자연히 안 쓰이게 된다."""
+    d = _disk_cache_dir()
+    prefix, suffix = f"datacache_{_CACHE_NS}_{market}_u", f"_{daykey}.pkl"
+    try:
+        cands = [fn for fn in os.listdir(d) if fn.startswith(prefix) and fn.endswith(suffix)]
+    except OSError:
+        return None
+    if not cands:
+        return None
+    return max((os.path.join(d, fn) for fn in cands), key=lambda f: os.path.getmtime(f))
+
+
+_last_disk_cache_path: str | None = None   # v5.286: 직전 _load_disk_cache가 실제로 읽은 파일
 
 
 def _log_existing_disk_caches(market: str):
@@ -8821,6 +8882,12 @@ def _load_disk_cache(market: str, daykey: str):
     "캐시미스"로 취급해 정상적으로 실 fetch로 폴백한다(새 분기 불필요)."""
     import pickle
     path = _disk_cache_path(market, daykey)
+    if not os.path.exists(path):
+        # v5.286 전환기: 새 이름이 없으면 구 u{N} 파일 중 최신 1개를 읽는다.
+        legacy = _legacy_disk_cache_path(market, daykey)
+        if legacy:
+            print(f"[disk-cache] 구 이름 파일 사용(전환기) {os.path.basename(legacy)}", flush=True)
+            path = legacy
     if not os.path.exists(path):
         # v5.285(계측 전용 — 동작 불변): miss를 무음으로 넘기지 않는다.
         # 2026-09-24 KR 콜드 스캔(n_reused=0) 조사에서 "파일명이 안 맞은
@@ -8859,8 +8926,45 @@ def _load_disk_cache(market: str, daykey: str):
               f"timing 누락:{sorted(missing_timing)} → 무시하고 새로 fetch", flush=True)
         _log_existing_disk_caches(market)
         return None
-    print(f"[disk-cache] hit {os.path.basename(path)} ({len(bundle.get('data') or {})}종목)", flush=True)
+    # v5.286: "hit" 한 줄은 **호출부**가 찍는다 — 재사용/신규/제외 건수를
+    # 같이 담아야 해서(사용자 지시 로그 형식) 유니버스를 아는 쪽이어야 한다.
+    # 번들에 경로를 끼워 넣으면 그대로 디스크에 되저장되므로, 방금 읽은
+    # 경로만 모듈 전역에 남긴다 — 이 함수는 await가 없어(동기) 호출 직후
+    # 읽으면 다른 호출과 섞일 수 없다.
+    global _last_disk_cache_path
+    _last_disk_cache_path = path
     return bundle
+
+
+def _disk_partial_reuse(market: str, daykey: str, tickers: list) -> tuple[dict, dict, dict | None]:
+    """디스크 캐시를 현재 유니버스에 맞춰 **부분 재사용**한다(v5.286).
+
+    반환 `(seed_data, seed_data_ts, full_bundle_or_None)`:
+      - 파일의 종목 ∩ 현재 유니버스 → `seed_data`(재사용)
+      - 현재 유니버스에만 있는 종목 → 아무것도 안 함(호출부가 fetch)
+      - 파일에만 있는 종목 → 버림(seed에 안 담음)
+      - 유니버스가 **완전히 같으면** 세 번째 값으로 번들을 그대로 돌려준다
+        (기존 전량 히트 경로 — RS/섹터까지 재계산 없이 즉시 승격).
+
+    부분 재사용일 때 새로 받는 종목은 호출부의 기존 fetch 경로를 그대로
+    타므로 품질검사(_downcast → _filter_invalid_bars, gap truncate 집계)가
+    똑같이 적용된다 — 신규 종목 전용 분기를 만들지 않는 이유다.
+    """
+    disk = _load_disk_cache(market, daykey)
+    if not disk:
+        return {}, {}, None
+    name = os.path.basename(_last_disk_cache_path or _disk_cache_path(market, daykey))
+    d_data = disk.get("data") or {}
+    d_ts = disk.get("data_ts") or {}
+    want, have = set(tickers), set(d_data)
+    keep = want & have
+    new, drop = want - have, have - want
+    print(f"[disk-cache] hit {name} 재사용 {len(keep)} · 신규 fetch {len(new)} · 제외 {len(drop)}",
+          flush=True)
+    if not new and not drop:
+        return {}, {}, disk
+    seed = {t: d_data[t] for t in keep}
+    return seed, {t: d_ts[t] for t in keep if t in d_ts}, None
 
 
 def _save_disk_cache(market: str, daykey: str, bundle: dict):
@@ -8909,8 +9013,11 @@ def _save_disk_cache(market: str, daykey: str, bundle: dict):
             fn_ns, fn_market = parts[1], parts[2]
             if fn_market != market:
                 continue
-            keep = fn_ns == _CACHE_NS and fn.endswith(f"_{daykey}.pkl")
-            if not keep:
+            # v5.286: **방금 쓴 그 파일 하나만** 남긴다. 예전엔 "현재 NS +
+            # 오늘 daykey"면 남겼는데, 그 조건은 구 u{N} 이름까지 통과시켜
+            # 같은 날짜 파일이 u1504/u1505로 둘 남는 걸 허용했다(09-24
+            # 사고의 볼륨 상태가 정확히 그 모습이었다).
+            if fn != os.path.basename(path):
                 try:
                     os.remove(os.path.join(d, fn))
                 except OSError:
@@ -9049,8 +9156,13 @@ async def _fetch_market_data(market: str, wait_for_fresh: bool = False, force: b
     if daykey and mem and mem.get("daykey") == daykey:
         return mem
     if not mem and daykey:
+        # v5.286: 이 경로는 **새 작업을 만들지 않는 빠른 경로**라 부분
+        # 재사용(=차집합 fetch)을 할 수 없다. 유니버스가 파일과 정확히
+        # 같을 때만 그대로 쓰고, 다르면 못 본 셈 치고 아래 콜드/백그라운드
+        # 경로로 넘긴다 — 거기서 _fetch_market_data_inner가 교집합
+        # 재사용으로 처리한다(판정 로직은 _disk_partial_reuse 한 곳).
         disk = _load_disk_cache(market, daykey)
-        if disk:
+        if disk and set(disk.get("data") or {}) == set(_scan_universe(market)[0]):
             _data_cache[cache_key] = disk
             return disk
     if mem:
@@ -9321,6 +9433,26 @@ async def _refine_sector_leaders(by_sector: dict, data: dict) -> None:
     return stats
 
 
+def _scan_universe(market: str) -> tuple[dict, dict]:
+    """스캔 대상 유니버스(시총 필터까지 적용) + 진단값(v5.286).
+
+    v4.91 필터를 **한 곳에서만** 적용하기 위해 분리했다 — 디스크 캐시의
+    전량 일치 판정(빠른 경로)과 실제 스캔이 서로 다른 집합을 보면
+    "같은데 다르다"가 되어 캐시가 영원히 안 맞는다. 로그는 호출부가
+    찍는다(스캔 1회당 1줄이어야 하므로).
+
+    반환 diag: {mcap_source, n_kr_before, allowed_count, dropped}"""
+    universe = get_universe(market)
+    allowed, source = _get_mcap_allowed_with_source()
+    n_kr_before = sum(1 for t in universe if naver_kr.is_kr(t))
+    if allowed:
+        universe = {t: n for t, n in universe.items()
+                    if not naver_kr.is_kr(t) or t in allowed}
+    dropped = n_kr_before - sum(1 for t in universe if naver_kr.is_kr(t))
+    return universe, {"mcap_source": source, "n_kr_before": n_kr_before,
+                       "allowed_count": len(allowed), "dropped": dropped}
+
+
 async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = False) -> dict:
 
     # 1) 장 마감 후면 디스크 캐시 우선 — 다음 거래일까지 재호출 0
@@ -9332,26 +9464,24 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
         mem = _data_cache.get(cache_key)
         if mem and mem.get("daykey") == daykey:
             return mem  # 메모리에 이미 그날치 있음
-        disk = _load_disk_cache(market, daykey)
-        if disk:
-            _data_cache[cache_key] = disk  # 메모리로 승격
-            return disk
+        # 디스크 캐시는 유니버스를 알아야 부분 재사용을 판정할 수 있어
+        # universe 계산 뒤(아래 _disk_partial_reuse)로 미룬다(v5.286).
 
     # 2) 장중/애매한 시간 → 기존 10분 메모리 TTL (force=True면 이것도 건너뜀)
     cached = _data_cache.get(cache_key)
     if cached and not daykey and not force and time.time() - cached["ts"] < DATA_TTL:
         return cached
 
-    universe = get_universe(market)
     # v4.91: 시총 1000억원 미만 국장 종목 제외 (예: 시총 700억짜리가 돌파임박에
     # 뜨는 문제). 허용목록이 아직 준비 안 됐으면(서버 갓 재시작 등) 필터 없이
     # 통과 — fail-open, 백그라운드 채워지면 다음 스캔부터 적용됨.
-    _mcap_allowed, _mcap_source = _get_mcap_allowed_with_source()
-    _n_kr_before_mcap = sum(1 for t in universe if naver_kr.is_kr(t))
-    if _mcap_allowed:
-        universe = {t: n for t, n in universe.items()
-                    if not naver_kr.is_kr(t) or t in _mcap_allowed}
-    elif market == "kr":
+    # v5.286: 필터 적용 자체는 _scan_universe()에 한 곳으로 모았다(디스크
+    # 캐시 일치 판정이 같은 집합을 보게 하려고). 로그는 여기서 찍는다.
+    universe, _mcap_diag = _scan_universe(market)
+    _mcap_source = _mcap_diag["mcap_source"]
+    _mcap_allowed_count = _mcap_diag["allowed_count"]
+    _n_kr_before_mcap = _mcap_diag["n_kr_before"]
+    if market == "kr" and _mcap_source == "fail_open":
         # v5.251(사용자 지시): fail-open을 조용히 넘기지 않는다 — 매 KR
         # 스캔마다 경고(TIMING의 kr_mcap_filter_source와 짝).
         print(f"[mcap] ⚠️ 시총 허용목록 없음 — KR {_n_kr_before_mcap}종목을 시총 필터 없이 스캔(fail-open)",
@@ -9361,9 +9491,9 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
         # 넘기면 "정상 적용"과 구분이 안 된다(fail-open을 v5.251에서
         # 가시화한 것과 같은 이유).
         print(f"[mcap] ⚠️ 이번 슬롯 허용목록 미충전 — 직전 성공 목록"
-              f"({(_mcap_last_good or {}).get('saved_at')}, {len(_mcap_allowed)}종목)으로 필터 적용(stale_disk)",
+              f"({(_mcap_last_good or {}).get('saved_at')}, {_mcap_allowed_count}종목)으로 필터 적용(stale_disk)",
               flush=True)
-    _kr_mcap_dropped = _n_kr_before_mcap - sum(1 for t in universe if naver_kr.is_kr(t))
+    _kr_mcap_dropped = _mcap_diag["dropped"]
     loop = asyncio.get_event_loop()
     tickers = list(universe.keys())
 
@@ -9381,6 +9511,16 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
     prev = _data_cache.get(cache_key)
     prev_data = prev.get("data", {}) if isinstance(prev, dict) else {}
     prev_data_ts = prev.get("data_ts", {}) if isinstance(prev, dict) else {}
+    # v5.286: 확정 daykey면 디스크 캐시를 **부분 재사용**한다 — 교집합은
+    # 그대로 쓰고, 유니버스에 새로 들어온 종목만 아래 fetch_targets로
+    # 내려보낸다(전용 fetch 경로를 따로 만들지 않는다 — 신규 종목도
+    # 기존 품질검사 _downcast/_filter_invalid_bars를 똑같이 거친다).
+    disk_seed, disk_seed_ts, disk_full = {}, {}, None
+    if daykey and not force:
+        disk_seed, disk_seed_ts, disk_full = _disk_partial_reuse(market, daykey, tickers)
+        if disk_full is not None:
+            _data_cache[cache_key] = disk_full   # 유니버스가 완전히 같음 — 그대로 승격
+            return disk_full
     now_ts = time.time()
     reused: dict = {}
     data_ts: dict = {}
@@ -9390,6 +9530,12 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
         if t in prev_data and prev_data[t] is not None and now_ts - fetched_at < REUSE_TTL:
             reused[t] = prev_data[t]      # 최근 REUSE_TTL 이내에 실제로 받은 데이터 재사용
             data_ts[t] = fetched_at
+        elif disk_seed.get(t) is not None:
+            # 확정 daykey의 디스크 데이터는 그날 종가로 이미 고정이라
+            # REUSE_TTL(장중 신선도 규칙)을 적용하지 않는다 — 적용하면
+            # 부분 재사용이 사실상 전량 재fetch가 된다.
+            reused[t] = disk_seed[t]
+            data_ts[t] = disk_seed_ts.get(t, 0)
         else:
             fetch_targets.append(t)        # 없거나, 실제 fetch가 오래돼 다시 받아야 함
 
@@ -9525,7 +9671,7 @@ async def _fetch_market_data_inner(market: str, cache_key: str, force: bool = Fa
         # 필터는 켜짐) / fail_open(목록 없음, 필터 꺼짐). 판정은
         # _get_mcap_allowed_with_source() 한 곳에서만 한다(사본 금지).
         "kr_mcap_filter_source": _mcap_source if market == "kr" else None,
-        "kr_mcap_allowed_count": len(_mcap_allowed) if market == "kr" else 0,
+        "kr_mcap_allowed_count": _mcap_allowed_count if market == "kr" else 0,
         "kr_mcap_dropped_count": _kr_mcap_dropped if market == "kr" else 0,
     }
     if kr_fetch_failed or us_fetch_failed:
@@ -12152,6 +12298,25 @@ def _log_startup_disk_state():
         print(f"[disk-cache] 시작 시 목록 조회 실패({d}): {type(e).__name__}: {e}", flush=True)
         return
     print(f"[disk-cache] 시작 시 {d} 내 datacache 파일 {len(files)}개: {files}", flush=True)
+    # v5.286(사용자 지시): **은퇴한 네임스페이스 파일만** 지운다. 09-25
+    # 기동 로그에서 datacache_all_2026-06-23 / datacache_kr_2026-06-23 /
+    # datacache_rs6_all_u3625_2026-09-09 / datacache_us_2026-06-24 가
+    # 몇 달째 볼륨을 차지하고 있는 게 확인됐다(저장 시 정리는 그 market을
+    # 실제로 저장할 때만 도는데, "all" 같은 은퇴한 market 이름은 이제
+    # 저장될 일이 없어 영원히 안 지워진다). **현재 NS 파일은 날짜·시장과
+    # 무관하게 절대 안 건드린다** — 오늘 쓸 캐시를 기동이 지우면 그게
+    # 바로 전량 콜드다.
+    removed = []
+    for fn in files:
+        parts = fn.split("_")
+        if len(parts) < 3 or parts[1] == _CACHE_NS:
+            continue
+        try:
+            os.remove(os.path.join(d, fn))
+            removed.append(fn)
+        except OSError as e:
+            print(f"[disk-cache] 시작 시 삭제 실패 {fn}: {type(e).__name__}: {e}", flush=True)
+    print(f"[disk-cache] 시작 시 구 네임스페이스 파일 {len(removed)}개 삭제: {removed}", flush=True)
 
 
 @app.on_event("startup")

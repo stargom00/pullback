@@ -19,7 +19,6 @@ import app  # noqa: E402
 @pytest.fixture
 def d(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "_disk_cache_dir", lambda: str(tmp_path))
-    monkeypatch.setattr(app, "_universe_sig", lambda m: "u7")
     return tmp_path
 
 
@@ -31,21 +30,18 @@ def _bundle():
 
 
 def test_miss_logs_the_wanted_name_and_what_exists(d, capsys):
-    (d / "datacache_rs9_kr_u9999_2026-09-23.pkl").write_bytes(b"x")
+    (d / "datacache_rs9_us_2026-09-23.pkl").write_bytes(b"x")   # 다른 market
     assert app._load_disk_cache("kr", "2026-09-23") is None
     out = capsys.readouterr().out
-    assert "miss datacache_rs9_kr_u7_2026-09-23.pkl" in out, out
-    assert "datacache_rs9_kr_u9999_2026-09-23.pkl" in out, "실제 있는 파일명이 안 찍혔다"
+    assert "miss datacache_rs9_kr_2026-09-23.pkl" in out, out
 
 
-def test_save_then_hit_logs_both(d, capsys):
+def test_save_logs_name_and_size(d, capsys):
     app._save_disk_cache("kr", "2026-09-23", _bundle())
     out = capsys.readouterr().out
-    assert "saved datacache_rs9_kr_u7_2026-09-23.pkl" in out, out
+    assert "saved datacache_rs9_kr_2026-09-23.pkl" in out, out
     assert "MB)" in out
-
     assert app._load_disk_cache("kr", "2026-09-23") is not None
-    assert "hit datacache_rs9_kr_u7_2026-09-23.pkl" in capsys.readouterr().out
 
 
 def test_save_failure_is_logged_not_swallowed(d, capsys, monkeypatch):
@@ -70,11 +66,42 @@ def test_schema_mismatch_still_logs_and_lists(d, capsys):
 
 
 def test_startup_logs_the_file_list(d, capsys):
-    (d / "datacache_rs9_us_u2120_2026-09-24.pkl").write_bytes(b"x")
+    (d / "datacache_rs9_us_2026-09-24.pkl").write_bytes(b"x")
     app._log_startup_disk_state()
     out = capsys.readouterr().out
     assert "시작 시" in out
-    assert "datacache_rs9_us_u2120_2026-09-24.pkl" in out, out
+    assert "datacache_rs9_us_2026-09-24.pkl" in out, out
+
+
+# ── v5.286: 기동 시 구 네임스페이스 정리 ────────────────────────────────
+# 09-25 기동 로그에서 몇 달 묵은 파일 4개가 확인됐다 — 저장 시 정리는 그
+# market을 실제로 저장할 때만 도는데 "all" 같은 은퇴한 market 이름은 이제
+# 저장될 일이 없어 영원히 안 지워진다.
+OLD_FILES = ["datacache_all_2026-06-23.pkl", "datacache_kr_2026-06-23.pkl",
+             "datacache_rs6_all_u3625_2026-09-09.pkl", "datacache_us_2026-06-24.pkl"]
+CURRENT_FILES = ["datacache_rs9_kr_2026-09-23.pkl", "datacache_rs9_us_2026-09-24.pkl",
+                 "datacache_rs9_kr_u1504_2026-09-23.pkl"]   # 전환기 구 이름도 현재 NS다
+
+
+def test_startup_deletes_only_retired_namespaces(d, capsys):
+    for fn in OLD_FILES + CURRENT_FILES:
+        (d / fn).write_bytes(b"x")
+    app._log_startup_disk_state()
+    left = sorted(f.name for f in d.glob("datacache_*.pkl"))
+    assert left == sorted(CURRENT_FILES), left
+    out = capsys.readouterr().out
+    assert "구 네임스페이스 파일 4개 삭제" in out, out
+    for fn in OLD_FILES:
+        assert fn in out
+
+
+def test_startup_never_touches_current_namespace_files(d, capsys):
+    """**오늘 쓸 캐시를 기동이 지우면 그게 바로 전량 콜드다.**"""
+    for fn in CURRENT_FILES:
+        (d / fn).write_bytes(b"x")
+    app._log_startup_disk_state()
+    assert sorted(f.name for f in d.glob("datacache_*.pkl")) == sorted(CURRENT_FILES)
+    assert "구 네임스페이스 파일 0개 삭제" in capsys.readouterr().out
 
 
 def test_no_silent_except_pass_left_in_save():
