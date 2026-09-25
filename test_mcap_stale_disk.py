@@ -55,6 +55,28 @@ def test_stale_disk_is_used_when_this_slot_is_not_charged(clean, monkeypatch):
         "kr_mcap_filter_source": "stale_disk", "kr_mcap_allowed_count": 1}
 
 
+def test_restored_list_of_the_current_slot_is_not_stale(clean, monkeypatch):
+    """**v5.287 오탐 수정**: 09-25 19:09:56에 slotkey=20260925_eod로 복원해놓고
+    20초 뒤 같은 슬롯 스캔에서 stale_disk 경고가 떴다 — 복원분이 이번 슬롯
+    것인지 안 보고 "메모리에 없으면 무조건 stale"로 취급한 탓."""
+    app._save_mcap_allowed("20260925_eod", {"005930.KS"})
+    monkeypatch.setattr(app, "_mcap_last_good", {}, raising=False)
+    app._load_mcap_allowed_from_disk()                      # 재시작 후 복원
+    monkeypatch.setattr(app, "_kr_cache_slot", lambda: "20260925_eod")   # 같은 슬롯
+    allowed, source = app._get_mcap_allowed_with_source()
+    assert source == "disk_current", source
+    assert allowed == {"005930.KS"}
+    assert app._kr_mcap_filter_info()["kr_mcap_filter_source"] == "disk_current"
+
+
+def test_restored_list_of_another_slot_is_stale(clean, monkeypatch):
+    app._save_mcap_allowed("20260924_eod", {"005930.KS"})
+    monkeypatch.setattr(app, "_mcap_last_good", {}, raising=False)
+    app._load_mcap_allowed_from_disk()
+    monkeypatch.setattr(app, "_kr_cache_slot", lambda: "20260925_eod")   # 슬롯이 넘어감
+    assert app._get_mcap_allowed_with_source()[1] == "stale_disk"
+
+
 def test_fresh_slot_wins_over_stale(clean, monkeypatch):
     app._save_mcap_allowed("20260923_eod", {"005930.KS"})
     monkeypatch.setattr(app, "_kr_cache_slot", lambda: "20260924_eod")

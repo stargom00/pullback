@@ -23,6 +23,13 @@ v5.287 [버그수정] 얼마냐봇 조사(2026-09-25 휴장일) 후속 2건(사�
     **유니버스 멤버십**으로 판정하고(`/api/lookup`과 같은
     `universe.resolve_name_to_ticker` 사용 — 사본 금지), 매핑에 없으면
     추측하지 않고 프론트가 사용자에게 시장을 묻는다(저장 중단).
+    [3] 시총 복원분의 슬롯 비교(오탐 수정). 09-25 19:09:56에
+    slotkey=20260925_eod로 복원해놓고 20초 뒤 **같은 슬롯** 스캔에서
+    "직전 성공 목록으로 필터 적용(stale_disk)" 경고가 떴다 — 복원분이 이번
+    슬롯 것인지 안 보고 "메모리 캐시에 없으면 무조건 stale"로 취급한 탓.
+    슬롯키가 같으면 새 값 `disk_current`(경고 아님, 배지 없음), 다르면
+    기존대로 `stale_disk`. 배지는 fail_open/stale_disk에서만 뜨므로
+    disk_current는 자동으로 무표시다.
     [조사만] 운영 저널 150건 중 접미사 불일치 3건 확인(003490·105560·008930이
     전부 .KQ로 저장, 실제는 코스피) — **수정 안 함**, 사용자 결정 대기.
     [테스트] test_opening_surge_today_bar.py(5) / test_kr_suffix_resolution.py(7).
@@ -12103,10 +12110,18 @@ def _get_mcap_allowed_with_source() -> tuple[set, str]:
     """(허용목록, source) — source는 TIMING/배지가 쓰는 그 값이다.
 
     - "mobile_api": 이번 슬롯으로 방금 받은 목록(정상)
-    - "stale_disk": 이번 슬롯은 아직 못 받았지만 **직전 성공 목록**이 있어
-      그걸 쓴다(v5.285). 필터는 켜져 있고 목록만 한 슬롯 낡았다 —
-      필터가 통째로 꺼지는 fail_open과 구분해야 하므로 별도 값이다.
+    - "disk_current": 디스크에서 복원했는데 **저장 당시 슬롯이 지금 슬롯과
+      같다**(v5.287). 내용은 이번 슬롯 목록 그 자체라 낡지 않았다 — 경고
+      대상이 아니다.
+    - "stale_disk": 복원한 목록이 **다른(지난) 슬롯** 것이다(v5.285).
+      필터는 켜져 있고 목록만 한 슬롯 낡았다 — 필터가 통째로 꺼지는
+      fail_open과 구분해야 하므로 별도 값이다.
     - "fail_open": 목록이 아예 없다(디스크에도 없음) → 필터 미적용.
+
+    v5.287(사용자 지시 — 오탐): 09-25 19:09:56에 slotkey=20260925_eod로
+    복원해놓고 20초 뒤 같은 슬롯 스캔에서 "직전 성공 목록으로 필터 적용
+    (stale_disk)" 경고가 떴다. 복원분이 이번 슬롯 것인지 아닌지를 안 보고
+    **메모리 캐시에 없으면 무조건 stale**로 취급한 탓 — 슬롯키를 비교한다.
 
     v5.231(사용자 지시 [c] — 삼미금속 012210 사고): 슬롯 키는 예전 "date"
     (하루 1회)가 아니라 universe.load_kr_dynamic()과 동일한 _kr_cache_slot
@@ -12116,9 +12131,10 @@ def _get_mcap_allowed_with_source() -> tuple[set, str]:
         fresh = _mcap_allowed_cache.get("tickers", set())
         if fresh:
             return fresh, "mobile_api"
-    stale = (_mcap_last_good or {}).get("tickers") or set()
-    if stale:
-        return stale, "stale_disk"
+    restored = (_mcap_last_good or {}).get("tickers") or set()
+    if restored:
+        return restored, ("disk_current" if _mcap_last_good.get("slotkey") == slotkey
+                           else "stale_disk")
     return set(), "fail_open"
 
 

@@ -56,7 +56,9 @@ def test_stale_disk_is_yellow_and_says_the_filter_is_on():
 
 
 def test_normal_and_missing_states_render_nothing():
+    # v5.287: disk_current(= 이번 슬롯 목록을 디스크에서 복원)도 경고 아님.
     for tm in ({"kr_mcap_filter_source": "mobile_api"},
+               {"kr_mcap_filter_source": "disk_current"},
                {"kr_mcap_filter_source": None}, {}, None):
         assert _badge(tm) == "", tm
 
