@@ -575,7 +575,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.286</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.287</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -7317,6 +7317,30 @@ let _maSnapTimer = null;
 // \d{4}[A-Z]{2}(0220WL). 기존 숫자 6자리(005930)와 앞자리 0이 빠진
 // 5자리(v4.96 자동보정 대상)도 그대로 허용. 전부 숫자로 시작하므로 영문으로
 // 시작하는 US 심볼과 겹치지 않는다. 입력은 대문자화된 값을 가정.
+// v5.287(사용자 지시 — 2026-09-25 저널 오염): 접미사 없는 KR 코드의 시장
+// 판정. **순차 시도 금지** — 예전엔 [.KQ, .KS]를 /api/prices에 차례로 던져
+// 먼저 값이 오는 쪽을 골랐는데, naver_kr.to_code()가 접미사를 검증하지 않아
+// (6자리 코드만 보고 시장 구분을 안 씀) 어떤 접미사든 값이 와서 **항상 .KQ가
+// 이겼다** — 코스피 003490이 .KQ로 저장된 원인. 이제 유니버스 매핑
+// (/api/lookup과 같은 리졸버)으로 결정하고, 없으면 **추측하지 않고** 사용자에게
+// 시장을 물어본다.
+function krSuffixDecision(resolved) {
+  if (resolved && resolved.ok && /\.(KS|KQ)$/.test(resolved.ticker || '')) {
+    return { ticker: resolved.ticker, name: resolved.name || null };
+  }
+  return { needsMarketChoice: true,
+           message: '이 코드는 스캐너 유니버스에 없어 시장(코스피/코스닥)을 알 수 없어요. '
+                  + '티커를 접미사까지 직접 입력해 주세요 — 코스피면 .KS, 코스닥이면 .KQ '
+                  + '(예: 003490.KS).' };
+}
+async function _resolveKrTicker(codeBody) {
+  try {
+    const d = await fetch('/api/kr-suffix/' + encodeURIComponent(codeBody)).then(r => r.json());
+    return krSuffixDecision(d);
+  } catch (e) {
+    return krSuffixDecision(null);
+  }
+}
 function _isKrCodeBody(s) {
   return /^\d{5}$/.test(s) || /^\d{4}[0-9A-Z]{2}$/.test(s);
 }
@@ -7482,16 +7506,16 @@ async function saveManualAdd() {
   // 조회해서 실제로 값이 오는 접미사로 티커 자체를 바로잡는다(저장값도 포함).
   let fetchedPrice = null;
   if (market === 'KR' && _isKrCodeBody(ticker)) {   // v5.250: 알파벳 혼용 KR 코드도 접미사 자동보정
+    const decided = await _resolveKrTicker(ticker);   // v5.287: 유니버스로 판정(순차 시도 제거)
+    if (decided.needsMarketChoice) { alert(decided.message); return; }
+    ticker = decided.ticker;
     try {
-      const cand = [ticker + '.KQ', ticker + '.KS'];
       const res = await fetch('/api/prices', {
         method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ tickers: cand })
+        body: JSON.stringify({ tickers: [ticker] })
       });
       const j = await res.json();
-      const prices = j.prices || {};
-      const hit = cand.find(t => prices[t] != null);
-      if (hit) { ticker = hit; fetchedPrice = prices[hit]; }
+      fetchedPrice = (j.prices || {})[ticker] ?? null;
     } catch (e) { /* 아래에서 기존 로직으로 처리 */ }
   }
 
@@ -8858,17 +8882,9 @@ async function myTrackSaveAdd() {
   // 실제 값이 오는 접미사를 찾아 티커 자체를 바로잡는다.
   let market = _maInferMarket(ticker);
   if (market === 'KR' && _isKrCodeBody(ticker)) {   // v5.250: 알파벳 혼용 KR 코드도 접미사 자동보정
-    try {
-      const cand = [ticker + '.KQ', ticker + '.KS'];
-      const res = await fetch('/api/prices', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tickers: cand })
-      });
-      const j = await res.json();
-      const prices = j.prices || {};
-      const hit = cand.find(t => prices[t] != null);
-      if (hit) ticker = hit;
-    } catch (e) { /* 아래에서 원래 티커 그대로 진행 */ }
+    const decided = await _resolveKrTicker(ticker);   // v5.287: 유니버스로 판정(순차 시도 제거)
+    if (decided.needsMarketChoice) { alert(decided.message); return; }
+    ticker = decided.ticker;
   }
 
   let name = (document.getElementById('mtaName').value || '').trim();

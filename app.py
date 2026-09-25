@@ -5,6 +5,28 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.287 [버그수정] 얼마냐봇 조사(2026-09-25 휴장일) 후속 2건(사용자 지시).
+    [1] `/api/opening-surge`가 **마지막 봉이 오늘이 아닌 종목을 제외**한다.
+    이 계산은 "09:00부터 지금까지 쌓인 거래량"을 _kr_session_elapsed_ratio
+    (10분 ≈ 1/39)로 나누는 전제라, 어제 확정봉(하루치)이 들어오면 배수가
+    **약 39배** 부풀려진다 — 09-25 휴장일에 1,483종목 중 1,006종목이
+    "급증"으로 통과했다(재현 완료). 휴장일 목록이 아니라 **데이터 날짜**로
+    판정해 캐시 낡음·종목별 거래정지까지 같은 규칙으로 건다. 전 종목이
+    제외되면 응답에 `reason="no_today_bar"`(+`n_stale_excluded`)를 실어
+    봇이 "급증 0건"과 "오늘 봉 없음"을 구분할 수 있게 했다.
+    [2] 저널 입력의 KR 시장 판정에서 **순차 시도 제거**. 예전엔
+    `[코드+".KQ", 코드+".KS"]`를 `/api/prices`에 차례로 던져 먼저 값이 오는
+    쪽을 골랐는데, `naver_kr.to_code()`가 접미사를 검증하지 않아(6자리 코드만
+    보고 시장 구분을 안 씀) **어떤 접미사든 값이 와서 항상 .KQ가 이겼다** —
+    코스피 003490(대한항공)이 .KQ로 저장된 원인(CLAUDE.md에 v5.244부터
+    미해결 과제로 기록돼 있던 것). 새 `GET /api/kr-suffix/{code}`가
+    **유니버스 멤버십**으로 판정하고(`/api/lookup`과 같은
+    `universe.resolve_name_to_ticker` 사용 — 사본 금지), 매핑에 없으면
+    추측하지 않고 프론트가 사용자에게 시장을 묻는다(저장 중단).
+    [조사만] 운영 저널 150건 중 접미사 불일치 3건 확인(003490·105560·008930이
+    전부 .KQ로 저장, 실제는 코스피) — **수정 안 함**, 사용자 결정 대기.
+    [테스트] test_opening_surge_today_bar.py(5) / test_kr_suffix_resolution.py(7).
+    사보타주 2종 FAIL 확인: 날짜 검사 제거 / 순차 시도 복원.
 v5.286 [버그수정] 디스크 캐시 파일명에서 **u{N} 제거** + 교집합 부분 재사용
     (사용자 지시 — 2026-09-24 전량 콜드 스캔의 확정 원인).
     [확정 원인] 09-25 기동 로그의 /data에 `datacache_rs9_kr_u1504_2026-09-23.pkl`
@@ -7991,7 +8013,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.286"
+VERSION = "v5.287"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -13549,6 +13571,34 @@ async def api_themes():
             "version": VERSION}
 
 
+@app.get("/api/kr-suffix/{code}")
+async def kr_suffix(code: str):
+    """접미사 없는 KR 코드 → 유니버스에 실제로 있는 티커(.KS/.KQ) 하나.
+
+    v5.287(사용자 지시 — 2026-09-25 저널 오염 조사): 예전엔 프론트가
+    `[코드+".KQ", 코드+".KS"]`를 `/api/prices`에 **순서대로** 던져 먼저 값이
+    오는 쪽을 골랐다. 그런데 `naver_kr.to_code()`는 접미사를 검증하지 않고
+    `split(".")[0]`으로 잘라내기만 해서(naver siseJson이 6자리 코드만 받고
+    시장 구분을 안 쓴다) **어떤 접미사를 붙여도 값이 온다** — 결과적으로
+    항상 `.KQ`가 먼저 성공했고, 코스피 종목 003490(대한항공)이 `.KQ`로
+    저널에 저장됐다(CLAUDE.md `naver_kr.to_code()` 항목의 미해결 과제,
+    v5.244에 기록만 돼 있던 것).
+
+    판정은 가격 조회가 아니라 **유니버스 멤버십**으로 한다 —
+    `/api/lookup`과 **같은 리졸버**(`universe.resolve_name_to_ticker`)를
+    쓰므로 두 경로가 갈라질 수 없다. 유니버스에 없으면 추측하지 않고
+    `ok:false`를 돌려준다(호출부가 사용자에게 시장을 물어야 한다)."""
+    from universe import resolve_name_to_ticker
+    q = (code or "").strip().upper()
+    uni = get_universe("kr")
+    res = resolve_name_to_ticker(q, uni)
+    t = res.get("ticker")
+    if t and t.endswith((".KS", ".KQ")):
+        return JSONResponse({"ok": True, "ticker": t, "name": uni.get(t, t)})
+    return JSONResponse({"ok": False, "reason": res.get("reason") or "not_in_universe",
+                          "query": q})
+
+
 @app.get("/api/lookup/{ticker}")
 async def lookup_ticker(ticker: str):
     """검색 전용: 종목이 어느 탭 조건에 안 맞아도 핵심 지표를 반환.
@@ -15877,6 +15927,15 @@ _OPENING_SURGE_MIN_RATIO = 3.0     # 시간보정 평소 거래량 대비 이 �
 _OPENING_SURGE_MIN_VALUE_EOK = 5   # 최소 거래대금(억원) — 초소형/저유동 잡음 제외
 
 
+def _last_bar_daykey(df) -> str | None:
+    """df의 마지막 봉 날짜를 "YYYY-MM-DD"로(v5.287). 인덱스가 날짜가 아니면
+    None — 판정 불가를 "오늘"로 오인하지 않게 호출부가 제외한다."""
+    try:
+        return df.index[-1].strftime("%Y-%m-%d")
+    except (AttributeError, IndexError, TypeError):
+        return None
+
+
 @app.get("/api/opening-surge")
 async def opening_surge():
     """장 시작 직후 돈 유입(거래량 급증) 스캔 (v5.00) — 얼마냐봇이 장 시작
@@ -15888,13 +15947,26 @@ async def opening_surge():
     wait_for_fresh=True로 강제 — 이 시각에 스테일 캐시(장 열리기 전 데이터)를
     돌려주면 거래량이 사실상 0으로 잡혀 무의미하다."""
     now = datetime.now(KST)
+    today = now.strftime("%Y-%m-%d")
     ratio_elapsed = _kr_session_elapsed_ratio(now)
     bundle = await _fetch_market_data("kr", wait_for_fresh=True)
     data = bundle.get("data", {})
     universe = bundle.get("universe", {})
     out = []
+    n_stale = 0
     for t, df in data.items():
         if df is None or len(df) < 55 or "Volume" not in df:
+            continue
+        # v5.287(사용자 지시 — 2026-09-25 휴장일 사고): **마지막 봉이 오늘이
+        # 아니면 제외한다.** 이 계산은 "오늘 09:00부터 지금까지 쌓인 거래량"을
+        # 전제로 _kr_session_elapsed_ratio(≈10분=1/39)로 나누는데, 마지막 봉이
+        # 어제(또는 직전 거래일) **종가 확정 봉**이면 하루치 거래량을 10분치로
+        # 나눠 배수가 ~39배 부풀려진다 — 09-25 휴장일에 1,483종목 중 1,006종목이
+        # "급증"으로 통과한 게 이것이다(재현 완료).
+        # 휴장일 목록이 아니라 **데이터 날짜**로 판정한다 — 캐시가 낡았거나
+        # 종목별로 마지막 봉이 다른 경우(거래정지 등)까지 같은 규칙으로 걸린다.
+        if _last_bar_daykey(df) != today:
+            n_stale += 1
             continue
         try:
             vol = df["Volume"]
@@ -15923,11 +15995,19 @@ async def opening_surge():
         except Exception:
             continue
     out.sort(key=lambda r: -r["surge_ratio"])
-    return JSONResponse({
+    body = {
         "asof": now.strftime("%Y-%m-%d %H:%M"),
         "session_elapsed_pct": round(ratio_elapsed * 100, 1),
         "hits": out[:15],
-    })
+        "n_stale_excluded": n_stale,
+    }
+    if not out and n_stale:
+        # v5.287: 봇이 "오늘 급증 0건"과 "오늘 봉 자체가 없음"을 구분할 수
+        # 있어야 한다 — 침묵을 성공으로 읽지 않기 위한 명시 사유.
+        body["reason"] = "no_today_bar"
+        print(f"[opening-surge] 오늘({today}) 봉 있는 종목 0 — {n_stale}종목 전부 제외(휴장/캐시 낡음)",
+              flush=True)
+    return JSONResponse(body)
 
 
 @app.get("/api/watch/positions")
