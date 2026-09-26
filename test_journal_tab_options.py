@@ -83,14 +83,32 @@ def test_confirm_rule_lookup_uses_get_and_has_no_jeojeom_key():
     assert "CONFIRM_RULE_BY_TAB[tab]" not in APP_CODE
 
 
+def _select_values(select_id: str) -> list:
+    start = HTML.index(f'<select id="{select_id}"')
+    block = HTML[start:HTML.index("</select>", start)]
+    return re.findall(r'<option value="([^"]+)"', block)
+
+
 def test_tab_field_has_no_other_select():
     """`tab` 필드를 쓰는 select는 `#maTab` 하나뿐 — 편집 폼 select는 category(`#e_cat`)다.
-    두 번째 select가 생기면 옵션을 한쪽만 추가하는 사고가 나므로 여기서 잡는다."""
+    두 번째 tab select가 생기면 옵션을 한쪽만 추가하는 사고가 나므로 여기서 잡는다."""
     assert HTML.count('<select id="maTab"') == 1
-    # 편집 행은 tab을 텍스트로만 표시하고, select는 e_cat(카테고리)뿐이어야 한다.
     assert HTML.count('<select id="e_cat"') == 1
-    edit_start = HTML.index('<select id="e_cat"')
-    edit_block = HTML[edit_start:HTML.index("</select>", edit_start)]
-    assert "저점" not in edit_block, (
-        "#e_cat은 category용 select다 — tab 값('저점')을 여기 넣으면 의미가 어긋난다."
-    )
+
+
+def test_two_selects_do_not_leak_each_others_exclusive_values():
+    """`#maTab`(tab)과 `#e_cat`(category)은 **서로의 전용 값을 갖지 않는다.**
+    `저점`은 v5.289부터 둘 다에 정당하게 존재한다(tab 값이면서 category 값) —
+    그래서 "한쪽에 없어야 한다"가 아니라 "전용 값이 새지 않는다"로 검사한다."""
+    tabs = _select_values("maTab")
+    cats = _select_values("e_cat")
+    tab_only = {"눌림목", "돌파", "돌파임박", "박스돌파", "추세전환", "재량"}
+    cat_only = {"추세추종", "단타", "대기", "관찰"}
+    assert tab_only <= set(tabs), f"#maTab에서 탭 전용 값이 사라짐: {tab_only - set(tabs)}"
+    assert cat_only <= set(cats), f"#e_cat에서 카테고리 전용 값이 사라짐: {cat_only - set(cats)}"
+    leaked_into_cat = (set(tabs) & cat_only)
+    leaked_into_tab = (set(cats) & (tab_only - {"재량"}))   # 재량은 원래 양쪽 공용
+    assert not leaked_into_cat, f"#maTab에 카테고리 전용 값이 섞임: {leaked_into_cat}"
+    assert not leaked_into_tab, f"#e_cat에 탭 전용 값이 섞임: {leaked_into_tab}"
+    # 공용 값(양쪽에 다 있어야 하는 것)은 저점·재량 둘뿐이다.
+    assert set(tabs) & set(cats) == {"저점", "재량"}, set(tabs) & set(cats)

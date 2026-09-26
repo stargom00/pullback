@@ -7485,6 +7485,22 @@ function onMaTickerOrTabChange() {
     } catch (e) { /* 조용히 무시 — 수동 입력으로 계속 진행 가능 */ }
   }, 400);
 }
+// 일지 "직접 추가"의 카테고리 판정 (v5.289) — status·tab만 보고 정하는 순수
+// 함수. DOM/전역상태에 안 기대게 최상위로 뽑아둔 이유는 격리 실행 테스트
+// (test_journal_manual_category.py가 이 함수 텍스트를 그대로 추출해 node로
+// 돌린다, CLAUDE.md "텍스트 추출 + Node 실행" 레시피) 때문이다 — Python으로
+// 같은 로직을 다시 짜서 비교하면 두 구현이 갈라진다.
+//
+// 관찰은 category='관찰'. "재량"탭은 category='재량'(통계 별도 집계).
+// v5.289(사용자 지시): "저점"탭도 같은 방식으로 category='저점' — 주봉 RSI
+// 저점 셋업은 추세추종(미너비니/오닐 계열) 성과에 섞이면 안 되고, 재량
+// (스캐너 밖 임의 판단)과도 성격이 달라 제3의 카테고리로 분리한다.
+// 그 외(5탭 중 하나 골라 직접 추가한 실거래)는 '추세추종'과 동일 취급.
+const MANUAL_CAT_BY_TAB = { '재량': '재량', '저점': '저점' };
+function manualCategoryFor(status, tab) {
+  if (status === 'watch') return '관찰';
+  return MANUAL_CAT_BY_TAB[tab] || '추세추종';
+}
 async function saveManualAdd() {
   let ticker = document.getElementById('maTicker').value.trim().toUpperCase();
   const market = document.getElementById('maMarket').value;
@@ -7562,9 +7578,7 @@ async function saveManualAdd() {
   const sector = document.getElementById('maSector').value.trim();
   const note = document.getElementById('maNote').value.trim();
   const today = kstStr();
-  // 관찰은 category='관찰', "재량"탭은 category='재량'(통계 별도 집계),
-  // 그 외(5탭 중 하나 골라 직접 추가한 실거래)는 '추세추종'과 동일 취급.
-  const cat = status === 'watch' ? '관찰' : (tab === '재량' ? '재량' : '추세추종');
+  const cat = manualCategoryFor(status, tab);
   const rec = {
     id: Date.now(), date: today, ticker, name, market,
     cat, category: cat, tab, signal: '직접 추가(사용자)', pivot_type: '수동', setup_score: '',
@@ -9262,6 +9276,7 @@ function editRow(r) {
           <option value="추세추종" ${cat==='추세추종'?'selected':''}>📈 추세추종</option>
           <option value="단타" ${cat==='단타'?'selected':''}>⚡ 단타</option>
           <option value="재량" ${cat==='재량'?'selected':''}>🎲 재량</option>
+          <option value="저점" ${cat==='저점'?'selected':''}>저점</option>
           <option value="대기" ${cat==='대기'?'selected':''}>⏳ 대기</option>
           <option value="관찰" ${cat==='관찰'?'selected':''}>👁 관찰</option>
         </select>
@@ -9316,7 +9331,8 @@ function saveEdit(id) {
   if (r.status !== 'closed') {
     if (r.category === '대기') r.status = 'pending';
     else if (r.category === '관찰') r.status = 'watch';
-    else if (r.category === '추세추종' || r.category === '단타' || r.category === '재량') {
+    else if (r.category === '추세추종' || r.category === '단타' || r.category === '재량'
+             || r.category === '저점') {
       if (r.status !== 'entered') r.status = 'entered';
     }
   }
