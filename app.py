@@ -43,6 +43,10 @@ v5.287 [버그수정] 얼마냐봇 조사(2026-09-25 휴장일) 후속 2건(사�
     스레드에서 두 호출이 겹칠 수 없다 — 2초 간격도 동시 실행이 아니라 순차
     재실행이었다. 그래서 가드의 실체는 "진행 중 대기"가 아니라 **직전 결과
     공유**다(threading.Lock은 나중에 executor로 옮겨질 때를 위한 대비).
+    [6] `/api/dist/{ticker}` 응답에 `bar_date`(평가한 df의 마지막 봉 날짜).
+    기존 필드는 그대로 두고 추가만 한다(봇 파서 호환 — `**r`을 뒤에 펼쳐
+    기존 키가 덮이지 않게). 봇이 "언제 자료로 판정한 값인지"를 응답만 보고
+    알 수 있어야 한다 — [1]의 opening-surge 사고와 같은 종류의 오해 방지.
     [조사만] 운영 저널 150건 중 접미사 불일치 3건 확인(003490·105560·008930이
     전부 .KQ로 저장, 실제는 코스피) — **수정 안 함**, 사용자 결정 대기.
     [테스트] test_opening_surge_today_bar.py(5) / test_kr_suffix_resolution.py(7).
@@ -15922,7 +15926,13 @@ async def distribution_signal(ticker: str):
         return JSONResponse({"ok": False}, status_code=404)
     try:
         r = scanner_mod.distribution_check(df["Close"], df["High"], df["Low"], df["Volume"])
-        return JSONResponse({"ok": True, "ticker": ticker, **r})
+        # v5.287(사용자 지시): **평가한 df의 마지막 봉 날짜**를 같이 준다.
+        # 봇이 "언제 자료로 판정한 값인지"를 응답만 보고 알 수 있어야 한다 —
+        # 같은 날 opening-surge가 어제 봉을 오늘로 읽어 39배를 부풀린 사고
+        # (v5.287 [1])와 같은 종류의 오해를 이쪽에서도 막는다. 기존 필드는
+        # 그대로 두고 추가만 한다(봇 파서 호환).
+        return JSONResponse({"ok": True, "ticker": ticker,
+                              "bar_date": _last_bar_daykey(df), **r})
     except Exception:
         return JSONResponse({"ok": False}, status_code=500)
 
