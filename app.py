@@ -30,6 +30,19 @@ v5.287 [버그수정] 얼마냐봇 조사(2026-09-25 휴장일) 후속 2건(사�
     슬롯키가 같으면 새 값 `disk_current`(경고 아님, 배지 없음), 다르면
     기존대로 `stale_disk`. 배지는 fail_open/stale_disk에서만 뜨므로
     disk_current는 자동으로 무표시다.
+    [5] `_load_disk_cache` 중복 언피클 단일화. 09-25 19:14:47·19:14:49에 US
+    전환기 파일이 2초 간격으로 두 번 읽혔다 — 읽기 경로가 셋인데
+    (`_fetch_market_data` 빠른 경로 / `_disk_partial_reuse` / `_peek_market_
+    bundle`) 락은 `_fetch_market_data_inner`를 감싸는 하나뿐이고, 빠른 경로는
+    유니버스 불일치면 읽은 걸 버리고 메모이즈도 안 해서 bg 리프레시가 끝나기
+    전 모든 요청이 매번 다시 언피클했다(US 2,120종목 = 회당 수십 MB 피크).
+    함수 **한 곳**에 가드를 넣어 세 경로가 전부 거치게 했다 — 키는
+    (경로, mtime_ns, size)라 새로 저장되면 자동 무효화되고, TTL 60초.
+    로그: `[disk-cache] 동시 읽기 합류 <파일명>`.
+    **사실관계 정정**: 이 함수는 동기(`def`)이고 안에 await가 없어 이벤트 루프
+    스레드에서 두 호출이 겹칠 수 없다 — 2초 간격도 동시 실행이 아니라 순차
+    재실행이었다. 그래서 가드의 실체는 "진행 중 대기"가 아니라 **직전 결과
+    공유**다(threading.Lock은 나중에 executor로 옮겨질 때를 위한 대비).
     [조사만] 운영 저널 150건 중 접미사 불일치 3건 확인(003490·105560·008930이
     전부 .KQ로 저장, 실제는 코스피) — **수정 안 함**, 사용자 결정 대기.
     [테스트] test_opening_surge_today_bar.py(5) / test_kr_suffix_resolution.py(7).
@@ -7674,6 +7687,7 @@ import math
 import os
 import subprocess
 import sys
+import threading
 import time
 import uuid
 import json as _json
@@ -8883,6 +8897,34 @@ def _legacy_disk_cache_path(market: str, daykey: str) -> str | None:
 
 _last_disk_cache_path: str | None = None   # v5.286: 직전 _load_disk_cache가 실제로 읽은 파일
 
+# v5.287(사용자 지시 — 수정 5): 같은 파일을 짧은 간격에 여러 번 언피클하지
+# 않기 위한 단일화 가드. 09-25 19:14:47·19:14:49에 US 전환기 파일이 2초 간격
+# 으로 두 번 읽혔다 — 경로가 (a) _fetch_market_data 빠른 경로, (b)
+# _disk_partial_reuse(락 안), (c) _peek_market_bundle 셋인데 락은 (b)를 감싸는
+# _market_fetch_locks 하나뿐이고 그건 _fetch_market_data_inner만 덮는다.
+# 빠른 경로는 유니버스 불일치면 읽은 걸 **버리고 메모이즈도 안 해서**, bg
+# 리프레시가 끝나기 전에 들어오는 모든 요청이 매번 다시 언피클했다
+# (US 2,120종목 = 회당 수십 MB 피크).
+#
+# [사실관계] 이 함수는 동기(`def`)이고 안에 await가 없어 **이벤트 루프
+# 스레드에서는 두 호출이 겹칠 수 없다** — 실제로 본 2초 간격도 동시 실행이
+# 아니라 순차 재실행이었다. 그래서 가드의 본체는 "진행 중 대기"가 아니라
+# **직전 결과 공유(짧은 TTL)**다. 다만 나중에 이 함수가 executor로 옮겨져도
+# 깨지지 않도록 threading.Lock도 같이 건다(현재 호출부는 전부 루프 스레드).
+# 키에 mtime_ns/size를 넣어 파일이 새로 저장되면 자동 무효화된다.
+_DISK_READ_TTL = 60.0
+_disk_read_lock = threading.Lock()
+_disk_read_memo: dict = {}   # {"key": (path, mtime_ns, size), "bundle": ..., "ts": float}
+
+
+def _disk_read_key(path: str):
+    """파일 동일성 키 — 같은 이름이어도 새로 저장됐으면 다른 키가 되게(v5.287)."""
+    try:
+        st = os.stat(path)
+        return (path, st.st_mtime_ns, st.st_size)
+    except OSError:
+        return (path, None, None)
+
 
 def _log_existing_disk_caches(market: str):
     """miss/스키마불일치일 때 같은 market의 실제 파일명을 한 줄로(v5.285).
@@ -8910,6 +8952,7 @@ def _load_disk_cache(market: str, daykey: str):
     반환 — 호출부(_fetch_market_data_inner)는 이미 disk=None을
     "캐시미스"로 취급해 정상적으로 실 fetch로 폴백한다(새 분기 불필요)."""
     import pickle
+    global _last_disk_cache_path
     path = _disk_cache_path(market, daykey)
     if not os.path.exists(path):
         # v5.286 전환기: 새 이름이 없으면 구 u{N} 파일 중 최신 1개를 읽는다.
@@ -8917,6 +8960,16 @@ def _load_disk_cache(market: str, daykey: str):
         if legacy:
             print(f"[disk-cache] 구 이름 파일 사용(전환기) {os.path.basename(legacy)}", flush=True)
             path = legacy
+    if os.path.exists(path):
+        # 위 전환기 분기까지 마친 **최종 경로**로 단일화 가드를 건다.
+        memo_key = _disk_read_key(path)
+        with _disk_read_lock:
+            memo = _disk_read_memo
+            if (memo.get("key") == memo_key and memo.get("bundle") is not None
+                    and time.time() - memo.get("ts", 0) < _DISK_READ_TTL):
+                print(f"[disk-cache] 동시 읽기 합류 {os.path.basename(path)}", flush=True)
+                _last_disk_cache_path = path
+                return memo["bundle"]
     if not os.path.exists(path):
         # v5.285(계측 전용 — 동작 불변): miss를 무음으로 넘기지 않는다.
         # 2026-09-24 KR 콜드 스캔(n_reused=0) 조사에서 "파일명이 안 맞은
@@ -8960,8 +9013,10 @@ def _load_disk_cache(market: str, daykey: str):
     # 번들에 경로를 끼워 넣으면 그대로 디스크에 되저장되므로, 방금 읽은
     # 경로만 모듈 전역에 남긴다 — 이 함수는 await가 없어(동기) 호출 직후
     # 읽으면 다른 호출과 섞일 수 없다.
-    global _last_disk_cache_path
     _last_disk_cache_path = path
+    with _disk_read_lock:
+        _disk_read_memo.clear()
+        _disk_read_memo.update({"key": _disk_read_key(path), "bundle": bundle, "ts": time.time()})
     return bundle
 
 
@@ -9028,6 +9083,8 @@ def _save_disk_cache(market: str, daykey: str, bundle: dict):
                 pk.clear_memo()
                 pk.dump((_k, _v))
         os.replace(tmp, path)
+        with _disk_read_lock:      # v5.287: 방금 덮어썼으니 공유 메모 무효화
+            _disk_read_memo.clear()
         # 오래된 캐시 정리 — 은퇴한 네임스페이스(_CACHE_NS와 다름)는 날짜
         # 상관없이 전부 삭제, 현재 네임스페이스는 오늘(daykey) 아닌 것만
         # 삭제. 남기는 건 딱 하나(현재 네임스페이스 + 오늘)뿐이라 다음

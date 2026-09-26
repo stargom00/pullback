@@ -108,3 +108,59 @@ def test_no_silent_except_pass_left_in_save():
     src = (ROOT / "app.py").read_text(encoding="utf-8")
     body = src[src.index("def _save_disk_cache("):src.index("def _benchmark_close(")]
     assert "except Exception:\n        pass" not in body, "저장 실패가 다시 무음이 됐다"
+
+
+# ── v5.287: 같은 파일 중복 언피클 단일화 ────────────────────────────────
+# 09-25 19:14:47·19:14:49에 US 전환기 파일이 2초 간격으로 두 번 읽혔다.
+# 읽기 경로가 셋(_fetch_market_data 빠른 경로 / _disk_partial_reuse /
+# _peek_market_bundle)인데 락은 _fetch_market_data_inner를 감싸는 하나뿐이고,
+# 빠른 경로는 유니버스 불일치면 읽은 걸 버리고 메모이즈도 안 했다.
+
+def _count_unpickles(monkeypatch):
+    import pickle as _p
+    calls = []
+    real = _p.load
+
+    def counting(f):
+        calls.append(1)
+        return real(f)
+    monkeypatch.setattr(_p, "load", counting)
+    return calls
+
+
+def test_second_read_of_the_same_file_shares_the_first(d, capsys, monkeypatch):
+    app._save_disk_cache("kr", "2026-09-23", _bundle())
+    app._disk_read_memo.clear()
+    capsys.readouterr()
+    calls = _count_unpickles(monkeypatch)
+
+    a = app._load_disk_cache("kr", "2026-09-23")
+    n_after_first = len(calls)
+    b = app._load_disk_cache("kr", "2026-09-23")
+
+    assert n_after_first > 0, "첫 호출이 실제로 언피클해야 한다"
+    assert len(calls) == n_after_first, "두 번째 호출이 파일을 다시 언피클했다"
+    assert a is b, "같은 번들 객체를 공유해야 한다"
+    assert "동시 읽기 합류 datacache_rs9_kr_2026-09-23.pkl" in capsys.readouterr().out
+
+
+def test_a_resaved_file_is_not_shadowed_by_the_memo(d, monkeypatch):
+    """키에 mtime/size가 들어가므로 새로 저장하면 자동 무효화 — 낡은 번들을
+    계속 돌려주면 그게 v4.93류의 '캐시가 안 없어지는' 사고다."""
+    app._save_disk_cache("kr", "2026-09-23", _bundle())
+    first = app._load_disk_cache("kr", "2026-09-23")
+    b2 = _bundle()
+    b2["data"] = {"000660.KS": {"y": 2}}
+    app._save_disk_cache("kr", "2026-09-23", b2)
+    second = app._load_disk_cache("kr", "2026-09-23")
+    assert second is not first
+    assert set(second["data"]) == {"000660.KS"}
+
+
+def test_memo_expires(d, monkeypatch):
+    app._save_disk_cache("kr", "2026-09-23", _bundle())
+    app._load_disk_cache("kr", "2026-09-23")
+    monkeypatch.setattr(app, "_DISK_READ_TTL", -1)   # 즉시 만료
+    calls = _count_unpickles(monkeypatch)
+    app._load_disk_cache("kr", "2026-09-23")
+    assert len(calls) > 0, "TTL이 지났으면 다시 읽어야 한다"
