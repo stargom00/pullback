@@ -5,6 +5,31 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.289 [기능추가] 일지 "직접 추가"의 **탭** 드롭다운(`#maTab`)에 `저점`
+    옵션 추가(사용자 지시). 기존 6개 값(눌림목/돌파/돌파임박/박스돌파/
+    추세전환/재량)과 기본 선택(재량)은 전부 불변 — 추가만 한다.
+    커밋 전 `tab="저점"` 소비처를 전수 추적해 키 부재로 에러·기본값
+    오동작이 나는 곳이 없음을 확인했다(사용자 지시):
+      · `/api/journal/snapshot` → `get_signal_snapshot()`은 `_signal_snapshots.get()`
+        이라 미등록 탭은 None → `ok:false` → 프론트가 "스냅샷 없음, 직접 입력"
+        안내. 스캐너 모드가 없는 탭이므로 이게 정상 경로다.
+      · `_refresh_auto_watch()`의 pending 루프 → `CONFIRM_RULE_BY_TAB.get(tab)`이
+        None → `vol_mult_req=None`, 이후 분기가 전부 `if rule`로 가드돼 있어
+        "확인규칙 미검증, 사용자 판단" 문구로 빠진다. **이미 `재량`이 매일
+        타고 있는 경로와 동일**(재량도 이 dict에 없다) — 새 경로가 아니다.
+      · `/api/paper-track` → `PAPER_TRACK_BACKTEST_EV.get((tab, market))`이 None →
+        `backtest_ev`/`gap`이 None으로 비어 표시. 게다가 paper_track 레코드는
+        `_refresh_auto_watch()`가 적립하는 것이고 수동 일지 레코드가 아니라
+        애초에 이 탭이 들어갈 일도 없다.
+      · `/api/watch/positions`·`/api/watch/pending` → 전자는 `tab`을 아예 안 읽고,
+        후자는 문자열을 그대로 통과시킨다(봇 오동작 없음).
+      · 프론트의 `tab` 읽기는 표시용(8356·9133·9245·5365행)과 `'ABC'`/`'급등'`
+        동등비교 2건(3322·6406행)뿐 — `tab` 값을 키로 쓰는 객체는 없다.
+    **같은 `tab` 필드를 쓰는 다른 select는 없다**(사용자 지시로 확인): 편집 행은
+    `r.tab`을 텍스트로만 보여주고, 편집 폼의 select는 `#e_cat`(카테고리)라
+    `saveEdit()`도 `category`만 쓴다 — 그래서 추가할 곳이 `#maTab` 한 군데다.
+    `test_journal_tab_options.py` 신규(옵션 존재 + 기존 6개 값·기본선택 불변 +
+    소비처의 `.get()` None-안전성).
 v5.288 [기능개선] `/api/dist/{ticker}` 응답에 **`bar_date`**(평가한 df의 마지막
     봉 날짜, YYYY-MM-DD) 추가(사용자 지시). 기존 필드는 그대로 두고 추가만
     한다 — `**r`을 뒤에 펼쳐 기존 키가 절대 덮이지 않게 했다(봇 파서 호환).
@@ -8043,7 +8068,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.288"
+VERSION = "v5.289"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
