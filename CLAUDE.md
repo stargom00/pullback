@@ -27,6 +27,19 @@
 
 ---
 
+## 프로덕션 안전
+- **프로덕션 쓰기 엔드포인트(POST/PUT/DELETE)는 탐침·확인 목적으로도 호출 금지.**
+  "인증이 걸려 있는지 확인만 해보자"도 안 된다 — 인증 여부는 **코드 읽기로만**
+  판정한다(`_auth_gate`, `_BOT_READ_EXACT_PATHS`, `_TOKEN_WRITABLE_EXACT_PATHS`,
+  `_SYNC_TOKEN_GATED_PATHS`를 보면 답이 나온다).
+  근거: 2026-09-26에 `POST /api/journal`이 토큰으로 열리는지 확인하려고
+  `{"records": [], "probe": true}`를 실제 프로덕션에 보냈다. 401로 거부돼
+  **아무 일도 안 일어났지만**, 통과했다면 이 엔드포인트의 병합 규칙상
+  `records`가 비고 `deleted_ids`도 없으면 최근 갱신 창(`JOURNAL_CONCURRENT_
+  KEEP_WINDOW_SEC`) 밖의 레코드가 전부 "사용자가 지운 것"으로 간주돼
+  **저널이 대량 삭제될 수 있었다.** 읽기(GET)로 답을 못 얻는 질문이라면
+  코드를 읽거나 사용자에게 묻는다.
+
 ## 검증 방법
 - **라이브 URL(pullback2-production.up.railway.app)에 curl로 접근된다 (2026-09-13 확인).**
   이전에 여기 "allowlist에 없다 → curl 불가"라고 적혀 있었는데 **틀린 기록이었다.**
