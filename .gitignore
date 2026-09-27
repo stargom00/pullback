@@ -43,3 +43,6 @@ scripts/maintenance/memory_probe.jsonl
 
 # v5.285: 시총 허용목록 상태 파일 — 프로덕션은 /data, 로컬 실행 시 레포 폴더에 생긴다
 kr_mcap_allowed.json
+
+# 저점종목 스크린 출력 CSV (로컬 산출물)
+scripts/screens/out/
