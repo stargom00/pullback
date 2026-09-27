@@ -5,6 +5,28 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.293 [저점종목 홈 카드] 주간·월간 저점종목(주봉/월봉 RSI(14) 30 하향돌파 +
+    직전봉 대비 반등) 결과를 캘린더 홈에 "📉 저점종목 (관심 신호 · 측정 전)"
+    카드로 표시. **계산은 맥 로컬 스크립트, 앱은 표시만**(사용자 지시) —
+    `scripts/screens/lowpoint.py --publish`가 `data/lowpoint_latest.json`에
+    기록하고(레포 파일 → git push로 배포), `/api/calendar`가 읽어서 내려준다.
+    새 스캔·새 fetch를 트리거하지 않는다(캘린더 원칙 그대로).
+    [병합 저장] 주봉·월봉은 별도 키다 — `merge_publish()`가 tf 칸만 갈아끼워서
+    week 실행이 month 결과를 지우지 않는다(사용자 지시). 파일 읽기 실패 시엔
+    조용히 덮어쓰지 않고 실패한다(다른 tf 결과 소실 방지).
+    [낡음 배지] 서버가 판정한다(`_lowpoint_expected_label()`, 프론트는 렌더만).
+    기준봉 라벨(주=금요일 / 월=말일)이 "이미 돌렸어야 하는" 라벨보다 오래되면
+    "⚠ 이번 주/달 미실행". 마감 기준은 라벨 **다음날** KST 20:10
+    (`KR_CLOSE_CONFIRMED_HM`) — US 주봉이 금요일 17:00 ET(= 토요일 새벽 KST)에야
+    확정돼서 KR·US를 한 기준으로 비교하려면 하루 여유가 필요하다(경고가 늦게
+    뜨는 쪽 = 보수적). 새 휴장일 로직은 안 만들었다 — 라벨이 달력 기준이고
+    하루 여유가 금요일·말일 휴장을 덮는다.
+    [3상태 구분] 파일/칸 없음(=미실행) · 0건(=신호 없음) · 신호 N건을 절대
+    합치지 않는다(`lowpointSectionStatus()`, 순수 함수 → node 실행 테스트).
+    JSON이 없어도 **카드를 숨기지 않는다** — "미실행"이 보여야 안 돌린 걸 안다.
+    [차트 링크] `tvSymbolUrl`/`tvUrl`에 선택 `interval` 인자 추가 — 주봉 섹션은
+    `1W`, 월봉은 `1M`으로 열린다. 안 넘기면 기존과 완전히 같은 URL(사본 금지
+    원칙 유지, 링크 생성은 여전히 tvSymbolUrl 한 곳).
 v5.292 [등급개편] ABC A급 조건에서 **차트 B(`b.ok`)를 완전히 제거**(사용자 지시,
     안4′). A급 = 🩷강돌파 AND 기업축 통과 AND 거래대금 하한·상한 안.
     `b.ok`는 화면 참고 칸으로만 남고 **등급 계산에 관여하지 않는다**.
@@ -8259,7 +8281,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.292"
+VERSION = "v5.293"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -17519,6 +17541,77 @@ async def refresh_market(market: str = "all"):
     return JSONResponse({"ok": bundle is not None, "market": market})
 
 
+# ── 📉 저점종목(주간·월간 RSI 하향돌파) — 표시 전용 ─────────────────────
+# 계산은 맥 로컬 스크립트(scripts/screens/lowpoint.py --publish)가 하고
+# 앱은 그 결과 파일을 읽어 캘린더 홈 카드로 **표시만** 한다(사용자 지시).
+# 경로가 `_resolve_persistent_path()`(/data 볼륨)가 아니라 레포 안 data/인
+# 이유: 이 파일은 git으로 배포된다(로컬에서 만들고 커밋 → Railway 재배포).
+LOWPOINT_LATEST_PATH = os.path.join(os.path.dirname(__file__), "data", "lowpoint_latest.json")
+LOWPOINT_TFS = ("week", "month")
+
+
+def _lowpoint_period_label(tf: str, d: "date") -> "date":
+    """d가 속한 봉 구간의 라벨 — 주봉은 pandas W-FRI와 같은 "그 구간의
+    금요일"(토요일은 다음 금요일 구간), 월봉은 'ME'와 같은 그 달 말일.
+    lowpoint.py의 resample_bars(RULE)와 같은 구간 정의여야 한다."""
+    if tf == "week":
+        return d + timedelta(days=(4 - d.weekday()) % 7)
+    nxt = datetime(d.year + (1 if d.month == 12 else 0), (d.month % 12) + 1, 1).date()
+    return nxt - timedelta(days=1)
+
+
+def _lowpoint_prev_label(tf: str, label: "date") -> "date":
+    if tf == "week":
+        return label - timedelta(days=7)
+    return label.replace(day=1) - timedelta(days=1)
+
+
+def _lowpoint_expected_label(tf: str, now: "datetime | None" = None) -> str:
+    """now 기준 "이미 돌렸어야 하는" 마지막 마감 봉 라벨(YYYY-MM-DD).
+    마감 기준은 라벨 다음날 KR_CLOSE_CONFIRMED_HM(KST 20:10) — 하루 여유를
+    두는 이유는 US 주봉이 금요일 17:00 ET(= 토요일 새벽 KST)에야 확정돼
+    같은 라벨을 KR·US 한 기준으로 비교해야 하기 때문이다(보수적 = 경고가
+    늦게 뜨는 쪽). 휴장일 로직은 일부러 안 쓴다 — 라벨 자체가 달력 기준
+    (금요일/말일)이고, 하루 여유가 금요일·말일 휴장을 이미 덮는다."""
+    now = now or datetime.now(KST)
+    label = _lowpoint_period_label(tf, now.date())
+    for _ in range(24):   # 무한루프 방지(주=24주·월=24개월이면 충분)
+        due = datetime(label.year, label.month, label.day, tzinfo=KST) + \
+            timedelta(days=1, minutes=KR_CLOSE_CONFIRMED_HM)
+        if now >= due:
+            return label.isoformat()
+        label = _lowpoint_prev_label(tf, label)
+    return label.isoformat()
+
+
+def _lowpoint_view(now: "datetime | None" = None) -> dict | None:
+    """캘린더 페이로드용. 파일이 없으면 None(프론트가 "미실행" 표시),
+    파싱 실패도 경고 로그 + None. tf별로 낡음(stale) 판정을 서버가 한다
+    (프론트는 렌더만 — v5.232와 같은 원칙)."""
+    if not os.path.exists(LOWPOINT_LATEST_PATH):
+        return None
+    try:
+        with open(LOWPOINT_LATEST_PATH, encoding="utf-8") as f:
+            data = _json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("최상위가 dict가 아님")
+    except (ValueError, OSError) as e:
+        print(f"[lowpoint] {LOWPOINT_LATEST_PATH} 읽기 실패: {e}", flush=True)
+        return None
+    out = {"expected": {}}
+    for tf in LOWPOINT_TFS:
+        expected = _lowpoint_expected_label(tf, now)
+        out["expected"][tf] = expected
+        entry = data.get(tf)
+        if not isinstance(entry, dict):
+            out[tf] = None
+            continue
+        bar_date = str(entry.get("bar_date") or "")
+        out[tf] = {**entry, "stale": (not bar_date) or bar_date < expected,
+                   "expected_bar_date": expected}
+    return out
+
+
 @app.get("/api/calendar")
 async def get_calendar():
     """캘린더 탭 — 로그인 후 기본 화면(v5.108). v5.110(사용자 지시)에서
@@ -18404,6 +18497,8 @@ async def get_calendar():
                 break
         market_closed = {"next_open": next_open}
 
+    lowpoint = _lowpoint_view(today_dt)
+
     sector_flow = None
     try:
         sector_flow = _build_sector_flow(today)
@@ -18455,6 +18550,9 @@ async def get_calendar():
         "earnings": earnings,
         "jongga_forward": jongga_forward,
         "market_closed": market_closed,
+        # v5.293(사용자 지시): 📉 저점종목 — 로컬 스크립트가 게시한 파일을
+        # 읽기만 한다(새 계산·새 fetch 없음, 이 엔드포인트의 원칙 그대로).
+        "lowpoint": lowpoint,
     }))
 
 

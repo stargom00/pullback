@@ -1,0 +1,634 @@
+{
+ "month": {
+  "bar_date": "2026-08-31",
+  "excluded_counts": {
+   "KOSDAQ": {
+    "admin_excluded": 134,
+    "failed": 0,
+    "fetched": 1684,
+    "short": 289,
+    "stale": 0,
+    "universe": 1684
+   },
+   "KOSPI": {
+    "admin_excluded": 38,
+    "failed": 0,
+    "fetched": 793,
+    "short": 29,
+    "stale": 0,
+    "universe": 793
+   },
+   "US": {
+    "admin_excluded": 0,
+    "failed": 15,
+    "fetched": 2105,
+    "short": 183,
+    "stale": 11,
+    "universe": 2120
+   }
+  },
+  "markets": [
+   "KOSPI",
+   "KOSDAQ",
+   "US"
+  ],
+  "rows": [
+   {
+    "bar_date": "2026-08-31",
+    "close0": 3210.0,
+    "close1": 2955.0,
+    "code": "088260.KS",
+    "market": "KOSPI",
+    "name": "이리츠코크렙",
+    "rsi0": 32.75,
+    "rsi1": 27.84,
+    "rsi2": 31.57
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 32650.0,
+    "close1": 30650.0,
+    "code": "039130.KS",
+    "market": "KOSPI",
+    "name": "하나투어",
+    "rsi0": 32.97,
+    "rsi1": 29.72,
+    "rsi2": 30.23
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 1196.0,
+    "close1": 1072.0,
+    "code": "017180.KS",
+    "market": "KOSPI",
+    "name": "명문제약",
+    "rsi0": 33.52,
+    "rsi1": 28.91,
+    "rsi2": 32.26
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 2270.0,
+    "close1": 2030.0,
+    "code": "041650.KS",
+    "market": "KOSPI",
+    "name": "상신브레이크",
+    "rsi0": 37.24,
+    "rsi1": 29.77,
+    "rsi2": 30.91
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 2325.0,
+    "close1": 1807.0,
+    "code": "007280.KS",
+    "market": "KOSPI",
+    "name": "한국특강",
+    "rsi0": 39.58,
+    "rsi1": 28.38,
+    "rsi2": 32.15
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 1515.0,
+    "close1": 1389.0,
+    "code": "012690.KS",
+    "market": "KOSPI",
+    "name": "모나리자",
+    "rsi0": 32.65,
+    "rsi1": 29.35,
+    "rsi2": 30.29
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 1191.0,
+    "close1": 1112.0,
+    "code": "004540.KS",
+    "market": "KOSPI",
+    "name": "깨끗한나라",
+    "rsi0": 29.72,
+    "rsi1": 27.1,
+    "rsi2": 30.96
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 3005.0,
+    "close1": 2740.0,
+    "code": "004250.KS",
+    "market": "KOSPI",
+    "name": "엔피씨",
+    "rsi0": 34.08,
+    "rsi1": 28.88,
+    "rsi2": 32.02
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 1707.0,
+    "close1": 1518.0,
+    "code": "373170.KQ",
+    "market": "KOSDAQ",
+    "name": "엠아이큐브솔루션",
+    "rsi0": 31.55,
+    "rsi1": 29.71,
+    "rsi2": 30.77
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 1920.0,
+    "close1": 1596.0,
+    "code": "438700.KQ",
+    "market": "KOSDAQ",
+    "name": "버넥트",
+    "rsi0": 32.0,
+    "rsi1": 29.04,
+    "rsi2": 30.72
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 6990.0,
+    "close1": 3985.0,
+    "code": "417010.KQ",
+    "market": "KOSDAQ",
+    "name": "나노팀",
+    "rsi0": 36.66,
+    "rsi1": 29.51,
+    "rsi2": 31.28
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 3450.0,
+    "close1": 2695.0,
+    "code": "419540.KQ",
+    "market": "KOSDAQ",
+    "name": "비스토스",
+    "rsi0": 34.56,
+    "rsi1": 29.34,
+    "rsi2": 30.76
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 1600.0,
+    "close1": 1329.0,
+    "code": "361570.KQ",
+    "market": "KOSDAQ",
+    "name": "알비더블유",
+    "rsi0": 35.05,
+    "rsi1": 29.89,
+    "rsi2": 30.27
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 3770.0,
+    "close1": 3750.0,
+    "code": "369370.KQ",
+    "market": "KOSDAQ",
+    "name": "블리츠웨이엔터테인먼트",
+    "rsi0": 30.04,
+    "rsi1": 29.88,
+    "rsi2": 30.83
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 6600.0,
+    "close1": 5460.0,
+    "code": "318410.KQ",
+    "market": "KOSDAQ",
+    "name": "비비씨",
+    "rsi0": 39.42,
+    "rsi1": 29.4,
+    "rsi2": 31.03
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 1287.0,
+    "close1": 1274.0,
+    "code": "169330.KQ",
+    "market": "KOSDAQ",
+    "name": "엠브레인",
+    "rsi0": 26.51,
+    "rsi1": 26.02,
+    "rsi2": 31.39
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 2025.0,
+    "close1": 1748.0,
+    "code": "124560.KQ",
+    "market": "KOSDAQ",
+    "name": "태웅로직스",
+    "rsi0": 35.89,
+    "rsi1": 29.18,
+    "rsi2": 30.26
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 2390.0,
+    "close1": 2365.0,
+    "code": "260660.KQ",
+    "market": "KOSDAQ",
+    "name": "알리코제약",
+    "rsi0": 30.32,
+    "rsi1": 29.9,
+    "rsi2": 30.63
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 2200.0,
+    "close1": 1844.0,
+    "code": "900310.KQ",
+    "market": "KOSDAQ",
+    "name": "컬러레이",
+    "rsi0": 35.85,
+    "rsi1": 29.63,
+    "rsi2": 30.15
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 1420.0,
+    "close1": 1393.0,
+    "code": "220180.KQ",
+    "market": "KOSDAQ",
+    "name": "폴라리스AI핸디",
+    "rsi0": 30.38,
+    "rsi1": 29.61,
+    "rsi2": 31.04
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 2495.0,
+    "close1": 2325.0,
+    "code": "252500.KQ",
+    "market": "KOSDAQ",
+    "name": "세화피앤씨",
+    "rsi0": 31.66,
+    "rsi1": 29.05,
+    "rsi2": 30.22
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 9260.0,
+    "close1": 9250.0,
+    "code": "221980.KQ",
+    "market": "KOSDAQ",
+    "name": "케이디켐",
+    "rsi0": 27.55,
+    "rsi1": 27.36,
+    "rsi2": 30.78
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 2405.0,
+    "close1": 2200.0,
+    "code": "178780.KQ",
+    "market": "KOSDAQ",
+    "name": "일월지엠엘",
+    "rsi0": 32.22,
+    "rsi1": 25.57,
+    "rsi2": 30.12
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 2990.0,
+    "close1": 2035.0,
+    "code": "205470.KQ",
+    "market": "KOSDAQ",
+    "name": "휴마시스",
+    "rsi0": 35.1,
+    "rsi1": 29.56,
+    "rsi2": 30.23
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 4195.0,
+    "close1": 3395.0,
+    "code": "090410.KQ",
+    "market": "KOSDAQ",
+    "name": "덕신이피씨",
+    "rsi0": 34.91,
+    "rsi1": 28.52,
+    "rsi2": 33.15
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 2315.0,
+    "close1": 2250.0,
+    "code": "131100.KQ",
+    "market": "KOSDAQ",
+    "name": "티엔엔터테인먼트",
+    "rsi0": 28.05,
+    "rsi1": 27.67,
+    "rsi2": 31.44
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 2645.0,
+    "close1": 2465.0,
+    "code": "095700.KQ",
+    "market": "KOSDAQ",
+    "name": "제넥신",
+    "rsi0": 31.13,
+    "rsi1": 29.89,
+    "rsi2": 30.05
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 1575.0,
+    "close1": 1206.0,
+    "code": "097780.KQ",
+    "market": "KOSDAQ",
+    "name": "에코볼트",
+    "rsi0": 36.78,
+    "rsi1": 26.91,
+    "rsi2": 31.03
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 3910.0,
+    "close1": 3270.0,
+    "code": "039290.KQ",
+    "market": "KOSDAQ",
+    "name": "인포뱅크",
+    "rsi0": 35.14,
+    "rsi1": 29.64,
+    "rsi2": 32.13
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 1586.0,
+    "close1": 1541.0,
+    "code": "075970.KQ",
+    "market": "KOSDAQ",
+    "name": "동국알앤에스",
+    "rsi0": 31.07,
+    "rsi1": 29.69,
+    "rsi2": 32.03
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 3135.0,
+    "close1": 2005.0,
+    "code": "064800.KQ",
+    "market": "KOSDAQ",
+    "name": "포니링크",
+    "rsi0": 38.61,
+    "rsi1": 29.72,
+    "rsi2": 30.69
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 4110.0,
+    "close1": 3945.0,
+    "code": "052790.KQ",
+    "market": "KOSDAQ",
+    "name": "액토즈소프트",
+    "rsi0": 31.93,
+    "rsi1": 29.98,
+    "rsi2": 31.48
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 2880.0,
+    "close1": 2630.0,
+    "code": "037950.KQ",
+    "market": "KOSDAQ",
+    "name": "엘컴텍",
+    "rsi0": 32.63,
+    "rsi1": 29.55,
+    "rsi2": 30.89
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 1920.0,
+    "close1": 1738.0,
+    "code": "038620.KQ",
+    "market": "KOSDAQ",
+    "name": "위즈코프",
+    "rsi0": 32.98,
+    "rsi1": 29.29,
+    "rsi2": 30.2
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 1620.0,
+    "close1": 1534.0,
+    "code": "013810.KQ",
+    "market": "KOSDAQ",
+    "name": "스페코",
+    "rsi0": 30.91,
+    "rsi1": 29.17,
+    "rsi2": 30.16
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 950.0,
+    "close1": 904.0,
+    "code": "031310.KQ",
+    "market": "KOSDAQ",
+    "name": "아이즈비전",
+    "rsi0": 30.93,
+    "rsi1": 29.35,
+    "rsi2": 30.8
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 1351.0,
+    "close1": 1158.0,
+    "code": "021880.KQ",
+    "market": "KOSDAQ",
+    "name": "메이슨캐피탈",
+    "rsi0": 31.14,
+    "rsi1": 29.18,
+    "rsi2": 33.18
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 12.35,
+    "close1": 11.58,
+    "code": "ACI",
+    "market": "US",
+    "name": "Albertsons Companies Inc.",
+    "rsi0": 31.29,
+    "rsi1": 26.93,
+    "rsi2": 31.09
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 21.03,
+    "close1": 14.86,
+    "code": "SRPT",
+    "market": "US",
+    "name": "Sarepta Therapeutics Inc. Common Stock (",
+    "rsi0": 33.96,
+    "rsi1": 29.09,
+    "rsi2": 30.13
+   },
+   {
+    "bar_date": "2026-08-31",
+    "close0": 9.54,
+    "close1": 9.42,
+    "code": "TU",
+    "market": "US",
+    "name": "Telus Corporation",
+    "rsi0": 29.59,
+    "rsi1": 28.64,
+    "rsi2": 32.01
+   }
+  ],
+  "run_stamp": {
+   "local_tz_utc_offset_hours": 13.0,
+   "run_at_kst": "2026-09-28 06:21:20 KST",
+   "run_at_local": "2026-09-28 10:21:20 "
+  }
+ },
+ "week": {
+  "bar_date": "2026-09-25",
+  "excluded_counts": {
+   "KOSDAQ": {
+    "admin_excluded": 134,
+    "failed": 0,
+    "fetched": 1684,
+    "short": 83,
+    "stale": 0,
+    "universe": 1684
+   },
+   "KOSPI": {
+    "admin_excluded": 38,
+    "failed": 0,
+    "fetched": 793,
+    "short": 5,
+    "stale": 0,
+    "universe": 793
+   },
+   "US": {
+    "admin_excluded": 0,
+    "failed": 16,
+    "fetched": 2104,
+    "short": 72,
+    "stale": 11,
+    "universe": 2120
+   }
+  },
+  "markets": [
+   "KOSPI",
+   "KOSDAQ",
+   "US"
+  ],
+  "rows": [
+   {
+    "bar_date": "2026-09-23",
+    "close0": 1662.0,
+    "close1": 1653.0,
+    "code": "019680.KS",
+    "market": "KOSPI",
+    "name": "대교",
+    "rsi0": 29.44,
+    "rsi1": 29.04,
+    "rsi2": 32.1
+   },
+   {
+    "bar_date": "2026-09-23",
+    "close0": 2735.0,
+    "close1": 2575.0,
+    "code": "145170.KQ",
+    "market": "KOSDAQ",
+    "name": "노브랜드",
+    "rsi0": 34.73,
+    "rsi1": 29.39,
+    "rsi2": 31.17
+   },
+   {
+    "bar_date": "2026-09-23",
+    "close0": 1356.0,
+    "close1": 1316.0,
+    "code": "334970.KQ",
+    "market": "KOSDAQ",
+    "name": "프레스티지바이오로직스",
+    "rsi0": 26.99,
+    "rsi1": 24.96,
+    "rsi2": 32.14
+   },
+   {
+    "bar_date": "2026-09-23",
+    "close0": 17800.0,
+    "close1": 15070.0,
+    "code": "042000.KQ",
+    "market": "KOSDAQ",
+    "name": "카페24",
+    "rsi0": 41.46,
+    "rsi1": 29.65,
+    "rsi2": 30.55
+   },
+   {
+    "bar_date": "2026-09-23",
+    "close0": 1709.0,
+    "close1": 1693.0,
+    "code": "033830.KQ",
+    "market": "KOSDAQ",
+    "name": "티비씨",
+    "rsi0": 29.83,
+    "rsi1": 28.68,
+    "rsi2": 30.36
+   },
+   {
+    "bar_date": "2026-09-23",
+    "close0": 3115.0,
+    "close1": 2990.0,
+    "code": "053450.KQ",
+    "market": "KOSDAQ",
+    "name": "세코닉스",
+    "rsi0": 33.07,
+    "rsi1": 29.69,
+    "rsi2": 30.32
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 35.75,
+    "close1": 35.51,
+    "code": "NKE",
+    "market": "US",
+    "name": "Nike Inc.",
+    "rsi0": 29.55,
+    "rsi1": 28.7,
+    "rsi2": 30.54
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 44.79,
+    "close1": 43.59,
+    "code": "APTV",
+    "market": "US",
+    "name": "Aptiv PLC",
+    "rsi0": 31.39,
+    "rsi1": 28.85,
+    "rsi2": 30.56
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 373.77,
+    "close1": 359.23,
+    "code": "LII",
+    "market": "US",
+    "name": "Lennox International Inc.",
+    "rsi0": 33.62,
+    "rsi1": 29.96,
+    "rsi2": 30.7
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 28.92,
+    "close1": 26.76,
+    "code": "VVV",
+    "market": "US",
+    "name": "Valvoline Inc.",
+    "rsi0": 36.55,
+    "rsi1": 29.08,
+    "rsi2": 35.99
+   }
+  ],
+  "run_stamp": {
+   "local_tz_utc_offset_hours": 13.0,
+   "run_at_kst": "2026-09-28 06:09:33 KST",
+   "run_at_local": "2026-09-28 10:09:33 "
+  }
+ }
+}

@@ -18,13 +18,19 @@ RSI는 scanner.rsi()(Wilder, ewm alpha=1/14) 그대로. 일봉 종가를 주봉(
 
 실행:
   python3 scripts/screens/lowpoint.py --market kr|kospi|kosdaq|us|all --tf week|month
+                                      [--publish]
   (kr = 코스피+코스닥)
 출력: 콘솔 표 + scripts/screens/out/lowpoint_{market}_{tf}_{기준봉날짜}.csv
+--publish: data/lowpoint_latest.json에 이번 실행분을 기록(앱 캘린더 홈 카드가
+읽는 파일). **주봉·월봉은 별도 키라 week 실행이 month 결과를 지우지 않는다**
+(merge_publish) — 파일 전체를 새로 쓰는 게 아니라 tf 칸만 갈아끼운다.
+커밋·push는 하지 않는다(사용자가 직접 지시) — 실행 끝에 다음 할 일만 출력.
 """
 from __future__ import annotations
 
 import argparse
 import io
+import json
 import os
 import sys
 import time
@@ -44,6 +50,10 @@ for _p in (_ROOT, os.path.join(_ROOT, "scripts", "measurements")):
 from scanner import rsi  # noqa: E402  (Wilder RSI — 재구현 금지)
 
 OUT_DIR = os.path.join(_HERE, "out")
+# 앱(app.py `_load_lowpoint_latest()`)이 읽는 게시 파일 — Railway 볼륨(/data)이
+# 아니라 **레포 안의 data/ 디렉터리**다(git으로 배포된다). 계산은 이 맥 로컬
+# 스크립트만 하고 앱은 표시만 한다.
+PUBLISH_PATH = os.path.join(_ROOT, "data", "lowpoint_latest.json")
 
 RSI_PERIOD = 14
 RSI_LEVEL = 30.0
@@ -134,6 +144,66 @@ def evaluate(close: pd.Series, tf: str, market: str, now: datetime) -> dict:
     return {"status": "hit" if hit else "no", "label": bars.index[-1],
             "bar_date": bars["bar_date"].iloc[-1], "c0": c0, "c1": c1,
             "r2": r2, "r1": r1, "r0": r0}
+
+
+# ── 게시(--publish) ────────────────────────────────────────────────────
+
+def publish_entry(results: list, tf: str, labels: dict, stamp: dict) -> dict:
+    """이번 실행분 한 칸(tf) 페이로드. 앱은 이 dict를 그대로 표시만 한다."""
+    rows = []
+    for res in results:
+        for r in res["rows"]:
+            rows.append({
+                "market": r["시장"], "code": r["코드"], "name": r["종목명"],
+                "bar_date": r["기준봉날짜"],       # 구간 내 실제 마지막 거래일
+                "close0": r["0봉종가"], "close1": r["1봉종가"],
+                "rsi2": r["RSI[2]"], "rsi1": r["RSI[1]"], "rsi0": r["RSI[0]"],
+            })
+    excluded = {res["market"].upper(): {
+        "universe": res["universe"], "fetched": res["fetched"],
+        "failed": len(res["failed"]), "stale": len(res["stale"]),
+        "short": len(res["short"]),
+        "admin_excluded": len((res["meta"] or {}).get("admin_excluded") or {}),
+    } for res in results}
+    return {
+        # 봉 구간 라벨(주봉=금요일, 월봉=말일) — 낡음 판정은 앱이 이 값으로 한다
+        # (`_lowpoint_expected_label()`). 행마다 있는 bar_date(실제 마지막
+        # 거래일)와 다른 값이므로 섞지 말 것.
+        "bar_date": str(max(labels.values()).date()),
+        "run_stamp": stamp,
+        "markets": [res["market"].upper() for res in results],
+        "rows": rows,
+        "excluded_counts": excluded,
+    }
+
+
+def merge_publish(existing: dict | None, tf: str, entry: dict) -> dict:
+    """기존 파일 내용에 tf 칸만 갈아끼운다 — 다른 tf는 그대로 보존한다.
+    (week 실행이 month 결과를 지우면 안 된다 — 사용자 지시.
+    test_lowpoint_publish.py가 사보타주로 이 병합을 검사한다.)"""
+    out = dict(existing or {})
+    out[tf] = entry
+    return out
+
+
+def write_publish(tf: str, entry: dict, path: str = PUBLISH_PATH) -> dict:
+    existing = None
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                loaded = json.load(f)
+            existing = loaded if isinstance(loaded, dict) else None
+        except (ValueError, OSError) as e:
+            # 조용히 덮어쓰면 다른 tf 결과가 사라진다 — 실패로 만든다.
+            raise RuntimeError(f"{path} 읽기 실패({e}) — 병합 불가, 수동 확인 필요")
+    merged = merge_publish(existing, tf, entry)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(merged, f, ensure_ascii=False, indent=1, sort_keys=True)
+        f.write("\n")
+    os.replace(tmp, path)
+    return merged
 
 
 # ── 유니버스 ───────────────────────────────────────────────────────────
@@ -277,6 +347,9 @@ def main(argv=None):
     ap.add_argument("--market", choices=["kr", "kospi", "kosdaq", "us", "all"], required=True,
                     help="kr = kospi+kosdaq, all = kospi+kosdaq+us")
     ap.add_argument("--tf", choices=["week", "month"], required=True)
+    ap.add_argument("--publish", action="store_true",
+                    help="data/lowpoint_latest.json에 이번 실행분 기록(앱 캘린더 카드용). "
+                         "다른 tf 결과는 보존된다. 커밋·push는 안 함.")
     args = ap.parse_args(argv)
 
     import harness
@@ -317,6 +390,15 @@ def main(argv=None):
     path = os.path.join(OUT_DIR, f"lowpoint_{args.market}_{args.tf}_{base_label}.csv")
     df.to_csv(path, index=False, encoding="utf-8-sig")
     print(f"\nCSV: {os.path.relpath(path, _ROOT)}")
+
+    if args.publish:
+        entry = publish_entry(results, args.tf, labels, stamp)
+        write_publish(args.tf, entry)
+        rel = os.path.relpath(PUBLISH_PATH, _ROOT)
+        print(f"게시: {rel} ({args.tf} 칸 갱신, 신호 {len(entry['rows'])}건, "
+              f"기준봉 {entry['bar_date']})")
+        print(f"다음 할 일: git add {rel} && git commit -m \"data: lowpoint {args.tf} "
+              f"{entry['bar_date']}\" 후 push (커밋·push는 지시 후 실행)")
 
     # 조용한 누락 금지 — 제외/실패 전부 목록으로
     for res in results:

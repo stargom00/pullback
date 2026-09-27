@@ -589,7 +589,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.292</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.293</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -5701,6 +5701,75 @@ function renderSectorFlowHtml(sf) {
   </div>`;
 }
 
+// ── 📉 저점종목(주간·월간 RSI 하향돌파) — v5.293(사용자 지시) ──────────
+// 계산은 맥 로컬 스크립트(scripts/screens/lowpoint.py --publish)가 하고 앱은
+// 표시만 한다. 서버(/api/calendar lowpoint)가 낡음(stale) 판정까지 끝내서
+// 보내므로 여기서 날짜 계산을 다시 하지 않는다(판단은 서버, 프론트는 렌더 —
+// v5.232와 같은 원칙). 측정 전 신호라 카드 제목에 "관심 신호 · 측정 전"을
+// 박아둔다(승률 주장 금지 원칙).
+const _LOWPOINT_TF_META = {
+  week:  {label: '주봉', interval: '1W', missingText: '이번 주 미실행',
+          emptyText: '이번 주 신호 없음', staleText: '⚠ 이번 주 미실행'},
+  month: {label: '월봉', interval: '1M', missingText: '이번 달 미실행',
+          emptyText: '이번 달 신호 없음', staleText: '⚠ 이번 달 미실행'},
+};
+// 판정 전용 순수 함수 — test_lowpoint_card.py가 이 함수 텍스트를 추출해
+// node로 **그대로 실행**한다(CLAUDE.md 레시피, 파이썬 재구현 금지).
+// state: 'missing'(파일/칸 없음 = 아직 안 돌렸다) · 'empty'(돌렸고 0건) ·
+// 'rows'(신호 있음) — missing과 empty를 절대 합치지 말 것(둘의 의미가 다르다).
+function lowpointSectionStatus(entry, tf) {
+  const meta = _LOWPOINT_TF_META[tf];
+  if (!entry) return {state: 'missing', text: meta.missingText, stale: false,
+                      staleText: '', barDate: null, count: 0};
+  const rows = entry.rows || [];
+  const stale = !!entry.stale;
+  return {state: rows.length ? 'rows' : 'empty',
+          text: rows.length ? '' : meta.emptyText,
+          stale: stale, staleText: stale ? meta.staleText : '',
+          barDate: entry.bar_date || null, count: rows.length};
+}
+function _lowpointRowHtml(r, meta) {
+  const name = r.name || r.code || '';
+  const rsi = [r.rsi2, r.rsi1, r.rsi0].map(v => v == null ? '-' : v).join('→');
+  const close = r.close0 == null ? '-' : Number(r.close0).toLocaleString('ko-KR');
+  return `<div style="display:flex;gap:8px;align-items:baseline;font-size:12px;padding:2px 0">
+    <span style="flex:0 0 52px;color:var(--muted)">${r.market || ''}</span>
+    <a class="name-link" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+       href="${tvUrl(r.code, r.market === 'US' ? 'US' : 'KR', meta.interval)}" target="_blank" rel="noopener"
+       title="트레이딩뷰 ${meta.label} 차트 열기">${name}</a>
+    <span style="flex:0 0 108px;color:var(--rs)" title="RSI(14) 2봉전→1봉전→0봉">${rsi}</span>
+    <span style="flex:0 0 86px;text-align:right" title="0봉 종가">${close}</span>
+  </div>`;
+}
+function _lowpointSectionHtml(lp, tf) {
+  const meta = _LOWPOINT_TF_META[tf];
+  const entry = lp && lp[tf];
+  const st = lowpointSectionStatus(entry, tf);
+  const staleBadge = st.staleText
+    ? ` <span class="badge" style="background:#3a2020;color:#ff9b9b" title="기준봉 ${st.barDate || '없음'} · 기대 ${(lp && lp.expected && lp.expected[tf]) || '?'} — 로컬 스크립트를 다시 돌려야 해요">${st.staleText}</span>` : '';
+  const head = st.state === 'missing'
+    ? `<b>${meta.label}</b> <span style="color:var(--muted)">· ${st.text}</span>`
+    : `<b>${meta.label}</b> <span style="color:var(--muted)">· 기준봉 ${st.barDate || '?'}</span>${staleBadge}`;
+  const body = st.state === 'rows'
+    ? (entry.rows || []).map(r => _lowpointRowHtml(r, meta)).join('')
+    : `<div style="font-size:12px;color:var(--muted);padding:2px 0">${st.text}</div>`;
+  const ranAt = (entry && entry.run_stamp && entry.run_stamp.run_at_kst) || null;
+  const foot = ranAt ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">실행 ${ranAt}</div>` : '';
+  return `<div style="margin-top:8px">
+    <div style="font-size:12px;margin-bottom:2px">${head}</div>
+    ${body}${foot}
+  </div>`;
+}
+// lp가 null(파일 자체 없음)이어도 **카드를 숨기지 않는다** — "미실행"이
+// 보여야 안 돌린 걸 알 수 있다(조용한 누락 금지).
+function renderLowpointHtml(lp) {
+  return `<div style="margin-top:14px">
+    <div class="mf-toolbar"><b>📉 저점종목</b> <span style="font-size:11px;color:var(--muted)">(관심 신호 · 측정 전)</span></div>
+    ${_lowpointSectionHtml(lp, 'week')}
+    ${_lowpointSectionHtml(lp, 'month')}
+  </div>`;
+}
+
 function renderCalendar(data) {
   const docStrip = document.getElementById('calendarDocStrip');
   const docTop = document.getElementById('calendarDocTop');
@@ -5750,6 +5819,7 @@ function renderCalendar(data) {
   // 반환 — 🔴(2번)와 🔎 후보(3번)를 독립 섹션으로 배치하기 위함.
   const td = renderTodayDecisionHtml(data.today_decision, data.sector_flow, data.immediate_pipeline_health);
   const sectorFlowHtml = renderSectorFlowHtml(data.sector_flow);
+  const lowpointHtml = renderLowpointHtml(data.lowpoint);
 
   // v5.217(사용자 지시 — [B] 상단 고정 스트립): 한 줄, 스크롤 안 됨
   // (position:sticky) — 게이트/포지션/📌도달/🔴 요약, 클릭하면 게이트
@@ -5806,6 +5876,7 @@ function renderCalendar(data) {
     ${td.immediateHtml}
     ${td.candidateHtml}
     ${sectorFlowHtml}
+    ${lowpointHtml}
   `;
 
   // ── 📅 D+14 일정(6번) — 이벤트 통합: 매크로 + 휴장일 + 실적 → 날짜별로 묶어서 하루씩 표시 ──
@@ -6664,15 +6735,19 @@ const TV_LAYOUT_ID = "0zrxNaq0";
 // 트레이딩뷰 URL을 만드는 **유일한** 자리 — tvUrl(티커용)과 지수 링크(심볼 직접)
 // 둘 다 이걸 거친다. 사본을 만들면 레이아웃이 한쪽에만 붙는다(v5.254에서 실제로
 // 지수 링크가 그 상태였고 테스트가 잡아냈다).
-function tvSymbolUrl(symbol) {
+// interval(선택): 트레이딩뷰 봉 주기 파라미터('1W' 주봉 · '1M' 월봉 등).
+// v5.293에서 추가 — 저점종목 카드(주봉/월봉 스크린)는 그 주기로 열려야
+// 의미가 있다. 안 넘기면 기존과 완전히 같은 URL(레이아웃 기본 주기).
+function tvSymbolUrl(symbol, interval) {
   const base = TV_LAYOUT_ID
     ? `https://www.tradingview.com/chart/${TV_LAYOUT_ID}/`
     : 'https://www.tradingview.com/chart/';
-  return `${base}?symbol=${encodeURIComponent(symbol)}`;
+  const iv = interval ? `&interval=${encodeURIComponent(interval)}` : '';
+  return `${base}?symbol=${encodeURIComponent(symbol)}${iv}`;
 }
 // 트레이딩뷰 차트 URL — 한국주는 KRX, 미국주는 거래소 자동판별 대신 심볼만
 // (링크 생성은 이 함수 한 곳뿐 — 사본을 만들지 말 것)
-function tvUrl(tickerOrObj, market) {
+function tvUrl(tickerOrObj, market, interval) {
   // 카드는 객체(s)를, 일지는 (ticker, market)을 넘김 — 둘 다 처리
   let ticker = tickerOrObj;
   if (tickerOrObj && typeof tickerOrObj === 'object') {
@@ -6683,10 +6758,10 @@ function tvUrl(tickerOrObj, market) {
   ticker = String(ticker).toUpperCase();
   if (market === 'kr' || market === 'KR' || /\.(KS|KQ)$/.test(ticker)) {
     const code = ticker.replace(/\.(KS|KQ)$/, '');
-    return tvSymbolUrl(`KRX:${code}`);
+    return tvSymbolUrl(`KRX:${code}`, interval);
   }
   // 미국주: 거래소 접두어 없이 심볼만 줘도 트레이딩뷰가 자동 해석
-  return tvSymbolUrl(ticker.replace(/\./g, ''));
+  return tvSymbolUrl(ticker.replace(/\./g, ''), interval);
 }
 
 // v5.44: 가격 추적 대상 판정 — 기존(진입가 있는 진입/대기/추적종목) OR
