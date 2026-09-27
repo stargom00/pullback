@@ -210,3 +210,10 @@ def test_kr_confirm_time_matches_app():
     m = re.search(r"^KR_CLOSE_CONFIRMED_HM\s*=\s*(\d+)\s*\*\s*60\s*\+\s*(\d+)", src, re.M)
     assert m, "app.py KR_CLOSE_CONFIRMED_HM 정의를 못 찾음"
     assert lp.KR_CLOSE_CONFIRMED_HM == int(m.group(1)) * 60 + int(m.group(2))
+
+
+def test_kr_boards_use_kr_close_clock():
+    # 코스닥도 KST 20:10 확정 시각을 써야 한다(US 시계로 새면 금요일 봉이 일찍 마감 처리됨)
+    assert lp.clock_of("kospi") == lp.clock_of("kosdaq") == "kr"
+    assert lp.clock_of("us") == "us"
+    assert {b[2] for b in lp.KR_BOARDS.values()} == {".KS", ".KQ"}

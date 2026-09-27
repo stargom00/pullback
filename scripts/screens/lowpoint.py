@@ -17,7 +17,8 @@ RSI는 scanner.rsi()(Wilder, ewm alpha=1/14) 그대로. 일봉 종가를 주봉(
 세션이 없으니 결과는 같다).
 
 실행:
-  python3 scripts/screens/lowpoint.py --market kr|us|all --tf week|month
+  python3 scripts/screens/lowpoint.py --market kr|kospi|kosdaq|us|all --tf week|month
+  (kr = 코스피+코스닥)
 출력: 콘솔 표 + scripts/screens/out/lowpoint_{market}_{tf}_{기준봉날짜}.csv
 """
 from __future__ import annotations
@@ -141,36 +142,49 @@ def _read_kind_table(text: str) -> pd.DataFrame:
     return pd.read_html(io.StringIO(text), converters={"종목코드": str})[0]
 
 
-def kr_universe() -> tuple[dict, dict]:
-    """KIND corpList 코스피 상장법인(회사 단위 → 보통주 대표코드) −
-    KIND adminissue 코스피 관리종목 스냅샷. 반환: ({ticker: name}, meta)."""
+# 보드별 KIND 파라미터: (corpList marketType, adminissue marketType, 티커 접미사, 최소 건수)
+# 최소 건수는 소스 개편으로 조용히 빈 결과가 오는 것을 실패로 만들기 위한 하한
+# (2026-09-27 실측 KOSPI 831·KOSDAQ 1818 고유코드의 대략 60%, AI 판단 어림값).
+KR_BOARDS = {
+    "kospi": ("stockMkt", "1", ".KS", 500),
+    "kosdaq": ("kosdaqMkt", "2", ".KQ", 1000),
+}
+_KIND_EMPTY = "조회된 결과값이 없습니다."
+
+
+def kr_universe(board: str = "kospi") -> tuple[dict, dict]:
+    """KIND corpList 상장법인(회사 단위 → 보통주 대표코드) − KIND adminissue
+    같은 시장 관리종목 스냅샷. board: 'kospi' | 'kosdaq'.
+    반환: ({ticker: name}, meta)."""
     import requests
-    r = requests.get(KIND_CORPLIST_URL, params={"method": "download", "marketType": "stockMkt"},
+    corp_mt, admin_mt, suffix, min_n = KR_BOARDS[board]
+    r = requests.get(KIND_CORPLIST_URL, params={"method": "download", "marketType": corp_mt},
                      headers=_KIND_HEADERS, timeout=30)
     r.raise_for_status()
     r.encoding = "euc-kr"
     corp = _read_kind_table(r.text)
     corp["종목코드"] = corp["종목코드"].str.strip().str.zfill(6)
-    uni = {f"{c}.KS": n for c, n in zip(corp["종목코드"], corp["회사명"])}
-    if len(uni) < 500:
-        raise RuntimeError(f"KIND corpList 코스피 {len(uni)}건 — 비정상(소스 개편 의심)")
+    uni = {f"{c}{suffix}": n for c, n in zip(corp["종목코드"], corp["회사명"])}
+    if len(uni) < min_n:
+        raise RuntimeError(f"KIND corpList {board} {len(uni)}건 — 비정상(소스 개편 의심)")
 
-    r = requests.post(KIND_ADMIN_URL, data={"method": "searchAdminIssueSub", "marketType": "1",
+    r = requests.post(KIND_ADMIN_URL, data={"method": "searchAdminIssueSub", "marketType": admin_mt,
                                             "currentPageSize": "3000", "pageIndex": "1",
                                             "forward": "adminissue_down"},
                       headers=_KIND_HEADERS, timeout=30)
     r.raise_for_status()
     r.encoding = "euc-kr"
     adm = _read_kind_table(r.text)
+    adm = adm[adm["종목코드"].str.strip() != _KIND_EMPTY]  # 0건이면 안내문 1행이 온다
     adm["종목코드"] = adm["종목코드"].str.strip().str.zfill(6)
     if adm.empty:
-        raise RuntimeError("KIND adminissue 코스피 관리종목 0건 — 비정상(소스 개편 의심)")
-    admin = {f"{c}.KS": n for c, n in zip(adm["종목코드"], adm["종목명"])}
+        raise RuntimeError(f"KIND adminissue {board} 관리종목 0건 — 비정상(소스 개편 의심)")
+    admin = {f"{c}{suffix}": n for c, n in zip(adm["종목코드"], adm["종목명"])}
     excluded = {t: admin[t] for t in admin if t in uni}
     for t in excluded:
         uni.pop(t)
-    return uni, {"kind_kospi": len(uni) + len(excluded), "admin_snapshot": len(admin),
-                 "admin_excluded": excluded}
+    return uni, {"kind_total": len(uni) + len(excluded), "kind_rows": len(corp),
+                 "admin_snapshot": len(admin), "admin_excluded": excluded}
 
 
 def us_universe() -> dict:
@@ -214,14 +228,21 @@ def fetch_us(tickers: list, tf: str, batch: int = 100) -> tuple[dict, list]:
 
 # ── 실행 ───────────────────────────────────────────────────────────────
 
+_MKT_ORDER = {"KOSPI": 0, "KOSDAQ": 1, "US": 2}
 COLS = ["시장", "코드", "종목명", "기준봉날짜", "0봉종가", "1봉종가", "RSI[2]", "RSI[1]", "RSI[0]"]
 
 
+def clock_of(market: str) -> str:
+    """마감 시각 판정용 시장: kospi/kosdaq → 'kr'."""
+    return "kr" if market in KR_BOARDS or market == "kr" else "us"
+
+
 def screen_market(market: str, tf: str, now: datetime) -> dict:
+    """market: 'kospi' | 'kosdaq' | 'us'."""
     t0 = time.time()
     meta = {}
-    if market == "kr":
-        uni, meta = kr_universe()
+    if market in KR_BOARDS:
+        uni, meta = kr_universe(market)
         data, failed = fetch_kr(list(uni), tf)
     else:
         uni = us_universe()
@@ -236,7 +257,7 @@ def screen_market(market: str, tf: str, now: datetime) -> dict:
     for t, c in data.items():
         if t in stale:
             continue
-        res = evaluate(c, tf, market, now)
+        res = evaluate(c, tf, clock_of(market), now)
         if res["status"] == "short":
             short[t] = res["n_bars"]
             continue
@@ -253,15 +274,16 @@ def screen_market(market: str, tf: str, now: datetime) -> dict:
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="저점종목 주간·월간 후보 스크린")
-    ap.add_argument("--market", choices=["kr", "us", "all"], required=True)
+    ap.add_argument("--market", choices=["kr", "kospi", "kosdaq", "us", "all"], required=True,
+                    help="kr = kospi+kosdaq, all = kospi+kosdaq+us")
     ap.add_argument("--tf", choices=["week", "month"], required=True)
     args = ap.parse_args(argv)
 
     import harness
     now = datetime.now().astimezone()
     stamp = harness.run_stamp()
-    markets = ["kr", "us"] if args.market == "all" else [args.market]
-    labels = {m: last_closed_label(args.tf, m, now) for m in markets}
+    markets = {"kr": ["kospi", "kosdaq"], "all": ["kospi", "kosdaq", "us"]}.get(args.market, [args.market])
+    labels = {m: last_closed_label(args.tf, clock_of(m), now) for m in markets}
 
     tf_ko = "주봉" if args.tf == "week" else "월봉"
     print(f"=== 저점종목 스크린 ({tf_ko}) ===")
@@ -280,12 +302,12 @@ def main(argv=None):
               f"신호 {len(res['rows'])} ({res['elapsed']:.0f}s)")
         if res["meta"]:
             ex = res["meta"]["admin_excluded"]
-            print(f"   KIND 코스피 {res['meta']['kind_kospi']}, 관리종목 스냅샷 {res['meta']['admin_snapshot']}건 "
-                  f"중 {len(ex)}건 제외")
+            print(f"   KIND {m} {res['meta']['kind_total']}종목(원본 {res['meta']['kind_rows']}행, 중복 병합), "
+                  f"관리종목 스냅샷 {res['meta']['admin_snapshot']}건 중 {len(ex)}건 제외")
         print(f"   직전 거래일(일봉 최빈값) = {res['session'].date() if res['session'] is not None else None}")
         all_rows.extend(res["rows"])
 
-    df = pd.DataFrame(all_rows, columns=COLS).sort_values(["시장", "RSI[1]"]) if all_rows \
+    df = pd.DataFrame(all_rows, columns=COLS).sort_values(["시장", "RSI[1]"], key=lambda col: col.map(_MKT_ORDER) if col.name == "시장" else col) if all_rows \
         else pd.DataFrame(columns=COLS)
     print()
     print(df.to_string(index=False) if len(df) else "(신호 없음)")
