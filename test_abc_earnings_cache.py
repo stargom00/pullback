@@ -51,7 +51,12 @@ def _fake_cands(n_per_stage=12):
 
 
 def test_cap_is_applied_after_priority_sort(monkeypatch):
-    """상한이 정렬 후에 걸리는가 — 조회된 티커의 단계 분포로 확인한다."""
+    """상한이 정렬 후에 걸리는가 — 조회된 티커의 단계 분포로 확인한다.
+
+    v5.292: **🩷강돌파는 상한을 우회**하므로(사용자 지시) 강돌파 12건은 전건
+    조회되고 상한 24는 **나머지**에만 걸린다. 즉 조회 = 강돌파 12 + 나머지 24.
+    강돌파 우회 자체는 `test_abc_grade_v4.py`가 따로 강제한다.
+    """
     cands = _fake_cands()
     asked = []
 
@@ -63,13 +68,16 @@ def test_cap_is_applied_after_priority_sort(monkeypatch):
     monkeypatch.setattr(app, "_ABC_EARNINGS_CACHE", {})
     monkeypatch.setattr(app, "_ABC_EARNINGS_MAX", 24)   # 60건 중 24건만
     fin = asyncio.run(_run_fill(cands))
-    assert len(asked) == 24, f"상한만큼 정확히 조회해야 함(off-by-N): {len(asked)}"
     stages = {t: s["c_stage"] for t, s in cands}
-    got = {stages[t] for t in asked}
-    # 상한 24 = 진돌이 12 + 벽앞 12 → 이 둘만 조회돼야 한다
-    assert got == {abc_screener.STAGE_STRONG, abc_screener.STAGE_WALL}, (
-        f"정렬 전 순서로 잘렸다: {got}")
-    assert len(fin) == 24
+    n_strong = sum(1 for t in asked if stages[t] == abc_screener.STAGE_STRONG)
+    assert n_strong == 12, f"강돌파가 상한에 잘렸다(v5.292 위반): {n_strong}/12"
+    assert len(asked) == 12 + 24, f"나머지 상한이 안 맞다: {len(asked)}"
+    # 나머지 24건은 **우선순위 순**(벽앞 12 → 약돌파 12)으로 채워져야 한다 —
+    # 정렬 전 순서로 잘리면 이탈·대기가 섞인다.
+    rest = {stages[t] for t in asked if stages[t] != abc_screener.STAGE_STRONG}
+    assert rest == {abc_screener.STAGE_WALL, abc_screener.STAGE_WEAK}, (
+        f"정렬 전 순서로 잘렸다: {rest}")
+    assert len(fin) == 36
 
 
 def test_capped_count_is_measured(monkeypatch):
@@ -79,8 +87,9 @@ def test_capped_count_is_measured(monkeypatch):
     monkeypatch.setattr(app, "_ABC_EARNINGS_CACHE", {})
     monkeypatch.setattr(app, "_ABC_EARNINGS_MAX", 24)
     asyncio.run(_run_fill(cands))
-    assert app._abc_earnings_source["capped"] == 60 - 24
-    assert app._abc_earnings_source["ok"] == 24
+    # v5.292: capped는 **비강돌파 몫만** 센다(강돌파 12는 상한 밖에서 전건 조회)
+    assert app._abc_earnings_source["capped"] == (60 - 12) - 24
+    assert app._abc_earnings_source["ok"] == 36
     assert app._abc_earnings_source["source"] == "mobile_api"
 
 
@@ -96,12 +105,13 @@ def test_cache_is_reused_across_calls(monkeypatch):
     monkeypatch.setattr(app, "_ABC_EARNINGS_MAX", 8)
     asyncio.run(_run_fill(cands))
     first = len(calls)
-    assert first == 8
+    # v5.292: 강돌파 4건은 상한 밖에서 전건 + 나머지 상한 8건 = 12
+    assert first == 4 + 8, first
     asyncio.run(_run_fill(cands))          # 두 번째 로드
-    assert len(calls) == first + 8, "캐시된 8건은 재조회하지 않고 새 8건을 채워야 함"
-    assert app._abc_earnings_source["cached"] == 8
-    # 커버리지가 누적된다 — 이게 캐시를 넣은 이유다
-    assert len(app._ABC_EARNINGS_CACHE) == 16
+    assert len(calls) == first + 8, "캐시된 12건은 재조회하지 않고 새 8건을 채워야 함"
+    assert app._abc_earnings_source["cached"] == 12
+    # 커버리지가 누적된다 — 이게 캐시를 넣은 이유다(20건 전부 채워짐)
+    assert len(app._ABC_EARNINGS_CACHE) == 20
 
 
 def test_cache_expires_after_ttl(monkeypatch):
@@ -190,6 +200,8 @@ async def _run_fill(cands):
     end = src.index("    _FLOW_STAGES = {")
     block = textwrap.dedent(src[begin:end])
     ns = {"asyncio": asyncio, "time": time, "cands": cands,
+          # v5.292: 블록이 `abc_screener.STAGE_STRONG`을 참조한다(강돌파 상한 우회)
+          "abc_screener": abc_screener,
           "_ABC_STAGE_PRIORITY": app._ABC_STAGE_PRIORITY,
           "_abc_earnings_peek": app._abc_earnings_peek,
           "_ABC_EARNINGS_CACHE": app._ABC_EARNINGS_CACHE,

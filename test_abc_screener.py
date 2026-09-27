@@ -251,24 +251,40 @@ def test_company_axis_ignores_market_cap():
     assert "mcap" not in src and "시총" in src, "시총 제외 근거 주석이 없다"
 
 
-def _g(b_ok, stage, comp_ok, turnover_fail=False, verdict="ABC"):
+def _g(b_ok, stage, comp_ok, turnover_fail=False, verdict="ABC", fin_unknown=False):
+    # v5.292: 실제 `company_axis()`가 내보내는 `fin_unknown`을 같이 넘긴다.
+    # 빠뜨리면 `.get()`이 None이라 보류 가드가 안 걸려 테스트가 무엄하게 통과한다.
     return A.grade({"verdict": verdict, "b": {"ok": b_ok}, "c_stage": stage},
-                   {"ok": comp_ok, "turnover_fail": turnover_fail})
+                   {"ok": comp_ok, "turnover_fail": turnover_fail,
+                    "fin_unknown": fin_unknown})
 
 
 def test_grade_matrix_is_three_tiers():
-    """사용자 확정 매트릭스. v5.291: **A급 후보는 🩷강돌파 하나뿐** —
-    벽앞은 차트·기업이 다 좋아도 최대 B급이다(사용자 지시)."""
-    assert _g(True, A.STAGE_STRONG, True) == "A급"      # 강돌파 & 차트·기업 전부
-    assert _g(True, A.STAGE_WALL, True) == "B급"        # ← v5.272엔 A급이었다
-    assert _g(True, A.STAGE_WEAK, True) == "B급"
-    assert _g(True, A.STAGE_WAIT, True) == "B급"
-    assert _g(True, A.STAGE_STRONG, False) == "B급"     # 강돌파 & 기업 감점
-    assert _g(False, A.STAGE_STRONG, True) == "B급"     # 기업 충족 & B 미달
-    assert _g(True, A.STAGE_STRONG, True, turnover_fail=True) == "C급"
-    assert _g(True, A.STAGE_EXIT, True) == "C급"
+    """v5.292(사용자 지시, 안4′): **`b.ok`가 등급에서 완전히 빠졌다.**
+    A급 = 🩷강돌파 & 기업축 & 거래대금 범위. b.ok는 화면 참고 칸 전용.
+
+    v5.291과 달라지는 칸 두 개를 명시해 둔다(설계 변경의 결과지 회귀가 아니다):
+      · 강돌파 & 기업 감점 → v5.291 B급(b.ok가 건져줬다) / v5.292 **C급**
+      · 벽앞 & B 미달 & 기업축 통과 → 양쪽 다 B급(이제 b.ok와 무관)
+    """
+    assert _g(True, A.STAGE_STRONG, True) == A.GRADE_A
+    assert _g(False, A.STAGE_STRONG, True) == A.GRADE_A, "b.ok가 A급을 막는다"
+    assert _g(True, A.STAGE_STRONG, False) == A.GRADE_C   # ← v5.291엔 B급
+    assert _g(True, A.STAGE_WALL, True) == A.GRADE_B
+    assert _g(False, A.STAGE_WALL, True) == A.GRADE_B
+    assert _g(True, A.STAGE_WALL, False) == A.GRADE_C
+    assert _g(True, A.STAGE_STRONG, True, turnover_fail=True) == A.GRADE_C
+    assert _g(True, A.STAGE_EXIT, True) == A.GRADE_C
     assert _g(True, A.STAGE_STRONG, True, verdict="다른 셋업") is None
     assert _g(True, A.STAGE_STRONG, True, verdict="ABC 아님") is None
+
+
+def test_b_ok_no_longer_changes_any_grade():
+    """매트릭스 전수에서 b.ok True/False 결과가 같아야 한다."""
+    for stage in A.C_STAGES:
+        for ok in (True, False):
+            for tf in (True, False):
+                assert _g(True, stage, ok, tf) == _g(False, stage, ok, tf), (stage, ok, tf)
 
 
 def test_obsolete_labels_are_gone():
@@ -295,7 +311,7 @@ def test_spec_gap_both_failing_lands_in_c():
 
 def test_grade_never_returns_an_unknown_label():
     """등급 문자열이 늘어나면 화면 색 테이블·필터 칩이 조용히 어긋난다."""
-    allowed = {"A급", "B급", "C급", None}
+    allowed = set(A.GRADES) | {None}
     for b in (True, False):
         for stage in A.C_STAGES + (None,):
             for ok in (True, False):

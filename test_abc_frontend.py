@@ -144,11 +144,16 @@ def test_grade_and_stage_combine():
 def test_grade_chips_and_colors_cover_exactly_the_three_tiers():
     """칩·색 테이블이 등급 집합과 어긋나면 **해당 등급이 화면에서 사라진다**
     (색 테이블에 없으면 회색, 칩에 없으면 걸러낼 방법이 없다)."""
-    import ast
     i = TEXT.index("const _ABC_GRADE_COLOR")
-    table = TEXT[i:TEXT.index("\n", i)]
-    for g in ("A급", "B급", "C급"):
+    # v5.292: 등급이 4개가 되며 테이블이 두 줄로 나뉘었다 — 줄 끝이 아니라
+    # **선언 끝(`;`)까지** 잘라야 한다(한 줄 가정은 조용히 B급을 놓쳤다).
+    table = TEXT[i:TEXT.index(";", i)]
+    import abc_screener as _A
+    for g in _A.GRADES:
         assert f"'{g}'" in table, f"{g} 색이 없다: {table}"
+    # 필터 칩은 A/B/C 셋만 — `A급 보류`는 칩이 없어 "전체"에서만 보인다
+    # (v5.292: 보류는 등급이 아니라 "아직 모른다"라 필터 축으로 안 뺐다).
+    for g in ("A급", "B급", "C급"):
         assert f"setAbcGrade('{g}')" in TEXT, f"{g} 필터 칩이 없다"
     assert "A급 근접" not in TEXT, "삭제된 라벨이 남아 있다"
     assert "단타만" not in TEXT and "trading_only" not in TEXT

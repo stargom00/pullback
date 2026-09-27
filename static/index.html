@@ -589,7 +589,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.291</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.292</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3116,7 +3116,12 @@ function _abcStageLabel() {
   return 'MA' + ((h && h.stage_ma_period) || 200);
 }
 
-const _ABC_GRADE_COLOR = { 'A급': '#4ADE80', 'B급': '#FACC15', 'C급': 'var(--muted)' };
+// v5.292: `A급 보류` 추가 — 🩷강돌파 + 기업축 통과인데 **기업축 판정에 쓸 실적이
+// 없어** 그 통과를 신뢰할 수 없는 상태. A급(초록)도 B급(노랑)도 아닌 "아직 모른다"라
+// 점선 테두리 + 흐린 초록으로 둔다. 색 테이블에 없으면 회색으로 떨어져 C급과
+// 구분이 안 된다.
+const _ABC_GRADE_COLOR = { 'A급': '#4ADE80', 'A급 보류': '#7FB88A',
+                           'B급': '#FACC15', 'C급': 'var(--muted)' };
 
 // 매출·EPS 한 칸. **"판정 불가"를 "미달"로 보이게 하면 안 된다** — naver 모바일이
 // 분기를 6개만 줘서 최근 4분기 YoY를 못 채우는 경우가 흔하고, 서버도 그럴 땐
@@ -3179,6 +3184,19 @@ function abcGateBreakHtml(h) {
     + '</span>';
 }
 
+// v5.292: 등급 셀 툴팁. `A급 보류`는 **왜 보류인지**를 반드시 말해야 한다 —
+// "실적 미조회(조회 상한)"와 "실적 데이터 없음(조회했으나 없음)"은 대응이 다르다
+// (전자는 다시 열면 캐시로 채워지고, 후자는 종목 자체가 판정 불가다). 그 구분은
+// 서버가 주는 `fin_reason`이 유지한다(v5.291 배지와 같은 출처).
+// status·fin_reason만 보고 정하는 순수 함수 — DOM/전역상태에 안 기댄다.
+function gradeTitle(h, fails) {
+  if (h.grade === 'A급 보류') {
+    return 'A급 보류 — 🩷강돌파·기업 축은 통과했지만 매출·EPS를 못 봐서 A급을 보류합니다. '
+      + '사유: ' + (h.fin_reason || '미조회') + ' (상단 실적 배지 참고)';
+  }
+  return fails ? '기업 축 미달: ' + fails : '기업 축 통과';
+}
+
 function abcRowHtml(h) {
   const gcol = _ABC_GRADE_COLOR[h.grade] || 'var(--muted)';
   const stage = h.c_stage || '—';
@@ -3193,8 +3211,8 @@ function abcRowHtml(h) {
   const fails = (h.company_fails || []).join(' · ');
   return `<tr>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);white-space:nowrap">${name} ${star}${abcFlowHtml(h)}</td>
-    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;color:${gcol};font-size:11px"
-        title="${fails ? '기업 축 미달: ' + fails : '기업 축 통과'}">${h.grade}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;color:${gcol};font-size:11px${h.grade === 'A급 보류' ? ';border:1px dashed #7FB88A' : ''}"
+        title="${gradeTitle(h, fails)}">${h.grade}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;font-size:11px">${stage}${_abcBadges(h)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;white-space:nowrap">${abcGateBreakHtml(h)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right;border-left:2px solid ${ABC_MA_COLOR}">${_abcMaPct(h.gate_pct)}</td>

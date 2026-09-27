@@ -112,6 +112,18 @@ STAGE_EXIT = "이탈"            # MA600 +exit_min 이상 — C급 강등
 # 화면·정렬·우선순위가 쓰는 정렬된 순서(= 사용자 지시 우선순위).
 C_STAGES = (STAGE_STRONG, STAGE_WALL, STAGE_WEAK, STAGE_WAIT, STAGE_EXIT)
 
+# ── 등급 라벨 (v5.292) ───────────────────────────────────────────────
+# `A급 보류` 신설: 🩷강돌파 + 기업축 통과인데 **기업축 판정에 쓸 실적이 없어**
+# 그 "통과"를 신뢰할 수 없는 상태(사용자 지시). `company_axis()`의 매출·EPS
+# 검사는 결측이면 건너뛰므로(v5.267 의도) 결측 종목은 `ok=True`가 되는데,
+# v5.292에서 A급이 **기업축에만** 걸리게 되면서 그게 곧 "미조회면 A급"이 된다 —
+# 실측으로 2배 과대(실적 결측 가정 23종목 vs 실조회 12종목)였다.
+GRADE_A = "A급"
+GRADE_A_PENDING = "A급 보류"
+GRADE_B = "B급"
+GRADE_C = "C급"
+GRADES = (GRADE_A, GRADE_A_PENDING, GRADE_B, GRADE_C)
+
 
 def _min_bars(cfg: dict = ABC_CONFIG) -> int:
     """판정 최소 봉수. 기준선 기간보다 짧으면 MA가 NaN이라 판정 자체가 불가."""
@@ -445,44 +457,63 @@ def company_axis(b_turnover_eok: float | None, rev_yoy_pos: int | None,
         fails.append(f"EPS 흑자 {eps_pos_q}/{cfg['eps_positive_quarters']}분기")
     if major_holder_issue:
         fails.append("최대주주 이슈")
+    # v5.292(사용자 지시): 매출·EPS가 **둘 다 없으면** 기업축의 "통과"는 실적을
+    # 안 본 결과다(위 두 검사가 `is not None` 가드로 건너뛰어졌다). `ok`만 보면
+    # 미조회와 진짜 통과가 구분되지 않아 `grade()`가 A급을 준다 — 그래서
+    # 사실을 별도 필드로 내보내고 등급 쪽에서 `A급 보류`로 막는다.
+    # "조회했으나 데이터 없음"과 "미조회"는 여기선 같게 취급한다(둘 다 판정
+    # 근거가 없다) — 그 구분은 `fin_reason`/화면 배지가 유지한다(v5.291).
+    fin_unknown = rev_yoy_pos is None and eps_pos_q is None
     return {"ok": not fails, "fails": fails, "turnover_fail": turnover_fail,
-            "turnover_large": turnover_large}
+            "turnover_large": turnover_large, "fin_unknown": fin_unknown}
 
 
 def grade(res: dict, comp: dict) -> str | None:
-    """등급 3단계.
+    """등급 (v5.292, 사용자 지시 — 안4′).
 
-        A급  = **🩷 강돌파** & 차트 A·B 충족 & 기업 전부 충족 & 거래대금 ≤ 상한
-        B급  = 그 외로 차트나 기업 한쪽이라도 충족
-        C급  = 거래대금 미달 또는 이탈, 또는 둘 다 미달
-        천장 = 거래대금 상한 초과("대형") → A급을 B급으로 내린다(v5.271)
-        제외 = A 없음 (None)
+        A급      = 🩷강돌파 & 기업축 통과 & 거래대금 하한·상한 안
+        A급 보류 = 위 조건인데 **기업축 판정에 쓸 실적이 없음**(미조회/데이터 없음)
+        B급      = 기업축 통과 & 강돌파 아님  (+ 강돌파지만 거래대금 상한 초과)
+        C급      = 거래대금 미달 · 이탈 · 기업축 미달
+        제외     = A 없음 (None)
 
-    v5.291(사용자 지시): **A급 후보를 `STAGE_STRONG` 하나로 제한**했다.
-    방법론이 "MA600을 거래량 동반 장대양봉으로 뚫느냐"라 대기·벽앞·약돌파·
-    이탈은 아직/이미 그 사건이 아니므로 최대 B급이다.
+    **`b.ok`(차트 B 구간)는 등급 계산에서 완전히 빠졌다.** 화면엔 참고 칸으로
+    남는다. 근거(2026-09-27 실측, 유니버스 968 후보): B 중앙값이 MA200 ±15%
+    안이어야 한다는 조건은 −40%+ 급락 후 39봉 바닥을 다진 종목과 원리적으로
+    양립하지 않아(편차 중앙 −20%대) 통과가 4.5%뿐이었고, **A급이 0건**이었다.
+    밴드를 MA600으로 옮기거나(3.9%) 부호 범위로 바꾸거나(5.9%) 아예 없애도(10.0%)
+    A급은 ≤1건, 기준 MA를 "B구간 당시 값"으로 교정해도 4.0%/0건 — 즉 이 조건은
+    A급을 막는 병목이었고 어떤 밴드로도 풀리지 않았다.
+    `b.ok`를 B급 규칙에만 남기는 안(안4)도 재봤는데 "b.ok만 통과하고 기업축은
+    미달"인 종목이 **유니버스에 0건**이라 결과가 완전히 동일했다 — 죽은 조건을
+    남기지 않으려고 완전히 뺐다(사용자 확정).
 
-    ⚠️ 단계 비교는 **반드시 상수**(`STAGE_*`)로 한다. v5.272까지 여기서
-    `stage == "C3 이탈"` 리터럴을 썼는데, 라벨이 바뀌면 그 비교가 조용히 항상
-    False가 되어 **이탈 종목이 C급 강등을 안 받고 A급까지 올라간다** —
-    테스트 없이는 안 잡히는 회귀라 사용자 지시로 상수화했다
+    그 결과 **B급 정의가 "기업축 통과 + 강돌파 아님" 한 갈래로 단순해진다**
+    (현행은 "차트 전부·기업 감점" / "기업 충족·B 미달" / "강돌파지만 대형" 세
+    갈래가 섞여 있었다). 거래대금 상한 초과 천장은 규칙으로는 남지만 실측
+    강돌파 44종목 중 해당 0건이다.
+
+    ⚠️ 단계·등급 비교는 **반드시 상수**(`STAGE_*`/`GRADE_*`)로. 리터럴을 쓰면
+    라벨을 바꿀 때 비교가 조용히 항상 False가 된다
     (`test_abc_ma600_stages.py::test_grade_uses_stage_constants_not_literals`).
 
-    **판정 순서**: C급 조건을 먼저 본다 — 거래대금 미달·이탈은 차트가 아무리
-    좋아도 위로 못 올라가는 강등 조건이라서다.
+    **판정 순서**: C급 강등 조건을 먼저 본다 — 거래대금 미달·이탈은 위로 못
+    올라가는 조건이라서다.
     """
     if res.get("verdict") != "ABC":
         return None
     stage = res.get("c_stage")
     if comp.get("turnover_fail") or stage == STAGE_EXIT:
-        return "C급"
-    # 여기부터 comp["ok"]는 거래대금을 뺀 나머지 기업 축의 통과 여부다
-    # (거래대금 미달은 위에서 이미 C급으로 빠졌다).
-    chart_ok = bool(res.get("b", {}).get("ok")) and stage is not None
-    if chart_ok and comp.get("ok") and stage == STAGE_STRONG:
-        # v5.271: 거래대금 상한 초과("대형")는 **A를 막는 천장**이지 미달이 아니다.
-        # 양봉맨 ABC가 소형 성장주 셋업이라는 전제(사용자 지시, 측정 근거 없음).
-        return "B급" if comp.get("turnover_large") else "A급"
-    if chart_ok or comp.get("ok"):
-        return "B급"
-    return "C급"
+        return GRADE_C
+    if comp.get("ok") and stage == STAGE_STRONG:
+        # 거래대금 상한 초과("대형")는 **A를 막는 천장**이지 미달이 아니다(v5.271).
+        if comp.get("turnover_large"):
+            return GRADE_B
+        # v5.292: 실적을 못 봤으면 A급을 주지 않는다 — 위 `ok`가 실적 검사를
+        # 건너뛴 결과일 수 있다. 보류는 "아직 모른다"이고 B급 강등이 아니다.
+        if comp.get("fin_unknown"):
+            return GRADE_A_PENDING
+        return GRADE_A
+    if comp.get("ok"):
+        return GRADE_B
+    return GRADE_C
