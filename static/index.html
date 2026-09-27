@@ -150,6 +150,20 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
   border:1px dashed var(--line);color:var(--muted);border-radius:8px;font-size:12px;
   cursor:pointer;font-family:inherit;transition:all .12s}
 .journal-btn:hover{border-color:var(--amber);color:var(--amber)}
+/* v5.290: ABC 탭 필터 칩 — 예전엔 `.journal-btn`(width:100%)을 재사용해
+   버튼 11개가 각각 화면 전체 폭을 차지하고 `margin-top:10px`까지 붙어
+   화면 절반을 필터가 먹었다. 전용 클래스로 분리(journal-btn은 불변 —
+   일지 쪽 전폭 버튼이 그 스타일에 의존한다). */
+.abc-chip{display:inline-flex;align-items:center;width:auto;margin:0;padding:3px 9px;
+  background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:999px;
+  font-size:11.5px;line-height:1.5;cursor:pointer;font-family:inherit;white-space:nowrap;
+  transition:all .12s}
+.abc-chip:hover{border-color:var(--amber);color:var(--amber)}
+.abc-chip.on{background:#1b2a3a;border-color:#3b6ea5;color:#cfe6ff}
+/* 한 줄 = 한 그룹. 모바일에선 줄바꿈 허용(가로 스크롤 금지). */
+.abc-chiprow{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-bottom:4px}
+.abc-chiprow>.abc-lbl{color:var(--muted);font-size:10.5px;letter-spacing:.02em;
+  margin-right:2px;flex-shrink:0}
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;
   align-items:center;justify-content:center;z-index:100}
 .modal-bg.open{display:flex}
@@ -575,7 +589,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 <header>
   <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.289</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
+    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.290</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
     <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
     <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
   </div>
@@ -3195,7 +3209,9 @@ function abcFilteredHits() {
 }
 
 function _abcChip(label, active, onclick) {
-  return `<button class="journal-btn" onclick="${onclick}" style="${active ? 'background:#1b2a3a;border-color:#3b6ea5;color:#cfe6ff' : ''}">${label}</button>`;
+  // v5.290: 전폭 `.journal-btn` → 한 줄 pill `.abc-chip`. 선택 상태는 인라인
+  // 스타일 대신 `.on` 클래스로(같은 색값 유지) — 값·onclick·개수 전부 불변.
+  return `<button class="abc-chip${active ? ' on' : ''}" onclick="${onclick}">${label}</button>`;
 }
 
 function setAbcGrade(g) { abcGradeFilter = g; renderAbcPage(); }
@@ -3227,21 +3243,26 @@ function renderAbcPage() {
   const rows = abcFilteredHits();
   const counts = d.counts || {};
   const clusters = (d.sector_clusters || []).map(c => `${c.sector} ${c.n}`).join(' · ');
-  const chips = [
-    '<span style="color:var(--muted);font-size:11px;margin-right:4px">등급</span>',
+  // v5.290(사용자 지시): 등급 / C단계를 **각각 한 줄 칩 행**으로. 필터 값·
+  // 개수·기본값·onclick은 전부 불변이고 감싸는 마크업과 클래스만 바뀐다
+  // (`test_abc_filter_chips.py`가 값·개수·기본값 불변을 강제).
+  const gradeRow = [
+    '<span class="abc-lbl">등급</span>',
     _abcChip('전체', abcGradeFilter === 'all', "setAbcGrade('all')"),
     _abcChip('A급', abcGradeFilter === 'A급', "setAbcGrade('A급')"),
     _abcChip('B급', abcGradeFilter === 'B급', "setAbcGrade('B급')"),
     _abcChip('C급', abcGradeFilter === 'C급', "setAbcGrade('C급')"),
-    '<span style="color:var(--muted);font-size:11px;margin:0 4px 0 10px">C단계</span>',
+  ].join('');
+  const stageRow = [
+    '<span class="abc-lbl">C단계</span>',
     _abcChip('전체', abcStageFilter === 'all', "setAbcStage('all')"),
     _abcChip('C1 벽앞', abcStageFilter === 'C1', "setAbcStage('C1')"),
     _abcChip('C2 돌파', abcStageFilter === 'C2', "setAbcStage('C2')"),
     _abcChip('C0 대기', abcStageFilter === 'C0', "setAbcStage('C0')"),
     _abcChip('C3 이탈', abcStageFilter === 'C3', "setAbcStage('C3')"),
-    '<span style="margin-left:10px"></span>',
     _abcChip('🩷 600돌파', abcGateBreakOnly, "toggleAbcGateBreak()"),
-  ].join(' ');
+  ].join('');
+  const chips = `<div class="abc-chiprow">${gradeRow}</div><div class="abc-chiprow">${stageRow}</div>`;
 
   content.innerHTML = `
     <div style="margin:0 0 10px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:#1a1410">
@@ -6007,6 +6028,15 @@ document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('clic
   // 오늘의 결정 등 캘린더 자체 섹션에 시장 필터가 반영된다.
   if (mode === 'moneyflow') { loadMoneyflowDate(null); }
   else if (mode === 'calendar') { if (_calendarData) renderCalendar(_calendarData); }
+  // v5.290(사용자 지시 — 2026-09-27 "ABC에서 한국/미국 누르면 빈 화면"):
+  // ABC는 `load()`가 2737행에서 `return loadAbc()`로 조기 반환하는 별도
+  // 경로라 `lastHits`를 채우지 않는다(대입은 일반 경로인 2794행뿐). 그런데
+  // 여기서 `renderCards()`가 불려 **직전 탭의 lastHits 잔존값**(없으면 [])을
+  // 시장 필터로 걸러 `#content`를 덮어써 ABC 표를 파괴했고, 빈 문구의 mode
+  // 체인에 abc가 없어 "눌림목 종목이 없습니다"로 보였다. 캘린더·돈의흐름과
+  // 같은 방식으로 자기 렌더러를 부른다. ABC는 KR 전용이라 시장 필터를
+  // 반영하지 않는 게 정상 동작이다(아래 시장 버튼 비활성과 짝).
+  else if (mode === 'abc') { if (_abcData) renderAbcPage(); }
   else { renderCards(); }  // 재스캔 없이 화면만 다시 그림 (lastHits는 전체 보유)
 }));
 // v5.92: "⋯ 실험" 접기 그룹 — 패턴/Stage2/IBD9/강한피벗/실적우수/급등 6개.
@@ -6030,8 +6060,26 @@ document.getElementById('expTabsToggle').addEventListener('click', (e) => {
 // load()만 불렀음. 캘린더가 기본 탭이 되면서 첫 로드도 이 로직을 거쳐야
 // (custom view 표시 + onEnterCalendarTab 호출) 하므로 재사용 가능하게 뺌 —
 // 클릭 핸들러와 부트스트랩 둘 다 이 함수 하나만 호출(동작 분기 이원화 방지).
+// v5.290(사용자 지시): ABC 탭에서 시장 버튼 3개(전체/한국/미국)를 비활성.
+// ABC는 KR 전용이고 `renderAbcPage()`가 시장 필터를 안 보므로, 누를 수 있게
+// 두면 "눌렀는데 아무 일도 안 일어난다"가 된다.
+// ⚠️ **`market` 값은 절대 건드리지 않는다** — `applyForcedMarket()`의
+// 저장/복원(`_marketBeforeForce`)과 얽히면 다른 탭의 시장이 바뀐다. 여기서
+// 하는 일은 `disabled` 속성과 흐림 표시뿐이다(표시 전용).
+function applyMarketButtonsEnabled(curMode) {
+  const off = curMode === 'abc';
+  document.querySelectorAll('[data-market]').forEach(b => {
+    b.disabled = off;
+    b.style.opacity = off ? '0.4' : '';
+    b.style.cursor = off ? 'not-allowed' : '';
+    if (off) b.title = 'ABC는 KR 전용이라 시장 필터가 적용되지 않습니다';
+    else if (b.title === 'ABC는 KR 전용이라 시장 필터가 적용되지 않습니다') b.title = '';
+  });
+}
+
 function applyTabViewState() {
   hideFilterButtonsIfNotApplicable();   // v5.56: journal은 load() 자체를 안 타서 여기서도 호출
+  applyMarketButtonsEnabled(mode);      // v5.290: ABC 진입/이탈 시 시장 버튼 비활성/복원
   const isJournal = mode === 'journal';
   const isMoneyflow = mode === 'moneyflow';
   const isPositions = mode === 'positions';

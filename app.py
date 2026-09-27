@@ -5,6 +5,48 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.290 [UI] ABC 탭 등급·C단계 필터를 **각각 한 줄 pill 칩 행**으로(사용자 지시).
+    [원인] `_abcChip()`이 `.journal-btn`(`static/index.html:149`,
+    `width:100%;margin-top:10px`)을 재사용했다 — 일지의 전폭 버튼용 스타일이라
+    칩 11개가 각각 화면 전체 폭을 차지하고 세로로 쌓여 화면 절반을 필터가 먹었다.
+    [수정] 전용 `.abc-chip`(inline-flex·width:auto·margin:0·radius 999px) +
+    `.abc-chiprow`(flex-wrap, 모바일 줄바꿈 허용·가로 스크롤 없음) 신설.
+    `.journal-btn`은 **건드리지 않았다**(일지 쪽이 전폭에 의존).
+    선택 상태는 인라인 스타일 → `.abc-chip.on` 클래스(같은 색값 #1b2a3a/#3b6ea5/#cfe6ff).
+    **필터 값·개수(등급 4 + C단계 5 + 600돌파 1)·기본값·onclick 전부 불변** —
+    감싸는 마크업과 클래스만 바뀐다. `test_abc_filter_chips.py` 신규가 강제.
+    두 줄 합쳐 약 56px(칩 24px + 행 gap/margin) — 요청 상한 80px 이내.
+    [버그수정 1, 사용자 지시] `_calendar_default_market_session()`의 주말·휴장일
+    규칙 ①② **"us" → "all"**. 원인: 프론트가 이 값을 그대로 `setMarket()`에
+    넣으므로(`static/index.html:4858`) 주말·휴장일에 페이지를 열면 **누르지도
+    않은 미국 버튼이 켜지고**, 캘린더를 벗어나도 비강제 탭끼리는
+    `applyForcedMarket()`이 아무것도 안 해 그대로 남았다(node로 탭 이동 6가지를
+    실제 실행해 복원 로직 자체는 정상임을 먼저 확인 — 범인이 아니었다).
+    2026-09-24~27 추석+주말 나흘 연속 이 상태. 평일 규칙 ③④는 불변이라
+    v5.232가 고치려던 "평일 아침에 미장이 남는" 증상은 영향 없다.
+    ⚠️ **필연적 후속(지시 목록엔 없지만 없으면 회귀)**: `market_session`은
+    🔴 즉시행동 세션 필터에도 쓰인다(v5.236). "all"을 그대로 비교하면
+    `(market or "").upper() == "ALL"`이 **전건 거짓**이라 즉시행동이 주말마다
+    0건이 되고 전부 `immediate_other_market`(🔎)으로 밀린다. v5.236이 막으려던
+    건 "세션=KR인데 US가 섞이는 것"이고 세션이 없는 날엔 가를 기준 자체가
+    없으므로, **"all"은 필터 미적용**으로 둔다(kr/us일 때 동작은 v5.236 그대로).
+    `immediate_empty_reason`의 라벨 삼항식도 ALL을 조용히 "US"로 찍었어서
+    dict lookup + "KR/US" 기본값으로 교체.
+    [버그수정 2, 사용자 지시] 시장 버튼 클릭 핸들러에 `mode === 'abc'` 분기 추가
+    → `renderAbcPage()`. 원인: ABC는 `load()`가 조기 반환하는 별도 경로
+    (`static/index.html:2737`)라 `lastHits`를 안 채우는데, 클릭 시 `renderCards()`가
+    불려 **직전 탭의 lastHits 잔존값**(없으면 [])을 시장 필터로 걸러 `#content`를
+    덮어써 ABC 표가 파괴됐다. 빈 문구 mode 체인에 `abc`가 없어 "눌림목 종목이
+    없습니다"로 보인 것도 같은 원인. 캘린더·돈의흐름과 같은 방식으로 통일.
+    [UI 3, 사용자 지시] ABC 탭에서 시장 버튼 3개를 `disabled`+흐림(0.4)으로.
+    `applyMarketButtonsEnabled(mode)`를 `applyTabViewState()`에 연결해 진입/이탈이
+    한 곳에서 처리된다(탭 클릭·초기 로드 양쪽에서 이미 불리는 함수).
+    **`market` 값은 건드리지 않는다** — `applyForcedMarket()`의 저장/복원
+    (`_marketBeforeForce`)과 얽히면 다른 탭 시장이 바뀐다. `disabled`/`opacity`/
+    `title`만 만지는 표시 전용이고, 테스트가 `market` 불변과 `setMarket` 미호출을
+    강제한다.
+    `test_abc_market_filter.py` 신규 15건(세션 규칙 9케이스 — 경계 07:00/20:10
+    직전·직후 포함 · 클릭 라우팅 6모드 · 버튼 disabled/복원). 사보타주 9건 탐지 확인.
 v5.289 [기능추가] 일지 "직접 추가"의 **탭** 드롭다운(`#maTab`)에 `저점`
     옵션 추가(사용자 지시). 기존 6개 값(눌림목/돌파/돌파임박/박스돌파/
     추세전환/재량)과 기본 선택(재량)은 전부 불변 — 추가만 한다.
@@ -8100,7 +8142,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.289"
+VERSION = "v5.290"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -8588,11 +8630,21 @@ def _calendar_default_market_session() -> str:
     캘린더 로드마다(탭 재진입 포함, 탭을 열어둔 채 시간이 지나도
     다음 재진입 시 자동 갱신) 이 값을 그대로 받아 렌더만 한다.
 
-    평가 순서(위에서부터, 먼저 걸리면 종료) — 사용자 지시로 확정:
-    ① 토·일 → US(주말 규칙이 07:00 진입보다 우선)
-    ② KR 휴장일(`is_trading_day`) → US
+    평가 순서(위에서부터, 먼저 걸리면 종료):
+    ① 토·일 → **all**(v5.290, 주말 규칙이 07:00 진입보다 우선)
+    ② KR 휴장일(`is_trading_day`) → **all**(v5.290)
     ③ 07:00 ≤ KST < 20:10 → KR
     ④ 그 외(20:10~익일 07:00) → US
+
+    v5.290(사용자 지시 — 2026-09-27 "미국을 누른 적 없는데 ABC에서 미국이
+    활성"): ①②가 "us"였다. 프론트(`onEnterCalendarTab()`)가 이 값을
+    `setMarket()`에 그대로 넣으므로, 주말·휴장일에 페이지를 열면 **사용자가
+    누르지 않았는데 미국 버튼이 켜지고** 캘린더를 벗어나도(비강제 탭끼리는
+    `applyForcedMarket()`이 아무것도 안 함) 그대로 남았다. 2026-09-24~27은
+    추석 연휴+주말이라 나흘 연속 이 상태였다. 주말·휴장일엔 **어느 시장도
+    열려 있지 않아 "US가 기본"일 실익이 없다** — 프론트 초기값과 같은
+    "all"로 돌려 새 상태를 만들지 않는다. ③④(평일 시간대 규칙)는 불변이라
+    v5.232가 고치려던 증상(평일 아침에 미장 종목이 남는 것)에는 영향 없다.
     20:10 경계 근거(v5.263): KR 애프터마켓(16:00~20:00 KST) 종료 + 여유 10분 —
     그 시각까지 일봉이 갱신되므로 KR 카드를 유지한다. 이전 값 19:00은
     '종가베팅 확정 이후'가 근거였고(그 근거 문장의 '18:20~18:30'은 NZST
@@ -8600,9 +8652,9 @@ def _calendar_default_market_session() -> str:
     영향 없음(ET 쪽이 아니라 KST 고정 시각 기준이라 DST 전환과 무관)."""
     now = datetime.now(KST)
     if now.weekday() >= 5:
-        return "us"
+        return "all"
     if not is_trading_day("kr", now.strftime("%Y-%m-%d")):
-        return "us"
+        return "all"
     hm = now.hour * 60 + now.minute
     if 7 * 60 <= hm < KR_CLOSE_CONFIRMED_HM:   # v5.263: 19:00 → 20:10(애프터 종료까지 KR)
         return "kr"
@@ -17996,11 +18048,20 @@ async def get_calendar():
     # market_session으로 걸러 즉시행동을 세션에 맞는 시장만 남기고, 밀린
     # 항목은 immediate_other_market으로 따로 내보내 프론트가 🔎로
     # 재표시한다(버리지 않음 — 정보 자체는 유효하니).
+    # v5.290(사용자 지시의 필연적 후속): `market_session`이 "all"일 수 있게
+    # 됐다(주말·휴장일). "ALL"을 그대로 비교하면 KR/US 항목이 **전건 불일치**로
+    # immediate_other_market에 밀려 🔴 즉시행동이 주말마다 0건이 된다 —
+    # v5.236이 막으려던 건 "세션이 KR인데 US가 섞이는 것"이고, 세션이 아예
+    # 없는 날엔 가를 기준 자체가 없다. 그래서 "all"은 **필터 미적용**으로 둔다
+    # (어느 쪽도 밀어내지 않음). 세션이 kr/us일 때 동작은 v5.236 그대로.
     _session_mkt_upper = market_session.upper()
     _immediate_all = immediate   # 재할당 전에 원본을 따로 잡아둠(그대로 for문 돌리면 자기참조 버그)
     immediate, immediate_other_market = [], []
-    for _it in _immediate_all:
-        (immediate if (_it.get("market") or "").upper() == _session_mkt_upper else immediate_other_market).append(_it)
+    if _session_mkt_upper == "ALL":
+        immediate = _immediate_all
+    else:
+        for _it in _immediate_all:
+            (immediate if (_it.get("market") or "").upper() == _session_mkt_upper else immediate_other_market).append(_it)
     # v5.236: 즉시행동이 세션 필터로 0건이 된 이유를 한 줄로 — 이미 계산된
     # gate/jongga_today 재사용(새 계산 아님).
     # v5.260(버그수정): 경계가 **18:20**이었다. `_now_hm`은 KST인데(today_dt =
@@ -18016,7 +18077,9 @@ async def get_calendar():
     # 기준을 만든 게 아니다) 예시 문구는 사용자 지정 형식 그대로.
     immediate_empty_reason = None
     if not immediate:
-        _label = "KR" if _session_mkt_upper == "KR" else "US"
+        # v5.290: 세션이 "all"(주말·휴장일)이면 한쪽으로 단정하지 않는다 —
+        # 예전 삼항식은 ALL을 조용히 "US"로 표시했다.
+        _label = {"KR": "KR", "US": "US"}.get(_session_mkt_upper, "KR/US")
         _reason_parts = [f"오늘 {_label} 즉시진입 없음"]
         if _session_mkt_upper == "KR":
             _now_hm = today_dt.hour * 60 + today_dt.minute
