@@ -7,7 +7,9 @@
 
 사보타주 확인(2026-09-27): ① lowpoint_signal에서 `r2 >= RSI_LEVEL` 제거
 ② drop_in_progress가 bars를 그대로 반환 ③ A 부등호 반전(c1 > c0) —
-세 경우 모두 이 파일에서 FAIL함을 확인하고 원복했다.
+세 경우 모두 이 파일에서 FAIL함을 확인하고 원복했다. ①이 처음엔 경계 단위 테스트
+1건에만 걸려, 종목 흐름 전체를 도는 `test_rsi2_already_below_30_no_signal_end_to_end`를
+추가했다(2건 FAIL로 재확인).
 """
 import os
 import re
@@ -53,8 +55,10 @@ def test_a_direction():
 
 # ── 합성 시리즈 end-to-end (리샘플 → 진행 중 봉 제거 → scanner.rsi → 판정) ──
 
-def _weekly_path():
-    """주봉 종가 71개: 60봉 진동 후 3씩 하락해 RSI 30 하향돌파, 마지막 봉 +0.5."""
+def _weekly_path(extra_drops=0):
+    """주봉 종가: 60봉 진동 후 3씩 하락해 RSI 30 하향돌파, 마지막 봉 +0.5.
+    extra_drops>0이면 돌파 후 그만큼 더 하락한 뒤 반등 — 1봉전 RSI가 30 아래지만
+    2봉전도 이미 30 아래라 '하향돌파'가 아니다."""
     w = [100 + (2 if i % 2 else -2) + i * 0.1 for i in range(60)]
     last = w[-1]
     while True:
@@ -62,6 +66,9 @@ def _weekly_path():
         w.append(last)
         if rsi(pd.Series(w), 14).iloc[-1] < 30:
             break
+    for _ in range(extra_drops):
+        last -= 3
+        w.append(last)
     w.append(last + 0.5)
     return w
 
@@ -99,6 +106,17 @@ def test_hit_and_in_progress_week_dropped():
     assert mid["bar_date"] == last_fri
     assert {k: mid[k] for k in ("label", "c0", "c1", "r2", "r1", "r0")} == \
            {k: weekend[k] for k in ("label", "c0", "c1", "r2", "r1", "r0")}
+
+
+def test_rsi2_already_below_30_no_signal_end_to_end():
+    # 종목 흐름 전체(리샘플→진행 중 봉 제거→scanner.rsi→판정)에서 B의 RSI[2]>=30 확인
+    daily = _daily_from_weekly(_weekly_path(extra_drops=1))
+    fri = daily.index[-1]
+    now = datetime(fri.year, fri.month, fri.day, 21, 0, tzinfo=KST)
+    res = lp.evaluate(daily, "week", "kr", now)
+    assert res["bar_date"] == fri
+    assert res["c1"] < res["c0"] and res["r1"] < 30 and res["r2"] < 30  # 픽스처 전제
+    assert res["status"] == "no"
 
 
 def test_friday_before_confirm_time_drops_that_week():
