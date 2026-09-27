@@ -9,18 +9,19 @@ C3 이탈로 넘어갔다 — "오늘" 기준으로 단언하면 이 테스트�
 그래서 봉을 2026-09-17까지 자른 뒤 판정한다(자르는 것 자체가 그날 프로덕션이
 본 데이터와 같은 상태다).
 
-**v5.268에서 셋 다 C3로 쏠렸다가 v5.272에서 다시 갈렸다.** MA600 하나로 전부
-판정하니 13종목 중 11개가 C3 이탈이 됐고(2.4년 평균이라 그간 오른 종목은
-기준선이 한참 아래 남는다), 그래서 역할을 쪼갰다 — MA600은 후보 게이트,
-MA200이 단계를 정한다.
+**v5.291에서 C단계가 MA600 기준으로 돌아갔다(사용자 지시 — 방법론 정정:
+"ABC 핵심은 MA600을 거래량 동반 장대양봉으로 뚫느냐").** v5.268이 MA600 단독으로
+갔다가 11/13이 이탈로 쏠려 v5.272에서 MA200으로 물러났는데, v5.291은 **판정
+순서**로 그 문제를 푼다 — 🩷강돌파(이벤트)를 밴드(위치)보다 먼저 본다.
+B 중앙값 밴드·매물대·진돌이/가돌이는 MA200 유지(사용자 확정).
 
-    (2026-09-17 고정봉 기준)
-    LS에코   게이트 +39.9% 통과 · MA200  +9.3% → C2 진돌이
-    RFHIC   게이트 +66.0% 통과 · MA200 −11.2% → C0 대기(벽 아래)
-    타이거일렉 다른 셋업(게이트 +152.1%)
+    (2026-09-17 고정봉 기준, v5.291 정의)
+    LS에코   MA600 +39.9% · 20봉 내 MA600 돌파 없음 → 이탈
+    RFHIC   MA600 +66.0% · 돌파 없음               → 이탈
+    타이거일렉 다른 셋업(MA600 +152.1%)
 
-    v5.268(MA600 단독)에선 **셋 다 C3 이탈**이었다. 두 선을 나누자 "장기 추세는
-    돌았지만 중기 벽과의 거리는 제각각"이라는 실제 상태가 드러난다.
+    v5.272(MA200 단계)에선 LS에코 C2 진돌이 · RFHIC C0 대기였다. 두 값(gate
+    +39.9% / stage +9.3%)은 그대로이고 **어느 선으로 단계를 매기느냐만** 바뀌었다.
 
 앵커는 **그때그때의 판정 구조로 다시 고정**한다 — 값이 바뀌는 것 자체는
 설계 변경의 결과지 회귀가 아니다.
@@ -62,30 +63,28 @@ def bars():
     return out
 
 
-def test_ls_eco_is_c2_jindori_again_after_the_split(bars):
-    """LS에코 — v5.267에서 C2 진돌이였다가 v5.268(MA600 단독)에서 C3로 밀렸고,
-    v5.272에서 **다시 C2 진돌이**로 돌아왔다. 게이트는 +39.9%로 통과하고
-    단계는 MA200 +9.3%라 C2 구간이다."""
+def test_ls_eco_is_exit_under_the_ma600_stage(bars):
+    """LS에코 — MA600 +39.9%로 이탈 기준(+20%)을 넘었고 최근 20봉 안에 MA600
+    돌파가 없어 **이탈**이다. MA200 기준이던 v5.272에선 C2 진돌이였다(+9.3%) —
+    두 값은 그대로이고 단계를 매기는 선만 바뀌었다."""
     r = A.analyze_abc(bars["229640.KQ"])
     assert r["verdict"] == "ABC", r
-    assert r["gate_pct"] > 0, "게이트선 아래로 떨어졌다"
-    assert r["c_stage"] == "C2 진돌이", r["c_stage"]
-    assert 0 <= r["stage_pct"] < A.ABC_CONFIG["c3_min"] * 100, r["stage_pct"]
+    assert r["gate_pct"] > A.ABC_CONFIG["exit_min"] * 100, r["gate_pct"]
+    assert r["gate_break"] is None, "20봉 내 MA600 돌파가 생겼다 — 앵커 재고정 필요"
+    assert r["c_stage"] == A.STAGE_EXIT, r["c_stage"]
+    # MA200 값은 여전히 계산된다(참고 칸) — 단계와 무관해졌을 뿐이다.
+    assert 0 <= r["stage_pct"] < 20, r["stage_pct"]
 
 
-def test_rfhic_passes_the_gate_but_waits_below_the_stage_wall(bars):
-    """RFHIC — 게이트 +66%(장기 추세는 돌았다)인데 **MA200 대비 −11.2%**라
-    아직 벽 아래 대기다.
-
-    v5.268은 MA600 하나로 재서 이걸 "C3 이탈"(이미 떠남)로 분류했다. 두 선을
-    나눠야 "추세는 돌았지만 아직 안 왔다"가 표현된다 — v5.272의 목적이다.
-    """
+def test_rfhic_is_exit_by_ma600_even_though_it_sits_below_ma200(bars):
+    """RFHIC — MA600 +66%라 이탈인데 **MA200으론 −11.2%**(벽 아래)다. 두 선이
+    정반대를 말하는 사례로, v5.291이 "MA600으로 단계를 매긴다"를 지킨다는 증거다.
+    v5.272에선 C0 대기였다 — 이 차이가 설계 변경의 결과지 회귀가 아니다."""
     r = A.analyze_abc(bars["218410.KQ"])
     assert r["verdict"] == "ABC", r
-    assert r["gate_pct"] > 20, r["gate_pct"]
-    assert r["c_stage"] == "C0 대기", r["c_stage"]
-    assert r["stage_pct"] < A.ABC_CONFIG["c1"][0] * 100, r["stage_pct"]
-    assert "벽 아래" in (r["reason"] or ""), r["reason"]
+    assert r["gate_pct"] > 60, r["gate_pct"]
+    assert r["stage_pct"] < 0, r["stage_pct"]
+    assert r["c_stage"] == A.STAGE_EXIT, r["c_stage"]
 
 
 def test_tiger_elec_is_excluded(bars):
@@ -112,7 +111,7 @@ def test_gate_and_stage_disagree_on_rfhic_by_design(bars):
 def test_short_history_ticker_is_excluded_not_crashed(bars):
     """봉을 600 미만으로 잘라도 예외 없이 '불가'로 빠져야 한다."""
     r = A.analyze_abc(bars["229640.KQ"].iloc[-300:])
-    assert r["verdict"] == "MA600 불가", r["verdict"]
+    assert r["verdict"] == f"{A._ma_label()} 불가", r["verdict"]
     assert A.grade(r, {"ok": True, "turnover_fail": False}) is None
 
 

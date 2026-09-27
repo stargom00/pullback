@@ -17,27 +17,12 @@
 import re
 import sys
 from pathlib import Path
+from test_helpers import code_only
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 INDEX = Path(__file__).resolve().parent / "static" / "index.html"
 TEXT = INDEX.read_text(encoding="utf-8")
-
-
-def _code_only(src: str) -> str:
-    """`//` 주석 줄을 걷어낸다.
-
-    주석까지 검사하면 **변경 이력을 적은 주석**에 걸려 오탐한다 — 실제로
-    "예전엔 status='entered'로 바꿨다"는 설명에 걸렸다(CLAUDE.md: 검사 범위를
-    실행 코드로 좁힐 것).
-    """
-    out = []
-    for line in src.splitlines():
-        t = line.lstrip()
-        if t.startswith("//"):
-            continue
-        out.append(line.split("//")[0] if "//" in line and "://" not in line else line)
-    return "\n".join(out)
 
 
 def _fn(name: str) -> str:
@@ -66,14 +51,14 @@ def test_tracking_never_assigns_entered():
     `in` 검사가 아니라 **개수 0**으로 고정한다 — 존재 검사는 대입이 여러 곳일 때
     하나만 지워도 통과한다(CLAUDE.md 사보타주 패턴).
     """
-    src = _code_only(_fn("updateTracking"))
+    src = code_only(_fn("updateTracking"), strip_trailing=True)
     hits = re.findall(r"""status\s*=\s*['"]entered['"]""", src)
     assert len(hits) == 0, f"자동 진입 대입이 남아 있다: {hits}"
 
 
 def test_tracking_does_not_overwrite_the_registration_date():
     """`r.date = 오늘`은 등록일을 지워 복구를 막았다 — 같이 사라져야 한다."""
-    src = _code_only(_fn("updateTracking"))
+    src = code_only(_fn("updateTracking"), strip_trailing=True)
     assert "r.date = kstStr(today)" not in src, "등록일 덮어쓰기가 남아 있다"
 
 
@@ -85,7 +70,7 @@ def test_the_two_auto_promotion_functions_are_gone():
 
 def test_watch_still_short_circuits_before_any_transition():
     """관찰은 원래도 전환 대상이 아니었다 — 되돌아가면 안 된다."""
-    src = _code_only(_fn("updateTracking"))
+    src = code_only(_fn("updateTracking"), strip_trailing=True)
     i = src.index("=== 'watch'")
     head = src[:i]
     assert "status = 'entered'" not in head

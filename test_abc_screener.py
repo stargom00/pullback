@@ -149,10 +149,11 @@ def test_b_range_boundary():
 
 
 def _at_ma(pct, vol_mult=1.0, breakout=False):
-    """마지막 봉을 **단계선(MA200)** 대비 pct 위치로 놓은 ABC 모양.
-    (v5.272: 단계는 MA200이 정한다 — 게이트선 MA600은 후보/탈락만 가른다.)"""
+    """마지막 봉을 **MA600** 대비 pct 위치로 놓은 ABC 모양.
+    (v5.291: C단계는 MA600이 정한다 — 방법론 정정. MA200은 B밴드·매물대·
+    진돌이/가돌이만 담당하는 참고선이 됐다.)"""
     df = make(abc_shape())
-    n = CFG["stage_ma_period"]
+    n = CFG["gate_ma_period"]
     ma = float(df["Close"].iloc[-n:].mean())
     if breakout:
         df.iloc[-2, df.columns.get_loc("Close")] = ma * 0.99
@@ -163,17 +164,23 @@ def _at_ma(pct, vol_mult=1.0, breakout=False):
 
 
 def test_c_stage_boundaries():
-    """v5.272 밴드: C0(벽 아래) / C1(-5~0) / C2(0~+20) / C3(+20~), 전부 MA200 기준."""
-    assert _at_ma(-0.10)["c_stage"] == "C0 대기"      # 벽에서 멀다
-    assert _at_ma(-0.02)["c_stage"] == "C1 벽앞"
-    assert _at_ma(0.25)["c_stage"] == "C3 이탈"
-    assert _at_ma(0.10)["c_stage"].startswith("C2")
+    """v5.291 밴드(전부 **MA600** 기준): 대기(−5%↓) / 벽앞(−5~0) /
+    약돌파(0~+20) / 이탈(+20~). 🩷강돌파는 밴드가 아니라 이벤트라 별도 테스트
+    (`test_abc_ma600_stages.py`)에서 본다."""
+    assert _at_ma(-0.10)["c_stage"] == A.STAGE_WAIT
+    assert _at_ma(-0.02)["c_stage"] == A.STAGE_WALL
+    assert _at_ma(0.10)["c_stage"] == A.STAGE_WEAK
+    assert _at_ma(0.25)["c_stage"] == A.STAGE_EXIT
 
 
-def test_c2_vol_mult_boundary():
-    """돌파 동반 시 vol 2.9 → 가돌이, 3.0 → 진돌이."""
-    assert _at_ma(0.02, vol_mult=2.9, breakout=True)["c_stage"] == "C2 가돌이"
-    assert _at_ma(0.02, vol_mult=3.0, breakout=True)["c_stage"] == "C2 진돌이"
+def test_ma200_breakout_no_longer_names_the_stage():
+    """v5.291: 진돌이/가돌이는 **단계 이름이 아니다**. `_find_breakout`(MA200)은
+    계속 돌아 `breakout.vol_mult`로 성격을 남기지만, `c_stage`는 MA600이 정한다.
+    예전 `test_c2_vol_mult_boundary`(vol 2.9→가돌이 / 3.0→진돌이)를 이걸로 교체."""
+    r = _at_ma(0.02, vol_mult=3.0, breakout=True)
+    assert r["c_stage"] in (A.STAGE_WEAK, A.STAGE_STRONG), r["c_stage"]
+    assert "진돌이" not in r["c_stage"] and "가돌이" not in r["c_stage"]
+    assert A.ABC_CONFIG["c2_vol_mult"] == 3.0, "진돌이 임계값 자체는 그대로 둔다"
 
 
 def test_other_setup_counted_not_hit():
@@ -250,14 +257,18 @@ def _g(b_ok, stage, comp_ok, turnover_fail=False, verdict="ABC"):
 
 
 def test_grade_matrix_is_three_tiers():
-    """사용자 확정 매트릭스(2026-09-18) 전수. "A급 근접"은 삭제됐다."""
-    assert _g(True, "C1 벽앞", True) == "A급"          # 차트 전부 & 기업 전부
-    assert _g(True, "C1 벽앞", False) == "B급"         # 차트 전부 & 기업 감점
-    assert _g(False, "C1 벽앞", True) == "B급"         # 기업 충족 & B 미달
-    assert _g(True, "C1 벽앞", True, turnover_fail=True) == "C급"
-    assert _g(True, "C3 이탈", True) == "C급"
-    assert _g(True, "C1 벽앞", True, verdict="다른 셋업") is None
-    assert _g(True, "C1 벽앞", True, verdict="ABC 아님") is None
+    """사용자 확정 매트릭스. v5.291: **A급 후보는 🩷강돌파 하나뿐** —
+    벽앞은 차트·기업이 다 좋아도 최대 B급이다(사용자 지시)."""
+    assert _g(True, A.STAGE_STRONG, True) == "A급"      # 강돌파 & 차트·기업 전부
+    assert _g(True, A.STAGE_WALL, True) == "B급"        # ← v5.272엔 A급이었다
+    assert _g(True, A.STAGE_WEAK, True) == "B급"
+    assert _g(True, A.STAGE_WAIT, True) == "B급"
+    assert _g(True, A.STAGE_STRONG, False) == "B급"     # 강돌파 & 기업 감점
+    assert _g(False, A.STAGE_STRONG, True) == "B급"     # 기업 충족 & B 미달
+    assert _g(True, A.STAGE_STRONG, True, turnover_fail=True) == "C급"
+    assert _g(True, A.STAGE_EXIT, True) == "C급"
+    assert _g(True, A.STAGE_STRONG, True, verdict="다른 셋업") is None
+    assert _g(True, A.STAGE_STRONG, True, verdict="ABC 아님") is None
 
 
 def test_obsolete_labels_are_gone():
@@ -271,23 +282,22 @@ def test_obsolete_labels_are_gone():
 
 def test_demotion_beats_a_good_chart():
     """거래대금 미달·C3은 **강등** 조건이다 — 차트가 완벽해도 위로 못 간다."""
-    assert _g(True, "C2 진돌이", True, turnover_fail=True) == "C급"
-    assert _g(True, "C3 이탈", True) == "C급"
+    assert _g(True, A.STAGE_STRONG, True, turnover_fail=True) == "C급"
+    assert _g(True, A.STAGE_EXIT, True) == "C급"
 
 
 def test_spec_gap_both_failing_lands_in_c():
     """**사양에 없던 조합**: B 미달 + 기업 감점. B급 두 갈래 어디에도 안 맞아
     최하위 C급으로 뒀고 사용자가 확정했다("둘 다 못 하면 최하위", 2026-09-18).
     제외는 A가 없을 때만이다."""
-    assert _g(False, "C1 벽앞", False) == "C급"
+    assert _g(False, A.STAGE_WALL, False) == "C급"
 
 
 def test_grade_never_returns_an_unknown_label():
     """등급 문자열이 늘어나면 화면 색 테이블·필터 칩이 조용히 어긋난다."""
     allowed = {"A급", "B급", "C급", None}
     for b in (True, False):
-        for stage in ("C0 대기", "C1 벽앞", "C2 진돌이", "C2 가돌이",
-                      "C2 돌파 없음", "C3 이탈", None):
+        for stage in A.C_STAGES + (None,):
             for ok in (True, False):
                 for tf in (True, False):
                     assert _g(b, stage, ok, tf) in allowed
@@ -365,7 +375,8 @@ def test_breakout_volume_uses_peak_within_window():
     bo = r["breakout"]
     assert bo["vol_bar_ago"] == 3, bo
     assert bo["vol_mult"] >= A.ABC_CONFIG["c2_vol_mult"], bo
-    assert r["c_stage"] == "C2 진돌이", r["c_stage"]
+    # v5.291: 이 배수는 더 이상 `c_stage`를 정하지 않는다(MA600이 정한다).
+    # `breakout`이 계속 계산되는지만 확인 — 진돌이/가돌이는 참고 정보로 남았다.
 
 
 def test_breakout_volume_window_is_bounded():
@@ -376,7 +387,6 @@ def test_breakout_volume_window_is_bounded():
     vols[-1] = 50000.0         # 돌파 4봉 뒤 — 창 밖
     r = A.analyze_abc(make(closes, vols=vols))
     assert r["breakout"]["vol_mult"] < 10, r["breakout"]
-    assert r["c_stage"] == "C2 가돌이"
 
 
 def test_no_breakout_when_always_above():
@@ -384,21 +394,23 @@ def test_no_breakout_when_always_above():
     closes = abc_shape(flat=200)
     closes[-60:] = [closes[-1] * 1.05] * 60
     r = A.analyze_abc(make(closes))
-    if r["c_stage"] and r["c_stage"].startswith("C2"):
-        assert r["c_stage"] == "C2 돌파 없음", r["c_stage"]
-        assert r["breakout"] is None
+    # v5.291: "돌파 없음"은 더 이상 단계가 아니다 — MA200 돌파 부재는
+    # `breakout is None`으로만 표현되고 단계는 MA600 위치가 정한다.
+    assert r["breakout"] is None, r["breakout"]
 
 
-def test_c2_stage_is_state_not_event():
-    """돌파 다음날에도 C2가 유지돼야 한다(이벤트로 두면 탭에서 사라진다)."""
+def test_stage_is_never_empty_after_a_breakout():
+    """돌파 다음날에도 단계가 비지 않아야 한다(이벤트로만 두면 탭에서 사라진다).
+    v5.291에서 🩷강돌파는 `strong_window`(20봉) 동안 유지되고, 그 뒤엔 위치
+    밴드가 받아준다 — 어느 쪽이든 `c_stage`는 항상 채워진다."""
     r = A.analyze_abc(make(with_crossing(abc_shape())))
     assert r["breakout"]["bars_ago"] == 4, "이미 며칠 지난 돌파인데"
-    assert r["c_stage"].startswith("C2"), r["c_stage"]
+    assert r["c_stage"] in A.C_STAGES, r["c_stage"]
 
 
 # ── C 경계: 겹침·빈틈 (v5.267) ────────────────────────────────────────
 def _stage_at(pct, vol_mult=10.0):
-    """마지막 봉을 **단계선(MA200)** 대비 pct%에 정확히 놓고 C단계를 읽는다.
+    """마지막 봉을 **MA600** 대비 pct%에 정확히 놓고 C단계를 읽는다(v5.291).
 
     마지막 종가도 기준선에 들어가므로(1/N 가중) 그냥 `ma*(1+p)`로 두면 목표에서
     어긋난다. x = MA×(1+p)를 만족하는 x를 직접 푼다:
@@ -407,7 +419,7 @@ def _stage_at(pct, vol_mult=10.0):
     """
     closes = abc_shape()
     p = pct / 100
-    N = CFG["stage_ma_period"]
+    N = CFG["gate_ma_period"]
     S = sum(closes[-(N - 1):])
     x = S * (1 + p) / (N - (1 + p))
     closes = closes[:-1] + [x]
@@ -417,15 +429,13 @@ def _stage_at(pct, vol_mult=10.0):
     return A.analyze_abc(make(closes, vols=vols))["c_stage"]
 
 
-def test_c1_and_c2_no_longer_overlap():
-    """v5.267~v5.271에는 C1(-5~+5)과 C2(0~+20)가 [0,+5%)에서 겹쳤고 순서로
-    해소했다. v5.272에서 C1이 (-5~0)으로 좁아지며 **겹침 자체가 사라졌다** —
-    순서에 기대지 않고 밴드만으로 결정된다(순서를 바꿔도 결과가 같아야 한다).
-    """
-    c1, c2 = CFG["c1"], CFG["c2"]
-    assert c1[1] <= c2[0], f"다시 겹친다: C1{c1} C2{c2}"
-    assert _stage_at(2.0).startswith("C2")
-    assert _stage_at(-2.0) == "C1 벽앞"
+def test_bands_do_not_overlap():
+    """v5.291 밴드는 경계를 공유하되 겹치지 않는다: 대기 < wall_band ≤ 벽앞 < 0
+    ≤ 약돌파 < exit_min ≤ 이탈. 겹치면 순서에 기대야 하고, 순서를 바꾸면
+    결과가 달라진다(밴드끼리는 순서 독립이어야 한다 — 🩷강돌파만 순서 의존)."""
+    assert CFG["wall_band"] < 0 < CFG["exit_min"], (CFG["wall_band"], CFG["exit_min"])
+    assert _stage_at(2.0) == A.STAGE_WEAK
+    assert _stage_at(-2.0) == A.STAGE_WALL
 
 
 def test_c_bands_have_no_silent_gap():
@@ -434,24 +444,20 @@ def test_c_bands_have_no_silent_gap():
         assert _stage_at(float(pct)) is not None, f"{pct}%에서 단계가 비었다"
 
 
-def test_far_below_the_wall_is_c0_not_a_hole():
-    """게이트선 위인데 MA200보다 한참 아래 — 지시문에 없던 조합.
+def test_below_ma600_is_wait_and_stays_visible():
+    """v5.291: MA600 **아래**는 게이트 탈락이 아니라 `대기`/`벽앞`이고 후보로
+    남는다(사용자 지시 "게이트 제거 — 대기·벽앞이 보여야 한다"). v5.272까지는
+    게이트 아래면 C0로 묶되 여전히 후보였고, v5.268엔 아예 탈락이었다."""
+    far = _at_ma(-0.30)
+    assert far["verdict"] == "ABC", far["reason"]
+    assert far["c_stage"] == A.STAGE_WAIT, far["c_stage"]
+    assert far["gate_pct"] < CFG["wall_band"] * 100, far["gate_pct"]
 
-    처음엔 "단계 없음"으로 뒀는데 13종목 실측에서 선익·비나텍·나무가 3건이
-    여기 빠졌고 **사용자 예상은 셋 다 C0 대기**였다. 구멍을 남기면 그 종목들이
-    탭에서 조용히 사라진다.
-    """
-    r = _at_ma(-0.10)
-    assert r["gate_pct"] > 0, f"게이트선 아래라 다른 갈래를 탔다({r['gate_pct']})"
-    assert r["stage_pct"] < CFG["c1"][0] * 100, r["stage_pct"]
-    assert r["c_stage"] == "C0 대기", r["c_stage"]
-    assert "벽 아래" in (r["reason"] or ""), r["reason"]
-
-    # 게이트선 **아래**도 C0지만 사유가 달라야 한다 — 둘을 구분 못 하면
-    # "왜 대기인지"를 화면에서 알 수 없다.
-    below = _at_ma(-0.30)
-    assert below["c_stage"] == "C0 대기"
-    assert "미전환" in (below["reason"] or ""), below["reason"]
+    near = _at_ma(-0.02)
+    assert near["c_stage"] == A.STAGE_WALL, near["c_stage"]
+    # 사유가 둘을 구분해야 한다 — 못 하면 "왜 대기인지"를 화면에서 알 수 없다.
+    assert far["reason"] != near["reason"]
+    assert "아래 대기" in (far["reason"] or "") and "바로 아래" in (near["reason"] or "")
 
 
 def test_c2_c3_boundary_sits_at_the_config_value():
@@ -461,16 +467,16 @@ def test_c2_c3_boundary_sits_at_the_config_value():
     부동소수점 오차로 어느 쪽에 떨어질지 갈린다(실제로 20.00%가 C2로 나왔다).
     경계가 **그 값 근처에서 갈리는지**를 본다.
     """
-    pct = A.ABC_CONFIG["c3_min"] * 100
-    assert _stage_at(pct + 0.5) == "C3 이탈"
-    assert _stage_at(pct - 0.5).startswith("C2")
+    pct = A.ABC_CONFIG["exit_min"] * 100
+    assert _stage_at(pct + 0.5) == A.STAGE_EXIT
+    assert _stage_at(pct - 0.5) == A.STAGE_WEAK
     # 상수를 낮추면 경계도 따라 내려와야 한다(리터럴 하드코딩 감지)
-    cfg = dict(A.ABC_CONFIG, c3_min=0.10)
+    cfg = dict(A.ABC_CONFIG, exit_min=0.10)
     closes = abc_shape()
-    N = CFG["stage_ma_period"]
+    N = CFG["gate_ma_period"]
     S = sum(closes[-(N - 1):]); x = S * 1.15 / (N - 1.15)
     r = A.analyze_abc(make(closes[:-1] + [x]), cfg)
-    assert r["c_stage"] == "C3 이탈", r["c_stage"]
+    assert r["c_stage"] == A.STAGE_EXIT, r["c_stage"]
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -484,22 +490,22 @@ def test_the_two_periods_are_600_and_200():
 
 
 def test_gate_and_stage_roles_are_separated():
-    """v5.272의 핵심 — 두 선이 **서로 다른 일**을 한다.
+    """v5.291 역할 배분 — **역할이 바뀌었다**(사용자 지시, 방법론 정정).
 
-    · 게이트(MA600): 후보/탈락만. `last < ma_gate` 한 곳에서만 쓰인다.
-    · 단계(MA200): C단계·B밴드·매물대·돌파.
-    한쪽이 다른 쪽 일을 하기 시작하면 v5.268의 "전부 C3 쏠림"이 재발한다.
+    · MA600: **C단계**를 정한다(+ 🩷강돌파 판정).
+    · MA200: **B밴드·매물대·진돌이/가돌이**만. C단계엔 관여하지 않는다.
+    v5.272는 정반대였다(게이트=후보만, MA200=C단계). 한쪽이 다른 쪽 일까지
+    하면 v5.268의 "전부 이탈 쏠림"이나 이번 방법론 불일치가 재발한다.
     """
     import inspect
     src = inspect.getsource(A.analyze_abc)
-    assert "if last < ma_gate:" in src, "게이트가 후보 판정에 안 쓰인다"
-    for axis, needle in (("C 단계", "d = last / ma_stage - 1"),
-                         ("B 밴드", "med / ma_stage - 1"),
+    assert "d = last / ma_gate - 1" in src, "C단계가 MA600을 안 쓴다"
+    for axis, needle in (("B 밴드", "med / ma_stage - 1"),
                          ("매물대", "lo_b, hi_b = ma_stage *")):
-        assert needle in src, f"{axis}가 단계선을 안 쓴다"
-    # 단계 판정 구간에서 게이트선을 다시 읽으면 안 된다
-    body = src[src.index("d = last / ma_stage - 1"):src.index("# ── 매물대")]
-    assert "ma_gate" not in body, f"단계 판정이 게이트선을 읽는다: {body[:200]}"
+        assert needle in src, f"{axis}가 MA200을 안 쓴다"
+    # C단계 판정 구간에서 MA200을 읽으면 안 된다(역할 역전 방지)
+    body = src[src.index("d = last / ma_gate - 1"):src.index("# ── 매물대")]
+    assert "ma_stage" not in body, f"C단계가 MA200을 읽는다: {body[:200]}"
 
 
 def test_every_judgement_axis_uses_the_config_period():
@@ -650,16 +656,17 @@ def test_turnover_bands():
 
 
 def test_large_turnover_caps_the_grade_at_b():
-    ok_chart = {"verdict": "ABC", "b": {"ok": True}, "c_stage": "C2 진돌이"}
+    # v5.291: A급 후보는 🩷강돌파뿐이므로 천장 테스트도 그 단계로 세운다.
+    ok_chart = {"verdict": "ABC", "b": {"ok": True}, "c_stage": A.STAGE_STRONG}
     assert A.grade(ok_chart, _comp()) == "A급"
     assert A.grade(ok_chart, _comp(turnover_large=True)) == "B급", "천장이 안 걸린다"
 
 
 def test_large_turnover_does_not_rescue_a_c_grade():
     """천장은 **내리기만** 한다 — C급을 B급으로 올리면 안 된다."""
-    ok_chart = {"verdict": "ABC", "b": {"ok": True}, "c_stage": "C3 이탈"}
+    ok_chart = {"verdict": "ABC", "b": {"ok": True}, "c_stage": A.STAGE_EXIT}
     assert A.grade(ok_chart, _comp(turnover_large=True)) == "C급"
-    bad = {"verdict": "ABC", "b": {"ok": True}, "c_stage": "C2 진돌이"}
+    bad = {"verdict": "ABC", "b": {"ok": True}, "c_stage": A.STAGE_STRONG}
     assert A.grade(bad, _comp(ok=False, turnover_fail=True, turnover_large=True)) == "C급"
 
 
@@ -778,8 +785,9 @@ def test_gate_break_is_detected_and_dated():
 
 
 def test_gate_break_only_within_the_window():
-    """최근 N봉 내 돌파만 표시(사용자 지시) — 오래된 돌파는 사건이 아니다."""
-    w = CFG["gate_break_window"]
+    """최근 N봉 내 돌파만 표시(사용자 지시) — 오래된 돌파는 사건이 아니다.
+    v5.291: 창이 `gate_break_window`(10) → **`strong_window`(20)**로 바뀌었다."""
+    w = CFG["strong_window"]
     inside, v1 = _gate_cross(bars_ago=w - 2)
     outside, v2 = _gate_cross(bars_ago=w + 5)
     assert A.analyze_abc(make(inside, vols=v1))["gate_break"] is not None
@@ -787,10 +795,11 @@ def test_gate_break_only_within_the_window():
 
 
 def test_gate_break_volume_threshold():
-    """vol ≥ 1.5×(50일 평균)이면 충족 — 양봉맨 A급 정의의 나머지 절반."""
-    lo, _ = _gate_cross(bars_ago=2, vol_mult=1.4)
-    hi, vh = _gate_cross(bars_ago=2, vol_mult=1.6)
-    _, vl = _gate_cross(bars_ago=2, vol_mult=1.4)
+    """v5.291: 기준이 `gate_break_vol_mult`(1.5×) → **`strong_vol_mult`(2.0×)**로
+    올라갔다(사용자 지정). 평균 기준은 그대로 50일이다."""
+    m = CFG["strong_vol_mult"]
+    lo, vl = _gate_cross(bars_ago=2, vol_mult=m - 0.2)
+    hi, vh = _gate_cross(bars_ago=2, vol_mult=m + 0.2)
     assert A.analyze_abc(make(lo, vols=vl))["gate_break"]["vol_ok"] is False
     assert A.analyze_abc(make(hi, vols=vh))["gate_break"]["vol_ok"] is True
 
@@ -806,14 +815,21 @@ def test_gate_break_uses_the_gate_line_not_the_stage_line():
     assert "gate_ma_period" not in stage_src
 
 
-def test_gate_break_is_independent_of_the_c_stage():
-    """**C3여도 최근에 게이트를 넘었으면 잡혀야 한다**(사용자 지시: 독립).
-    C 단계 분기 안에서 계산하면 이 성질이 조용히 깨진다."""
+def test_gate_break_now_decides_the_stage_and_is_computed_first():
+    """v5.291에서 **의도적으로 역전**됐다(사용자 지시). v5.276의 "gate_break은
+    C단계와 독립"은 이제 성립하지 않는다 — 강돌파가 곧 단계다.
+
+    그래도 **계산은 단계 분기보다 먼저** 와야 한다(분기 안에서 계산하면
+    밴드로 먼저 갈린 종목에서 돌파가 안 잡힌다 = 이벤트 우선이 깨진다).
+    """
     import inspect
     src = inspect.getsource(A.analyze_abc)
     i = src.index('out["gate_break"] = _find_gate_break')
-    j = src.index("if last < ma_gate:")
-    assert i < j, "게이트 돌파가 C 단계 분기 **안**에서 계산된다"
+    j = src.index('if gb is not None and gb["strong"]')
+    assert i < j, "강돌파 계산이 단계 분기 **뒤**에 있다 — 이벤트 우선이 깨진다"
+    # 그리고 밴드가 아니라 이 이벤트가 STAGE_STRONG을 정한다
+    body = src[j:src.index("elif d >= cfg[\"exit_min\"]")]
+    assert "STAGE_STRONG" in body, body
 
 
 def test_gate_break_takes_the_first_cross_not_the_last():

@@ -32,11 +32,22 @@ ABC_CONFIG = {
     "b_max_bars": 60,         # 같은 구간의 최대 — 20~60 중 가장 긴 것을 고른다
     "b_range_max": 0.25,      # 그 구간 고저 범위 ≤ 25%
     "b_ma_band": 0.15,        # 구간 중앙값이 **MA200** ±15% 안(v5.267 기준 복귀)
-    # C: 단계 — **MA600 위인 종목만** MA200 기준으로 가른다(v5.272).
-    # C0는 더 이상 MA200 구간이 아니다: "MA600 아래" 자체가 C0 대기다.
-    "c1": (-0.05, 0.00),      # 벽앞 — MA200 바로 아래
-    "c2": (0.00, 0.20),       # 상태 — MA200 위, 진돌이/가돌이
-    "c3_min": 0.20,           # 이탈 — MA200 +20% 이상
+    # ── C: 단계 — **MA600 기준** (v5.291, 사용자 지시로 전면 개편) ─────
+    # 방법론 정정: ABC의 핵심은 "MA600을 거래량 동반 장대양봉으로 뚫느냐"다.
+    # v5.272까지 C단계를 MA200으로 재던 것은 방법론과 불일치였다.
+    # **판정 순서가 핵심 — 강돌파(이벤트)를 밴드(위치)보다 먼저 본다.**
+    # 실측 근거(2026-09-27, 참조 12종목): 밴드를 먼저 보면 MA600이 2.4년
+    # 평균이라 그간 오른 종목의 종가가 이미 +20%를 넘어 **10/12가 이탈로
+    # 쏠리고 실제 강돌파(티이엠씨 +27.1%·vol×42, 우리넷 +12.2%·vol×26)가
+    # 이탈에 먹혔다**. v5.268에서 겪은 것과 같은 현상이라 순서로 해결한다.
+    # MA600 게이트는 제거했다 — 대기·벽앞이 화면에 보여야 한다(사용자 지시).
+    "wall_band": -0.05,       # 벽앞 하한 — MA600 −5% ~ 0% (임의값)
+    "exit_min": 0.20,         # 이탈 — MA600 +20% 이상 (임의값, 사용자 확정 유지)
+    # 강돌파: 최근 N봉 안에 MA600 첫 종가 돌파 + 그 봉이 당일 +X% 양봉 +
+    # 거래량 ≥ M배. 전부 **임의값**(백테스트 근거 없음, 사용자 지정 수치).
+    "strong_window": 20,      # 최근 N봉 내 첫 돌파만 강돌파로 본다
+    "strong_day_pct": 0.07,   # 돌파봉 당일 등락률 하한 (+7%)
+    "strong_vol_mult": 2.0,   # 돌파봉 거래량 ÷ 평균 (사용자 확정: **50일 평균**)
     "c2_vol_mult": 3.0,       # 진돌이 기준 거래량 배수(돌파봉/직전 5일평균)
     "vol_avg_bars": 5,
     # ── 🩷 MA600 첫 상향돌파 이벤트 (v5.276, 사용자 지시) ──────────
@@ -87,8 +98,19 @@ ABC_CONFIG = {
     "min_bars_floor": 250,
 }
 
-C_STAGES = ("C0 대기", "C1 벽앞", "C2 진돌이", "C2 가돌이",
-            "C2 돌파 없음", "C3 이탈")
+# ── 단계 라벨 (v5.291, 사용자 지시) ─────────────────────────────────
+# **리터럴 비교 금지 — 반드시 이 상수를 참조할 것.** v5.272까지 `grade()`가
+# `stage == "C3 이탈"`로 문자열을 직접 비교했는데, 라벨을 바꾸면 그 비교가
+# 조용히 항상 False가 되어 **이탈 종목이 C급 강등을 안 받고 A급까지 올라간다**
+# (테스트 없으면 안 잡히는 회귀). 사용자 지시로 상수화했다.
+STAGE_STRONG = "🩷 강돌파"     # MA600을 거래량 동반 장대양봉으로 뚫은 사건 — A급 유일 후보
+STAGE_WALL = "벽앞"            # MA600 바로 아래
+STAGE_WEAK = "약돌파"          # MA600 위지만 강돌파 조건 미달
+STAGE_WAIT = "대기"            # MA600보다 한참 아래
+STAGE_EXIT = "이탈"            # MA600 +exit_min 이상 — C급 강등
+
+# 화면·정렬·우선순위가 쓰는 정렬된 순서(= 사용자 지시 우선순위).
+C_STAGES = (STAGE_STRONG, STAGE_WALL, STAGE_WEAK, STAGE_WAIT, STAGE_EXIT)
 
 
 def _min_bars(cfg: dict = ABC_CONFIG) -> int:
@@ -152,21 +174,32 @@ def _find_breakout(close, vol, cfg: dict):
             "vol_mult": round(float(vol.iloc[peak_i]) / avg, 2) if avg > 0 else None}
 
 
-def _find_gate_break(close, vol, cfg: dict):
-    """게이트선(MA600)을 **아래→위로 넘은 첫 봉**을 최근 `gate_break_window`봉
-    안에서 찾는다. 없으면 None.
+def _find_gate_break(close, vol, cfg: dict, opn=None):
+    """게이트선(MA600)을 **아래→위로 넘은 첫 봉**을 최근 `strong_window`봉 안에서
+    찾고, 그 돌파가 **강돌파**인지 판정한다. 없으면 None.
 
-    C 단계의 돌파(`_find_breakout`, MA200 기준)와 **다른 선·다른 목적**이다:
-      · `_find_breakout`  MA200 첫 돌파 → C2의 진돌이/가돌이 라벨
-      · 이 함수           MA600 첫 돌파 → "장기 추세 전환 사건"을 시간축으로
-    둘을 한 함수로 합치면 어느 선 기준인지가 호출부에서 사라진다.
+    v5.291(사용자 지시) 개편 — 이 함수가 이제 C단계의 `🩷 강돌파`를 결정한다.
+    예전엔 C단계와 독립된 "사건 표시" 전용이었는데, 방법론의 핵심이
+    "MA600을 거래량 동반 장대양봉으로 뚫느냐"라 단계 자체가 이 사건이다.
 
-    거래량은 **돌파봉 포함 N봉 중 최대**를 50일 평균으로 나눈다 — 교차봉이
-    소량이고 다음날 대량이 터지는 형태가 흔해서다(v5.267에서 같은 이유로
-    MA200 쪽에 도입).
+    강돌파 3조건(전부 `ABC_CONFIG`, 전부 **임의값** — 백테스트 근거 없음):
+      ① 최근 `strong_window`(20)봉 안에 MA600 첫 종가 돌파
+      ② 그 돌파봉의 **당일 등락률** ≥ `strong_day_pct`(+7%)
+      ③ 그 돌파봉의 **거래량 ÷ 직전 `gate_break_vol_avg`(50)일 평균**
+         ≥ `strong_vol_mult`(2.0)
+    ②의 등락률 기준은 **전봉 종가 대비**다(시가 대비가 아니다) — "장대양봉"을
+    갭 포함 일간 상승률로 읽는다. `opn`을 넘기면 시가 대비도 같이 계산해
+    참고로 내보내지만 판정에는 쓰지 않는다(기준을 둘로 만들면 어긋난다).
+
+    평균 기준이 **50일**인 근거: 사용자 확정(2026-09-27). `_find_breakout`
+    (MA200)은 직전 5일평균을 쓰는데 그쪽은 건드리지 않는다 — 다른 선·다른
+    목적이고, 같은 이름(`vol_mult`)이라 혼동하기 쉬워 여기 명시한다.
+
+    D+1/2/3 거래량 배수도 같은 50일 평균으로 함께 낸다(화면 표시용) — 돌파 후
+    거래량이 유지되는지 사람이 보고 판단할 수 있게(판정에는 안 쓴다).
     """
     n = len(close)
-    look = min(cfg["gate_break_window"], n - 1)
+    look = min(cfg["strong_window"], n - 1)
     if look < 1:
         return None
     ma = close.rolling(cfg["gate_ma_period"]).mean()
@@ -185,13 +218,25 @@ def _find_gate_break(close, vol, cfg: dict):
     k = cfg["gate_break_vol_avg"]
     prev = vol.iloc[max(0, found - k):found]
     avg = float(prev.mean()) if len(prev) else 0.0
-    w = cfg["gate_break_vol_bars"]
-    seg = vol.iloc[found:min(n, found + w)]
-    peak = float(seg.max()) if len(seg) else 0.0
-    mult = round(peak / avg, 2) if avg > 0 else None
+    bar_vol = float(vol.iloc[found])
+    mult = round(bar_vol / avg, 2) if avg > 0 else None
+    prev_c = float(close.iloc[found - 1])
+    day_pct = round((float(close.iloc[found]) / prev_c - 1) * 100, 1) if prev_c else None
+    open_pct = None
+    if opn is not None:
+        o = float(opn.iloc[found])
+        open_pct = round((float(close.iloc[found]) / o - 1) * 100, 1) if o else None
+    dplus = []
+    for step in (1, 2, 3):
+        j = found + step
+        dplus.append(round(float(vol.iloc[j]) / avg, 2) if (j < n and avg > 0) else None)
+    vol_ok = bool(mult is not None and mult >= cfg["strong_vol_mult"])
+    day_ok = bool(day_pct is not None and day_pct >= cfg["strong_day_pct"] * 100)
     return {"bars_ago": n - 1 - found,
-            "vol_mult": mult,
-            "vol_ok": bool(mult is not None and mult >= cfg["gate_break_vol_mult"])}
+            "vol_mult": mult, "vol_ok": vol_ok,
+            "day_pct": day_pct, "day_ok": day_ok, "open_pct": open_pct,
+            "dplus": dplus,
+            "strong": bool(vol_ok and day_ok)}
 
 
 def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
@@ -321,43 +366,40 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
     out["b_turnover_eok"] = (round(float((seg_c * seg_v).mean()) / 1e8, 1)
                              if len(seg_c) >= tb else None)
 
-    # ── C: 단계 — **게이트(MA600) 통과분만 MA200으로** (v5.272) ────
-    # C2를 "당일 돌파"라는 **이벤트**로 두면 ① 사이 구간이 어느 단계에도 안
-    # 들어가고 ② 돌파 다음날 탭에서 사라진다. 그래서 위치로 단계를 정하고,
-    # 진돌이/가돌이는 **첫 돌파봉의 거래량**으로 구분한 뒤 라벨을 유지한다.
+    # ── C: 단계 — **MA600 기준, 이벤트 우선** (v5.291, 사용자 지시) ───
+    # 판정 순서가 핵심이다. `🩷 강돌파`를 **밴드보다 먼저** 본다 — MA600은
+    # 2.4년 평균이라 그간 오른 종목의 종가가 이미 +20%를 넘어, 밴드를 먼저
+    # 보면 실제 강돌파가 "이탈"에 먹힌다(2026-09-27 실측: 참조 12종목 중
+    # 10종목이 이탈로 쏠리고 티이엠씨 +27.1%·vol×42, 우리넷 +12.2%·vol×26
+    # 두 건의 진짜 돌파가 가려졌다). v5.268에서 겪은 것과 같은 현상이다.
     #
-    # v5.272 구조: 게이트선 **아래면 그것만으로 C0 대기**(장기 추세 미전환).
-    # 위에 있을 때만 MA200 대비 위치로 C1/C2/C3을 가르고, MA200보다 한참
-    # 아래(벽앞 구간에도 못 든 경우)면 역시 C0 대기다 — 아래 주석 참고.
+    # `_find_breakout`(MA200)은 **그대로 둔다** — 진돌이/가돌이 성격 표시는
+    # MA200 유지가 사용자 확정이고, 이제 C단계를 정하지 않는다(참고 칸).
     out["breakout"] = _find_breakout(close, vol, cfg)
-    # v5.276: MA600 돌파 **사건**. C 단계와 독립이라 여기서 따로 잡는다.
-    out["gate_break"] = _find_gate_break(close, vol, cfg)
-    c1, c2 = cfg["c1"], cfg["c2"]
-    if last < ma_gate:
-        out["c_stage"] = "C0 대기"
-        out["reason"] = f"장기 추세 미전환 ({_ma_label(cfg)} 대비 {out['gate_pct']:+.1f}%)"
+    # MA600 첫 돌파 + 강돌파 판정. 이게 `🩷 강돌파` 단계를 결정한다.
+    out["gate_break"] = _find_gate_break(close, vol, cfg, opn=df["Open"])
+    gb = out["gate_break"]
+    d = last / ma_gate - 1                 # ← 단계는 **MA600** 기준
+    if gb is not None and gb["strong"] and last > ma_gate:
+        # ① 이벤트 우선 — 밴드 무관. 단 "지금도 MA600 위"일 것(되밟았으면 아니다).
+        out["c_stage"] = STAGE_STRONG
+        out["reason"] = (f"{_ma_label(cfg)} 돌파 {gb['bars_ago']}봉 전 · "
+                         f"당일 {gb['day_pct']:+.1f}% · 거래량 {gb['vol_mult']}배")
+    elif d >= cfg["exit_min"]:
+        out["c_stage"] = STAGE_EXIT
+        out["reason"] = f"{_ma_label(cfg)} 대비 {d*100:+.1f}% (이탈 기준 +{cfg['exit_min']*100:.0f}%)"
+    elif d >= 0:
+        out["c_stage"] = STAGE_WEAK
+        out["reason"] = (f"{_ma_label(cfg)} 위 {d*100:+.1f}% — 강돌파 조건 미달"
+                         + ("" if gb is None else
+                            f"(당일 {gb['day_pct']:+.1f}%/{cfg['strong_day_pct']*100:.0f}% · "
+                            f"거래량 {gb['vol_mult']}/{cfg['strong_vol_mult']}배)"))
+    elif d >= cfg["wall_band"]:
+        out["c_stage"] = STAGE_WALL
+        out["reason"] = f"{_ma_label(cfg)} 바로 아래 ({d*100:+.1f}%)"
     else:
-        d = last / ma_stage - 1          # ← 단계는 **MA200** 기준
-        if d >= cfg["c3_min"]:
-            out["c_stage"] = "C3 이탈"
-        elif c2[0] <= d < c2[1]:
-            bo = out["breakout"]
-            if bo is None:
-                out["c_stage"] = "C2 돌파 없음"   # 창 안에 돌파 없음 — 등급엔 무관
-            else:
-                out["c_stage"] = ("C2 진돌이" if (bo["vol_mult"] or 0) >= cfg["c2_vol_mult"]
-                                  else "C2 가돌이")
-        elif c1[0] <= d < c1[1]:
-            out["c_stage"] = "C1 벽앞"
-        else:
-            # 게이트선 위인데 MA200보다 c1 하한(-5%)보다 더 아래 — 지시문에
-            # 없던 조합이라 처음엔 "단계 없음"으로 뒀는데, 13종목 실측에서
-            # 선익·비나텍·나무가 3건이 여기 빠졌고 **사용자 예상은 셋 다
-            # C0 대기**였다. 즉 C0는 "게이트 아래"가 아니라 **"MA200 벽 아래에서
-            # 대기"**가 맞는 해석이다(게이트 아래도 그 부분집합).
-            out["c_stage"] = "C0 대기"
-            out["reason"] = (f"MA{cfg['stage_ma_period']} 벽 아래 대기 "
-                             f"({d*100:+.1f}%)")
+        out["c_stage"] = STAGE_WAIT
+        out["reason"] = f"{_ma_label(cfg)} 아래 대기 ({d*100:+.1f}%)"
 
     # ── 매물대: MA200 ~ MA200×1.3에 과거 250봉 중 몇 봉이 머물렀나 ──
     # (v5.272에서 v5.267 기준으로 복귀 — 사용자 지시 "MA200 기준 유지")
@@ -408,30 +450,36 @@ def company_axis(b_turnover_eok: float | None, rev_yoy_pos: int | None,
 
 
 def grade(res: dict, comp: dict) -> str | None:
-    """등급 3단계 (사용자 확정 2026-09-18).
+    """등급 3단계.
 
-        A급  = 차트 A·B·C 전부 & 기업 전부 충족 & 거래대금 ≤ 상한
-        B급  = 차트 전부 & 기업 감점  /  또는  기업 충족 & B 미달
-        C급  = 거래대금 미달 또는 C3 이탈
-        천장 = 거래대금 상한 초과("대형") → A급은 B급으로 내린다(v5.271)
+        A급  = **🩷 강돌파** & 차트 A·B 충족 & 기업 전부 충족 & 거래대금 ≤ 상한
+        B급  = 그 외로 차트나 기업 한쪽이라도 충족
+        C급  = 거래대금 미달 또는 이탈, 또는 둘 다 미달
+        천장 = 거래대금 상한 초과("대형") → A급을 B급으로 내린다(v5.271)
         제외 = A 없음 (None)
 
-    **판정 순서**: C급 조건을 먼저 본다 — 거래대금 미달·C3 이탈은 차트가
-    아무리 좋아도 위로 못 올라가는 강등 조건이라서다.
+    v5.291(사용자 지시): **A급 후보를 `STAGE_STRONG` 하나로 제한**했다.
+    방법론이 "MA600을 거래량 동반 장대양봉으로 뚫느냐"라 대기·벽앞·약돌파·
+    이탈은 아직/이미 그 사건이 아니므로 최대 B급이다.
 
-    **"B 미달 **그리고** 기업 감점"** — 위 네 줄 어디에도 안 나오는 조합이라
-    내가 C급으로 메웠고, 사용자가 확정했다: "둘 다 못 하면 최하위"
-    (2026-09-18). 제외는 A가 없을 때만이다.
+    ⚠️ 단계 비교는 **반드시 상수**(`STAGE_*`)로 한다. v5.272까지 여기서
+    `stage == "C3 이탈"` 리터럴을 썼는데, 라벨이 바뀌면 그 비교가 조용히 항상
+    False가 되어 **이탈 종목이 C급 강등을 안 받고 A급까지 올라간다** —
+    테스트 없이는 안 잡히는 회귀라 사용자 지시로 상수화했다
+    (`test_abc_ma600_stages.py::test_grade_uses_stage_constants_not_literals`).
+
+    **판정 순서**: C급 조건을 먼저 본다 — 거래대금 미달·이탈은 차트가 아무리
+    좋아도 위로 못 올라가는 강등 조건이라서다.
     """
     if res.get("verdict") != "ABC":
         return None
     stage = res.get("c_stage")
-    if comp.get("turnover_fail") or stage == "C3 이탈":
+    if comp.get("turnover_fail") or stage == STAGE_EXIT:
         return "C급"
     # 여기부터 comp["ok"]는 거래대금을 뺀 나머지 기업 축의 통과 여부다
     # (거래대금 미달은 위에서 이미 C급으로 빠졌다).
     chart_ok = bool(res.get("b", {}).get("ok")) and stage is not None
-    if chart_ok and comp.get("ok"):
+    if chart_ok and comp.get("ok") and stage == STAGE_STRONG:
         # v5.271: 거래대금 상한 초과("대형")는 **A를 막는 천장**이지 미달이 아니다.
         # 양봉맨 ABC가 소형 성장주 셋업이라는 전제(사용자 지시, 측정 근거 없음).
         return "B급" if comp.get("turnover_large") else "A급"

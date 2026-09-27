@@ -8,7 +8,7 @@ CLAUDE.md의 "텍스트 추출 + Node 실행" 레시피 그대로다 — 재구�
      naver 모바일이 분기를 6개만 줘서 최근 4분기 YoY를 못 채우는 게 흔하고,
      서버도 그럴 땐 감점하지 않는다(test_abc_route.py). 화면이 그걸 "매출 1/4"
      처럼 보여주면 사용자가 **없는 근거로 종목을 버린다**.
-  2. `abcFilteredHits` — 필터 칩이 실제로 거르는가(C1이 C1만).
+  2. `abcFilteredHits` — 필터 칩이 실제로 거르는가(단계 하나가 그 단계만).
   3. 탭 배선·경고 문구가 살아 있는가(관심 신호 · 진입 근거 없음).
 """
 import json
@@ -115,10 +115,10 @@ def _filtered(hits, grade="all", stage="all", gate_break_only=False):
 
 
 HITS = [
-    {"ticker": "A", "grade": "A급", "c_stage": "C1 벽앞"},
-    {"ticker": "B", "grade": "B급", "c_stage": "C2 진돌이"},
-    {"ticker": "C", "grade": "A급", "c_stage": "C0 대기"},
-    {"ticker": "D", "grade": "C급", "c_stage": "C3 이탈"},
+    {"ticker": "A", "grade": "A급", "c_stage": "벽앞"},
+    {"ticker": "B", "grade": "B급", "c_stage": "🩷 강돌파"},
+    {"ticker": "C", "grade": "A급", "c_stage": "대기"},
+    {"ticker": "D", "grade": "C급", "c_stage": "이탈"},
 ]
 
 
@@ -126,16 +126,18 @@ def test_filters_default_to_everything():
     assert _filtered(HITS) == ["A", "B", "C", "D"]
 
 
-def test_stage_prefix_does_not_leak_across_stages():
-    """C0과 C3이 'C'로 시작한다고 같이 걸리면 안 된다."""
-    assert _filtered(HITS, stage="C0") == ["C"]
-    assert _filtered(HITS, stage="C3") == ["D"]
-    assert _filtered(HITS, stage="C2") == ["B"]
+def test_stage_filter_matches_exactly_one_stage():
+    """v5.291: 라벨이 접두어 체계가 아니게 됐고 필터도 `startsWith` →
+    **정확 일치**로 바뀌었다. 한 단계를 고르면 그 단계만 남아야 한다."""
+    assert _filtered(HITS, stage="대기") == ["C"]
+    assert _filtered(HITS, stage="이탈") == ["D"]
+    assert _filtered(HITS, stage="🩷 강돌파") == ["B"]
+    assert _filtered(HITS, stage="벽앞") == ["A"]
 
 
 def test_grade_and_stage_combine():
-    assert _filtered(HITS, grade="A급", stage="C1") == ["A"]
-    assert _filtered(HITS, grade="B급", stage="C1") == []
+    assert _filtered(HITS, grade="A급", stage="벽앞") == ["A"]
+    assert _filtered(HITS, grade="B급", stage="벽앞") == []
     assert _filtered(HITS, grade="C급") == ["D"]
 
 
@@ -152,27 +154,28 @@ def test_grade_chips_and_colors_cover_exactly_the_three_tiers():
     assert "단타만" not in TEXT and "trading_only" not in TEXT
 
 
-def test_gate_break_chip_filters_to_the_event():
-    """v5.276 🩷 — **C 단계와 독립**이라 C0든 C3든 사건이 있으면 남는다."""
-    hits = [
-        {"ticker": "A", "grade": "B급", "c_stage": "C0 대기",
-         "gate_break": {"bars_ago": 0, "vol_mult": 8.6, "vol_ok": True}},
-        {"ticker": "B", "grade": "B급", "c_stage": "C2 진돌이", "gate_break": None},
-        {"ticker": "C", "grade": "C급", "c_stage": "C3 이탈",
-         "gate_break": {"bars_ago": 3, "vol_mult": 2.0, "vol_ok": True}},
-    ]
-    assert _filtered(hits) == ["A", "B", "C"]
-    assert _filtered(hits, gate_break_only=True) == ["A", "C"], "C단계에 묶였다"
+def test_gate_break_chip_was_absorbed_into_the_strong_stage():
+    """v5.291(사용자 지시): 🩷600돌파 **토글이 제거**되고 `🩷 강돌파` 단계로
+    흡수됐다. 같은 사건을 단계와 별도 토글 두 곳에서 거르면 어긋난다.
+    v5.276의 "gate_break은 C단계와 독립"은 이제 의도적으로 성립하지 않는다."""
+    code = "\n".join(ln for ln in TEXT.splitlines()
+                      if not ln.strip().startswith("//"))
+    assert "toggleAbcGateBreak" not in code, "토글이 되살아났다"
+    assert "abcGateBreakOnly" not in code, "죽은 변수가 되살아났다"
+    # 대신 단계 칩으로 같은 일을 한다
+    assert "setAbcStage('🩷 강돌파')" in TEXT
 
 
 def test_gate_break_column_is_rendered():
     src = _extract_function("abcGateBreakHtml")
-    assert "gate_break" in src and "600돌파" in src, src
-    assert "ABC_MA_COLOR" in src, "기준 충족을 핫핑크로 구분하지 않는다"
+    assert "gate_break" in src, src
+    assert "ABC_MA_COLOR" in src, "강돌파 충족을 핫핑크로 구분하지 않는다"
+    # v5.291(사용자 지시): 돌파봉 등락률·vol배수 + D+1/2/3 거래량을 같이 띄운다
+    assert "day_pct" in src and "vol_mult" in src and "dplus" in src, src
 
 
 def test_missing_stage_does_not_crash():
-    assert _filtered([{"ticker": "X", "grade": "B급", "c_stage": None}], stage="C1") == []
+    assert _filtered([{"ticker": "X", "grade": "B급", "c_stage": None}], stage="벽앞") == []
 
 
 # ── 3. 배선·경고 ───────────────────────────────────────────────────
@@ -196,15 +199,18 @@ def test_warning_banner_is_present_and_unambiguous():
     assert "초기 임의값(2026-09-18)" in TEXT
 
 
-def test_star_uses_the_stage_baseline_price():
-    """트리거는 **단계선(MA200) 가격**. v5.268엔 MA600이었고 v5.272에서
-    옮겼다. v5.278에서 필드명이 `pivot` → `my_trigger_price`로 바뀌었다
-    (`/api/watch/quick`의 409를 피하려고 내 추적 형태로 전환) — **어느 선을
-    쓰는가**는 그대로 검사한다.
+def test_star_uses_the_gate_baseline_price():
+    """트리거는 **MA600(게이트선) 가격**. v5.268 MA600 → v5.272 MA200 →
+    v5.291 다시 MA600(사용자 지시 — 방법론이 MA600 돌파이므로 알림도 그 선).
+    필드명은 v5.278부터 `my_trigger_price`다.
     """
     src = _extract_function("abcWatch")
-    assert "my_trigger_price: h.ma_stage," in src, src
-    assert "ma_gate" not in src, "★가 게이트선을 트리거로 쓴다"
+    assert "my_trigger_price: h.ma_gate," in src, src
+    # ⚠️ 주석 제거 후 검사한다 — 교체를 설명하는 주석에 `ma_stage`가 들어 있어
+    # 원문 그대로 보면 오탐한다(CLAUDE.md 패턴 1, 이 세션에서 다섯 번째).
+    code = "\n".join(ln for ln in src.splitlines()
+                      if not ln.strip().startswith("//"))
+    assert "ma_stage" not in code, "★가 MA200을 트리거로 쓴다"
     # 등록 값은 **가격만** 쓴다 — 비율(h.stage_pct)은 메모 문구에만 허용한다.
     # `_pct`로 통째 금지하면 레코드의 `risk_pct: ''` 필드에 걸려 오탐한다
     # (실제로 그랬다) — 읽는 대상(`h.`)으로 좁힌다.
@@ -220,10 +226,10 @@ def test_both_baselines_are_shown_with_their_roles():
     row = TEXT[i:TEXT.index("\nfunction abcFilteredHits")]
     gate = row.index("h.gate_pct")
     stage = row.index("h.stage_pct")
-    assert gate < stage, "게이트 열이 단계 열보다 뒤에 있다"
-    assert "ABC_MA_COLOR" in row[:gate], "게이트 열에 핫핑크 표시가 없다"
-    # 헤더가 역할을 말하는가
-    assert "(게이트)" in TEXT and "(단계)" in TEXT, "열 이름에 역할 표시가 없다"
+    assert gate < stage, "MA600 열이 MA200 열보다 뒤에 있다"
+    assert "ABC_MA_COLOR" in row[:gate], "MA600 열에 핫핑크 표시가 없다"
+    # 헤더가 역할을 말하는가 — v5.291에서 역할이 뒤바뀌었다(MA600=단계기준)
+    assert "(단계기준)" in TEXT and "(참고)" in TEXT, "열 이름에 역할 표시가 없다"
     assert "장기&gt;중기 역전" in TEXT, "역배열 라벨이 v5.272 문구가 아니다"
 
 

@@ -32,6 +32,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from test_helpers import code_only
 
 ROOT = Path(__file__).resolve().parent
 INDEX_PATH = ROOT / "static" / "index.html"
@@ -309,31 +310,16 @@ def _fn_body(name: str) -> str:
     raise AssertionError(name)
 
 
-def _code_only(src: str) -> str:
-    """`//` 주석 제거.
-
-    변경 이력을 적은 주석("예전엔 …진입 대신…을 물어")에 걸려 **고친 코드가
-    안 고쳐진 것처럼** 보인다 — 이 세션에서만 세 번째로 겪은 오탐이라
-    검사는 실행 코드에만 건다.
-    """
-    out = []
-    for line in src.splitlines():
-        if line.lstrip().startswith("//"):
-            continue
-        out.append(line.split("//")[0] if "//" in line and "://" not in line else line)
-    return "\n".join(out)
-
-
 def test_save_journal_warns_but_does_not_force_pending():
     """게이트 🔴이어도 **진입으로 저장**된다 — 이미 산 종목의 R이 유실되면 안 된다."""
-    body = _code_only(_fn_body("saveJournal"))
+    body = code_only(_fn_body("saveJournal"), strip_trailing=True)
     assert "gate.reason" in body, "경고 사유를 안 보여준다"
     assert "진입 대신" not in body, "강제 대기 전환이 남아 있다"
     assert "forcePending = true" not in body
 
 
 def test_mark_entered_warns_but_still_converts():
-    body = _code_only(_fn_body("markEntered"))
+    body = code_only(_fn_body("markEntered"), strip_trailing=True)
     assert "gate.reason" in body
     assert "대기 상태를 유지합니다" not in body, "아직 전환을 막는다"
     assert "gate_defiance" in body, "역행 태그를 안 남긴다"

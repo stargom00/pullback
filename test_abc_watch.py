@@ -3,7 +3,7 @@
 [증상] ★ → `/api/watch/quick` → **409**, 그런데 일지엔 아무것도 없음.
 
 [원인] v5.106 안전장치 `reg_price >= pivot → 409(already_above_pivot)`.
-abcWatch가 `pivot=MA200`, `reg_price=현재가`를 보내는데 **C2·C3는 정의상
+abcWatch가 `pivot=기준선`, `reg_price=현재가`를 보내는데 **기준선 위 단계는 정의상
 close > MA200**이라 ★을 누를 만한 종목이 100% 409였다. 프론트는 409를 받으면
 `openPivotChoiceModal(s,...)`을 띄우지만 그 모달은 **스캔 히트 모양**을
 기대해서 ABC 히트로는 제대로 안 뜨고, **레코드가 하나도 안 생겼다**.
@@ -12,8 +12,9 @@ close > MA200**이라 ★을 누를 만한 종목이 100% 409였다. 프론트�
 pivot 비교가 없으니 409 경로 자체를 안 탄다.
 
 [트리거] 항상 MA200(벽), 방향만 가격 위치로:
-  벽 아래(C0·C1) → above  /  벽 위(C2·C3) → below(눌림 재터치)
-사용자 초안의 "C2·C3는 트리거 없이 관찰만"은 `my_trigger_price=null`인 pending이
+  MA600 아래(대기·벽앞) → above  /  위(강돌파·약돌파·이탈) → below(되밟기 경보)
+  v5.291: 기준선이 MA200(ma_stage) → **MA600(ma_gate)**로 교체됐다(사용자 지시).
+사용자 초안의 "기준선 위 단계는 트리거 없이 관찰만"은 `my_trigger_price=null`인 pending이
 **14일 뒤 자동 무산**되는 문제가 있어(WATCH_DAYS) 방향을 뒤집는 쪽을 택했다.
 """
 import json
@@ -23,6 +24,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
+
+import abc_screener as A
 
 ROOT = Path(__file__).resolve().parent
 TEXT = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
@@ -61,6 +64,7 @@ function getJournal() {{ return _journal; }}
 async function setJournal(j) {{ _saved = j; }}
 function kstStr() {{ return '2026-09-22'; }}
 function _abcStageLabel() {{ return 'MA200'; }}
+function _abcMaLabel() {{ return 'MA600'; }}   // v5.291: ★ 트리거가 게이트선 라벨을 쓴다
 // 이 둘 중 하나라도 불리면 옛 경로로 되돌아간 것이다
 async function _quickWatchRequest() {{ _fetched.push('quickWatch'); }}
 async function fetch(u) {{ _fetched.push(String(u)); return {{json: async () => ({{}})}}; }}
@@ -77,7 +81,7 @@ abcWatch(btn, {json.dumps(hit['ticker'])}).then(() => {{
 
 def hit(stage, close, ma=1000.0, **kw):
     d = {"ticker": "123456.KQ", "name": "테스트", "c_stage": stage,
-         "close": close, "ma_stage": ma, "stage_pct": round((close / ma - 1) * 100, 1),
+         "close": close, "ma_gate": ma, "gate_pct": round((close / ma - 1) * 100, 1),
          "sector": "반도체", "gate_break": None}
     d.update(kw)
     return d
@@ -85,10 +89,10 @@ def hit(stage, close, ma=1000.0, **kw):
 
 # ── 네 단계 전부 등록되는가 ─────────────────────────────────────────
 @pytest.mark.parametrize("stage,close", [
-    ("C0 대기", 900.0),      # 벽 한참 아래
-    ("C1 벽앞", 980.0),      # 벽 바로 아래
-    ("C2 진돌이", 1080.0),   # 벽 위 — 옛 경로에선 409였다
-    ("C3 이탈", 1300.0),     # 벽 한참 위 — 옛 경로에선 409였다
+    (A.STAGE_WAIT, 900.0),     # MA600 한참 아래
+    (A.STAGE_WALL, 980.0),     # MA600 바로 아래
+    (A.STAGE_STRONG, 1080.0),  # MA600 위 — 옛 경로에선 409였다
+    (A.STAGE_EXIT, 1300.0),    # MA600 한참 위 — 옛 경로에선 409였다
 ])
 def test_every_stage_registers(stage, close):
     r = _register(hit(stage, close))
@@ -99,29 +103,29 @@ def test_every_stage_registers(stage, close):
 
 def test_no_network_call_at_all():
     """`/api/watch/quick`을 안 탄다 — 409의 출처였다."""
-    for stage, close in (("C2 진돌이", 1080.0), ("C0 대기", 900.0)):
+    for stage, close in ((A.STAGE_STRONG, 1080.0), (A.STAGE_WAIT, 900.0)):
         r = _register(hit(stage, close))
         assert r["net"] == [], f"{stage}: 네트워크를 탔다 — {r['net']}"
 
 
 # ── 트리거 방향 ─────────────────────────────────────────────────────
 def test_trigger_is_always_the_wall():
-    for stage, close in (("C0 대기", 900.0), ("C3 이탈", 1300.0)):
+    for stage, close in ((A.STAGE_WAIT, 900.0), (A.STAGE_EXIT, 1300.0)):
         rec = _register(hit(stage, close))["saved"][0]
         assert rec["my_trigger_price"] == 1000.0, (stage, rec["my_trigger_price"])
 
 
 def test_direction_follows_which_side_of_the_wall():
-    below = _register(hit("C1 벽앞", 980.0))["saved"][0]
-    above = _register(hit("C2 진돌이", 1080.0))["saved"][0]
+    below = _register(hit(A.STAGE_WALL, 980.0))["saved"][0]
+    above = _register(hit(A.STAGE_STRONG, 1080.0))["saved"][0]
     assert below["my_trigger_dir"] == "above", "벽 아래인데 아래로 기다린다"
     assert above["my_trigger_dir"] == "below", "벽 위인데 위로 기다린다"
 
 
 def test_trigger_is_never_null():
     """null이면 **14일 뒤 자동 무산**된다(WATCH_DAYS) — 관찰이 조용히 사라진다."""
-    for stage, close in (("C0 대기", 900.0), ("C1 벽앞", 980.0),
-                         ("C2 진돌이", 1080.0), ("C3 이탈", 1300.0)):
+    for stage, close in ((A.STAGE_WAIT, 900.0), (A.STAGE_WALL, 980.0),
+                         (A.STAGE_STRONG, 1080.0), (A.STAGE_EXIT, 1300.0)):
         rec = _register(hit(stage, close))["saved"][0]
         assert rec["my_trigger_price"] is not None, stage
 
@@ -134,7 +138,7 @@ def test_watch_days_expiry_still_targets_null_triggers_only():
 
 # ── 일지 레코드 모양 ────────────────────────────────────────────────
 def test_record_marks_its_origin_and_stays_out_of_auto_judgement():
-    rec = _register(hit("C2 진돌이", 1080.0))["saved"][0]
+    rec = _register(hit(A.STAGE_STRONG, 1080.0))["saved"][0]
     assert rec["tab"] == "ABC", "출처가 안 남는다"
     assert rec["manual"] is True, "자동 판정에 섞인다"
     assert rec["category"] == "재량" and rec["status"] == "pending"
@@ -142,14 +146,16 @@ def test_record_marks_its_origin_and_stays_out_of_auto_judgement():
 
 
 def test_note_records_the_stage_at_registration():
-    rec = _register(hit("C2 진돌이", 1080.0, gate_break={"bars_ago": 2}))["saved"][0]
-    assert "C2 진돌이" in rec["note"] and "MA200" in rec["note"], rec["note"]
-    assert "600돌파 D+2" in rec["note"], rec["note"]
+    rec = _register(hit(A.STAGE_STRONG, 1080.0, gate_break={"bars_ago": 2, "day_pct": 12.0, "vol_mult": 5.0}))["saved"][0]
+    assert A.STAGE_STRONG in rec["note"] and "MA600" in rec["note"], rec["note"]
+    # v5.291: note 문구가 "600돌파 D+N" → "돌파 D+N ±X% vol M배"로 바뀌었다
+    # (돌파봉 성격을 일지에도 남긴다 — 사용자 지시의 표시 항목과 같은 정보).
+    assert "돌파 D+2" in rec["note"] and "+12%" in rec["note"] and "vol 5배" in rec["note"], rec["note"]
 
 
 def test_duplicate_is_refused_without_touching_the_journal():
     existing = [{"ticker": "123456.KQ", "tab": "ABC", "status": "pending"}]
-    r = _register(hit("C2 진돌이", 1080.0), journal=existing)
+    r = _register(hit(A.STAGE_STRONG, 1080.0), journal=existing)
     assert r["saved"] is None, "중복인데 또 썼다"
     assert r["btn"] == "✓ 추적중"
 
@@ -157,11 +163,11 @@ def test_duplicate_is_refused_without_touching_the_journal():
 def test_closed_record_does_not_block_re_registration():
     for st in ("closed", "missed", "archived"):
         old = [{"ticker": "123456.KQ", "tab": "ABC", "status": st}]
-        r = _register(hit("C2 진돌이", 1080.0), journal=old)
+        r = _register(hit(A.STAGE_STRONG, 1080.0), journal=old)
         assert r["saved"] is not None, f"{st}인데 재등록이 막혔다"
 
 
 def test_missing_wall_is_reported_not_saved():
-    r = _register(hit("C2 진돌이", 1080.0, ma_stage=None))
+    r = _register(hit(A.STAGE_STRONG, 1080.0, ma_gate=None))
     assert r["saved"] is None
     assert "없음" in (r["btn"] or ""), r["btn"]

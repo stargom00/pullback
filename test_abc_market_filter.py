@@ -14,17 +14,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from test_helpers import code_only
 
 ROOT = Path(__file__).resolve().parent
 HTML = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
 KST = timezone(timedelta(hours=9))
 needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="node 미설치")
-
-
-def _code_only(src: str) -> str:
-    """`//` 주석 줄 제거 — "이 문자열이 없어야 한다" 검사가 주석 인용문에
-    걸려 오탐하는 것을 막는다(CLAUDE.md 패턴 1)."""
-    return "\n".join(ln for ln in src.splitlines() if not ln.strip().startswith("//"))
 
 
 def _block(header: str, src: str = None) -> str:
@@ -172,7 +167,7 @@ console.log(JSON.stringify(out));
 
 def test_market_buttons_helper_never_calls_set_market():
     """표시 전용이어야 한다 — setMarket/market 대입이 있으면 실패."""
-    fn = _code_only(_block("function applyMarketButtonsEnabled("))
+    fn = code_only(_block("function applyMarketButtonsEnabled("))
     assert "setMarket" not in fn, "applyMarketButtonsEnabled는 market 값을 건드려선 안 된다"
     assert not re.search(r"\bmarket\s*=[^=]", fn), fn
 

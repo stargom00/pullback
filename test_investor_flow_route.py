@@ -115,12 +115,17 @@ def test_an_exception_does_not_break_the_batch(monkeypatch):
     assert out["100000.KQ"]["ok"] is False
 
 
-def test_route_only_fetches_c1_c2(monkeypatch):
-    """C0 대기·C3 이탈·다른 셋업은 제외 — 요청 수를 절반으로(사용자 지시)."""
+def test_route_only_fetches_strong_and_wall(monkeypatch):
+    """대기·약돌파·이탈·다른 셋업은 제외 — 요청 수를 줄인다(사용자 지시).
+    v5.291: 대상이 C1~C2 → **강돌파 + 벽앞**으로 바뀌었고, 접두어 비교
+    (`startswith(("C1","C2"))`)는 새 라벨에서 **0건**이 되므로 상수 집합 비교로
+    교체했다 — 그 회귀를 여기서 잡는다."""
     src = Path(app.__file__).read_text(encoding="utf-8")
     i = src.index('@app.get("/api/abc")')
     body = src[i:src.index('@app.get("/api/debug/memory")')]
-    assert 'startswith(("C1", "C2"))' in body, "범위 제한이 없다"
+    assert 'startswith(("C1", "C2"))' not in body, "구 접두어 비교가 남아 있다(0건이 된다)"
+    assert "_FLOW_STAGES = {abc_screener.STAGE_STRONG, abc_screener.STAGE_WALL}" in body
+    assert 'r["c_stage"] in _FLOW_STAGES' in body
     assert "_flow_fill(flow_targets)" in body
 
 
@@ -137,5 +142,6 @@ def test_flow_is_display_only_never_a_gate():
         src = inspect.getsource(fn)
         assert "flow" not in src, f"{fn.__name__}가 수급을 읽는다"
     src = Path(app.__file__).read_text(encoding="utf-8")
-    i = src.index('    order = {"C1 벽앞"')
+    # v5.291: 별도 `order` dict가 사라지고 `_ABC_STAGE_PRIORITY` 하나로 통합됐다.
+    i = src.index("    hits.sort(key=lambda h: (_ABC_STAGE_PRIORITY.get(")
     assert "flow" not in src[i:i + 400], "정렬이 수급을 읽는다"

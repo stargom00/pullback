@@ -5,6 +5,86 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.291 [버그수정] ABC 실적 칸이 화면 상단 전체 "판정 불가"로 보인 문제(사용자
+    지시, 툴팁 "미조회"로 원인 확정). **네 가지를 같이 고쳤다 — 상한 자체가
+    아니라 상한이 걸리는 "순서"와 "가시성"이 문제였다.**
+    [1] 상한 적용을 **정렬 후로**. 예전엔 `_ABC_EARNINGS_MAX`가 `cands`(번들 dict
+        순회 = 유니버스 순서) 앞에서 잘렸고 `hits`는 그 뒤에 c_stage·vol_mult로
+        재정렬돼, 조회된 42건이 목록 전체에 무작위로 흩어졌다. cands 153건
+        실측 기준 111건(73%)이 미조회. 이제 `_ABC_STAGE_PRIORITY`(화면 정렬과
+        같은 순서: 강돌파→벽앞→약돌파→대기→이탈)로 줄을 세워 잘리는 몫이
+        아래쪽이 되게 한다.
+    [2] **실적 캐시 신설**(`_ABC_EARNINGS_CACHE`/`_abc_earnings_peek`, TTL 24h) —
+        `_FLOW_CACHE`와 같은 패턴. `earnings.py`엔 캐시가 0건이라(`_CACHE`/
+        `lru_cache` 부재 확인) 종목당 매 요청 HTTP 2회를 새로 쏘고 커버리지가
+        영원히 안 쌓였다. TTL 24h 근거는 "분기 실적은 하루에 안 바뀜"(사용자 지시).
+    [3] `capped` 계측 + **화면 배지** `_abcEarningsSourceHtml()`("실적: 상한 초과
+        N건 미조회 · 데이터 없음 M · 캐시 K") — 수급 배지와 같은 방식.
+        `판정 불가` 툴팁 기본 문구도 "미조회 — 조회 상한"으로 명시. 이 배지가
+        없어서 "안 본 종목"과 "데이터 없는 종목"이 화면에서 같아 보였다(사고의 정체).
+        응답에 `earnings_source` 필드 추가 + 0건일 때도 남기는 요약 로그
+        (`[abc-earnings] 대상 N건 중 조회 M건…`) — 침묵을 성공으로 읽지 않기.
+    [4] off-by-2 수정: `range(0, min(len(cands), 40), 6)`은 마지막 청크가
+        `cands[36:42]`라 실제로 **42건**을 조회했다(상한 40의 의미가 흐려짐).
+        슬라이스로 정확히 상한까지 자른 뒤 청크로 나눈다.
+    ⚠️ **전제 정정**: 사용자가 "판정 불가 → A급 구조적으로 불가"로 보고했으나
+    **반대다.** `company_axis()`의 매출·EPS 검사는 `is not None` 가드라 결측이면
+    **감점하지 않는다**(v5.267 의도, 주석에 명시) — 실제로 돌려 확인했다:
+    fin 전부 None → `fails=[]`·`ok=True` → **A급**, fin 있고 미달 → B급. 즉
+    미조회는 A급을 막지 않고 오히려 쉽게 만든다. A급이 안 나오는 원인은 차트
+    축(`b.ok`/`c_stage`)이나 거래대금(<10억 → C급 / >1000억 → A를 B로)이며 별건.
+    `test_abc_earnings_cache.py` 신규.
+    [C단계 MA600 개편, 사용자 지시 — 방법론 정정] "ABC 핵심은 MA600을 거래량
+    동반 장대양봉으로 뚫느냐"인데 v5.272의 C단계는 MA200 기준이라 불일치였다.
+    **판정 순서가 핵심**: 🩷강돌파(이벤트)를 밴드(위치)보다 **먼저** 본다.
+      · 대기 MA600 −5%↓ · 벽앞 −5~0% · 🩷강돌파(밴드 무관) · 약돌파 0~+20% ·
+        이탈 +20%↑. 강돌파 = 최근 20봉 내 MA600 첫 종가 돌파 & 그 봉 당일
+        +7%↑ & 거래량 ≥ **50일 평균의 2배**(사용자 확정) & 지금도 MA600 위.
+        전부 임의값(백테스트 없음) — `ABC_CONFIG` 한 곳.
+      · **MA600 게이트 제거** — 대기·벽앞이 화면에 보여야 한다(사용자 지시).
+      · B 중앙값 밴드·매물대·진돌이·가돌이(`_find_breakout`, 직전 5일평균)는
+        **MA200 유지**(사용자 확정). MA200은 참고 칸으로만 남는다.
+    **왜 순서인가(실측)**: 밴드를 먼저 보면 MA600이 2.4년 평균이라 참조 12종목
+    중 **10종목이 이탈로 쏠리고** 진짜 강돌파가 먹혔다(티이엠씨 +22.4%·vol×42,
+    우리넷 +57.6%·vol×26). v5.268이 MA600 단독으로 갔다가 11/13 이탈로 물러선
+    것과 같은 현상 — 이번엔 기준선을 되돌리지 않고 순서로 풀었다.
+    [등급] **A급 후보 = 🩷강돌파 하나뿐**(사용자 지시). 대기·벽앞·약돌파는 최대
+    B급, 이탈은 C급. `grade()`의 `"C3 이탈"` 리터럴 비교를 **`STAGE_*` 상수**로
+    교체 — 라벨을 바꾸면 비교가 조용히 항상 False가 되어 이탈이 A급까지
+    올라가는 회귀가 난다(`test_grade_uses_stage_constants_not_literals`가 본문에
+    라벨 리터럴이 있으면 FAIL).
+    [소비처 전수 교체] `_ABC_STAGE_PRIORITY`(상수 참조) · 수급 조회 대상 =
+    **강돌파+벽앞**(`startswith(("C1","C2"))`는 새 라벨에서 0건이 된다) ·
+    화면 정렬(별도 `order` dict 삭제, 우선순위 표 **하나로 통합** — 같은 뜻을 두
+    곳에 두면 어긋난다) · 섹터 묶음 제외(`startswith("C3")` → `!= STAGE_EXIT`) ·
+    필터 칩 5종 + `startsWith` → **정확 일치** · `C_STAGES`.
+    [UI] 돌파봉 칸이 등락률·vol배수·**D+1/2/3 거래량 배수**를 표시하고 기존
+    🩷600돌파 칸·토글(`toggleAbcGateBreak`/`abcGateBreakOnly`)을 흡수·삭제했다
+    (같은 사건을 단계와 별도 토글 두 곳에서 거르면 어긋난다).
+    ★ 트리거 기준선 MA200→**MA600(`ma_gate`)**, 방향 로직(`close>기준선?below:above`)
+    유지 → 대기·벽앞은 `above`(돌파 알림), 강돌파·약돌파·이탈은 `below`(되밟기
+    경보)가 자동으로 나온다(사용자 확정, 새 분기 없음).
+    MA600 칸 툴팁에 **"naver 수정주가는 현금배당 미조정 — TradingView(ADJ)와
+    2~3% 차이 가능"**(사용자 지시). 실측 근거: 계룡건설 09-23 스캐너 SMA600
+    18,443 vs TV 18,014(+2.38%) → 배당 소급조정(DPS 700원×2회, 배당수익률
+    3.13%) −3.1%p + 봉수 차이 +2.4%p로 분해되며, 둘을 넣으면 18,021(TV와 0.04%p).
+    `test_abc_ma600_stages.py` 신규 26건. `test_abc_real_tickers.py` 앵커 재고정
+    (LS에코·RFHIC 둘 다 MA600 기준으로 이탈 — 설계 변경의 결과지 회귀가 아니다).
+    사보타주 11건 전부 탐지 확인.
+    [테스트 공용화, 사용자 지시] `test_helpers.py` 신설 — `code_only()` 하나로
+    중복 **6곳**을 교체했다(`test_abc_filter_chips`/`test_abc_market_filter`/
+    `test_abc_earnings_cache`/`test_abc_ma600_stages`/`test_entry_gate_bypass_note`/
+    `test_journal_no_auto_entry`). "이 문자열이 없어야 한다" 검사가 **변경을
+    설명하는 주석**에 걸려 오탐한 사고가 2026-09-27 한 세션에 다섯 번 났고
+    (changelog 인용 2건 · `.journal-btn` · `toggleAbcGateBreak` · `ma_stage`),
+    그때마다 헬퍼를 복사해 넣다 6곳이 됐다.
+    **동작 불변**을 위해 기존 두 변종을 파라미터로 보존한다 — 단순형 4곳은
+    `//` 시작 줄만, 강한형 2곳은 후행 `//`까지(`://`는 URL 예외), 파이썬 소스를
+    보는 2곳은 `comment_markers=("//","#")`. 기본값을 "가장 강한 동작"으로 두면
+    조용히 검사 범위가 넓어지므로 호출부마다 명시한다.
+    헬퍼 자체 테스트 6건 포함(헬퍼가 망가지면 그걸 쓰는 모든 검사가 오탐 쪽으로
+    무너진다). 사보타주: 헬퍼 no-op → **9건 실패** · `strip_trailing` 무시 → 1건 ·
+    `comment_markers` 무시 → 1건 · URL 예외 제거 → 1건.
 v5.290 [UI] ABC 탭 등급·C단계 필터를 **각각 한 줄 pill 칩 행**으로(사용자 지시).
     [원인] `_abcChip()`이 `.journal-btn`(`static/index.html:149`,
     `width:100%;margin-top:10px`)을 재사용했다 — 일지의 전폭 버튼용 스타일이라
@@ -8142,7 +8222,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.290"
+VERSION = "v5.291"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -13163,6 +13243,49 @@ def _rss_mb() -> float | None:
 # 책임 분리). 일봉은 **이미 있는 번들 캐시만** 읽는다 — 새 fetch 0건.
 _ABC_FLAGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "abc_flags.json")
 _ABC_EARNINGS_MAX = 40      # 실적 조회 상한(임의값) — 차트 통과분만 보므로 보통 한 자릿수
+# ── v5.291(사용자 지시): 실적 조회 캐시·상태 필드 ─────────────────────
+# 배경: `_ABC_EARNINGS_MAX=40`이 **정렬 전 cands 순서**(번들 dict 순회 = 유니버스
+# 순서)에 걸렸고 `hits`는 그 뒤에 c_stage·vol_mult로 재정렬돼, 실적이 있는
+# 42종목이 목록 전체에 무작위로 흩어졌다. cands 153건일 때 111건(73%)이
+# "미조회"인데 화면엔 "판정 불가"로만 보여 **"안 본 종목"과 "데이터 없는 종목"이
+# 구분되지 않았다**(2026-09-27 사용자 보고, 툴팁 "미조회"로 확정).
+# 수급(`_FLOW_CACHE`)은 캐시가 있어 재로드마다 커버리지가 쌓이는데 실적은
+# `earnings.py`에 캐시가 0건이라(확인: `_CACHE`/`lru_cache` 없음) 종목당 매번
+# HTTP 2회를 새로 쏘고 커버리지가 영원히 안 쌓였다. 같은 패턴으로 맞춘다.
+# TTL 24h 근거: **분기 실적은 하루 안에 바뀌지 않는다**(사용자 지시).
+# ⚠️ 접두어 `_ABC_`가 필수다. 처음 `_EARNINGS_TTL`로 썼더니 **아래 14864행의
+# 동명 상수(6시간, v5.05 `get_earnings_growth` 캐시용)가 나중에 정의되며 조용히
+# 덮어써서** 이 캐시가 24h가 아니라 6h로 돌았다(`test_ttl_is_24h`가 잡음).
+# 이 파일은 19k줄이라 전역 이름 충돌이 눈에 안 띈다 — 기능별 접두어를 붙일 것.
+_ABC_EARNINGS_CACHE: dict = {}         # {ticker: (ts, axes_dict)}
+_ABC_EARNINGS_TTL = 24 * 3600          # 24시간(사용자 지시 — 분기 실적은 하루에 안 바뀜)
+# v5.252 방식 방어 3종 중 "상태 필드". 수급의 `_flow_source`와 같은 구실이다.
+_abc_earnings_source = {"source": "unknown", "ok": 0, "no_data": 0, "failed": 0,
+                        "cached": 0, "capped": 0}
+
+
+def _abc_earnings_peek(ticker: str):
+    """캐시에 있으면 준다. 없으면 None — **여기서 조회하지 않는다**
+    (`_flow_peek`와 같은 계약)."""
+    hit = _ABC_EARNINGS_CACHE.get(ticker)
+    if hit and time.time() - hit[0] < _ABC_EARNINGS_TTL:
+        return hit[1]
+    return None
+
+
+# 조회 우선순위 — **정렬 후 순서와 같게** 둔다(사용자 지시). 상한에 걸려 잘리는
+# 몫이 화면 아래쪽(대기·이탈)이 되도록. 값은 `abc_screener.C_STAGES`의 라벨이고,
+# ⚠️ **C_STAGES를 바꾸면 이 표도 같이 고칠 것** — `test_abc_earnings_cache.py`의
+# `test_priority_covers_every_stage`가 누락을 FAIL시킨다.
+# v5.291: 라벨 리터럴 금지 — `abc_screener.STAGE_*` 상수를 참조한다(라벨이
+# 바뀌면 `.get(..., 9)`로 조용히 맨 뒤에 밀리는 회귀를 막기 위해).
+_ABC_STAGE_PRIORITY = {
+    abc_screener.STAGE_STRONG: 0,   # 강돌파 — 가장 먼저
+    abc_screener.STAGE_WALL: 1,
+    abc_screener.STAGE_WEAK: 2,
+    abc_screener.STAGE_WAIT: 3,
+    abc_screener.STAGE_EXIT: 4,
+}
 
 
 def _load_abc_flags() -> dict:
@@ -13264,22 +13387,72 @@ async def api_abc():
             continue
         cands.append((t, r))
 
-    # 실적은 차트 통과분만 — 스레드풀로 병렬, 상한 초과분은 unknown
+    # ── 실적 (v5.291, 사용자 지시로 전면 개편) ─────────────────────────
+    # [1] 상한을 **정렬 후 순서**에 적용한다. 예전엔 `cands`(번들 순회 = 유니버스
+    #     순서) 앞 42건만 조회했는데 `hits`는 그 뒤에 c_stage로 재정렬돼, 조회분이
+    #     목록 전체에 흩어져 화면 상단이 전부 "미조회"가 됐다. 이제
+    #     `_ABC_STAGE_PRIORITY`(= 화면 정렬 순서)로 먼저 줄을 세워 상한에 잘리는
+    #     몫이 아래쪽(대기·이탈)이 되게 한다.
+    # [2] 캐시(`_abc_earnings_peek`, TTL 24h)를 먼저 본다 — 재로드마다 커버리지 누적.
+    # [3] off-by-2 수정: `range(0, min(len, 40), 6)`은 마지막 청크가 `[36:42]`라
+    #     실제로 **42건**을 조회했다(상한 40의 의미가 흐려짐). 슬라이스로 정확히
+    #     상한만큼 자른 뒤 청크로 나눈다.
+    # [4] `capped`를 센다 — 조용히 빠지면 "안 본 종목"과 "데이터 없는 종목"이
+    #     화면에서 같아 보인다(이 사고의 정체).
     loop = asyncio.get_event_loop()
     fin = {}
-    for i in range(0, min(len(cands), _ABC_EARNINGS_MAX), 6):
-        chunk = cands[i:i + 6]
+    _fin_order = sorted(cands, key=lambda tr: _ABC_STAGE_PRIORITY.get(tr[1].get("c_stage"), 9))
+    _fin_todo = []
+    for t, _r in _fin_order:
+        hit = _abc_earnings_peek(t)
+        if hit is not None:
+            fin[t] = hit
+        else:
+            _fin_todo.append(t)
+    _fin_stats = {"ok": 0, "no_data": 0, "failed": 0, "cached": len(fin),
+                  "capped": max(0, len(_fin_todo) - _ABC_EARNINGS_MAX)}
+    _fin_todo = _fin_todo[:_ABC_EARNINGS_MAX]      # [3] 정확히 상한까지
+    for i in range(0, len(_fin_todo), 6):
+        chunk = _fin_todo[i:i + 6]
         res = await asyncio.gather(*[
             loop.run_in_executor(_earnings_executor, _abc_quarterly_axes, t)
-            for t, _ in chunk], return_exceptions=True)
-        for (t, _), v in zip(chunk, res):
-            fin[t] = v if isinstance(v, dict) else {"rev_yoy_pos": None,
-                                                    "eps_pos_q": None, "reason": "조회 실패"}
+            for t in chunk], return_exceptions=True)
+        _now = time.time()
+        for t, v in zip(chunk, res):
+            if not isinstance(v, dict):
+                v = {"rev_yoy_pos": None, "rev_yoy_of": 0,
+                     "eps_pos_q": None, "reason": "조회 실패"}
+            _ABC_EARNINGS_CACHE[t] = (_now, v)
+            fin[t] = v
+    for v in fin.values():
+        if v.get("rev_yoy_pos") is not None or v.get("eps_pos_q") is not None:
+            _fin_stats["ok"] += 1
+        elif v.get("reason") == "조회 실패":
+            _fin_stats["failed"] += 1
+        else:
+            _fin_stats["no_data"] += 1
+    _fin_total = _fin_stats["ok"] + _fin_stats["no_data"] + _fin_stats["failed"]
+    # v5.252 방식 "경고 로그" — 전량 실패/0건을 조용히 넘기지 않는다.
+    if _fin_total and not _fin_stats["ok"]:
+        print(f"[abc-earnings] ⚠️ 실적 전량 판정불가 — 대상 {_fin_total}건 "
+              f"(데이터없음 {_fin_stats['no_data']} · 실패 {_fin_stats['failed']} · "
+              f"상한초과 {_fin_stats['capped']}). naver 개편 의심", flush=True)
+    else:
+        # 0건일 때도 남긴다 — `if changed:`류로 감싸면 "아무것도 안 함"과
+        # "호출조차 안 됨"이 똑같이 무음이 된다(CLAUDE.md 침묵≠성공).
+        print(f"[abc-earnings] 대상 {len(_fin_order)}건 중 조회 {_fin_total}건 "
+              f"(캐시 {_fin_stats['cached']} · 신규 {len(_fin_todo)} · "
+              f"상한초과 {_fin_stats['capped']})", flush=True)
+    _abc_earnings_source.update(
+        source=("mobile_api" if _fin_stats["ok"] else ("failed" if _fin_total else "idle")),
+        **_fin_stats)
 
-    # v5.275(사용자 지시): 수급 표시는 **C1~C2만**. C0 대기·C3 이탈·다른 셋업은
-    # 빼서 요청 수를 절반으로 줄인다(153건 표본에서 C1 15 + C2 37 = 52건).
-    flow_targets = [t for t, r in cands
-                    if (r["c_stage"] or "").startswith(("C1", "C2"))]
+    # v5.291(사용자 지시): 수급 조회 대상 = **강돌파 + 벽앞**. v5.275의
+    # `startswith(("C1","C2"))`는 새 라벨에서 **한 건도 안 맞아 전 종목 미조회**가
+    # 되므로 상수 집합 비교로 바꾼다(문자열 접두어 비교를 남겨두면 라벨 개편
+    # 때마다 조용히 0건이 된다).
+    _FLOW_STAGES = {abc_screener.STAGE_STRONG, abc_screener.STAGE_WALL}
+    flow_targets = [t for t, r in cands if r["c_stage"] in _FLOW_STAGES]
     flow = await _flow_fill(flow_targets)
 
     hits = []
@@ -13326,18 +13499,23 @@ async def api_abc():
             "sector": si.get("sector"),
         })
 
-    order = {"C1 벽앞": 0, "C2 진돌이": 1, "C2 가돌이": 1, "C2 돌파 없음": 1,
-             "C0 대기": 2, "C3 이탈": 3}
-    hits.sort(key=lambda h: (order.get(h["c_stage"], 9), -(h["vol_mult"] or 0)))
+    # v5.291: 정렬 순서를 `_ABC_STAGE_PRIORITY` **하나로 통합**했다. 예전엔
+    # 별도 `order` 딕셔너리가 있어 실적 조회 우선순위와 화면 정렬이 서로 다른
+    # 표를 봤다 — 같은 뜻을 두 곳에 두면 어긋난다(CLAUDE.md).
+    hits.sort(key=lambda h: (_ABC_STAGE_PRIORITY.get(h["c_stage"], 9), -(h["vol_mult"] or 0)))
 
     # 섹터 묶음 — C0~C2 히트가 같은 섹터에 2개 이상이면 상단에 표시
     from collections import Counter
     sec_cnt = Counter(h["sector"] for h in hits
-                      if h["sector"] and not h["c_stage"].startswith("C3"))
+                      # v5.291: `startswith("C3")` → 상수 비교(라벨 개편 대응)
+                      if h["sector"] and h["c_stage"] != abc_screener.STAGE_EXIT)
     ts = bundle.get("ts")
     return {"ok": True, "cache_state": "warm", "hits": hits, "counts": counts,
             "ma_label": abc_screener._ma_label(),
             "flow_source": dict(_flow_source),   # v5.275 방어: 화면 배지가 읽는다
+            # v5.291(사용자 지시): 실적도 같은 방어 — "미조회(상한 초과)"와
+            # "데이터 없음"을 화면에서 구분할 수 있게 상태를 내보낸다.
+            "earnings_source": dict(_abc_earnings_source),
             "sector_clusters": [{"sector": s, "n": n}
                                 for s, n in sec_cnt.most_common() if n >= 2],
             "flags_loaded": len(flags),
