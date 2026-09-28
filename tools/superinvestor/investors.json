@@ -1,0 +1,238 @@
+{
+  "_note": "미국 슈퍼인베스터 13F 추적 대상. Phase 1(관심 신호 · 측정 전) 전용.",
+  "_cik_source": "CIK·표기명은 추측이 아니라 SEC Form 13F Data Sets(01jun2026-31aug2026 등 실제 제출분)의 SUBMISSION.CIK × COVERPAGE.FILINGMANAGER_NAME에서 확인한 값이다(2026-09-28). 이름으로 검색해 실제 제출 이력이 있는 CIK만 넣었다.",
+  "_exclusion_rule": "지수형·퀀트 대형 운용사 제외(사용자 지시): Vanguard/BlackRock/State Street/FMR/Geode/Renaissance/Two Sigma/DE Shaw/Citadel/Millennium/AQR/Dimensional/Northern Trust/Bridgewater 등은 넣지 않는다. '가치·집중 포트폴리오를 사람이 고르는' 운용사만 대상.",
+  "_list_fixed_date_rule": "이 목록을 확정한 날짜. Phase 3(백테스트)는 이 날짜 이후 공개분만 신호로 쓴다 — 목록 자체를 사후 성과로 고른 편향(survivorship/사후선택)을 백테스트에 섞지 않기 위함. 목록에 투자자를 추가하면 그 투자자의 list_fixed_date만 새 날짜로 기록한다(전체를 갱신하지 말 것).",
+  "investors": [
+    {
+      "cik": "0001067983",
+      "name": "Berkshire Hathaway Inc",
+      "short": "Berkshire (Buffett)",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "BRK"
+    },
+    {
+      "cik": "0001061768",
+      "name": "BAUPOST GROUP LLC/MA",
+      "short": "Baupost (Klarman)",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "BAUPOST"
+    },
+    {
+      "cik": "0000915191",
+      "name": "FAIRFAX FINANCIAL HOLDINGS LTD/ CAN",
+      "short": "Fairfax (Watsa)",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "FFH"
+    },
+    {
+      "cik": "0001709323",
+      "name": "Himalaya Capital Management LLC",
+      "short": "Himalaya (Li Lu)",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "HC"
+    },
+    {
+      "cik": "0001112520",
+      "name": "AKRE CAPITAL MANAGEMENT LLC",
+      "short": "Akre Capital",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "AC"
+    },
+    {
+      "cik": "0001631014",
+      "name": "ALTAROCK PARTNERS LP",
+      "short": "AltaRock Partners",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "AP"
+    },
+    {
+      "cik": "0001656456",
+      "name": "APPALOOSA LP",
+      "short": "Appaloosa (Tepper)",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "AM"
+    },
+    {
+      "cik": "0001536411",
+      "name": "Duquesne Family Office LLC",
+      "short": "Duquesne (Druckenmiller)",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": null
+    },
+    {
+      "cik": "0001336528",
+      "name": "Pershing Square Capital Management, L.P.",
+      "short": "Pershing Square (Ackman)",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "psc",
+      "alt_ciks": [
+        "0002026053"
+      ],
+      "alt_names": [
+        "PERSHING SQUARE INC."
+      ]
+    },
+    {
+      "cik": "0001040273",
+      "name": "Third Point LLC",
+      "short": "Third Point (Loeb)",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "tp"
+    },
+    {
+      "cik": "0001412093",
+      "name": "ICAHN CAPITAL LP",
+      "short": "Icahn Capital",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "ic",
+      "alt_ciks": [
+        "0000921669"
+      ],
+      "alt_names": [
+        "ICAHN CARL C"
+      ]
+    },
+    {
+      "cik": "0001345471",
+      "name": "TRIAN FUND MANAGEMENT, L.P.",
+      "short": "Trian (Peltz)",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "TF"
+    },
+    {
+      "cik": "0001351069",
+      "name": "ValueAct Capital Management, L.P.",
+      "short": "ValueAct",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "VA",
+      "alt_ciks": [
+        "0001418814"
+      ],
+      "alt_names": [
+        "ValueAct Holdings, L.P."
+      ]
+    },
+    {
+      "cik": "0001553733",
+      "name": "Brave Warrior Advisors, LLC",
+      "short": "Brave Warrior (Greenberg)",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "CCM"
+    },
+    {
+      "cik": "0000860643",
+      "name": "GARDNER RUSSO & QUINN LLC",
+      "short": "Gardner Russo & Quinn",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "GR"
+    },
+    {
+      "cik": "0001115373",
+      "name": "SEMPER AUGUSTUS INVESTMENTS GROUP LLC",
+      "short": "Semper Augustus",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "SA"
+    },
+    {
+      "cik": "0001641864",
+      "name": "Giverny Capital Inc.",
+      "short": "Giverny Capital",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "GC"
+    },
+    {
+      "cik": "0000859804",
+      "name": "WEDGEWOOD PARTNERS INC",
+      "short": "Wedgewood Partners",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "WP"
+    },
+    {
+      "cik": "0001389403",
+      "name": "Chou Associates Management Inc.",
+      "short": "Chou Associates",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "ca"
+    },
+    {
+      "cik": "0000807985",
+      "name": "SOUTHEASTERN ASSET MANAGEMENT INC/TN/",
+      "short": "Southeastern (Longleaf)",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "SE"
+    },
+    {
+      "cik": "0000813917",
+      "name": "HARRIS ASSOCIATES L P",
+      "short": "Harris Associates (Oakmark)",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "HA"
+    },
+    {
+      "cik": "0000905567",
+      "name": "YACKTMAN ASSET MANAGEMENT LP",
+      "short": "Yacktman Asset Mgmt",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "YAM"
+    },
+    {
+      "cik": "0000732905",
+      "name": "Tweedy, Browne Co LLC",
+      "short": "Tweedy Browne",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "TB"
+    },
+    {
+      "cik": "0001720792",
+      "name": "Ruane, Cunniff & Goldfarb L.P.",
+      "short": "Ruane Cunniff",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "RC"
+    },
+    {
+      "cik": "0001427008",
+      "name": "Smead Capital Management, Inc.",
+      "short": "Smead Capital",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": null
+    },
+    {
+      "cik": "0001166559",
+      "name": "GATES FOUNDATION TRUST",
+      "short": "Gates Foundation Trust",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "GFT"
+    },
+    {
+      "cik": "0001096343",
+      "name": "Markel Group Inc.",
+      "short": "Markel Group",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "MKL"
+    },
+    {
+      "cik": "0001061165",
+      "name": "LONE PINE CAPITAL LLC",
+      "short": "Lone Pine",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "LPC"
+    },
+    {
+      "cik": "0001103804",
+      "name": "VIKING GLOBAL INVESTORS LP",
+      "short": "Viking Global",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "vg"
+    },
+    {
+      "cik": "0001167483",
+      "name": "TIGER GLOBAL MANAGEMENT LLC",
+      "short": "Tiger Global",
+      "list_fixed_date": "2026-09-28",
+      "dataroma_code": "TGM"
+    }
+  ],
+  "_dataroma_note": "dataroma_code는 https://www.dataroma.com/m/managers.php 실제 목록에서 확인한 코드다(2026-09-28). 검증(validate_dataroma.py)의 분류 일치율 대조에만 쓰고, 스크리너 계산에는 쓰지 않는다. null = Dataroma가 그 투자자를 다루지 않음.",
+  "_alt_ciks_note": "alt_ciks = 같은 투자자의 다른 보고 법인. **13F는 '통지(13F-NT)'와 '보유명세(13F-HR)'를 다른 법인이 낼 수 있다**(2026-09-28 실측): ICAHN CAPITAL LP는 매 분기 NT만 내고 실제 보유는 ICAHN CARL C가, ValueAct Capital Management도 NT만 내고 보유는 ValueAct Holdings가 낸다. Pershing Square는 2026Q1까지 Capital Management가 HR을 내다가 2026Q2에 NT로 바뀌고 PERSHING SQUARE INC.가 HR을 냈다. 그래서 분기마다 '그 분기에 실제로 보유를 보고한 법인'을 골라야 한다(secdata.pick_filer — 여러 법인이 같은 분기에 HR을 내면 **합치지 않고** 총액이 큰 쪽 하나만 쓴다. 합치면 중복 계상 위험이 있다)."
+}
