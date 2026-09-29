@@ -34,11 +34,42 @@
   `_SYNC_TOKEN_GATED_PATHS`를 보면 답이 나온다).
   근거: 2026-09-26에 `POST /api/journal`이 토큰으로 열리는지 확인하려고
   `{"records": [], "probe": true}`를 실제 프로덕션에 보냈다. 401로 거부돼
-  **아무 일도 안 일어났지만**, 통과했다면 이 엔드포인트의 병합 규칙상
-  `records`가 비고 `deleted_ids`도 없으면 최근 갱신 창(`JOURNAL_CONCURRENT_
-  KEEP_WINDOW_SEC`) 밖의 레코드가 전부 "사용자가 지운 것"으로 간주돼
+  아무 일도 안 일어났지만, 통과했다면 당시(v5.299 이하) 전체 배열 병합 규칙상
   **저널이 대량 삭제될 수 있었다.** 읽기(GET)로 답을 못 얻는 질문이라면
   코드를 읽거나 사용자에게 묻는다.
+
+### 일지(journal_user.json) 저장 구조 — v5.300부터
+- **쓰기는 레코드 단위만.** `PUT /api/journal/{id}`(한 건 생성/수정, body
+  `{record, base_rev, edit}`), `DELETE /api/journal/{id}`(명시적 삭제만).
+  **전체 배열 `POST /api/journal`은 410**(`code: reload_required`) — 옛 탭·옛 스크립트가
+  보내도 파일은 안 바뀐다. 읽기는 `GET /api/journal` 그대로.
+- **rev 규칙**: 레코드마다 정수 `rev`. PUT의 `base_rev`가 서버 rev와 다르면 **409 +
+  서버 최신본**(`code: conflict`) — 덮어쓰지 않는다. 서버에 없는 id를 `base_rev`와 함께
+  PUT하면 **409 `gone`** — 삭제된 레코드를 되살리지 않는다. 새 레코드는 `base_rev`
+  없이(null) PUT → rev 1로 생성. 실체결 3필드(`PROTECTED_JOURNAL_FIELDS`)는 `edit=true`
+  (saveEdit의 명시적 편집)일 때만 바뀐다. `updated_at`은 판정에 쓰지 않는다(운영 163건 중
+  94건이 1970 기본값·143건이 같은 값이라 신뢰 불가).
+- **서버 내부 쓰기도 rev를 올려야 한다.** 레코드를 바꾸는 서버 코드는 반드시
+  `_journal_bump(r)`로 rev·updated_at을 올리고 `_write_journal_file()`로 쓴다(현재:
+  감시 등록 `watch_quick` rev=1 생성, 토스 실체결 자동채움 `positions_sync`, 포지션 손절
+  동기화 `positions_set_stop`). rev를 안 올리면 그 사이 낡은 탭의 PUT이 409로 안 막혀
+  서버 변경을 덮어쓴다. 여러 줄에 걸친 읽기→쓰기는 `_JOURNAL_LOCK` 안에서.
+- **프론트**: `setJournal(arr, opts)`는 "서버와 맞춘 사본"(`_journalSynced`) 대비 **바뀐
+  레코드만** PUT한다. 배열에서 빠진 것만으로는 절대 삭제하지 않는다 — 삭제는
+  `opts.deletedIds`에 명시한 id만 DELETE(전체 삭제도 id 목록을 넘김). 409면 서버본으로
+  화면을 바꾸고 알린다. 일지 로드 실패(`_journalLoadError`) 중엔 모든 쓰기를 거부한다(v5.299).
+- **기록·백업**: 삭제마다 `journal_deletions.log`(일지 폴더)에 시각·id·클라이언트·지운
+  레코드를 한 줄씩 남긴다. 날짜별 사본 `journal_YYYYMMDD.json`을 서버 시작 직후 1회 +
+  스케줄러 하루 1회 만들고 **최근 14개**만 보관(원자적 tmp→rename). 기존 1세대
+  `journal_user.json.bak`은 매 쓰기마다 교체되므로 복구용으로 믿지 말 것.
+- **옛 localStorage 일지(`pullback_journal_v1`) 자동 이전은 제거됐다**(v5.300 — 옛 배열을
+  서버에 올리는 경로 자체가 훼손 위험, v5.299 로컬 재현 60→3건). **브라우저의 그 키는
+  삭제하지 말 것** — 그 브라우저에 남은 마지막 사본일 수 있다.
+- **금지**: 일지 파일을 스크립트·셸로 직접 덮어쓰기, 배열 전체를 받아 저장하는 경로의
+  재도입(새 엔드포인트든 기존 것의 부활이든). 대량 보정이 필요하면 레코드 단위 함수로
+  rev를 올리며 바꾸고, 전후 레코드 수·id·필드를 대조한다(v5.300 rev 보정 선례).
+  `scripts/maintenance/2026-09-02_journal_date_kst_migration.py`는 전체 배열 POST라
+  이제 410으로 동작하지 않는다(재사용 금지).
 
 ## 검증 방법
 - **라이브 URL(pullback2-production.up.railway.app)에 curl로 접근된다 (2026-09-13 확인).**
