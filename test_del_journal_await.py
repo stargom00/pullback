@@ -56,6 +56,10 @@ def _extract_function(name: str) -> str:
 SET_JOURNAL_SRC = _extract_function("setJournal")
 SAVE_TO_SERVER_SRC = _extract_function("_saveJournalToServer")
 DEL_JOURNAL_SRC = _extract_function("delJournal")
+# v5.298: _saveJournalToServer가 응답을 apiParse(API JSON 공통 헬퍼)로 읽는다 —
+# 헬퍼 원문도 같이 넣어야 production과 같은 경로를 탄다(없으면 참조 오류가 기존
+# "파싱 실패 무시" catch에 삼켜져 서버 반영이 조용히 빠진다).
+API_HELPER_SRC = _extract_function("_apiError") + "\n" + _extract_function("apiParse")
 
 
 def _run_node(script: str, timeout=15):
@@ -82,6 +86,7 @@ function showSaveError() {{ showSaveErrorCalled = true; }}
 function confirm(msg) {{ return true; }}
 function alert(msg) {{ alertMessages.push(msg); }}
 {fetch_impl_js}
+{API_HELPER_SRC}
 {SET_JOURNAL_SRC}
 {SAVE_TO_SERVER_SRC}
 {DEL_JOURNAL_SRC}
@@ -100,7 +105,7 @@ def test_normal_delete_removes_record_and_renders_once():
     seed = json.dumps([{"id": 1001, "ticker": "008930.KS"}, {"id": 1002, "ticker": "005930.KS"}])
     fetch_impl = """
     async function fetch(url, opts) {
-      return { ok: true, json: async () => ({ ok: true, journal: [{id:1002, ticker:'005930.KS'}] }) };
+      return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, journal: [{id:1002, ticker:'005930.KS'}] }) };
     }
     """
     out = json.loads(_run_node(_harness(fetch_impl, seed)))
@@ -119,7 +124,7 @@ def test_server_rejects_deletion_record_stays_and_alerts():
     fetch_impl = """
     async function fetch(url, opts) {
       // deletedIds를 보냈는데도 서버가 되살린 상황을 흉내(이상 상황 방어 확인용)
-      return { ok: true, json: async () => ({ ok: true, journal: [{id:1001, ticker:'008930.KS'}, {id:1002, ticker:'005930.KS'}] }) };
+      return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, journal: [{id:1001, ticker:'008930.KS'}, {id:1002, ticker:'005930.KS'}] }) };
     }
     """
     out = json.loads(_run_node(_harness(fetch_impl, seed)))
@@ -156,7 +161,7 @@ def test_del_journal_sends_deleted_ids():
     let capturedBody = null;
     async function fetch(url, opts) {
       capturedBody = JSON.parse(opts.body);
-      return { ok: true, json: async () => ({ ok: true, journal: [] }) };
+      return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, journal: [] }) };
     }
     """
     script = _harness(fetch_impl, seed).replace(

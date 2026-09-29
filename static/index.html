@@ -892,7 +892,7 @@ details.rowmenu>summary:hover{background:#1b2029}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.297</span>
+      <span class="ver mono" id="verBadge">v5.298</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -1900,10 +1900,41 @@ function jonggaCard(s) {
 // 내려주는 값으로 통일, docs/label_semantics_audit_2026-09-02.md)와 실전
 // 결과를 계속 대조(사용자 지시). /api/jongga/forward를 탭 진입 시 별도로
 // 불러온다(카드 스캔과 다른 엔드포인트라 load()의 일반 흐름 밖에서 처리).
+// ══════════════════════════════════════════════════════════════════
+// v5.298(사용자 지시): API JSON 공통 헬퍼. 예전엔 41곳이 응답 상태를 안 보고 바로
+// res.json()을 불러, Railway 프록시 타임아웃이 준 일반 텍스트 "upstream error"(HTTP
+// 502/504)가 "SyntaxError: Unexpected token 'u'"로 보였다 — 진짜 원인(상태·본문)이
+// 가려졌다. 여기서 ① 상태 확인 ② 본문을 text로 받아 JSON 파싱 ③ 실패하면
+// "서버 응답 오류 HTTP {status} — {본문 앞 120자}"(파싱 실패는 "JSON 아님" 표시)로
+// 던진다. error.status / error.body / error.notJson 필드로 호출부가 더 볼 수 있다.
+// allow: 2xx가 아니어도 **JSON 본문을 그대로 돌려줄** 상태 목록 — 서버가 의도적으로
+//   에러 JSON을 주고 호출부가 그걸 읽어 분기하는 곳(예: 감시 등록 409
+//   already_above_pivot)만 쓴다. 'any'는 예전 동작(상태 무시하고 JSON만 파싱)을
+//   그대로 유지해야 하는 곳(일지 로드 — 실패 분기가 localStorage 이전을 탄다).
+// 204·빈 본문은 null. 에러를 삼키지 않는다(잡는 건 호출부의 기존 catch 몫).
+function _apiError(status, text, notJson) {
+  const head = String(text == null ? '' : text).slice(0, 120);
+  const e = new Error(`서버 응답 오류 HTTP ${status} — ${notJson ? 'JSON 아님: ' : ''}${head}`);
+  e.status = status; e.body = text; e.notJson = !!notJson;
+  return e;
+}
+async function apiParse(res, cfg) {
+  const allow = (cfg && cfg.allow) || [];
+  const text = await res.text();
+  const pass = allow === 'any' || (Array.isArray(allow) && allow.includes(res.status));
+  if (!res.ok && !pass) throw _apiError(res.status, text, false);
+  if (res.status === 204 || text === '') return null;
+  try { return JSON.parse(text); }
+  catch (_) { throw _apiError(res.status, text, true); }
+}
+async function apiJson(url, opts, cfg) {
+  const res = await fetch(url, opts);
+  return apiParse(res, cfg);
+}
+
 async function loadJonggaForwardStats() {
   try {
-    const res = await fetch('/api/jongga/forward');
-    jonggaForwardStats = await res.json();
+    jonggaForwardStats = await apiJson('/api/jongga/forward');
   } catch (e) {
     jonggaForwardStats = null;
   }
@@ -1936,8 +1967,7 @@ function jonggaForwardFooterHtml() {
 // 카드 스캔과 다른 엔드포인트라 load()의 일반 흐름 밖에서 처리).
 async function loadReignitionWatch() {
   try {
-    const res = await fetch('/api/reignition/watchlist');
-    reignitionWatchData = await res.json();
+    reignitionWatchData = await apiJson('/api/reignition/watchlist');
   } catch (e) {
     reignitionWatchData = null;
   }
@@ -2070,8 +2100,7 @@ function reignitionWatchSectionHtml() {
 let reignitionPullbackData = null;
 async function loadReignitionPullbackStatus() {
   try {
-    const res = await fetch('/api/reignition/watchlist?include_expired=1');
-    reignitionPullbackData = await res.json();
+    reignitionPullbackData = await apiJson('/api/reignition/watchlist?include_expired=1');
   } catch (e) {
     reignitionPullbackData = null;
   }
@@ -2600,8 +2629,7 @@ let pivotHugExpandedModes = new Set();
 
 async function loadHidden() {
   try {
-    const res = await fetch('/api/hidden');
-    const items = await res.json();
+    const items = await apiJson('/api/hidden');
     hiddenMap = {};
     (items || []).forEach(it => { hiddenMap[it.ticker] = it; });
   } catch (e) { /* 실패해도 숨김 없이 그냥 보여주는 쪽이 안전 */ }
@@ -2845,9 +2873,7 @@ async function load(refresh = false) {
   status.innerHTML = '';
   try {
     // 시장 구분 없이 항상 전체를 받아옴 → 한국/미국 탭은 클라이언트에서 필터(재스캔 0초)
-    const res = await fetch(`/api/scan?market=all&mode=${mode}${refresh ? '&refresh=true' : ''}`, { cache: 'no-store' });
-    if (!res.ok) throw new Error('status ' + res.status);
-    const data = await res.json();
+    const data = await apiJson(`/api/scan?market=all&mode=${mode}${refresh ? '&refresh=true' : ''}`, { cache: 'no-store' });
     // v5.12 [버그수정]: 콜드 스타트(유니버스 데이터가 아직 없음)일 때 서버가
     // 더 이상 요청을 몇 분씩 붙잡지 않고(그러면 중간에 끊기기 쉬움) 즉시
     // pending:true로 응답하도록 바꿈 — 여긴 "실패"가 아니라 "아직 준비 중"
@@ -2939,8 +2965,7 @@ async function loadSectors() {
   content.innerHTML = '<div class="loading"><div class="spinner"></div>섹터 집계 중…</div>';
   status.innerHTML = '';
   try {
-    const res = await fetch('/api/sectors');
-    const d = await res.json();
+    const d = await apiJson('/api/sectors');
     if (d.version) { const vb = document.getElementById('verBadge'); if (vb) vb.textContent = d.version; }
     status.innerHTML = `<span>기준 ${d.asof} KST</span><span>마지막 봉 대비 등락 · 섹터 매핑 종목 기준</span>`;
     const panelName = {KOSPI: '코스피', KOSDAQ: '코스닥', US: '나스닥·NYSE'};
@@ -3157,9 +3182,9 @@ async function loadThemes() {
   status.innerHTML = '';
   try {
     const [tr, sr] = await Promise.all([
-      _themesData ? Promise.resolve(null) : fetch('/api/themes').then(r => r.json()),
+      _themesData ? Promise.resolve(null) : apiJson('/api/themes'),
       themesLayer === 'sector' && !_sectorMembersData
-        ? fetch(`/api/sector_members?market=${themesMarket}`).then(r => r.json())
+        ? apiJson(`/api/sector_members?market=${themesMarket}`)
         : Promise.resolve(null),
     ]);
     if (tr) _themesData = tr;
@@ -3453,7 +3478,7 @@ async function loadAbc() {
   content.innerHTML = '<div class="loading"><div class="spinner"></div>불러오는 중…</div>';
   status.innerHTML = '';
   try {
-    _abcData = await fetch('/api/abc', { cache: 'no-store' }).then(r => r.json());
+    _abcData = await apiJson('/api/abc', { cache: 'no-store' });
     const n = (_abcData.hits || []).length;
     status.innerHTML = `<span>${_abcData.asof ? `스캔 기준 ${_abcData.asof} KST` : ''}</span>`
       + `<span>${n}건 · 번들 캐시만 읽음(새 조회 없음)</span>`;
@@ -3533,8 +3558,7 @@ async function loadEod() {
   content.innerHTML = '<div class="loading"><div class="spinner"></div>마감 정리 중…</div>';
   status.innerHTML = '';
   try {
-    const res = await fetch('/api/eod');
-    const d = await res.json();
+    const d = await apiJson('/api/eod');
     status.innerHTML = `<span>기준 ${d.date}${d.market_closed ? ' (장마감 확정)' : ' (장중 — 최종 아님)'}</span>
       <span>상한가 <b>${d.limit_up.length}</b>개</span>`;
     const chgColor = v => v > 0 ? 'var(--px-up)' : v < 0 ? 'var(--px-down)' : 'var(--muted)';
@@ -3634,8 +3658,7 @@ async function loadInverse(refresh = false) {
   document.getElementById('searchBar').style.display = 'none';
   document.getElementById('diagBar').style.display = 'none';
   try {
-    const res = await fetch(`/api/inverse?market=all${refresh ? '&refresh=true' : ''}`);
-    const data = await res.json();
+    const data = await apiJson(`/api/inverse?market=all${refresh ? '&refresh=true' : ''}`);
     const regimeColor = data.regime === 'bear' ? '#FF6B6B' : (data.regime === 'weakening' ? '#f2b33d' : '#5fd99a');
     status.innerHTML = `<span style="color:${regimeColor};font-weight:600">${data.regime_txt}</span>
       <span>인버스 ${data.hits.length}개</span>
@@ -3701,7 +3724,7 @@ function renderInverseCards(hits) {
 
 async function loadAlertList() {
   try {
-    const r = await fetch('/api/alerts'); const data = await r.json();
+    const data = await apiJson('/api/alerts');
     const list = document.getElementById('alertList');
     const keys = Object.keys(data);
     list.innerHTML = keys.length
@@ -3740,8 +3763,7 @@ function triggerLookup(query) {
     runDiag();
     const hint = document.getElementById('lookupHint');
     try {
-      const res = await fetch('/api/lookup/' + encodeURIComponent(q));
-      const d = await res.json();
+      const d = await apiJson('/api/lookup/' + encodeURIComponent(q));
       // 검색어가 그새 바뀌었으면 무시
       if (searchQuery.trim() !== q) return;
       if (d.candidates) {
@@ -3814,9 +3836,9 @@ document.getElementById('alertAdd').addEventListener('click', async () => {
   const t = input.value.trim();
   const k = document.getElementById('alertKind').value;
   if (!t) return;
-  const res = await fetch('/api/alerts', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ticker: t, kind: k})});
-  const d = await res.json();
+  // 400은 서버가 {error, candidates} JSON으로 해석 실패·모호를 알려주는 정상 분기
+  const d = await apiJson('/api/alerts', {method:'POST', headers:{'Content-Type':'application/json'},
+  body: JSON.stringify({ticker: t, kind: k})}, { allow: [400] });
   // v5.112: 예전엔 응답을 아예 안 봐서 "삼성전자"가 그대로 문자열로 저장되는
   // 조용한 실패가 있었음 — 이름/코드 해석 실패·모호를 여기서 구분해 보여준다.
   if (d.candidates) {
@@ -4213,8 +4235,7 @@ function renderCards() {
     }
     b.disabled = true; b.textContent = '불러오는 중…';
     try {
-      const res = await fetch('/api/fundamentals/' + encodeURIComponent(t));
-      const data = await res.json();
+      const data = await apiJson('/api/fundamentals/' + encodeURIComponent(t));
       fundCache[t] = data;
       box.innerHTML = renderFund(data);
       box.dataset.shown = '1';
@@ -4292,8 +4313,7 @@ async function loadMoneyflowDate(date) {
   const mkt = moneyflowMarket();
   try {
     const url = date ? `/api/moneyflow/${mkt}?date=${encodeURIComponent(date)}` : `/api/moneyflow/${mkt}`;
-    const res = await fetch(url);
-    const d = await res.json();
+    const d = await apiJson(url);
     const sel = document.getElementById('moneyflowDateSel');
     sel.innerHTML = (d.available_dates || []).map(dt => `<option value="${dt}" ${dt===d.date?'selected':''}>${dt}</option>`).join('');
     let html = '';
@@ -4319,8 +4339,8 @@ async function runMoneyflowNow() {
   btn.textContent = '실행 중… (최대 1분)';
   const mkt = moneyflowMarket();
   try {
-    const res = await fetch(`/api/moneyflow/${mkt}/run`, { method: 'POST' });
-    const d = await res.json();
+    // 429(쿨다운)·500은 서버가 {error} JSON을 주고 아래에서 그대로 보여준다
+    const d = await apiJson(`/api/moneyflow/${mkt}/run`, { method: 'POST' }, { allow: [429, 500] });
     let html = d.markdown ? marked.parse(d.markdown) : (d.snapshot ? mfFmtTop(d.snapshot) : `<p class="mf-err">${d.error || '실행 실패'}</p>`);
     if (d.error && d.snapshot) html += `<p class="mf-err">⚠️ ${d.error}</p>`;
     document.getElementById('moneyflowDoc').innerHTML = html;
@@ -4351,8 +4371,7 @@ async function populateThemeLifecycleSelect() {
   const sel = document.getElementById('tlThemeSel');
   if (!sel || tlThemeNames.length) return;   // 이미 채웠으면 재요청 안 함(탭 재진입 시)
   try {
-    const res = await fetch('/api/theme_map');
-    const d = await res.json();
+    const d = await apiJson('/api/theme_map');
     tlThemeNames = Object.keys(d || {});
     sel.innerHTML = '<option value="">테마 선택…</option>' +
       tlThemeNames.map(n => `<option value="${n}">${n}${d[n].stale ? ' (오래됨)' : ''}</option>`).join('');
@@ -4380,12 +4399,11 @@ async function loadThemeLifecycle(theme) {
   if (!theme) { doc.innerHTML = '테마를 선택하면 최근 60거래일 재구성·단계 판정을 표시합니다.'; return; }
   doc.innerHTML = '불러오는 중… (최초 계산은 수 초 걸릴 수 있습니다)';
   try {
-    const [lcRes, mapRes] = await Promise.all([
-      fetch(`/api/theme_lifecycle/${encodeURIComponent(theme)}`),
-      fetch(`/api/theme_map/${encodeURIComponent(theme)}`),
+    // 404·503(라이프사이클)·404(테마맵)은 서버가 {error} JSON을 주는 정상 분기
+    const [d, mapD] = await Promise.all([
+    apiJson(`/api/theme_lifecycle/${encodeURIComponent(theme)}`, undefined, { allow: [404, 503] }),
+    apiJson(`/api/theme_map/${encodeURIComponent(theme)}`, undefined, { allow: [404] }),
     ]);
-    const d = await lcRes.json();
-    const mapD = await mapRes.json();
     if (d.error) { doc.innerHTML = `<p class="mf-err">⚠️ ${d.error}</p>`; return; }
     const nameOf = t => (mapD.stocks || []).find(s => s.ticker === t)?.name || t;
     const ev = d.phase_evidence || {};
@@ -4462,8 +4480,8 @@ async function loadRotationMatrix() {
   const doc = document.getElementById('tlDoc');
   doc.innerHTML = '자금이동 매트릭스 계산 중…';
   try {
-    const res = await fetch('/api/theme_lifecycle_rotation');
-    const d = await res.json();
+    // 404·503은 서버가 {error} JSON으로 이유를 준다(아래 d.error 분기)
+    const d = await apiJson('/api/theme_lifecycle_rotation', undefined, { allow: [404, 503] });
     if (d.error) { doc.innerHTML = `<p class="mf-err">⚠️ ${d.error}</p>`; return; }
     const names = d.themes || [];
     const pairs = [];
@@ -4492,8 +4510,7 @@ async function checkMoneyflowUnread() {
   let anyUnread = false;
   for (const mkt of ['kr', 'us']) {
     try {
-      const res = await fetch(`/api/moneyflow/${mkt}`);
-      const d = await res.json();
+      const d = await apiJson(`/api/moneyflow/${mkt}`);
       if (d.date === today && !localStorage.getItem(mfUnreadKey(mkt, d.date))) anyUnread = true;
     } catch (e) { /* 무시 */ }
   }
@@ -4521,9 +4538,7 @@ async function onEnterPositionsTab() {
   const doc = document.getElementById('positionsDoc');
   doc.innerHTML = '<div class="loading"><div class="spinner"></div>불러오는 중…</div>';
   try {
-    const res = await fetch('/api/positions');
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    _positionsData = await res.json();
+    _positionsData = await apiJson('/api/positions');
     renderPositions(_positionsData);
   } catch (e) {
     doc.innerHTML = '<p class="mf-err">불러오기 실패 — 새로고침 해보세요.</p>';
@@ -4581,9 +4596,7 @@ async function onEnterSurgeObserveTab() {
   const doc = document.getElementById('surgeObserveDoc');
   doc.innerHTML = '<div class="loading"><div class="spinner"></div>불러오는 중…</div>';
   try {
-    const res = await fetch('/api/surge/observe');
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const d = await res.json();
+    const d = await apiJson('/api/surge/observe');
     renderSurgeObserve(d);
   } catch (e) {
     doc.innerHTML = '<p class="mf-err">불러오기 실패 — 새로고침 해보세요.</p>';
@@ -4669,9 +4682,7 @@ async function loadDailyNoteBox() {
   const box = document.getElementById('dailyNoteBox');
   if (!box) return;
   try {
-    const res = await fetch('/api/daily-note');
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const d = await res.json();
+    const d = await apiJson('/api/daily-note');
     _dailyNoteDate = d.today;
     _dailyNoteData = { today: d.today, today_note: d.today_note || '', history: (d.history || []).map(h => ({ ...h })) };
     renderDailyNoteBox(d);
@@ -4901,10 +4912,9 @@ async function calRunSearch() {
   if (!q) { out.innerHTML = ''; return; }
   out.innerHTML = '<div style="color:var(--muted);font-size:13px">검색 중…</div>';   // "응답 느리면 로딩 표시"
   try {
-    const res = await fetch('/api/lookup/' + encodeURIComponent(q));
-    const d = await res.json();
+    const d = await apiJson('/api/lookup/' + encodeURIComponent(q));
     if (d.candidates && d.candidates.length) {
-      _calSearchCandidates = d.candidates;
+    _calSearchCandidates = d.candidates;
       out.innerHTML = `<div style="font-size:12px;color:#9fd4ff;margin-bottom:6px">'${_escapeHtml(q)}'에 해당하는 종목이 여러 개예요 — 하나를 골라주세요.</div>` +
         d.candidates.slice(0, 12).map((c, i) =>
           `<div onclick="calPickCandidate(${i})" style="padding:8px 12px;cursor:pointer;display:flex;justify-content:space-between;gap:10px;border:1px solid var(--line);border-radius:8px;margin-bottom:4px;font-size:13px">
@@ -4953,8 +4963,7 @@ async function calRunDiag(ticker) {
   out.innerHTML = '<div style="color:var(--muted);font-size:13px">진단 중…</div>';
   let d;
   try {
-    const res = await fetch('/api/debug/' + encodeURIComponent(ticker));
-    d = await res.json();
+    d = await apiJson('/api/debug/' + encodeURIComponent(ticker));
   } catch (e) {
     out.innerHTML = '<div style="color:#f87171;font-size:13px">진단 실패</div>';
     return;
@@ -5018,9 +5027,7 @@ async function onEnterCalendarTab() {
   const doc = document.getElementById('calendarDocTop');
   doc.innerHTML = '<div class="loading"><div class="spinner"></div>불러오는 중…</div>';
   try {
-    const res = await fetch('/api/calendar');
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    _calendarData = await res.json();
+    _calendarData = await apiJson('/api/calendar');
     // v5.198(사용자 지시 — 버전 배지 동기화): 캘린더 탭(기본 진입 탭)은
     // 예전엔 이 배지를 안 건드려서, 캘린더 탭만 쓰는 사용자는 실제 배포
     // 버전과 무관하게 페이지 로드 시 박힌 정적 텍스트를 계속 보고 있었다
@@ -5058,9 +5065,8 @@ async function runMacroCalendarNow(btn) {
     const deadline = Date.now() + 90000;
     while (Date.now() < deadline) {
       await new Promise(r => setTimeout(r, 3000));
-      const res = await fetch('/api/calendar/macro/status');
-      if (!res.ok) break;
-      const status = await res.json();
+      // 비2xx면 헬퍼가 던져 아래 기존 catch로 루프를 빠져나간다(예전 break와 같은 결과)
+      const status = await apiJson('/api/calendar/macro/status');
       if (!status.generating) break;
     }
   } catch (e) { /* 무시 — 아래서 어차피 다시 불러옴 */ }
@@ -6072,9 +6078,9 @@ async function savePositionStop(ticker, value, inputEl) {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ticker, stop})
     });
-    const j = await res.json();
+    const j = await apiParse(res, { allow: [400] });   // 400 = {ok:false,error} 입력 오류 분기
     if (j.ok) {
-      inputEl.style.background = '#12351f';
+    inputEl.style.background = '#12351f';
       setTimeout(() => { inputEl.style.background = prevBg; }, 800);
       onEnterPositionsTab();   // 재계산된 R진행률·손절거리·요약을 반영
     } else {
@@ -6296,11 +6302,9 @@ let rSettings = { equity: 0, r_pct: 0.5, max_open_r: 3, weekly_stop_r: 3,
 let gateSug = null;   // 시장 게이트 자동 제안 (v4.50)
 async function loadGateSuggest() {
   try {
-    const res = await fetch('/api/market/gate');
-    if (res.ok) {
-      const j = await res.json();
-      if (j.ok) gateSug = j;
-    }
+    // 503(지수 데이터 없음) 등 비2xx는 헬퍼가 던지고 기존 catch가 무시 — 예전과 같은 결과
+    const j = await apiJson('/api/market/gate');
+    if (j && j.ok) gateSug = j;
   } catch (e) { /* 무시 */ }
 }
 async function applyGateSuggest() {
@@ -6315,8 +6319,7 @@ async function applyGateSuggest() {
 }
 async function loadRSettings() {
   try {
-    const res = await fetch('/api/rsettings');
-    if (res.ok) rSettings = { ...rSettings, ...(await res.json()) };
+    rSettings = { ...rSettings, ...(await apiJson('/api/rsettings')) };   // 실패는 기존 catch(기본값 유지)
   } catch (e) { /* 오프라인이면 기본값 유지 */ }
 }
 function openRSettings() {
@@ -6348,10 +6351,11 @@ async function saveRSettings() {
     dist_days: g('rsDist') || 0,
   };
   try {
-    const res = await fetch('/api/rsettings', { method: 'POST',
-      headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-    if (res.ok) rSettings = { ...rSettings, ...(await res.json()) };
-  } catch (e) { alert('저장 실패 — 서버 연결을 확인하세요'); return; }
+    // v5.298: 예전엔 비2xx(400/500)를 조용히 건너뛰고 모달을 닫아 "저장된 줄" 알았다 —
+    // 이제 헬퍼가 던져 기존 catch의 알림에 서버 응답이 보인다.
+    rSettings = { ...rSettings, ...(await apiJson('/api/rsettings', { method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) })) };
+    } catch (e) { alert('저장 실패 — ' + (e.status != null ? e.message : '서버 연결을 확인하세요')); return; }
   document.getElementById('rSettingsModal').classList.remove('open');
   if (document.getElementById('journalView').style.display !== 'none') renderJournal();
 }
@@ -6675,13 +6679,13 @@ async function _saveJournalToServer(arr, _retry = true, editId = null, deletedId
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (!res.ok) throw _apiError(res.status, await res.text(), false);
     // v5.187(사용자 지시 — [1] 병합 가드): 서버가 병합 후 실제로 저장된
     // 배열을 돌려준다(보호 필드가 서버값으로 되돌려졌거나, 동시 갱신
     // 레코드가 되살아났을 수 있음) — journalCache를 그 결과로 갱신해
     // 다음 자동저장이 이미 낡은 로컬 값을 다시 밀어넣는 걸 막는다.
     try {
-      const data = await res.json();
+      const data = await apiParse(res);
       if (data && Array.isArray(data.journal)) journalCache = data.journal;
     } catch (e) { /* 응답 파싱 실패해도 저장 자체는 성공 — 무시 */ }
     return true;
@@ -6712,9 +6716,10 @@ function showSaveError() {
 async function loadJournalFromServer() {
   let serverData = [];
   try {
-    const res = await fetch('/api/journal');
-    serverData = await res.json();
-  } catch(e) { serverData = []; }
+    // allow:'any' — 예전과 **완전히 같은** 동작(상태 무관, JSON이면 그대로). 실패 분기가
+    // localStorage 옛 일지 이전(POST)을 타므로 여기 판정을 바꾸지 않는다(v5.298 예외).
+    serverData = await apiJson('/api/journal', undefined, { allow: 'any' });
+    } catch(e) { serverData = []; }
 
   // 마이그레이션: 서버가 비었고 localStorage에 옛 일지가 있으면 한 번 올림
   let localData = [];
@@ -6910,9 +6915,9 @@ async function refreshPrices() {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ tickers: active.map(r => r.ticker) })
     });
-    if (!res.ok) { errMsg = `서버 응답 오류 (${res.status})`; }
-    else { const j = await res.json(); prices = j.prices || {}; mclosed = j.closed || {}; }
-  } catch(e) { errMsg = '네트워크 오류: ' + e.message; }
+    const j = await apiParse(res);   // 비2xx·JSON 아님은 헬퍼 메시지(HTTP 상태·본문)로 아래 catch
+    prices = j.prices || {}; mclosed = j.closed || {};
+    } catch(e) { errMsg = e.status != null ? e.message : '네트워크 오류: ' + e.message; }
 
   if (errMsg) { alert('현재가 갱신 실패\n' + errMsg); return; }
 
@@ -6982,7 +6987,7 @@ async function updateTracking(prefetched, prefetchedClosed) {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ tickers: active.map(r => r.ticker) })
       });
-      const j2 = await res.json();
+      const j2 = await apiParse(res);
       prices = j2.prices || {};
       mclosed = j2.closed || {};
       highs = j2.highs || {};
@@ -7139,7 +7144,7 @@ async function checkLeaderConversions(active) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tickers: targets.map(r => r.ticker) })
     });
-    const j2 = await res.json();
+    const j2 = await apiParse(res);
     if (!j2.ok || j2.pending) return;
     const converted = new Set(j2.converted || []);
     if (!converted.size) return;
@@ -7308,9 +7313,10 @@ async function _quickWatchRequest(s, btn, payload) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    const j = await res.json();
+    // 409 already_above_pivot·400 입력 오류·500은 서버가 {ok:false,code,error} JSON을 준다(아래 분기)
+    const j = await apiParse(res, { allow: [400, 409, 500] });
     if (j.ok) {
-      btn.textContent = j.exists ? '✓ 감시중' : '✓ 등록됨';
+    btn.textContent = j.exists ? '✓ 감시중' : '✓ 등록됨';
       btn.style.background = '#12351f';
       // v4.80: /api/watch/quick은 서버 일지에만 저장하고 클라이언트 journalCache는
       // 안 건드려서, 등록 직후 '내 일지' 탭으로 가면 옛 캐시가 그대로 보여
@@ -7400,9 +7406,9 @@ async function watchLeaderConversion(btn, ticker) {
         leader_snapshot_price: s.close, leader_snapshot_ma20_dist_pct: s.ma20_dist_pct,
       })
     });
-    const j = await res.json();
+    const j = await apiParse(res, { allow: [400, 409, 500] });   // /api/watch/quick — 위와 같은 에러 JSON
     if (j.ok) {
-      btn.textContent = j.exists ? '✓ 관찰중' : '✓ 등록됨';
+    btn.textContent = j.exists ? '✓ 관찰중' : '✓ 등록됨';
       btn.style.background = '#12351f';
       await loadJournalFromServer();
     } else {
@@ -7546,7 +7552,7 @@ function krSuffixDecision(resolved) {
 }
 async function _resolveKrTicker(codeBody) {
   try {
-    const d = await fetch('/api/kr-suffix/' + encodeURIComponent(codeBody)).then(r => r.json());
+    const d = await apiJson('/api/kr-suffix/' + encodeURIComponent(codeBody));
     return krSuffixDecision(d);
   } catch (e) {
     return krSuffixDecision(null);
@@ -7564,7 +7570,7 @@ async function _maResolveName(query) {
   const hintEl = document.getElementById('maSnapHint');
   if (hintEl) hintEl.textContent = `🔎 '${query}' 코드 찾는 중…`;
   try {
-    const d = await fetch('/api/lookup/' + encodeURIComponent(query)).then(r => r.json());
+    const d = await apiJson('/api/lookup/' + encodeURIComponent(query));
     if (d.ticker) {
       _maApplyTicker(d.ticker, d.name);
     } else if (d.candidates && d.candidates.length) {
@@ -7679,8 +7685,7 @@ function onMaTickerOrTabChange() {
   }
   _maSnapTimer = setTimeout(async () => {
     try {
-      const res = await fetch(`/api/journal/snapshot?ticker=${encodeURIComponent(ticker)}&tab=${encodeURIComponent(tabEl.value)}`);
-      const j = await res.json();
+      const j = await apiJson(`/api/journal/snapshot?ticker=${encodeURIComponent(ticker)}&tab=${encodeURIComponent(tabEl.value)}`);
       if (j.ok) {
         _maSnapshotFound = true;
         const pivotEl = document.getElementById('maPivot');
@@ -7741,7 +7746,7 @@ async function saveManualAdd() {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ tickers: [ticker] })
       });
-      const j = await res.json();
+      const j = await apiParse(res);
       fetchedPrice = (j.prices || {})[ticker] ?? null;
     } catch (e) { /* 아래에서 기존 로직으로 처리 */ }
   }
@@ -7761,7 +7766,7 @@ async function saveManualAdd() {
           method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({ tickers: [ticker] })
         });
-        const j = await res.json();
+        const j = await apiParse(res);
         pivot = (j.prices || {})[ticker];
       } catch (e) { pivot = null; }
     }
@@ -7920,7 +7925,7 @@ async function saveJournal() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tickers: [s.ticker] })
       });
-      const j = await res.json();
+      const j = await apiParse(res);
       freshPrice = (j.prices || {})[s.ticker] ?? null;
     } catch (e) { /* 아래에서 fail-open 처리(freshPrice=null) */ }
     if (!confirm(_staleConfirmMessage(s.close, s.price_stale_note, freshPrice))) return;
@@ -8278,8 +8283,8 @@ async function _loadPaperTrackIfNeeded() {
   if (_paperTrackData !== null || _paperTrackLoading) return;
   _paperTrackLoading = true;
   try {
-    const res = await fetch('/api/paper-track');
-    _paperTrackData = res.ok ? await res.json() : { stats: [], error: true };
+    // 비2xx는 헬퍼가 던져 아래 기존 catch가 {error:true}로 — 예전과 같은 결과
+    _paperTrackData = await apiJson('/api/paper-track');
   } catch (e) {
     _paperTrackData = { stats: [], error: true };
   }
@@ -9038,8 +9043,7 @@ async function mtaOnTickerChange() {
   _mtaLookupTimer = setTimeout(async () => {
     if ((tickerEl.value || '').trim() !== raw) return;   // 그새 입력값이 또 바뀌었으면 무시
     try {
-      const res = await fetch('/api/lookup/' + encodeURIComponent(raw));
-      const d = await res.json();
+      const d = await apiJson('/api/lookup/' + encodeURIComponent(raw));
       if ((tickerEl.value || '').trim() !== raw) return;   // 응답 도착 시점 재확인
       if (d && d.candidates && d.candidates.length) {
         mtaShowDropdown(d.candidates);
@@ -9089,8 +9093,7 @@ async function myTrackSaveAdd() {
   if (!name) {
     // [2]: 종목명 자동 조회, 실패하면 입력값(티커) 그대로.
     try {
-      const res = await fetch('/api/lookup/' + encodeURIComponent(ticker));
-      const d = await res.json();
+      const d = await apiJson('/api/lookup/' + encodeURIComponent(ticker));
       if (d && d.name) name = d.name;
     } catch (e) { /* 무시 */ }
   }
@@ -9716,8 +9719,7 @@ async function runDiag() {
   if (!q) { out.innerHTML = ''; return; }
   out.innerHTML = '<div style="color:var(--muted);font-size:13px">진단 중…</div>';
   try {
-    const res = await fetch('/api/debug/' + encodeURIComponent(q));
-    const d = await res.json();
+    const d = await apiJson('/api/debug/' + encodeURIComponent(q));
     if (d.error) {
       out.innerHTML = `<div style="color:#f87171;font-size:13px">${d.error} (${d.ticker || q})</div>`;
       return;
@@ -9866,8 +9868,7 @@ let _idxList = null;   // v5.294: 홈 타일용 — loadIndices가 채운다
 async function loadIndices() {
   const bar = document.getElementById('idxbar');
   try {
-    const res = await fetch('/api/indices');
-    const data = await res.json();
+    const data = await apiJson('/api/indices');
     const list = (data.indices || []);
     _idxList = list;
     renderHomeTiles();

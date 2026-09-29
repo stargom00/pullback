@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.298 [API JSON 공통 헬퍼 — 사용자 지시, 서버 코드 변경 없음] 재점화 "지금 갱신"이
+    Railway 프록시 타임아웃의 일반 텍스트 "upstream error"를 받았는데 프론트가 상태를
+    안 보고 res.json()을 불러 "SyntaxError: Unexpected token 'u'"만 보였다(진짜 원인
+    가려짐). static/index.html에 apiJson/apiParse 신설 — 상태 확인 → text로 받아
+    JSON 파싱 → 실패 시 "서버 응답 오류 HTTP {status} — {본문 앞 120자}"(파싱 실패는
+    "JSON 아님"), error.status/body/notJson. fetch 응답 .json() 직접 호출 51곳을 전부
+    교체(정적 테스트가 0곳 유지 강제). 서버가 의도적으로 에러 JSON을 주는 곳만
+    allow로 본문 통과: 알림 등록 400 · 돈의흐름 실행 429/500 · 테마 라이프사이클
+    404/503 · 테마맵 404 · 자금이동 404/503 · 손절 저장 400 · 감시 등록 400/409/500.
+    일지 로드(/api/journal GET)는 allow:'any'로 예전과 완전히 같은 판정(실패 분기가
+    localStorage 이전을 탄다). R 설정 저장은 예전에 비2xx를 조용히 넘기고 모달을 닫았는데
+    이제 기존 알림에 서버 응답이 보인다.
 v5.297 [표시 수정 — 사용자 지시, 서버 코드 변경 없음] ① 모든 탭 본문(스캔 탭·ABC·
     추세전환·종가베팅·급등·업종/테마·마감정리·실험 탭·포지션·돈의흐름)도 헤더와 같은
     좌우 끝선 — 기존 --n-gutter(--n-maxw 기반) 재사용, #content 바깥에서만 여백을
@@ -8344,7 +8356,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.297"
+VERSION = "v5.298"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
