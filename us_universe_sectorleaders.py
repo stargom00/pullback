@@ -30,7 +30,7 @@ US_UNIVERSE_SECTOR = {
     # 은행-저축대출/지역/초대형
     "FLG": "Flagstar Financial", "AX": "Axos Financial", "TFSL": "TFS Financial",
     "WSFS": "WSFS Financial", "EWBC": "East West Bancorp", "PNFP": "Pinnacle Financial",
-    "FHN": "First Horizon", "WBS": "Webster Financial", "FITB": "Fifth Third Bancorp",
+    "FHN": "First Horizon", "FITB": "Fifth Third Bancorp",
     "TFC": "Truist Financial",
     # 물류/자동화
     "SERV": "Serve Robotics", "RR": "Richtech Robotics",

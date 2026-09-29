@@ -597,6 +597,12 @@ tr.editing{background:rgba(242,179,61,.06)}
   /* v5.295(사용자 지시): 숫자 타일 축소 비율 — 홈 시장 타일·오늘 할 일, 일지 리스크 5칸·
      R 누적의 여백·큰 숫자·높이만 이 값으로 줄인다(라벨·본문 글자는 그대로). */
   --n-k:.85;
+  /* v5.296(사용자 지시): 헤더·헤더 띠·홈·일지 콘텐츠 최대 폭 — 배경·구분선은 전체 폭,
+     안쪽만 이 폭으로 가운데 정렬(--n-gutter가 좌우 여백을 계산). 900px 미만은 기존 규칙. */
+  --n-maxw:1280px;
+  /* --n-maxw는 좌우 여백(40px)을 **포함한** 컨테이너 폭 — 1280px 창과 그보다 넓은 창에서
+     내용 폭(1200px)·타일 폭이 같아진다. */
+  --n-gutter:max(40px, calc((100% - var(--n-maxw)) / 2 + 40px));
   /* 내 추적 표 — 헤더와 행이 **같은 열 정의**를 쓴다. 트리거 열은 입력칸+이상/이하
      선택이 들어가 내용 폭이 고정이라 fr이 아니라 고정 폭(모자라면 옆 '상태' 열을 침범했다). */
   --track-cols:minmax(0,1.5fr) minmax(0,1fr) 164px minmax(0,1.1fr) minmax(0,.7fr) minmax(0,.9fr);
@@ -605,7 +611,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 
 /* ── 헤더 ── */
 header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1px solid var(--n-line)}
-.hdr-row{display:flex;align-items:center;gap:20px;min-height:64px;padding:0 40px}
+.hdr-row{display:flex;align-items:center;gap:20px;min-height:64px;padding:0 var(--n-gutter)}
 .hdr-brand{display:flex;align-items:baseline;gap:8px;flex-shrink:0}
 .hdr-title{font-size:17px;font-weight:700;letter-spacing:-.2px;color:var(--n-text)}
 .hdr-brand .ver{font-size:11px;color:var(--n-muted);border:0;padding:0}
@@ -635,15 +641,15 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .more-panel .tab{width:100%;justify-content:flex-start;padding:0 12px;font-size:14px;color:var(--n-sub)}
 .more-panel .tab:hover{background:#1b2029}
 .more-panel .tab.active{background:#1b2029;color:#fff;font-weight:600}
-.hdr-strip{display:flex;align-items:center;gap:12px;min-height:40px;padding:0 40px;font-size:12px;
+.hdr-strip{display:flex;align-items:center;gap:12px;min-height:40px;padding:0 var(--n-gutter);font-size:12px;
   color:var(--n-muted);border-bottom:1px solid var(--n-line);background:var(--n-bg)}
 .hdr-strip b{color:#c9ced7;font-weight:600}
 .hdr-strip-link{background:none;border:0;color:var(--n-accent);font:inherit;font-size:12px;min-height:40px;padding:0 4px;cursor:pointer}
 .hdr-strip-link:hover{color:#f3bd83}
 .hdr-strip-meta{margin-left:auto;white-space:nowrap}
-.hdr-basis{margin:10px 40px 0}
+.hdr-basis{margin:10px var(--n-gutter) 0}
 /* ── 홈(#calendarView) ── */
-.jrnl-wrap.home{padding:28px 40px 40px;background:var(--n-bg);color:var(--n-text);max-width:none}
+.jrnl-wrap.home{padding:28px var(--n-gutter) 40px;background:var(--n-bg);color:var(--n-text);max-width:none}
 .home a{color:var(--n-accent)}
 .home .name-link{color:inherit}
 .n-card{background:var(--n-card);border:1px solid var(--n-line);border-radius:16px}
@@ -728,6 +734,7 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .tile-row .num{white-space:nowrap;text-align:right}
 .track-row .num.r{white-space:nowrap}
 .lp-month-lbl{color:var(--n-sub)}
+.us-tkr{color:var(--n-muted);font-weight:500;font-family:var(--n-num);font-size:.85em;white-space:nowrap}
 .ev-row{display:flex;gap:14px;font-size:13px}
 .ev-row .d{flex:0 0 72px;color:var(--n-muted)}
 .home-note{padding:16px 18px}
@@ -753,7 +760,7 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 }
 /* ── 내 일지(#journalView) ── */
 /* applyTabViewState가 style.display='block'을 넣으므로 flex gap 대신 형제 여백으로 간격을 둔다 */
-#journalView{background:var(--n-bg);color:var(--n-text);padding:32px 40px 48px}
+#journalView{background:var(--n-bg);color:var(--n-text);padding:32px var(--n-gutter) 48px}
 #journalView>*+*{margin-top:24px}
 #journalView a{color:inherit}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
@@ -869,7 +876,7 @@ details.rowmenu>summary:hover{background:#1b2029}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.295</span>
+      <span class="ver mono" id="verBadge">v5.296</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -5592,7 +5599,7 @@ function renderTodayDecisionHtml(td, sectorFlow, pipelineHealth) {
     const _pbnText = priceBasisNoteText(item);
     const pivotGap = (item.pivot != null && item.entry != null && item.pivot !== item.entry)
       ? `피벗 ${fmtPrice(item.pivot, mkt)} / 진입 ${fmtPrice(item.entry, mkt)}` : '';
-    const nameHtml = `<a class="name-link" href="${tvUrl(item)}" target="_blank" rel="noopener">${item.name}</a>`;
+    const nameHtml = `<a class="name-link" href="${tvUrl(item)}" target="_blank" rel="noopener">${item.name}</a>${usTickerSuffix(item.ticker, mkt)}`;
     if (compact) {
       return cardShell('', '', `
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="font-size:14px">${nameHtml}</b>${chips.join('')}</div>
@@ -5677,7 +5684,7 @@ function renderTodayDecisionHtml(td, sectorFlow, pipelineHealth) {
     // 뜬다. 별도 분기 없이 공용 헬퍼로 통일.
     const hugBadge = pivotHugBadgeHtml(item.current_price, item.pivot, item.atr_pct);
     return cardShell('var(--line)', 'var(--card)', `
-      <div><b>${nameLink(item)}</b> <span class="mkt">${mkt}</span></div>
+      <div><b>${nameLink(item)}</b>${usTickerSuffix(item.ticker, mkt)} <span class="mkt">${mkt}</span></div>
       <div style="font-size:15px;font-weight:700;margin-top:4px">${fmtPrice(item.current_price, mkt)} → ${fmtPrice(item.pivot, mkt)} <span style="font-size:12px;font-weight:400;color:var(--muted)">(${distStr})</span></div>
       <div style="font-size:11px;color:var(--muted);margin-top:4px;${descClamp}">${descParts.join(' · ')}</div>
       ${hugBadge}
@@ -5708,7 +5715,7 @@ function renderTodayDecisionHtml(td, sectorFlow, pipelineHealth) {
     // v5.210(사용자 지시 — [2]): 🔎관심은 확인 후 종가(close)가 기준가.
     const hugBadge = pivotHugBadgeHtml(item.close, item.pivot, item.atr_pct);
     return cardShell('var(--line)', 'var(--card)', `
-      <div><b>${nameLink(item)}</b> <span class="mkt">${mkt}</span></div>
+      <div><b>${nameLink(item)}</b>${usTickerSuffix(item.ticker, mkt)} <span class="mkt">${mkt}</span></div>
       <div style="font-size:15px;font-weight:700;margin-top:4px;color:var(--muted)">${item.tab || ''} · 확인일 ${item.confirmed_at || '-'} · 종가 ${fmtPrice(item.close, mkt)}</div>
       <div style="font-size:11px;color:var(--muted);margin-top:2px">피벗(기준) ${fmtPrice(item.pivot, mkt)} · 손절(기준) ${fmtPrice(item.stop, mkt)}</div>
       <div style="font-size:11px;color:#ffb27a;font-weight:700;margin-top:2px">${labelText}${checklistIcon}</div>
@@ -5942,6 +5949,12 @@ function renderLowpointHtml(lp) {
 // 표시만 재배치한다 — 새 계산·새 API 없음. 각 카드의 값 출처는 함수마다 적었다.
 // ══════════════════════════════════════════════════════════════════
 const _N_LV_CLASS = { good: 'st-good', neutral: 'st-neutral', bad: 'st-bad', unknown: 'st-unknown' };
+// v5.296(사용자 지시): US 종목은 이름 옆에 티커를 붙인다 — 이름만 보고 "…Pfd 3"(BNS 보통주)을
+// 우선주로 오해한 사례. 이름 자체는 바꾸지 않는다. 홈 오늘 할 일·후보·내 추적 공통.
+function usTickerSuffix(ticker, mkt) {
+  if (mkt !== 'US' || !ticker) return '';
+  return `<span class="us-tkr"> · ${_escapeHtml(String(ticker))}</span>`;
+}
 // 종합 게이트(rSettings/gate_suggest 3값) → 점 색. 판정은 서버(get_calendar의 gate).
 const _GATE_LV = { confirmed: 'good', pressure: 'neutral', correction: 'bad' };
 function _nPct(pct) {
@@ -9451,7 +9464,7 @@ function renderMyTrackBoard() {
 
   const activeVisible = _myTrackActiveExpanded ? withState : withState.slice(0, MY_TRACK_ACTIVE_SHOW_N);
   const activeHiddenCount = withState.length - activeVisible.length;
-  const nameCell = (r, mkt) => `<span class="nm"><a class="name-link" href="${tvUrl(r.ticker, mkt)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${_escapeHtml(r.name || r.ticker)}</a> <span class="n-sub">${mkt}</span></span>`;
+  const nameCell = (r, mkt) => `<span class="nm"><a class="name-link" href="${tvUrl(r.ticker, mkt)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${_escapeHtml(r.name || r.ticker)}</a>${usTickerSuffix(r.ticker, mkt)} <span class="n-sub">${mkt}</span></span>`;
   const activeRowsHtml = activeVisible.map(({ r, st }) => {
     const mkt = r.market || (/\.(KS|KQ)$/i.test(r.ticker || '') ? 'KR' : 'US');
     const priceStr = st.price != null ? fmtPrice(st.price, mkt) : '-';

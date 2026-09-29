@@ -5,6 +5,22 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.296 [최대 폭·US 티커·US 유니버스 정리 — 사용자 지시, 스캔·계산 로직 변경 없음]
+    ① 헤더·헤더 띠·홈·일지 콘텐츠 최대 폭 1280px 가운데 정렬(--n-maxw 한 곳, 배경·
+    구분선은 전체 폭). 넓은 창에서 카드가 가로로 늘어나 숫자 칸이 커 보이던 원인.
+    다른 탭 본문은 이번 범위 밖(헤더만 1280px로 모이고 본문은 기존 전체 폭).
+    ② 홈 오늘 할 일·후보·내 추적의 US 종목 이름 옆에 티커(usTickerSuffix) — 이름만
+    보고 "Bank Nova Scotia Halifax Pfd 3"(BNS 보통주, 거래소 등록명)을 우선주로 오해.
+    ③ US 유니버스 2,120 → 2,096. [KR 코드 2개] watchlist.txt에 접미사 없이
+    `226950 올릭스`·`045100 한양이엔지`로 적혀(2026-06-29) get_universe가 US로 분류 —
+    `.KQ`로 정정(둘 다 코스닥, KR 유니버스엔 이미 포함이라 KR 스캔 변화 없음).
+    [제거 22 — yfinance 1개월 조회가 빈 결과 + Nasdaq Trader 공식 목록에 없음]
+    PSTG CYBR EA JNPR CFLT BADN EXAS X AVB AVNS CPRX EQR GTLS LBRDK LEG NUVL SKYT
+    TMHC TWO WBS WSR, 그리고 SQ(티커 변경 — 새 티커 XYZ가 이미 유니버스에 있음).
+    [유지] APGE·CRNX(2026-09-02 이후 봉 없음)·TBPH(09-25까지) — 빈 결과가 아니라
+    규칙상 유지. 장외 ADR 4개(RHHBY·RCRUY·SMNNY·TTNDY)는 시세 정상이라 유지.
+    _CACHE_NS 불변 — 디스크 캐시는 v5.286부터 파일∩유니버스 부분 재사용이라
+    제거 종목은 파일에서 버려질 뿐 콜드 스캔이 없다.
 v5.295 [표시 조정 — 사용자 지시, 서버 로직 변경 없음] ① 숫자 타일 85% 축소: 홈 시장
     타일 4칸·"오늘 할 일" 카드(종목명·4칸·여백, 버튼은 44px 유지), 일지 리스크 5칸·
     R 누적 큰 숫자 — 여백·큰 숫자·높이만 CSS 변수 --n-k(.85) 한 곳으로 계산, 라벨·
@@ -8317,7 +8333,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.295"
+VERSION = "v5.296"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

@@ -21,8 +21,8 @@ US_UNIVERSE_EXT = {
 
     # ── AI / 데이터센터 / 네트워킹 ──
     "ANET": "Arista", "DELL": "Dell", "HPE": "HP Enterprise", "SMCI": "Supermicro",
-    "VRT": "Vertiv", "NTAP": "NetApp", "PSTG": "Pure Storage", "WDC": "Western Digital",
-    "STX": "Seagate", "CIEN": "Ciena", "JNPR": "Juniper", "FFIV": "F5",
+    "VRT": "Vertiv", "NTAP": "NetApp", "WDC": "Western Digital",
+    "STX": "Seagate", "CIEN": "Ciena", "FFIV": "F5",
     "NBIS": "Nebius", "CRWV": "CoreWeave", "APLD": "Applied Digital",
     "IREN": "IREN", "CORZ": "Core Scientific",
 
@@ -31,19 +31,19 @@ US_UNIVERSE_EXT = {
     "CRWD": "CrowdStrike", "PANW": "Palo Alto", "FTNT": "Fortinet", "ZS": "Zscaler",
     "NET": "Cloudflare", "DDOG": "Datadog", "MDB": "MongoDB", "OKTA": "Okta",
     "TEAM": "Atlassian", "WDAY": "Workday", "ADBE": "Adobe", "INTU": "Intuit",
-    "HUBS": "HubSpot", "TWLO": "Twilio", "S": "SentinelOne", "CYBR": "CyberArk",
-    "GTLB": "GitLab", "ESTC": "Elastic", "CFLT": "Confluent", "FROG": "JFrog",
+    "HUBS": "HubSpot", "TWLO": "Twilio", "S": "SentinelOne", 
+    "GTLB": "GitLab", "ESTC": "Elastic", "FROG": "JFrog",
     "PATH": "UiPath", "AI": "C3.ai", "APP": "AppLovin", "RBLX": "Roblox",
     "U": "Unity", "DOCN": "DigitalOcean", "FSLY": "Fastly", "BILL": "Bill.com",
     "ASAN": "Asana", "MNDY": "Monday.com", "PCOR": "Procore", "BRZE": "Braze",
-    "RXT": "Rackspace", "WYFI": "WiSA", "BADN": "Badger",
+    "RXT": "Rackspace", "WYFI": "WiSA", 
 
     # ── 양자컴퓨팅 / 신기술 ──
     "IONQ": "IonQ", "RGTI": "Rigetti", "QBTS": "D-Wave", "QUBT": "Quantum Computing",
     "ARQQ": "Arqit",
 
     # ── 핀테크 / 결제 / 코인 ──
-    "COIN": "Coinbase", "HOOD": "Robinhood", "SQ": "Block", "PYPL": "PayPal",
+    "COIN": "Coinbase", "HOOD": "Robinhood", "PYPL": "PayPal",
     "SOFI": "SoFi", "AFRM": "Affirm", "UPST": "Upstart", "NU": "Nu Holdings",
     "MSTR": "MicroStrategy", "MARA": "Marathon", "RIOT": "Riot", "CLSK": "CleanSpark",
     "BMNR": "Bitmine", "GLXY": "Galaxy Digital",
@@ -64,7 +64,7 @@ US_UNIVERSE_EXT = {
     # ── 헬스케어 / 바이오 (대형 + 모멘텀) ──
     "LLY": "Eli Lilly", "NVO": "Novo Nordisk", "VRTX": "Vertex", "REGN": "Regeneron",
     "ISRG": "Intuitive Surgical", "MRNA": "Moderna", "HIMS": "Hims", "TEM": "Tempus",
-    "GH": "Guardant", "EXAS": "Exact Sciences", "RXRX": "Recursion", "CRSP": "CRISPR",
+    "GH": "Guardant", "RXRX": "Recursion", "CRSP": "CRISPR",
     "NTLA": "Intellia", "BEAM": "Beam", "ALNY": "Alnylam", "ARWR": "Arrowhead",
 
     # ── 소비재 / 리테일 / 기타 모멘텀 ──
@@ -81,7 +81,7 @@ US_UNIVERSE_EXT = {
     "PWR": "Quanta", "URI": "United Rentals", "PH": "Parker", "EMR": "Emerson",
     "FIX": "Comfort Systems", "POWL": "Powell", "ATKR": "Atkore",
     "FCX": "Freeport", "NUE": "Nucor", "STLD": "Steel Dynamics", "CLF": "Cleveland-Cliffs",
-    "MP": "MP Materials", "ALB": "Albemarle", "X": "US Steel",
+    "MP": "MP Materials", "ALB": "Albemarle", 
 
     # ── 금융 (대형) ──
     "JPM": "JPMorgan", "BAC": "Bank of America", "WFC": "Wells Fargo", "MS": "Morgan Stanley",

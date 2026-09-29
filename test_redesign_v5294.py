@@ -229,3 +229,36 @@ def test_gate_line_does_not_repeat_gate_label():
     fn = _fn("renderJournal")
     assert "· 게이트 ${gateLabel}" not in fn
     assert "계좌 성과는 포지션 탭" not in fn
+
+
+# ── v5.296: 최대 폭 · US 티커 · US 유니버스 ─────────────────────────
+def test_max_width_single_variable_applied_to_header_home_journal():
+    assert "--n-maxw:1280px;" in TEXT
+    assert "--n-gutter:max(40px, calc((100% - var(--n-maxw)) / 2 + 40px));" in TEXT
+    for sel in (".hdr-row", ".hdr-strip", ".jrnl-wrap.home", "#journalView"):
+        assert "var(--n-gutter)" in _css_rule(sel), sel
+
+
+def test_us_ticker_suffix_runs():
+    import shutil, subprocess, json as _j
+    if not shutil.which("node"):
+        import pytest
+        pytest.skip("node 미설치")
+    js = ("function _escapeHtml(s){return s;}\n" + _fn("usTickerSuffix") +
+          "\nconsole.log(JSON.stringify({us: usTickerSuffix('BNS','US'), kr: usTickerSuffix('005930.KS','KR')}));")
+    out = subprocess.run(["node", "-e", js], capture_output=True, text=True, timeout=20)
+    assert out.returncode == 0, out.stderr
+    got = _j.loads(out.stdout)
+    assert "BNS" in got["us"] and got["kr"] == ""
+    # 홈 세 곳(오늘 할 일·후보 카드·내 추적)이 실제로 부른다
+    assert TEXT.count("usTickerSuffix(") >= 5
+
+
+def test_us_universe_has_no_bare_numeric_codes():
+    """접미사 없는 6자리 KR 코드가 watchlist에서 US로 새어 들어오던 사고(v5.296)."""
+    import sys
+    sys.path.insert(0, str(ROOT))
+    import universe
+    us = universe.get_universe("us")
+    bad = [t for t in us if re.fullmatch(r"\d{5}[0-9A-Z]", t)]
+    assert not bad, bad
