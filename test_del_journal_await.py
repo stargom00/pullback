@@ -75,6 +75,7 @@ def _harness(fetch_impl_js: str, seed_records_json: str):
     """공통 스텁 환경 — fetch만 시나리오별로 다르게 주입."""
     return f"""
 let journalCache = {seed_records_json};
+let _journalLoadError = null;   // v5.299: setJournal 쓰기 잠금 플래그 — 로드 성공 상태
 let editingId = null;
 let _journalSaveChain = Promise.resolve();
 let renderCallCount = 0;

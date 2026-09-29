@@ -892,7 +892,7 @@ details.rowmenu>summary:hover{background:#1b2029}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.298</span>
+      <span class="ver mono" id="verBadge">v5.299</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -1927,6 +1927,12 @@ async function apiParse(res, cfg) {
   try { return JSON.parse(text); }
   catch (_) { throw _apiError(res.status, text, true); }
 }
+// v5.299: 고정 문구만 보이던 실패 표시 뒤에 헬퍼 오류 메시지(HTTP 상태·본문)를 덧붙인다.
+function _errNote(e) {
+  const m = e && e.message ? String(e.message) : '';
+  if (!m) return '';
+  return `<br><span style="font-size:12px;color:var(--muted)">${m.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`;
+}
 async function apiJson(url, opts, cfg) {
   const res = await fetch(url, opts);
   return apiParse(res, cfg);
@@ -2950,7 +2956,7 @@ async function load(refresh = false) {
       return;
     }
     load._retryCount = 0;
-    content.innerHTML = '<div class="empty">스캔에 실패했습니다. 잠시 후 \'다시 스캔\'을 눌러주세요 — 유니버스가 커서 첫 스캔은 몇 분 넘게 걸릴 수 있어요.</div>';
+    content.innerHTML = '<div class="empty">스캔에 실패했습니다. 잠시 후 \'다시 스캔\'을 눌러주세요 — 유니버스가 커서 첫 스캔은 몇 분 넘게 걸릴 수 있어요.' + _errNote(e) + '</div>';
   }
   load._retryCount = 0;
 }
@@ -3019,7 +3025,7 @@ async function loadSectors() {
       <div style="color:var(--muted);font-size:11px;padding:10px">강세순 정렬 · 셀에 마우스를 올리면 상위 종목 표시 · 섹터 매핑된 종목 기준</div>
     </div>`;
   } catch (e) {
-    content.innerHTML = '<div class="empty">섹터 집계에 실패했습니다.</div>';
+    content.innerHTML = '<div class="empty">섹터 집계에 실패했습니다.' + _errNote(e) + '</div>';
   }
 }
 
@@ -3646,7 +3652,7 @@ async function loadEod() {
         </div>
       </div>`;
   } catch (e) {
-    content.innerHTML = '<div class="empty">마감 정리를 못 가져왔습니다.</div>';
+    content.innerHTML = '<div class="empty">마감 정리를 못 가져왔습니다.' + _errNote(e) + '</div>';
   }
 }
 
@@ -3667,7 +3673,7 @@ async function loadInverse(refresh = false) {
     lastInverseHits = data.hits || [];
     renderInverseCards(lastInverseHits);
   } catch (e) {
-    content.innerHTML = '<div class="empty">인버스 스캔 실패. 서버 로그를 확인하세요.</div>';
+    content.innerHTML = '<div class="empty">인버스 스캔 실패. 서버 로그를 확인하세요.' + _errNote(e) + '</div>';
   }
 }
 
@@ -4541,7 +4547,7 @@ async function onEnterPositionsTab() {
     _positionsData = await apiJson('/api/positions');
     renderPositions(_positionsData);
   } catch (e) {
-    doc.innerHTML = '<p class="mf-err">불러오기 실패 — 새로고침 해보세요.</p>';
+    doc.innerHTML = '<p class="mf-err">불러오기 실패 — 새로고침 해보세요.' + _errNote(e) + '</p>';
   }
 }
 
@@ -4599,7 +4605,7 @@ async function onEnterSurgeObserveTab() {
     const d = await apiJson('/api/surge/observe');
     renderSurgeObserve(d);
   } catch (e) {
-    doc.innerHTML = '<p class="mf-err">불러오기 실패 — 새로고침 해보세요.</p>';
+    doc.innerHTML = '<p class="mf-err">불러오기 실패 — 새로고침 해보세요.' + _errNote(e) + '</p>';
   }
 }
 
@@ -4965,7 +4971,7 @@ async function calRunDiag(ticker) {
   try {
     d = await apiJson('/api/debug/' + encodeURIComponent(ticker));
   } catch (e) {
-    out.innerHTML = '<div style="color:#f87171;font-size:13px">진단 실패</div>';
+    out.innerHTML = '<div style="color:#f87171;font-size:13px">진단 실패' + _errNote(e) + '</div>';
     return;
   }
   if (d.error) {
@@ -5050,7 +5056,7 @@ async function onEnterCalendarTab() {
     await _archiveDuplicateTrackers();
     renderCalendar(_calendarData);
   } catch (e) {
-    doc.innerHTML = '<p class="mf-err">불러오기 실패 — 새로고침 해보세요.</p>';
+    doc.innerHTML = '<p class="mf-err">불러오기 실패 — 새로고침 해보세요.' + _errNote(e) + '</p>';
   }
 }
 
@@ -6658,6 +6664,12 @@ let _journalSaveChain = Promise.resolve();
 // (가드는 그대로 유지 — 두 탭 동시 편집 보호는 여전히 필요, "누락"과
 // "삭제"만 구분).
 function setJournal(arr, opts) {
+  // v5.299: 일지를 못 불러온 상태(캐시가 비었거나 낡음)에서 저장하면 서버 병합 규칙상
+  // 서버 일지가 지워질 수 있다 — 쓰기를 거부하고 원인을 알린다. 캐시도 바꾸지 않는다.
+  if (_journalLoadError) {
+    alert(`일지를 불러오지 못해 저장하지 않았어요 — ${_journalLoadError.message}\n새로고침한 뒤 다시 시도해 주세요.`);
+    return Promise.resolve(false);
+  }
   journalCache = arr;
   const editId = (opts && opts.editId != null) ? opts.editId : null;
   const deletedIds = (opts && Array.isArray(opts.deletedIds) && opts.deletedIds.length) ? opts.deletedIds : null;
@@ -6713,18 +6725,46 @@ function showSaveError() {
 }
 
 // 앱 시작 시 서버에서 일지 로드 + 구 localStorage 데이터 마이그레이션
+// v5.299(사용자 지시 — 일지 훼손 경로 차단): [재현 확정] 서버 일지 60건 + 브라우저
+// localStorage 옛 일지(JKEY, v4.x 시절 06-13~06-18 저장 방식) 3건 상태에서 GET
+// /api/journal이 502 "upstream error"를 받으면, 예전 코드는 실패를 빈 배열로 취급해
+// 이전 분기를 탔고 옛 3건을 배열로 POST했다 → 서버 병합 규칙상 "배열에 없고 최근
+// 5분 안에 갱신 안 된 레코드 = 사용자가 지움"이라 **서버 일지가 60건 → 3건**이 됐다
+// (1세대 .bak도 다음 쓰기 한 번에 교체). JKEY는 읽기만 하고 지우는 코드가 없어
+// 옛 데이터가 남아 있는 브라우저에선 매 로드마다 이 분기가 열려 있었다.
+// [수정] ① 이전은 "서버가 2xx로 정상 JSON **배열**을 줬고 그게 비었을 때만".
+// 오류·타임아웃·JSON 아님·401·배열 아닌 응답에선 절대 안 탄다. ② 로드 실패면
+// _journalLoadError를 세우고 화면에 원인(HTTP 상태)을 보이며, setJournal()이 서버
+// 쓰기를 거부한다 — 빈 캐시로 저장해 서버를 덮어쓰는 일이 없게. 다음에 로드가
+// 성공하면 풀린다.
+let _journalLoadError = null;
+function journalShouldMigrate(serverData, loadError, localData) {
+  return !loadError && Array.isArray(serverData) && serverData.length === 0
+    && Array.isArray(localData) && localData.length > 0;
+}
 async function loadJournalFromServer() {
-  let serverData = [];
+  let serverData = null, loadError = null;
   try {
-    // allow:'any' — 예전과 **완전히 같은** 동작(상태 무관, JSON이면 그대로). 실패 분기가
-    // localStorage 옛 일지 이전(POST)을 타므로 여기 판정을 바꾸지 않는다(v5.298 예외).
-    serverData = await apiJson('/api/journal', undefined, { allow: 'any' });
-    } catch(e) { serverData = []; }
+    serverData = await apiJson('/api/journal');
+    if (!Array.isArray(serverData)) {
+      loadError = _apiError(200, JSON.stringify(serverData), false);
+      loadError.message = `서버 응답 오류 HTTP 200 — 일지 배열이 아님: ${JSON.stringify(serverData).slice(0, 120)}`;
+    }
+  } catch (e) { loadError = e; }
 
-  // 마이그레이션: 서버가 비었고 localStorage에 옛 일지가 있으면 한 번 올림
+  if (loadError) {
+    _journalLoadError = loadError;
+    console.error('[journal] 일지 로드 실패 — 서버 쓰기 잠금:', loadError.message);
+    if (typeof renderJournal === 'function' && document.getElementById('journalView').style.display !== 'none') renderJournal();
+    if (mode === 'calendar' && _calendarData) renderCalendar(_calendarData);
+    return;   // 이전 분기·updateTracking(자동저장) 모두 타지 않는다
+  }
+  _journalLoadError = null;
+
+  // 마이그레이션: 서버가 **정상 응답으로** 비었고 localStorage에 옛 일지가 있을 때만 한 번 올림
   let localData = [];
   try { localData = JSON.parse(localStorage.getItem(JKEY) || '[]'); } catch(e) {}
-  if ((!serverData || serverData.length === 0) && localData.length > 0) {
+  if (journalShouldMigrate(serverData, loadError, localData)) {
     journalCache = _normalize(localData);
     await fetch('/api/journal', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -8333,6 +8373,19 @@ function renderJournal() {
   // 계산이 없다. 기능(현재가 갱신·수동 추가·CSV·급락 알림·전체 삭제·행별 상태
   // 전환·편집·삭제·부분 청산·대기만료 복구·관찰 정리)은 전부 그대로다.
   const wrap = document.getElementById('journalView');
+  // v5.299: 일지 로드 실패 — 빈 화면을 "기록 없음"처럼 보이지 않게 원인을 보이고, 쓰기
+  // 버튼(기록 추가·전체 삭제 등)을 아예 그리지 않는다(setJournal도 저장을 거부한다).
+  if (_journalLoadError) {
+    const st = _journalLoadError.status != null ? `HTTP ${_journalLoadError.status}` : '네트워크 오류';
+    wrap.innerHTML = `<div class="jr-title"><h2>내 일지</h2></div>
+      <section class="n-card jr-gate jr-gate-bad" role="alert" style="display:block;padding:18px 20px">
+        <div style="font-size:15px;font-weight:600">일지를 불러오지 못했어요 — ${st}</div>
+        <div class="n-sub" style="margin-top:6px">${_escapeHtml(_journalLoadError.message)}</div>
+        <div style="margin-top:10px;font-size:13px">서버 일지를 지키기 위해 저장·수정·삭제를 잠갔어요. 잠시 후 새로고침해 주세요.</div>
+        <div style="margin-top:12px"><button type="button" class="n-btn" onclick="location.reload()">새로고침</button></div>
+      </section>`;
+    return;
+  }
   const all = getJournal();
   const titleHtml = `<div class="jr-title">
       <h2>내 일지</h2>
@@ -9271,6 +9324,13 @@ function renderMyTrackBoard() {
   </div>`;
   const colHead = `<div class="track-row track-head"><span>종목</span><span class="r">현재가</span><span class="r">트리거</span><span>상태</span><span>경과</span><span></span></div>`;
 
+  // v5.299: 일지 로드 실패면 "추적 중인 종목 없음"으로 오해하지 않게 원인을 보인다.
+  if (_journalLoadError) {
+    return `<section class="n-card track" aria-label="내 추적">
+      ${headerHtml}
+      <div class="st-dot st-bad" role="alert" style="padding:14px 28px 18px;font-size:13px;white-space:normal">일지를 불러오지 못했어요 — ${_journalLoadError.status != null ? 'HTTP ' + _journalLoadError.status : '네트워크 오류'}. 새로고침해 주세요.</div>
+    </section>`;
+  }
   // v5.218 [1]: 0건이어도 섹션 자체는 항상 보이게(재점화 후보만 있어도 표시).
   if (!all.length) {
     return `<section class="n-card track" aria-label="내 추적">

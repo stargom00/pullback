@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.299 [일지 훼손 경로 차단 — 사용자 지시, 서버 코드 변경 없음] [재현 확정(로컬)] 서버
+    일지 60건 + 브라우저 localStorage 옛 일지(pullback_journal_v1, v4.x 시절) 3건 상태에서
+    GET /api/journal이 502 "upstream error"(2026-09-29 실제 발생한 프록시 타임아웃 형태)를
+    받으면 loadJournalFromServer가 실패를 빈 배열로 취급해 이전 분기를 타고 옛 3건을 배열로
+    POST → 서버 병합 규칙(배열에 없고 최근 5분 안 갱신 아님 = 삭제)으로 서버 일지가 3건이
+    됐다. 1세대 .bak도 다음 쓰기(로드 시 필드 마이그레이션 포함) 한 번에 교체됐다.
+    옛 키는 읽기만 하고 지우는 코드가 없어 남아 있는 브라우저에선 매 로드마다 열려 있던 경로.
+    [수정] 이전은 "2xx 정상 JSON 배열이 비었을 때만"(journalShouldMigrate). 오류·JSON 아님·
+    401·배열 아님이면 _journalLoadError를 세우고 화면(일지·홈 내 추적)에 "일지를 불러오지
+    못했어요 — HTTP {상태}"를 보이며 setJournal이 서버 쓰기를 거부(자동저장 포함).
+    /api/journal GET도 apiJson 헬퍼로 교체(v5.298 예외 목록 0건). 마감정리·섹터·인버스·
+    포지션·급등관찰·캘린더·진단·스캔 실패의 고정 문구 뒤에 헬퍼 오류 메시지를 덧붙임.
 v5.298 [API JSON 공통 헬퍼 — 사용자 지시, 서버 코드 변경 없음] 재점화 "지금 갱신"이
     Railway 프록시 타임아웃의 일반 텍스트 "upstream error"를 받았는데 프론트가 상태를
     안 보고 res.json()을 불러 "SyntaxError: Unexpected token 'u'"만 보였다(진짜 원인
@@ -8356,7 +8368,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.298"
+VERSION = "v5.299"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
