@@ -5571,7 +5571,9 @@ function renderTodayDecisionHtml(td, sectorFlow, pipelineHealth) {
       if ((mkt === 'KR' ? accelSectorsKr : accelSectorsUs).has(item.sector)) subParts.push('가속 섹터');
     }
     const qty = calcSharesGateCap(item.entry, mkt);
-    const stopStr = item.stop != null ? `${fmtPrice(item.stop, mkt)}${todayDecisionRiskBadge(item)}` : '없음(시간 청산 — 탭 규칙)';
+    // 손절폭 배지는 한 번만 판정한다(_tdBadgeStats 집계가 두 번 세지지 않게).
+    const riskBadge = item.stop != null ? todayDecisionRiskBadge(item) : '';
+    const stopStr = item.stop != null ? `${fmtPrice(item.stop, mkt)}${riskBadge}` : '없음(시간 청산 — 탭 규칙)';
     const reasonParts = [];
     if (item.snapshot_date) reasonParts.push(`${item.snapshot_date.slice(5)} 종가 기준`);
     reasonParts.push(item.reason);
@@ -5598,7 +5600,8 @@ function renderTodayDecisionHtml(td, sectorFlow, pipelineHealth) {
       cell('진입가', fmtPrice(item.entry, mkt)),
       cell('수량', qty ? `${qty.shares.toLocaleString()}주` : 'R설정 필요'),
       cell('매수', isJongga ? JONGGA_BUY_WINDOW : (ENTRY_METHOD_TEXT[item.entry_method] || '—')),
-      isJongga ? cell('매도', JONGGA_SELL_CELL) : cell('손절', stopStr),
+      isJongga ? cell('매도', JONGGA_SELL_CELL)
+        : cell('손절', item.stop != null ? `${fmtPrice(item.stop, mkt)}<span style="display:block;font-size:12px;font-weight:400">${riskBadge}</span>` : stopStr),
     ].join('');
     const foot = [
       isJongga ? `시각 KST · 손절 없음(시간 청산: ${JONGGA_SELL_RULE})` : null,
