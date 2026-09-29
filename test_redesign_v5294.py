@@ -127,3 +127,69 @@ def test_home_column_order():
     order = [side.index(x) for x in ("renderJonggaForwardCard", "renderSectorAccelCard",
                                      "renderLowpointHtml", "renderUpcomingCard")]
     assert order == sorted(order)
+
+
+# ── 3단계: 내 일지 ─────────────────────────────────────────────────
+def _fn(name: str) -> str:
+    i = TEXT.index(f"function {name}(")
+    b = TEXT.index("{", i)
+    d = 0
+    for k in range(b, len(TEXT)):
+        d += {"{": 1, "}": -1}.get(TEXT[k], 0)
+        if d == 0:
+            return TEXT[i:k + 1]
+    raise AssertionError(name)
+
+
+def test_tab_owned_banners_are_hidden_on_tab_switch():
+    """종가베팅 배너가 일지에 남던 원인 — 표시가 renderCards()에서만 정해졌다.
+    탭 전환(applyTabViewState)에서 주인 탭이 아니면 숨겨야 한다."""
+    assert ("const TAB_OWNED_BANNERS = { jonggaSafetyBanner: 'jongga', "
+            "jonggaSessionBanner: 'jongga', stopWidthWarnBanner: 'pullback' };") in TEXT
+    src = _fn("applyTabViewState")
+    assert "Object.entries(TAB_OWNED_BANNERS)" in src and "mode !== owner" in src
+    assert "IDXBAR_HIDDEN_MODES.has(mode)" in src
+    assert "const IDXBAR_HIDDEN_MODES = new Set(['calendar', 'journal']);" in TEXT
+
+
+def test_journal_table_is_six_columns_everywhere():
+    src = _fn("renderJournal")
+    thead = src[src.index("<thead>"):src.index("</thead>")]
+    assert thead.count("<th>") == 6, thead
+    for fn in ("viewRow", "renderWatchRows", "renderClosedMonths",
+               "renderArchivedPendingSection", "partialRow", "editRow"):
+        body = _fn(fn)
+        spans = [int(x) for x in re.findall(r'colspan="(\d+)"', body)]
+        for n in spans:
+            assert n in (2, 5, 6), f"{fn}: colspan {n}"
+    # editRow: 일반 td 4개 + colspan="2" 1개 = 6열
+    er = _fn("editRow")
+    assert er.count("<td") == 5 and 'colspan="2"' in er, er.count("<td")
+
+
+def test_row_menu_keeps_every_existing_action():
+    src = _fn("viewRow")
+    for call in ("markWatchEntered(", "markWatchMissed(", "markWatchClosed(", "reopenWatch(",
+                 "markEntered(", "markMissed(", "partialEditingId=", "markClosed(",
+                 "revertToPending(", "reopenRow(", "restoreArchivedPending(",
+                 "editingId=", "delJournal("):
+        assert call in src, call
+
+
+def test_journal_title_menu_keeps_tools():
+    src = _fn("renderJournal")
+    for call in ("refreshPrices()", "openManualAdd()", "exportCSV()",
+                 "Notification.requestPermission()", "setJournal([])", "openRSettings()"):
+        assert call in src, call
+
+
+def test_journal_category_chips():
+    src = _fn("renderJournal")
+    chips = re.findall(r"catBtn\('([^']+)', '([^']+)'\)", src)
+    assert [c[1] for c in chips] == ["전체", "추세", "단타", "재량", "저점", "관찰"], chips
+
+
+def test_category_stats_reuse_journal_stats_only():
+    """카테고리 성적 표는 기존 statcard 값 재배치 — 새 통계 함수 호출이 없어야 한다."""
+    src = _fn("renderJournal")
+    assert src.count("journalStats(") == 3   # 추세추종·단타·재량 (v5.187과 동일)

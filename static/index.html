@@ -744,6 +744,89 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
   .track-row .act{grid-column:2/4;text-align:right}
   .track-exp{padding:10px 16px}
 }
+/* ── 내 일지(#journalView) ── */
+/* applyTabViewState가 style.display='block'을 넣으므로 flex gap 대신 형제 여백으로 간격을 둔다 */
+#journalView{background:var(--n-bg);color:var(--n-text);padding:32px 40px 48px}
+#journalView>*+*{margin-top:24px}
+#journalView a{color:inherit}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.jr-title{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.jr-title h2{margin:0;font-size:24px;font-weight:700}
+.jr-title-sp{flex:1}
+details.jr-more,details.rowmenu{position:relative}
+details.jr-more>summary,details.rowmenu>summary{list-style:none;cursor:pointer}
+details.jr-more>summary::-webkit-details-marker,details.rowmenu>summary::-webkit-details-marker{display:none}
+details.jr-more>summary{width:44px;justify-content:center;padding:0}
+.jr-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:50;min-width:150px;display:flex;flex-direction:column;
+  background:var(--n-card);border:1px solid #232933;border-radius:10px;padding:6px;box-shadow:0 12px 32px rgba(0,0,0,.45)}
+.jr-menu button{min-height:40px;text-align:left;background:none;border:0;border-radius:6px;padding:0 12px;color:var(--n-text);font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
+.jr-menu button:hover{background:#1b2029}
+.jr-menu button.danger{color:#f2848c}
+.jr-menu-note{font-size:12px;color:var(--n-muted);padding:10px 12px}
+.jr-risk{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr 1.2fr;overflow:hidden}
+.jr-risk>div{padding:18px 22px;display:flex;flex-direction:column;gap:8px;border-right:1px solid var(--n-line);min-width:0}
+.jr-risk>div:last-child{border-right:0}
+.jr-risk .k{font-size:12px;color:var(--n-muted)}
+.jr-risk .v{font-size:22px;font-weight:600}
+.jr-gate{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 18px;border-radius:12px;background:var(--n-card);border:1px solid var(--n-line)}
+.jr-gate-bad{background:#1d1417;border-color:#3a2226;color:#f2b8bd}
+.jr-gate-bad b{color:#ffd5d8}
+.jr-gate-neutral{background:#1c1a12;border-color:#3a3320}
+.jr-grid{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(0,1fr);gap:24px;align-items:start}
+.jr-grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:start}
+.jr-records{overflow:visible}
+.jr-rec-h{display:flex;align-items:center;gap:12px 16px;flex-wrap:wrap;padding:18px 24px;border-bottom:1px solid var(--n-line)}
+.jr-seg{display:flex;background:#0f1318;border:1px solid #232933;border-radius:10px;padding:3px}
+.jr-seg-b{min-height:38px;padding:0 14px;border:0;border-radius:7px;background:none;color:var(--n-muted);font:inherit;font-size:13px;cursor:pointer}
+.jr-seg-b.on{background:#262c37;color:#fff;font-weight:600}
+.jr-pills{display:flex;gap:6px;flex-wrap:wrap}
+.jr-pill{min-height:32px;padding:0 12px;border-radius:16px;border:1px solid var(--n-line2);background:none;color:var(--n-sub);font:inherit;font-size:12px;cursor:pointer}
+.jr-pill.on{border-color:var(--n-accent);background:#2a2114;color:var(--n-accent);font-weight:600}
+.jr-records .jrnl-stats{padding:12px 24px 0}
+.jr-table-wrap{overflow:visible;position:relative}   /* .sr 절대배치가 스크롤 밖으로 새지 않게 */
+table.jr-table{width:100%;border-collapse:collapse;font-size:14px}
+table.jr-table th{text-align:left;font-size:12px;font-weight:400;color:var(--n-muted);padding:10px 12px;border-bottom:1px solid var(--n-line);background:none}
+table.jr-table th:first-child,table.jr-table td:first-child{padding-left:24px}
+table.jr-table td{padding:16px 12px;border-bottom:1px solid var(--n-row);vertical-align:top;background:none}
+table.jr-table tbody tr:nth-child(even) td{background:none}
+.jr-date{font-size:13px;color:var(--n-sub);white-space:nowrap}
+.jr-name>a{font-size:15px;font-weight:600;text-decoration:none}
+.jr-name>a:hover{color:var(--n-accent)}
+.jr-s{font-size:12px;color:var(--n-muted);margin-top:4px;line-height:1.45}
+.jr-note{font-size:13px;color:var(--n-sub);max-width:220px}
+.jr-act{width:44px;text-align:right;padding-right:16px!important}
+details.rowmenu>summary{width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;color:var(--n-muted)}
+details.rowmenu>summary:hover{background:#1b2029}
+.jr-cats{padding:20px 0 6px}
+.jr-card-h{display:flex;justify-content:space-between;align-items:baseline;padding:0 22px 12px}
+.jr-cat-row{display:grid;grid-template-columns:1.1fr .5fr 1.3fr 1.3fr;align-items:center;gap:6px;padding:8px 22px;min-height:52px;border-bottom:1px solid var(--n-row);font-size:13px}
+.jr-cat-row.head{min-height:0;font-size:11px;color:var(--n-muted);border-top:1px solid var(--n-line);border-bottom:1px solid var(--n-line)}
+.jr-cat-row .r,.sv-row .r{text-align:right}
+.jcal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.jcal-dow{font-size:11px;color:var(--n-muted);text-align:center}
+.jcal-cell{height:52px;border:0;border-radius:8px;padding:6px 8px;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-start;color:var(--n-text);font:inherit;cursor:pointer;min-width:0}
+.jcal-cell:disabled{cursor:default}
+.jcal-list{border-top:1px solid var(--n-line);padding-top:10px}
+.jcal-li{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:4px 0}
+.sv-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+.sv-row{display:grid;grid-template-columns:1.4fr .8fr .8fr .8fr;align-items:center;min-height:44px;border-bottom:1px solid var(--n-row);font-size:13px}
+.sv-row.head{min-height:0;padding:8px 0;font-size:11px;color:var(--n-muted);border-bottom:1px solid var(--n-line)}
+#journalView .sigval{background:none;border:0;padding:0;margin:0}
+@media (max-width:899px){
+  #journalView{padding:16px 16px 32px}
+  #journalView>*+*{margin-top:16px}
+  .jr-title h2{font-size:20px}
+  .jr-risk{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .jr-risk>div{border-right:0;border-bottom:1px solid var(--n-line);padding:14px 16px}
+  .jr-risk .v{font-size:18px}
+  .jr-grid,.jr-grid2,.sv-grid{grid-template-columns:minmax(0,1fr)}
+  .jr-rec-h{padding:14px 16px}
+  .jr-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table.jr-table{min-width:640px}
+  table.jr-table th:first-child,table.jr-table td:first-child{padding-left:16px}
+  .jr-menu{position:static;box-shadow:none;margin-top:4px}
+  .jr-cat-row{padding:8px 16px}
+}
 @media (max-width:899px){
   .hdr-row{flex-wrap:wrap;gap:8px 12px;padding:10px 16px}
   .hdr-navs{order:3;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
@@ -4959,6 +5042,10 @@ function loadCalSearchBox() {
   if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') calRunSearch(); });   // [3]
   if (btn) btn.addEventListener('click', calRunSearch);
 }
+// v5.294: 일지 행 메뉴·더보기(<details>)는 바깥을 누르면 닫는다(한 번에 하나만 열림).
+document.addEventListener('click', e => {
+  document.querySelectorAll('#journalView details[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; });
+});
 // v5.294: 홈에서 "/"를 누르면 검색창으로(입력 중일 땐 무시).
 document.addEventListener('keydown', e => {
   if (e.key !== '/' || mode !== 'calendar' || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -6294,7 +6381,14 @@ function applyMarketButtonsEnabled(curMode) {
   });
 }
 
-const IDXBAR_HIDDEN_MODES = new Set(['calendar']);
+const IDXBAR_HIDDEN_MODES = new Set(['calendar', 'journal']);
+// v5.294(사용자 지시 — 일지 탭에 종가베팅 배너 2개가 뜨던 문제의 근본 수정):
+// [원인] 이 배너들의 표시/숨김은 renderCards() 안에서만 정해졌다. 일지·홈 같은
+// 커스텀 뷰는 renderCards()를 안 타므로, 종가베팅 → 일지로 가면 직전 탭에서 켜진
+// 배너가 그대로 남았다(Playwright 재현: jongga→journal에서 두 배너 display:block).
+// [수정] 배너마다 **주인 탭**을 적어 두고, 탭 전환 시점(applyTabViewState)에 주인
+// 탭이 아니면 무조건 숨긴다. 주인 탭 안에서 켤지·내용은 여전히 renderCards()가 정한다.
+const TAB_OWNED_BANNERS = { jonggaSafetyBanner: 'jongga', jonggaSessionBanner: 'jongga', stopWidthWarnBanner: 'pullback' };
 function applyTabViewState() {
   hideFilterButtonsIfNotApplicable();   // v5.56: journal은 load() 자체를 안 타서 여기서도 호출
   applyMarketButtonsEnabled(mode);      // v5.290: ABC 진입/이탈 시 시장 버튼 비활성/복원
@@ -6318,6 +6412,10 @@ function applyTabViewState() {
   // loadIndices()가 5분마다 style.display='block'을 다시 쓰므로 인라인 style이 아니라
   // 클래스(!important)로 탭별 표시를 정한다 — 판정 지점은 IDXBAR_HIDDEN_MODES 하나.
   document.getElementById('idxbar').classList.toggle('tab-off', IDXBAR_HIDDEN_MODES.has(mode));
+  for (const [id, owner] of Object.entries(TAB_OWNED_BANNERS)) {
+    const el = document.getElementById(id);
+    if (el && mode !== owner) el.style.display = 'none';
+  }
   if (isJournal) { renderJournal(); }
   else if (isMoneyflow) { onEnterMoneyflowTab(); }
   else if (isPositions) { onEnterPositionsTab(); }
@@ -7248,92 +7346,92 @@ function jcalNav(d) {
   if (_jcal.m > 11) { _jcal.m = 0; _jcal.y++; }
   renderJournal();
 }
+// v5.294(사용자 지시 — 일지 달력): 칸에는 **기록 수만**(색 농도), 날짜를 누르면 그날
+// 종목 목록이 달력 아래 펼쳐진다. 묶는 기준(등록일, 모든 카테고리 — "그날 뭘 봤나")은
+// v4.52 그대로. 선택 날짜는 _jcalSel(저장 안 함).
+let _jcalSel = null;
+function jcalPick(ds) { _jcalSel = (_jcalSel === ds) ? null : ds; renderJournal(); }
 function renderJCal(all) {
-  // 날짜별 종목명 그룹 (등록일 기준, 모든 카테고리 포함 — "그날 뭘 봤나")
   const byDay = {};
   for (const r of all) {
     const d = (r.date || '').slice(0, 10);
     if (!d) continue;
-    (byDay[d] = byDay[d] || []).push(r.name || r.ticker || '?');
+    (byDay[d] = byDay[d] || []).push(r);
   }
   if (!Object.keys(byDay).length) return '';
   const now = new Date();
   if (!_jcal) _jcal = { y: now.getFullYear(), m: now.getMonth() };
   const { y, m } = _jcal;
-  const first = new Date(y, m, 1);
-  const startDow = first.getDay();                 // 0=일
+  const startDow = new Date(y, m, 1).getDay();                 // 0=일
   const daysInMonth = new Date(y, m + 1, 0).getDate();
   const todayStr = kstStr(now);
+  const shade = n => n >= 10 ? '#5a3d1c' : n >= 4 ? '#3f2d17' : n >= 1 ? '#2a2114' : '#171b22';
   let cells = '';
   for (let i = 0; i < startDow; i++) cells += '<div></div>';
   for (let d = 1; d <= daysInMonth; d++) {
     const ds = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    const names = byDay[ds] || [];
-    const isToday = ds === todayStr;
+    const n = (byDay[ds] || []).length;
     const dow = (startDow + d - 1) % 7;
-    const shown = names.slice(0, 3);
-    const more = names.length - shown.length;
-    cells += `<div style="min-height:52px;border:1px solid var(--line);border-radius:6px;padding:3px 4px;${isToday ? 'border-color:var(--green);' : ''}${names.length ? 'background:var(--surface);cursor:help' : 'opacity:.45'}" title="${names.join(', ')}">
-      <div style="font-size:10px;color:${dow === 0 ? '#f87171' : dow === 6 ? '#7fb8e0' : 'var(--muted)'};font-weight:${isToday ? '800' : '400'}">${d}</div>
-      ${shown.map(n => `<div style="font-size:9.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.35">${n}</div>`).join('')}
-      ${more > 0 ? `<div style="font-size:9px;color:var(--muted)">+${more}</div>` : ''}
-    </div>`;
+    const isToday = ds === todayStr, sel = ds === _jcalSel;
+    cells += `<button type="button" class="jcal-cell" style="background:${shade(n)};${isToday ? 'outline:1.5px solid var(--n-accent);' : ''}${sel ? 'box-shadow:inset 0 0 0 1.5px #fff;' : ''}"
+      ${n ? `onclick="jcalPick('${ds}')" aria-label="${ds} 기록 ${n}건"` : `disabled aria-label="${ds} 기록 없음"`}>
+      <span class="num" style="font-size:11px;color:${dow === 0 ? '#f2848c' : 'var(--n-muted)'}">${d}</span>
+      <span class="num" style="font-size:15px;font-weight:600">${n || ''}</span></button>`;
   }
-  return `
-  <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:12px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <div style="font-size:13px;font-weight:700">📅 활동 달력 <span style="color:var(--muted);font-weight:400;font-size:11px">날짜별 분석·등록 종목 (셀에 마우스: 전체 목록)</span></div>
-      <div style="display:flex;gap:6px;align-items:center">
-        <button class="btn" style="padding:2px 10px" onclick="jcalNav(-1)">‹</button>
-        <b style="font-size:13px">${y}.${String(m + 1).padStart(2, '0')}</b>
-        <button class="btn" style="padding:2px 10px" onclick="jcalNav(1)">›</button>
-      </div>
+  const selRows = _jcalSel && byDay[_jcalSel] && _jcalSel.startsWith(`${y}-${String(m + 1).padStart(2, '0')}`)
+    ? `<div class="jcal-list"><div class="n-sub" style="margin-bottom:6px">${_jcalSel} · ${byDay[_jcalSel].length}건</div>
+        ${byDay[_jcalSel].map(r => `<div class="jcal-li"><a href="${tvUrl(r.ticker, r.market)}" target="_blank" rel="noopener">${_escapeHtml(r.name || r.ticker || '?')}</a><span class="n-sub">${_escapeHtml(r.category || '추세추종')} · ${_escapeHtml((_JR_ST_TEXT[r.status] || [r.status || ''])[0])}</span></div>`).join('')}</div>`
+    : `<span class="n-sub">날짜를 누르면 그날 종목 목록</span>`;
+  return `<section class="n-card side-card" aria-label="기록 달력" style="padding:20px 24px;gap:14px">
+    <div style="display:flex;align-items:center;gap:10px">
+      <span class="n-h">${y}년 ${m + 1}월</span><span class="n-sub">날짜별 기록 수</span>
+      <span class="jr-title-sp"></span>
+      <button type="button" class="n-btn sm" style="min-width:36px;justify-content:center" aria-label="이전 달" onclick="jcalNav(-1)">‹</button>
+      <button type="button" class="n-btn sm" style="min-width:36px;justify-content:center" aria-label="다음 달" onclick="jcalNav(1)">›</button>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:10px;color:var(--muted);text-align:center;margin-bottom:4px">
-      <div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">${cells}</div>
-  </div>`;
+    <div class="jcal-grid jcal-dow"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div>
+    <div class="jcal-grid">${cells}</div>
+    ${selRows}
+  </section>`;
 }
 
 // ── R 누적 곡선 (v4.48.2): 종료 매매를 시간순으로 누적 — 시스템의 에쿼티 커브 ──
-// 우상향이면 시스템이 작동 중, 꺾이면 규칙 위반이나 시장 역행을 의심.
+// v5.294: 누적·최대낙폭을 큰 숫자로, 곡선은 강조색. 집계 규칙은 그대로.
 function renderRCurve(all) {
   const closed = all
     .filter(r => r.result_r !== '' && r.status !== 'missed' && (r.category || '추세추종') !== '관찰')
     .map(r => ({ d: r.closed_date || r.last_checked || r.date || '', v: parseFloat(r.result_r) }))
     .filter(x => !isNaN(x.v))
     .sort((a, b) => a.d.localeCompare(b.d));
-  if (closed.length < 2) return '';
+  if (closed.length < 2) return `<section class="n-card side-card" aria-label="R 누적" style="padding:20px 24px"><span class="n-h">R 누적</span><span class="n-sub">종료 매매가 2건 이상이면 곡선이 그려져요.</span></section>`;
   let cum = 0;
   const pts = closed.map(x => (cum += x.v, { d: x.d, c: cum }));
-  const W = 560, H = 120, PAD = 8;
+  const W = 600, H = 200, PAD = 8;
   const min = Math.min(0, ...pts.map(p => p.c));
   const max = Math.max(0, ...pts.map(p => p.c));
   const span = (max - min) || 1;
   const X = i => PAD + i / (pts.length - 1) * (W - PAD * 2);
   const Y = v => PAD + (max - v) / span * (H - PAD * 2);
-  const line = pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(p.c).toFixed(1)}`).join(' ');
+  const line = pts.map((p, i) => `${X(i).toFixed(1)},${Y(p.c).toFixed(1)}`).join(' ');
   const zero = Y(0);
   const last = pts[pts.length - 1].c;
-  const col = last >= 0 ? 'var(--green)' : '#ff6b6b';
   // 최대 낙폭 (R 기준 드로다운)
   let peak = -1e9, mdd = 0;
   for (const p of pts) { peak = Math.max(peak, p.c); mdd = Math.min(mdd, p.c - peak); }
   const dots = pts.map((p, i) =>
-    `<circle cx="${X(i).toFixed(1)}" cy="${Y(p.c).toFixed(1)}" r="2.5" fill="${closed[i].v >= 0 ? 'var(--green)' : '#ff6b6b'}"><title>${p.d} · ${closed[i].v > 0 ? '+' : ''}${closed[i].v}R → 누적 ${p.c.toFixed(2)}R</title></circle>`).join('');
-  return `
-  <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:12px">
-    <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
-      <div style="font-size:13px;font-weight:700">📈 R 누적 곡선 <span style="color:var(--muted);font-weight:400;font-size:11px">종료 ${pts.length}건 · 관찰 제외</span></div>
-      <div style="font-size:12px">누적 <b style="color:${col}">${last > 0 ? '+' : ''}${last.toFixed(2)}R</b> · 최대낙폭 <span style="color:#ff9b9b">${mdd.toFixed(2)}R</span></div>
+    `<circle cx="${X(i).toFixed(1)}" cy="${Y(p.c).toFixed(1)}" r="3" fill="transparent"><title>${p.d} · ${closed[i].v > 0 ? '+' : ''}${closed[i].v}R → 누적 ${p.c.toFixed(2)}R</title></circle>`).join('');
+  return `<section class="n-card side-card" aria-label="R 누적" style="padding:20px 24px;gap:14px">
+    <div style="display:flex;align-items:baseline;gap:10px"><span class="n-h">R 누적</span><span class="n-sub">종료 ${pts.length}건 · 관찰 제외</span></div>
+    <div style="display:flex;gap:32px;flex-wrap:wrap">
+      <div style="display:flex;flex-direction:column;gap:2px"><span class="n-sub">누적</span><span class="num" style="font-size:26px;font-weight:600;color:${last >= 0 ? 'var(--px-up)' : 'var(--px-down)'}">${last > 0 ? '+' : ''}${last.toFixed(2)}R</span></div>
+      <div style="display:flex;flex-direction:column;gap:2px"><span class="n-sub">최대 낙폭</span><span class="num" style="font-size:26px;font-weight:600;color:var(--px-down)">${mdd.toFixed(2)}R</span></div>
     </div>
-    <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto;display:block;margin-top:6px">
-      <line x1="${PAD}" y1="${zero.toFixed(1)}" x2="${W - PAD}" y2="${zero.toFixed(1)}" stroke="var(--line)" stroke-dasharray="3,3"/>
-      <path d="${line}" fill="none" stroke="${col}" stroke-width="2"/>
+    <svg width="100%" height="200" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="R 누적 곡선">
+      <line x1="0" y1="${zero.toFixed(1)}" x2="${W}" y2="${zero.toFixed(1)}" stroke="#2a303b" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>
+      <polyline fill="none" stroke="var(--n-accent)" stroke-width="2.5" stroke-linejoin="round" vector-effect="non-scaling-stroke" points="${line}"/>
       ${dots}
     </svg>
-  </div>`;
+  </section>`;
 }
 
 function modeTab(mode) { return MODE_TAB_LABEL[mode] || mode || '-'; }
@@ -8245,13 +8343,13 @@ function renderClosedSummary(stats) {
   const moneyLine = (v, n, skip, fmt) => n === 0 ? null :
     `${fmt(v)}${skip ? ` <span style="opacity:.6">(사이즈 미기록 ${skip}건 제외)</span>` : ''}`;
   const krLine = moneyLine(stats.krPnl, stats.krN, stats.krSkip,
-    v => `🇰🇷 ${v >= 0 ? '+' : ''}${Math.round(v).toLocaleString('ko-KR')}원`);
+    v => `KR ${v >= 0 ? '+' : ''}${Math.round(v).toLocaleString('ko-KR')}원`);
   const usLine = moneyLine(stats.usPnl, stats.usN, stats.usSkip,
-    v => `🇺🇸 ${v >= 0 ? '+' : ''}$${Math.round(v).toLocaleString('en-US')}`);
+    v => `US ${v >= 0 ? '+' : ''}$${Math.round(v).toLocaleString('en-US')}`);
   return `
     <div class="jrnl-stats" style="margin-bottom:10px">
       <div class="statcard">
-        <div class="statcard-t">✔ 종료 요약 (전체 ${stats.total}건)</div>
+        <div class="statcard-t">종료 요약 (전체 ${stats.total}건)</div>
         <div class="statcard-v">
           <span title="청산가만 있으면 포함(손절 미기록 종료건도 집계) — 원시 등락률이 양수인 비율. 상단 추세추종/단타 카드의 승률(R+)과 표본이 다를 수 있음(그쪽은 손절가 기록건만).">승률(청산가+)</span> ${stats.winRate == null ? '–' : stats.winRate + '%'} (${stats.wins}승/${stats.withPnlCount}건)
           · 평균 ${stats.withRActualCount ? rr(stats.avgRActual) : '<span style="color:var(--amber)">실전 데이터 없음</span>'}<span style="opacity:.6;font-size:11px">(실체결 ${stats.withRActualCount}건${stats.withRPlanCount ? ` / 참고가 ${stats.withRPlanCount}건 · ${rr(stats.avgRPlan)}` : ''})</span>
@@ -8280,7 +8378,7 @@ function renderClosedMonths(rows) {
     const open = closedMonthOpen.has(m);
     const head = `
       <tr onclick="toggleClosedMonth('${m}')" style="cursor:pointer;background:var(--surface)">
-        <td colspan="8" style="padding:9px 12px;font-weight:700">
+        <td colspan="6" style="padding:9px 12px;font-weight:700">
           ${open ? '▾' : '▸'} ${m === '기타' ? '날짜 미상' : m}
           <span style="font-weight:400;color:var(--muted);font-size:12px">— ${rowsM.length}건 · <span title="청산가만 있으면 포함(손절 미기록 종료건도 집계) — 원시 등락률이 양수인 비율.">승률(청산가+)</span> ${st.winRate == null ? '–' : st.winRate + '%'} (n=${st.withPnlCount}) · 평균 ${st.avgR == null ? '–' : (st.avgR > 0 ? '+' : '') + st.avgR.toFixed(2) + 'R'}</span>
         </td>
@@ -8292,30 +8390,40 @@ function renderClosedMonths(rows) {
   }).join('');
 }
 
+// v5.294(사용자 지시 — 일지 신호 검증): 신호등·AVWAP 표 2개를 나란히, 경고 항목별
+// 성과와 페이퍼 트래킹은 접기(기본 접힘, 저장 안 함). 집계(signalValidation/
+// flagStats/페이퍼 서버 통계)는 그대로다.
+let _sigFlagsOpen = false, _paperOpen = false;
+const _SIG_LEVEL_TEXT = { ok: ['진입 양호', 'var(--n-good)'], warn: ['주의', 'var(--n-warn)'], danger: ['자제', 'var(--n-bad)'] };
 function renderSignalValidation(all) {
+  const paperToggle = `<button type="button" class="n-btn sm" aria-expanded="${_paperOpen}" onclick="_paperOpen=!_paperOpen;renderJournal()">페이퍼 트래킹 ${_paperOpen ? '접기' : '펼치기'}</button>`;
+  const paperHtml = _paperOpen ? renderPaperTrackCard() : '';
   const v = signalValidation(all);
-  if (!v) return `<div class="sigval-hint">📊 신호 검증: 종료된 매매가 3건 이상 쌓이면 신호별 승률이 여기 표시돼요. (진입 시 신호등·AVWAP 상태가 자동 기록됩니다)</div>`;
-  const rowsOf = (obj) => Object.values(obj).map(g =>
-    `<tr><td>${g.label}</td><td>${g.n}건</td><td>${g.win}%</td><td style="color:${parseFloat(g.avgR)>=0?'var(--px-up)':'var(--px-down)'}">${g.avgR}R</td></tr>`
-  ).join('');
-  const lvlRows = rowsOf(v.byLevel);
-  const zoneRows = rowsOf(v.byZone);
-  const flagRows = (v.byFlag || []).map(g =>
-    `<tr><td>${g.label}</td><td>${g.n}건</td><td>${g.win}%</td><td style="color:${parseFloat(g.avgR)>=0?'var(--px-up)':'var(--px-down)'}">${g.avgR}R</td></tr>`
-  ).join('');
-  return `
-    <div class="sigval">
-      <div class="sigval-head">🔬 신호 검증 <span style="opacity:.6;font-size:11px">— 종료 ${v.total}건 기준. 신호가 실제로 맞는지 데이터로 확인</span></div>
-      <div class="sigval-tables">
-        <table class="sigval-t"><thead><tr><th>진입 신호등</th><th>건수</th><th>승률</th><th>평균</th></tr></thead><tbody>${lvlRows || '<tr><td colspan=4>데이터 없음</td></tr>'}</tbody></table>
-        <table class="sigval-t"><thead><tr><th>AVWAP 존</th><th>건수</th><th>승률</th><th>평균</th></tr></thead><tbody>${zoneRows || '<tr><td colspan=4>데이터 없음</td></tr>'}</tbody></table>
-      </div>
-      ${flagRows ? `
-      <div class="sigval-subhead">⚠️ 경고 항목별 성과 <span style="opacity:.6;font-size:11px">— 이 경고가 떴는데도 잘 됐다면 그 기준이 과한 것</span></div>
-      <table class="sigval-t" style="width:100%"><thead><tr><th>경고 항목</th><th>건수</th><th>승률</th><th>평균R</th></tr></thead><tbody>${flagRows}</tbody></table>
-      ` : ''}
-      <div class="sigval-note">💡 🟢 진입이 🔴보다 성과 좋으면 신호등이 잘 작동하는 거예요. 경고 항목 중 승률·평균R이 높은 게 있으면(예: AVWAP 근처가 +1R) 그 경고는 너무 엄격한 거라 기준을 풀어도 됩니다.</div>
-    </div>`;
+  if (!v) return `<section class="n-card side-card" aria-label="신호 검증" style="padding:20px 24px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="n-h">신호 검증</span><span class="jr-title-sp"></span>${paperToggle}</div>
+      <span class="n-sub">종료된 매매가 3건 이상 쌓이면 신호별 승률이 여기 표시돼요. (진입 시 신호등·AVWAP 상태가 자동 기록됩니다)</span>
+      ${paperHtml}</section>`;
+  const avgCol = a => parseFloat(a) >= 0 ? 'var(--px-up)' : 'var(--px-down)';
+  const row = (label, g) => `<div class="sv-row"><span>${label}</span><span class="num r">${g.n}</span><span class="num r">${g.win}%</span><span class="num r" style="color:${avgCol(g.avgR)}">${parseFloat(g.avgR) > 0 ? '+' : ''}${g.avgR}R</span></div>`;
+  const lvlRows = Object.entries(v.byLevel).map(([k, g]) => {
+    const [t, c] = _SIG_LEVEL_TEXT[k] || [g.label, 'var(--n-muted)'];
+    return row(`<span class="st-dot" style="color:${c}"><span style="color:var(--n-text)">${t}</span></span>`, g);
+  }).join('');
+  const zoneRows = Object.values(v.byZone).map(g => row(g.label, g)).join('');
+  const table = (head, rows) => `<div><div class="sv-row head"><span>${head}</span><span class="r">건수</span><span class="r">승률</span><span class="r">평균</span></div>${rows || '<div class="n-sub" style="padding:10px 0">데이터 없음</div>'}</div>`;
+  const flagRows = (v.byFlag || []).map(g => row(g.label, g)).join('');
+  return `<section class="n-card side-card" aria-label="신호 검증" style="padding:20px 24px;gap:16px">
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+      <span class="n-h">신호 검증</span><span class="n-sub">종료 ${v.total}건 · 신호가 실제로 맞았는지</span>
+      <span class="jr-title-sp"></span>
+      ${flagRows ? `<button type="button" class="n-btn sm" aria-expanded="${_sigFlagsOpen}" onclick="_sigFlagsOpen=!_sigFlagsOpen;renderJournal()">경고 항목별 성과 ${_sigFlagsOpen ? '접기' : '펼치기'}</button>` : ''}
+      ${paperToggle}
+    </div>
+    <div class="sv-grid">${table('진입 신호등', lvlRows)}${table('AVWAP 존', zoneRows)}</div>
+    ${_sigFlagsOpen && flagRows ? `<div><div class="n-sub" style="margin-bottom:4px">경고 항목별 성과 — 이 경고가 떴는데도 잘 됐다면 그 기준이 과한 것</div>${table('경고 항목', flagRows)}</div>` : ''}
+    <span class="n-sub">${v.total < 20 ? '표본 20건 미만 · 관심 신호' : '진입 양호가 자제보다 성과 좋으면 신호등이 작동하는 것'}</span>
+    ${paperHtml}
+  </section>`;
 }
 
 // v5.186(사용자 지시 — [1] 페이퍼 추적, forward 검증): 저널
@@ -8339,11 +8447,11 @@ async function _loadPaperTrackIfNeeded() {
 function renderPaperTrackCard() {
   if (_paperTrackData === null) {
     _loadPaperTrackIfNeeded();
-    return `<div class="sigval"><div class="sigval-head">📝 페이퍼 (forward) <span style="opacity:.6;font-size:11px">불러오는 중…</span></div></div>`;
+    return `<div class="sigval"><div class="sigval-head">페이퍼 (forward) <span style="opacity:.6;font-size:11px">불러오는 중…</span></div></div>`;
   }
   const stats = (_paperTrackData && _paperTrackData.stats) || [];
   if (!stats.length) {
-    return `<div class="sigval"><div class="sigval-head">📝 페이퍼 (forward)</div><div class="sigval-note">아직 확인된 히트가 없어요 — 5탭×KR/US에서 확인(안C)되는 대로 자동 추적을 시작합니다(사용자 입력 없음).</div></div>`;
+    return `<div class="sigval"><div class="sigval-head">페이퍼 (forward)</div><div class="sigval-note">아직 확인된 히트가 없어요 — 5탭×KR/US에서 확인(안C)되는 대로 자동 추적을 시작합니다(사용자 입력 없음).</div></div>`;
   }
   const rows = stats.map(s => {
     const evStr = s.ev == null ? '–' : `${s.ev >= 0 ? '+' : ''}${s.ev.toFixed(2)}R`;
@@ -8356,7 +8464,7 @@ function renderPaperTrackCard() {
   }).join('');
   return `
     <div class="sigval">
-      <div class="sigval-head">📝 페이퍼 (forward) <span style="opacity:.6;font-size:11px">— 확인된 히트를 확인일 종가에 진입했다면(사용자 입력 없음, 실체결 저널과 별도 합산 금지)</span></div>
+      <div class="sigval-head">페이퍼 (forward) <span style="opacity:.6;font-size:11px">— 확인된 히트를 확인일 종가에 진입했다면(사용자 입력 없음, 실체결 저널과 별도 합산 금지)</span></div>
       <table class="sigval-t" style="width:100%"><thead><tr><th>탭 · 시장</th><th>건수</th><th>승률</th><th>평균R (백테스트)</th></tr></thead><tbody>${rows}</tbody></table>
     </div>`;
 }
@@ -8372,21 +8480,43 @@ function _trackingWaitNote(r) {
   return r.entry ? '앱 새로고침 시 갱신' : '';
 }
 function renderJournal() {
+  // v5.294(사용자 지시 — 일지 재디자인, 시안 docs/design/2026-09-29/journal.dc.html):
+  // 배치·모양만 바꾼다. 통계는 전부 기존 함수(journalStats·openRiskR·periodR·
+  // consecLosses·entryGate·closedTabStats·signalValidation)의 값을 재배치할 뿐 새
+  // 계산이 없다. 기능(현재가 갱신·수동 추가·CSV·급락 알림·전체 삭제·행별 상태
+  // 전환·편집·삭제·부분 청산·대기만료 복구·관찰 정리)은 전부 그대로다.
   const wrap = document.getElementById('journalView');
   const all = getJournal();
+  const titleHtml = `<div class="jr-title">
+      <h2>내 일지</h2>
+      <span class="n-sub" style="font-size:13px">신호 추적 기록 · 실제 체결과 다를 수 있음 — 계좌 성과는 포지션 탭</span>
+      <span class="jr-title-sp"></span>
+      <button type="button" class="n-btn" onclick="refreshPrices()">현재가 갱신</button>
+      <button type="button" class="n-btn primary" onclick="openManualAdd()">+ 기록 추가</button>
+      <details class="jr-more">
+        <summary class="n-btn" aria-label="더보기: CSV 내보내기, 급락 알림, 전체 삭제"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></summary>
+        <div class="jr-menu" role="menu">
+          <button type="button" role="menuitem" onclick="exportCSV()">CSV 내보내기</button>
+          ${(typeof Notification === 'undefined') ? ''
+            : Notification.permission === 'granted'
+            ? '<span class="jr-menu-note">급락 알림 켜짐</span>'
+            : `<button type="button" role="menuitem" onclick="Notification.requestPermission().then(()=>renderJournal())">급락 알림 켜기</button>`}
+          <button type="button" role="menuitem" class="danger" onclick="if(confirm('일지를 모두 지울까요? 되돌릴 수 없어요.')){setJournal([]);renderJournal();}">전체 삭제</button>
+        </div>
+      </details>
+    </div>`;
   if (!all.length) {
-    wrap.innerHTML = `
-      <div class="riskbar"><span style="color:var(--muted)">⚙️ R 시스템 — 총자산을 입력하면 사이즈 자동계산·서킷브레이커가 켜져요</span>
-        <button class="exp" onclick="openRSettings()" style="margin-left:auto">⚙️ R 설정</button></div>
-      <div class="jrnl-empty">아직 기록이 없어요.<br>
+    wrap.innerHTML = `${titleHtml}
+      <div class="n-card jr-gate"><span class="n-sub">R 시스템 — 총자산을 입력하면 사이즈 자동계산·서킷브레이커가 켜져요</span>
+        <button type="button" class="n-link" style="margin-left:auto" onclick="openRSettings()">R 설정</button></div>
+      <div class="n-card jrnl-empty" style="padding:40px 24px">아직 기록이 없어요.<br>
       카드에서 <b>"+ 일지에 추가"</b>를 눌러 신호를 기록하세요.<br>
       진입가·손절·근거만 적으면 나머지는 자동으로 채워집니다.</div>`;
     return;
   }
-  // ②재설계: 주 탭은 상태 4개(진입/대기/종료/무산)뿐 — 관찰·추세·단타는
-  // 탭 안에서 한 번 더 좁히는 보조 필터. 관찰은 상태 개념이 아니라(진입/
-  // 대기/종료 어디에도 속할 수 있는 카테고리) 보조 필터를 켜면 주 탭과
-  // 무관하게 관찰 종목 전체를 보여준다(기존 동작 그대로 유지).
+  // ②재설계: 주 탭은 상태 4개(진입/대기/종료/무산)뿐 — 관찰·추세·단타·재량·저점은
+  // 탭 안에서 한 번 더 좁히는 보조 필터. 관찰은 상태 개념이 아니라 보조 필터를 켜면
+  // 주 탭과 무관하게 관찰 종목 전체를 보여준다(기존 동작 그대로).
   const isWatch = r => (r.category || '추세추종') === '관찰';
   const stOf = r => r.status || (r.result_r ? 'closed' : 'entered');
   let j;
@@ -8396,33 +8526,30 @@ function renderJournal() {
     j = all.filter(r => stOf(r) === journalTab && !isWatch(r));
     if (journalCatFilter !== 'all') j = j.filter(r => (r.category || '추세추종') === journalCatFilter);
   }
-  // 정렬: 최신순(종료 탭은 closed_date 우선, 그 외는 등록일)
   j = [...j].sort((a, b) => (b.closed_date || b.date || '').localeCompare(a.closed_date || a.date || '')
     || ((b.id || 0) - (a.id || 0)));
-  // 카테고리별 통계 (추세추종 / 단타 / 재량 분리)
+  // 카테고리별 통계 (추세추종 / 단타 / 재량 분리 — v5.187)
   const trend = journalStats(all.filter(r => (r.category || '추세추종') === '추세추종'));
   const scalp = journalStats(all.filter(r => (r.category || '추세추종') === '단타'));
-  // v5.187(사용자 지시 — [2] "재량"은 통계 별도 분리): 스캐너 신호가
-  // 아니라 사용자 재량으로 담은 매매라 추세추종/단타 성과에 섞이면 안
-  // 된다 — category='재량' 명시 레코드만 잡으므로(기본값 폴백에 안 걸림)
-  // 위 두 줄과 자동으로 상호 배타적.
   const discretion = journalStats(all.filter(r => r.category === '재량'));
 
   const tabCount = key => all.filter(r => stOf(r) === key && !isWatch(r)).length;
-  const mainTab = (key, label) => `<button class="jrnl-tab ${(journalTab===key && journalCatFilter!=='관찰')?'on':''}" onclick="journalTab='${key}';journalCatFilter=(journalCatFilter==='관찰'?'all':journalCatFilter);renderJournal()">${label} <span style="opacity:.6;font-size:12px">${tabCount(key)}</span></button>`;
-  const catBtn = (key, label) => `<button class="fbtn ${journalCatFilter===key?'on':''}" onclick="journalCatFilter='${key}';renderJournal()">${label}</button>`;
+  const mainTab = (key, label) => {
+    const on = journalTab === key && journalCatFilter !== '관찰';
+    return `<button type="button" role="tab" aria-selected="${on}" class="jr-seg-b${on ? ' on' : ''}" onclick="journalTab='${key}';journalCatFilter=(journalCatFilter==='관찰'?'all':journalCatFilter);renderJournal()">${label} <span class="num" style="opacity:.7">${tabCount(key)}</span></button>`;
+  };
+  const catBtn = (key, label) => `<button type="button" class="jr-pill${journalCatFilter === key ? ' on' : ''}" aria-pressed="${journalCatFilter === key}" onclick="journalCatFilter='${key}';renderJournal()">${label}</button>`;
   const isClosedTab = journalTab === 'closed' && journalCatFilter !== '관찰';
   const isWatchView = journalCatFilter === '관찰';   // v5.47: 관찰 전용 렌더(종료건 접기) 분기
 
-  // ── R 리스크 대시보드 ──
+  // ── R 리스크 5칸 ──
   const _open = openRiskR();
   const _cap = effectiveCapR();
   const _p = periodR();
   const _consec = consecLosses();
   const _gate = entryGate();
   const _pct = _cap > 0 ? Math.min(100, _open / _cap * 100) : (_open > 0 ? 100 : 0);
-  const _fillCls = _pct >= 100 ? 'max' : _pct >= 70 ? 'hot' : '';
-  const _gateLabel = { confirmed: '🟢 확인된 상승', pressure: '🟡 조정 압박', correction: '🔴 조정' }[rSettings.gate] || rSettings.gate;
+  const _gaugeCol = _pct >= 100 ? 'var(--n-bad)' : _pct >= 70 ? 'var(--n-warn)' : 'var(--n-good)';
   // 투입금액 합계 (진입중 × 주식수 × 진입가, US는 환율 환산) — 구버전(주식수 없음) 항목은 제외
   let _invested = 0, _investedUnknown = 0;
   for (const r of all) {
@@ -8436,96 +8563,86 @@ function renderJournal() {
   const _cash = Math.max(0, (rSettings.equity || 0) - _invested);
   const _investPct = rSettings.equity ? Math.round(_invested / rSettings.equity * 100) : 0;
   const _fmtM = v => (v / 10000).toLocaleString(undefined, {maximumFractionDigits: 0}) + '만';
-  const _rv = v => `<span style="color:${v > 0 ? 'var(--px-up)' : v < 0 ? 'var(--px-down)' : 'var(--muted)'}">${v > 0 ? '+' : ''}${v}R</span>`;
-  const riskbar = rSettings.equity ? `
-    <div class="riskbar">
-      <div class="rb-item"><span class="rb-t">오픈 리스크</span>
-        <span class="rb-v">${_open}R / ${_cap}R</span></div>
-      <div class="rb-gauge"><div class="rb-fill ${_fillCls}" style="width:${_pct}%"></div></div>
-      <div class="rb-item"><span class="rb-t">주간</span><span class="rb-v">${_rv(_p.week)} <span style="font-size:10px;color:var(--muted)">/ -${rSettings.weekly_stop_r}R</span></span></div>
-      <div class="rb-item"><span class="rb-t">월간</span><span class="rb-v">${_rv(_p.month)} <span style="font-size:10px;color:var(--muted)">/ -${rSettings.monthly_stop_r}R</span></span></div>
-      <div class="rb-item"><span class="rb-t">연속손실</span><span class="rb-v" style="${_consec >= 3 ? 'color:var(--amber)' : ''}">${_consec}패${_consec >= 3 ? ' (R½)' : ''}</span></div>
-      <div class="rb-item"><span class="rb-t">투입 / 현금</span><span class="rb-v">${_fmtM(_invested)} / ${_fmtM(_cash)} <span style="font-size:10px;color:var(--muted)">(${_investPct}%${_investedUnknown ? ` · 수량미기록 ${_investedUnknown}건 제외` : ''})</span></span></div>
-      <div class="rb-item"><span class="rb-t">시장 게이트</span><span class="rb-v">${_gateLabel}</span>${(() => {
-        if (!gateSug || !gateSug.suggest) return '';
-        const em = { confirmed: '🟢', pressure: '🟡', correction: '🔴' }[gateSug.suggest] || '';
-        if (gateSug.suggest === rSettings.gate)
-          return `<span class="rb-t" title="${gateSug.why || ''}">자동 제안 일치 ✓</span>`;
-        return `<span class="rb-t" style="color:var(--amber)" title="${gateSug.why || ''}">제안: ${em} <b style="cursor:pointer;text-decoration:underline" onclick="applyGateSuggest()">적용</b></span>`;
-      })()}</div>
-      <button class="exp" onclick="openRSettings()" style="margin-left:auto">⚙️ R 설정</button>
-    </div>
-    ${!_gate.allowed ? `<div class="rlock-banner">${_gate.reason}</div>`
-      : _consec >= 3 ? `<div class="rlock-banner soft">⚠️ 연속 ${_consec}패 — 다음 진입은 R 절반(0.5×)으로 자동 축소. 2연승 후 복구.</div>` : ''}`
-  : `<div class="riskbar"><span style="color:var(--muted)">⚙️ R 시스템 미설정 — 총자산을 입력하면 사이즈 자동계산·서킷브레이커가 켜져요</span>
-      <button class="exp" onclick="openRSettings()" style="margin-left:auto">⚙️ R 설정</button></div>`;
+  const _rv = v => `<span style="color:${v > 0 ? 'var(--px-up)' : v < 0 ? 'var(--px-down)' : 'inherit'}">${v > 0 ? '+' : ''}${v}R</span>`;
+  const riskHtml = rSettings.equity ? `
+    <section class="n-card jr-risk" aria-label="리스크">
+      <div><span class="k">오픈 리스크 · 상한 ${_cap}R</span><span class="num v">${_open}R</span>
+        <div class="bar" style="height:4px"><div style="width:${_pct}%;height:4px;background:${_gaugeCol}"></div></div></div>
+      <div><span class="k">주간 · 한도 −${rSettings.weekly_stop_r}R</span><span class="num v">${_rv(_p.week)}</span></div>
+      <div><span class="k">월간 · 한도 −${rSettings.monthly_stop_r}R</span><span class="num v">${_rv(_p.month)}</span></div>
+      <div><span class="k">연속 손실</span><span class="v"><span class="num"${_consec >= 3 ? ' style="color:#e9c46a"' : ''}>${_consec}패</span>${_consec >= 3 ? ' <span style="font-size:12px;color:#e9c46a">R ½ 적용</span>' : ''}</span></div>
+      <div><span class="k">투입 / 현금</span><span class="num v">${_fmtM(_invested)} <span style="color:var(--n-muted);font-size:16px">/ ${_fmtM(_cash)}</span></span>
+        <span class="n-sub">${_investPct}%${_investedUnknown ? ` · 수량미기록 ${_investedUnknown}건 제외` : ''}</span></div>
+    </section>` : '';
+  // ── 게이트 한 줄: 잠금 사유 > 연속손실 R½ > 게이트 상태 순 ──
+  const GL = { confirmed: 'good', pressure: 'neutral', correction: 'bad' }[rSettings.gate] || 'unknown';
+  const gateLabel = { confirmed: '확인된 상승', pressure: '조정 압박', correction: '조정' }[rSettings.gate] || rSettings.gate;
+  const sugHtml = (() => {
+    if (!gateSug || !gateSug.suggest) return '';
+    if (gateSug.suggest === rSettings.gate) return `<span class="n-sub" title="${gateSug.why || ''}">자동 제안 일치</span>`;
+    const lab = { confirmed: '확인된 상승', pressure: '조정 압박', correction: '조정' }[gateSug.suggest] || gateSug.suggest;
+    return `<span class="n-sub" title="${gateSug.why || ''}">제안: ${lab} <button type="button" class="n-link" onclick="applyGateSuggest()">적용</button></span>`;
+  })();
+  let gateMsg, gateLv;
+  if (!rSettings.equity) { gateMsg = 'R 시스템 미설정 — 총자산을 입력하면 사이즈 자동계산·서킷브레이커가 켜져요'; gateLv = 'unknown'; }
+  else if (!_gate.allowed) { gateMsg = `<b>${_escapeHtml(_gate.reason.replace(/^[\u{1F534}\u{1F512}]\s*/u, ''))}</b>`; gateLv = 'bad'; }
+  else if (_consec >= 3) { gateMsg = `연속 ${_consec}패 — 다음 진입은 R 절반(0.5×)으로 자동 축소. 2연승 후 복구.`; gateLv = 'neutral'; }
+  else { gateMsg = `시장 게이트 <b>${gateLabel}</b>`; gateLv = GL; }
+  const gateHtml = `<div class="jr-gate jr-gate-${gateLv}" role="status">
+      <span class="st-dot ${_N_LV_CLASS[gateLv]}" aria-hidden="true"></span>
+      <span style="font-size:14px">${gateMsg}${rSettings.equity && (!_gate.allowed || _consec >= 3) ? ` · 게이트 ${gateLabel}` : ''}</span>
+      <span class="jr-title-sp"></span>${sugHtml}
+      <button type="button" class="n-link" onclick="openRSettings()">R 설정</button>
+    </div>`;
+
+  // ── 카테고리 성적(기존 statcard 4장의 값을 표로 재배치) ──
+  const rsCell = st => st.n ? `${st.winRate}% · ${parseFloat(st.avgR) > 0 ? '+' : ''}${st.avgR}R` : '—';
+  const rsCol = st => !st.n ? 'var(--n-muted)' : parseFloat(st.avgR) > 0 ? 'var(--px-up)' : parseFloat(st.avgR) < 0 ? 'var(--px-down)' : 'inherit';
+  const impulse = all.filter(x => x.exit_reason === '충동').length;
+  const catRow = (name, st, sub) => `<div class="jr-cat-row">
+      <span><b>${name}</b>${sub ? `<br><span class="n-sub" style="font-size:11px">${sub}</span>` : ''}</span>
+      <span class="num r" style="color:var(--n-sub)">${st.closedCount}</span>
+      <span class="num r" style="color:${rsCol(st.actualStats)}" title="entry_actual(실체결가) 기록된 종료건만 — 승률(R+)·평균R. 손절 미기록 종료건 제외">${st.actualStats.n ? rsCell(st.actualStats) + ` <span class="n-sub">n=${st.actualStats.n}</span>` : '<span class="n-sub">실전 데이터 없음</span>'}</span>
+      <span class="num r" style="color:var(--n-muted)" title="참고가(plan) 기반 — 참고용">${st.planStats.n ? rsCell(st.planStats) + ` <span class="n-sub">n=${st.planStats.n}</span>` : '—'}</span>
+    </div>`;
+  const watchNow = all.filter(r => (r.category || '추세추종') === '관찰' && (r.status || 'watch') === 'watch').length;
+  const watchEnded = all.filter(r => (r.category || '추세추종') === '관찰' && (r.status || 'watch') !== 'watch').length;
+  const catStatsHtml = `<section class="n-card jr-cats" aria-label="카테고리 성적">
+      <div class="jr-card-h"><span class="n-h">카테고리 성적</span><span class="n-sub" style="font-size:11px">실체결 · 참고가 분리</span></div>
+      <div class="jr-cat-row head"><span>카테고리</span><span class="r">종료</span><span class="r">실체결</span><span class="r">참고가</span></div>
+      ${catRow('추세추종', trend, `진입 ${trend.enteredCount} · 대기 ${trend.pendingCount}${impulse ? ` · <span style="color:#f2848c">충동 ${impulse}</span>` : ''}`)}
+      ${catRow('재량', discretion, `총 ${discretion.total}`)}
+      ${catRow('단타', scalp, `총 ${scalp.total}`)}
+      <div class="jr-cat-row"><span><b>관찰</b><br><span class="n-sub" style="font-size:11px">관찰중 ${watchNow}</span></span><span class="num r" style="color:var(--n-sub)">${watchEnded}</span><span class="r n-sub">통계 제외</span><span class="r"></span></div>
+    </section>`;
+
+  const statusSeg = `<div role="tablist" aria-label="상태" class="jr-seg">${mainTab('entered', '진입')}${mainTab('pending', '대기')}${mainTab('closed', '종료')}${mainTab('missed', '무산')}</div>`;
+  const catChips = `<div class="jr-pills">${catBtn('all', '전체')}${catBtn('추세추종', '추세')}${catBtn('단타', '단타')}${catBtn('재량', '재량')}${catBtn('저점', '저점')}${catBtn('관찰', '관찰')}</div>`;
+  const recordsHtml = `<section class="n-card jr-records" aria-label="기록">
+      <div class="jr-rec-h">${statusSeg}<span class="jr-title-sp"></span>${catChips}</div>
+      ${isClosedTab ? renderClosedSummary(closedTabStats(j)) : ''}
+      ${isWatchView ? renderWatchCleanupBar(all) : ''}
+      <div class="jr-table-wrap">
+      <table class="jr-table">
+        <thead><tr><th>날짜</th><th>종목</th><th>진입 → 손절</th><th>손익</th><th>근거</th><th><span class="sr">메뉴</span></th></tr></thead>
+        <tbody>
+          ${isClosedTab ? renderClosedMonths(j)
+            : isWatchView ? renderWatchRows(j)
+            : j.map(r => r.id === partialEditingId ? partialRow(r) : (r.id === editingId ? editRow(r) : viewRow(r))).join('')
+              // v5.186: "대기" 탭에서만 접힌 대기만료 섹션.
+              + (journalTab === 'pending' && !isWatchView ? renderArchivedPendingSection(all) : '')}
+          ${j.length ? '' : `<tr><td colspan="6" class="n-sub" style="padding:24px;text-align:center">이 조건의 기록이 없어요.</td></tr>`}
+        </tbody>
+      </table></div>
+    </section>`;
 
   wrap.innerHTML = `
-    <div style="font-size:11px;color:var(--muted);margin-bottom:6px">신호 추적 기록 — 실제 체결 아님, 계좌 성과는 포지션 탭 참조</div>
-    ${riskbar}
-    <div class="jrnl-tools">
-      <button class="exp" onclick="refreshPrices()" style="background:#1e3a4a;border-color:#2d6a8c;color:#9fd4ff">🔄 현재가 갱신</button>
-      <button class="exp" onclick="openManualAdd()" style="background:#2d6a4a;border-color:#40916c;color:#fff">➕ 수동 추가</button>
-      <button class="exp" onclick="exportCSV()">⬇ CSV 내보내기</button>
-      <button onclick="if(confirm('일지를 모두 지울까요? 되돌릴 수 없어요.')){setJournal([]);renderJournal();}">전체 삭제</button>
-      ${(typeof Notification === 'undefined') ? ''
-        : Notification.permission === 'granted'
-        ? '<span class="exp" style="margin-left:auto;color:var(--muted);cursor:default">🔔 급락 알림 ON</span>'
-        : `<button class="exp" style="margin-left:auto;background:#3a2020;border-color:#ff6b6b;color:#ff9b9b" onclick="Notification.requestPermission().then(()=>renderJournal())">🔔 급락 알림 켜기</button>`}
-    </div>
-
-    <div class="jrnl-filter">
-      ${mainTab('entered','▶ 진입')} ${mainTab('pending','⏳ 대기')} ${mainTab('closed','✔ 종료')} ${mainTab('missed','✖ 무산')}
-    </div>
-    <div class="jrnl-filter" style="margin-top:6px">
-      ${catBtn('all','전체')} ${catBtn('추세추종','📈 추세')} ${catBtn('단타','⚡ 단타')} ${catBtn('재량','🎲 재량')} ${catBtn('관찰','👁 관찰')}
-    </div>
-    ${isClosedTab ? renderClosedSummary(closedTabStats(j)) : ''}
-    ${isWatchView ? renderWatchCleanupBar(all) : ''}
-    <div style="overflow-x:auto">
-    <table class="jtable">
-      <thead><tr>
-        <th>날짜</th><th>상태</th><th>종목</th><th>진입가</th><th>손절</th>
-        <th>손익 (R)</th><th>근거/복기</th><th></th>
-      </tr></thead>
-      <tbody>
-        ${isClosedTab ? renderClosedMonths(j)
-          : isWatchView ? renderWatchRows(j)
-          : j.map(r => r.id === partialEditingId ? partialRow(r) : (r.id === editingId ? editRow(r) : viewRow(r))).join('')
-            // v5.186(사용자 지시 — [2] 저널 대기 만료): "대기" 탭에서만
-            // 접힌 "관찰 종료" 섹션 노출 — 삭제가 아니라 접기라 이 탭을
-            // 벗어나면 안 보이는 게 아니라 여기 계속 남아있어야 함.
-            + (journalTab === 'pending' && !isWatchView ? renderArchivedPendingSection(all) : '')}
-      </tbody>
-    </table></div>
-    <!-- v5.280(사용자 지시): **통계 카드·차트를 목록 아래로.**
-         "내가 지금 뭘 들고 있나가 스크롤 없이 보여야 한다" — 예전엔 통계
-         4칸 + 캘린더 + R곡선 + 신호검증 + 페이퍼추적이 목록보다 위에 있어
-         보유 종목을 보려면 매번 스크롤해야 했다. 기본 탭은 원래부터
-         'entered'(보유)라 이제 화면을 열면 보유가 첫 줄에 온다.
-         쌓아 보는 데이터는 "필요할 때 내려서" 보는 쪽이 맞다. -->
-    <div class="jrnl-stats">
-      <div class="statcard">
-        <div class="statcard-t">📈 추세추종</div>
-        <div class="statcard-v">진입 ${trend.enteredCount} · 대기 ${trend.pendingCount} · 종료 ${trend.closedCount} · ${_rStatsBadgeHtml(trend)}${(() => { const imp = getJournal().filter(x => x.exit_reason === '충동').length; return imp ? ` · <span style="color:#ff6b6b;font-weight:700">충동 ${imp}</span>` : ''; })()}</div>
-      </div>
-      <div class="statcard">
-        <div class="statcard-t">👁 관찰</div>
-        <div class="statcard-v">${all.filter(r => (r.category||'추세추종')==='관찰' && (r.status||'watch')==='watch').length}종목 관찰중${(() => { const n = all.filter(r => (r.category||'추세추종')==='관찰' && (r.status||'watch')!=='watch').length; return n ? ` (종료 ${n})` : ''; })()} · 매매 통계 제외</div>
-      </div>
-      <div class="statcard">
-        <div class="statcard-t">⚡ 단타</div>
-        <div class="statcard-v">총 ${scalp.total} · 종료 ${scalp.closedCount} · ${_rStatsBadgeHtml(scalp)}</div>
-      </div>
-      <div class="statcard">
-        <div class="statcard-t">🎲 재량</div>
-        <div class="statcard-v">총 ${discretion.total} · 종료 ${discretion.closedCount} · ${_rStatsBadgeHtml(discretion)}</div>
-      </div>
-    </div>
-    ${renderJCal(all)}
-    ${renderRCurve(all)}
-    ${renderSignalValidation(all)}
-    ${renderPaperTrackCard()}`;
+    ${titleHtml}
+    ${riskHtml}
+    ${gateHtml}
+    <div class="jr-grid">${recordsHtml}${catStatsHtml}</div>
+    <div class="jr-grid2">${renderJCal(all)}${renderRCurve(all)}</div>
+    ${renderSignalValidation(all)}`;
 }
 
 // v5.186(사용자 지시 — [2] 저널 대기 만료): get_calendar()가 계산해준
@@ -8547,8 +8664,8 @@ function renderArchivedPendingSection(all) {
   rows = [...rows].sort((a, b) => (b.archived_at || b.date || '').localeCompare(a.archived_at || a.date || ''));
   const rowHtml = r => r.id === editingId ? editRow(r) : viewRow(r);
   const head = `<tr onclick="archivedPendingOpen=!archivedPendingOpen;renderJournal()" style="cursor:pointer;background:var(--surface)">
-    <td colspan="8" style="padding:9px 12px;font-weight:700">
-      ${archivedPendingOpen ? '▾' : '▸'} 🗄️ 대기만료 <span style="font-weight:400;color:var(--muted);font-size:12px">— ${rows.length}건, 등록 후 10거래일(내 트리거 직접 입력분은 30거래일) 내 확인 안 됨 · 삭제 아님, 복구 가능</span>
+    <td colspan="6" style="padding:9px 12px;font-weight:700">
+      ${archivedPendingOpen ? '▾' : '▸'} 대기만료 <span style="font-weight:400;color:var(--muted);font-size:12px">— ${rows.length}건, 등록 후 10거래일(내 트리거 직접 입력분은 30거래일) 내 확인 안 됨 · 삭제 아님, 복구 가능</span>
     </td></tr>`;
   return head + (archivedPendingOpen ? rows.map(rowHtml).join('') : '');
 }
@@ -8569,181 +8686,134 @@ function restoreArchivedPending(id) {
   renderJournal();
 }
 
+// v5.294(사용자 지시 — 일지 기록 표): 8열(날짜·상태·종목·진입·손절·손익·근거·액션) →
+// 6열(날짜 · 종목(코드·카테고리·수동·상태) · 진입→손절 · 손익 · 근거 · 행 ⋯ 메뉴).
+// 상태 전환 버튼(진입/무산/부분/종료/대기로/재오픈/복구/관찰 전환)과 편집·삭제는
+// 전부 행 메뉴로 옮겼다 — 호출하는 함수는 예전과 같다. 손익 칸 계산 식은 그대로.
+const _JR_ST_TEXT = { pending: ['대기', 'st-warn'], entered: ['진입', 'st-good'], missed: ['무산', 'st-unknown'],
+  archived: ['대기만료', 'st-unknown'], closed: ['종료', 'st-unknown'], watch: ['관찰', 'st-accent'] };
+function _jrMenuItem(label, onclick, title, cls) {
+  return `<button type="button" role="menuitem"${cls ? ` class="${cls}"` : ''} onclick="this.closest('details').open=false;${onclick}"${title ? ` title="${title}"` : ''}>${label}</button>`;
+}
 function viewRow(r) {
   const cat = r.category || '추세추종';
-  const catColor = cat === '단타' ? 'color:#c084fc' : 'color:var(--green)';
   const st = r.status || (r.result_r ? 'closed' : 'entered');
-  // v5.274(사용자 지시): status가 비어 있는 레코드를 화면에서 드러낸다.
-  // 폴백 자체는 그대로 두되(기존 표시가 바뀌면 혼란), **미기록이라는 사실**을
-  // 보이게 한다 — 서버 /api/watch/positions는 v5.274부터 이런 레코드를
-  // 열린 포지션으로 안 세므로(봇 오알림 차단) 사람이 고쳐줘야 한다.
+  const watch = cat === '관찰';
+  const watchActive = watch && st === 'watch';
+  const broken = isBrokenRow(r);   // 손절≥진입 = 데이터 오류
+  const [stText, stCls] = _JR_ST_TEXT[watchActive ? 'watch' : st] || [st, 'st-unknown'];
+  // v5.274: status가 비어 있는 레코드는 드러낸다(봇 R 알림 대상 제외라 사람이 고쳐야 함).
   const noStatus = !r.status
-    ? `<span class="st-badge" style="background:#2a2a2a;color:var(--muted)" title="status 필드가 비어 있습니다. 표시는 추정값(${st})이고, 봇 R 알림 대상에서는 제외됩니다 — 상태를 지정해 주세요.">상태 미기록</span>` : '';
+    ? `<span class="st-dot st-warn" title="status 필드가 비어 있습니다. 표시는 추정값(${st})이고, 봇 R 알림 대상에서는 제외됩니다 — 상태를 지정해 주세요.">상태 미기록</span>` : '';
   // 피벗 도달 표시 — v5.274에서 자동 진입을 없앤 자리. 상태는 안 바뀐다.
   const reachedBadge = (st === 'pending' && r.pivot_reached)
-    ? `<span class="st-badge" style="background:#13351f;color:#4ADE80" title="가격이 피벗에 도달했습니다. 자동 진입하지 않습니다 — 실제로 사셨으면 ▶진입을 누르세요.">피벗 도달 ↑</span>` : '';
-  const stBadge = st === 'pending'
-      ? `<span class="st-badge" style="background:#3b3a2a;color:var(--amber)">⏳대기</span>`
-    : st === 'entered'
-      ? `<span class="st-badge" style="background:#1e3a2a;color:var(--green)">▶진입</span>`
-    : st === 'missed'
-      ? `<span class="st-badge" style="background:#3a2a2a;color:var(--muted)">✖무산</span>`
-    // v5.186(사용자 지시 — [2] 저널 대기 만료): "관찰 종료" — missed(무산,
-    // 셋업 붕괴/실패)와는 다른 중립적 상태(그냥 10거래일 안에 확인이
-    // 안 됐을 뿐, 실패로 단정 안 함). 복구 가능하다는 점도 다름.
-    : st === 'archived'
-      ? `<span class="st-badge" style="background:#2a2a3a;color:#8fa0b3">🗄️대기만료</span>`
-      : `<span class="st-badge" style="background:#2a2a3a;color:var(--muted)">✔종료</span>`;
-  const watch = (r.category || '추세추종') === '관찰';
-  const watchActive = watch && st === 'watch';
-  // v5.47: 종료된 관찰(status가 더 이상 'watch'가 아님)은 실제 종결상태
-  // 배지(✖무산/✔종료 등, stBadge)를 그대로 보여줌 — 예전엔 category만 보고
-  // 무조건 "👁관찰" 배지를 달아서 종료됐는지 구분이 안 됐음.
-  const watchBadge = watchActive ? `<span class="st-badge" style="background:#1a2a3f;color:#7fb8ff">👁관찰</span>` : '';
-  const borderCol = watchActive ? '#3b6ea5' : st === 'entered' ? '#40916c' : st === 'pending' ? '#a8842c' : (st === 'missed' || st === 'archived') ? '#333' : '#3a3a4a';
-  // 관찰중: 진입함/무산/종료 세 갈래. 종료된 관찰: 재관찰 되돌리기만.
-  // 대기 중이면 진입/무산, 진입 중이면 종료 빠른 버튼
-  const stActions = watchActive
-      ? `<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">
-           <span class="st-act" onclick="markWatchEntered(${r.id})" title="실제 매매로 전환" style="border-color:#40916c;color:#7fe0a7">▶진입함</span>
-           <span class="st-act" onclick="markWatchMissed(${r.id})" title="셋업 무산 — 관찰 종료" style="border-color:#8c4040;color:#ff9b9b">✖무산</span>
-           <span class="st-act" onclick="markWatchClosed(${r.id})" title="그냥 관찰 종료 (승패 판단 없음)" style="border-color:#666;color:#aaa">⏹종료</span>
-         </div>`
-    : (watch && st !== 'watch')
-      ? `<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">
-           <span class="st-act" onclick="reopenWatch(${r.id})" title="실수로 종료했으면 다시 관찰중으로" style="border-color:#666;color:#aaa">🔓재관찰</span>
-         </div>`
-    : st === 'pending'
-      ? `<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">
-           <span class="st-act" onclick="markEntered(${r.id})" title="실제 진입함" style="border-color:#40916c;color:#7fe0a7">▶진입</span>
-           <span class="st-act" onclick="markMissed(${r.id})" title="돌파 안 옴 · 무산" style="border-color:#8c4040;color:#ff9b9b">✖무산</span>
-         </div>`
-    : st === 'entered'
-      ? `<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">
-           <span class="st-act" onclick="partialEditingId=${r.id};editingId=null;renderJournal()" title="부분 익절 기록 (예: 2R에서 절반)" style="border-color:#8c6d2d;color:#f2b33d">🔪부분</span>
-           <span class="st-act" onclick="markClosed(${r.id})" title="매매 종료 · 청산가 입력" style="border-color:#2d5a8c;color:#9fb4ff">⏹종료</span>
-           ${(!r.partials || !r.partials.length) ? `<span class="st-act" onclick="revertToPending(${r.id})" title="등록 직후 즉시 진입으로 잘못 전환된 기록을 대기 상태로 되돌리기" style="border-color:#666;color:#aaa">↩대기로</span>` : ''}
-         </div>`
-    // v4.95: 목표도달 자동종료가 남긴 실수(부분익절 하려던 종목이 먼저 전량
-    // 종료돼버린 경우 등)를 되돌릴 수 있게. 종료 기록만 초기화하고 진입중으로 복귀.
-    : st === 'closed'
-      ? `<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">
-           <span class="st-act" onclick="reopenRow(${r.id})" title="실수로 종료됐거나, 부분익절 후 계속 보유 중이면 진입중 상태로 되돌리기" style="border-color:#666;color:#aaa">🔓재오픈</span>
-         </div>`
-    // v5.186(사용자 지시 — [2]): 삭제 아님 — 언제든 대기로 복구 가능.
-    : st === 'archived'
-      ? `<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">
-           <span class="st-act" onclick="restoreArchivedPending(${r.id})" title="다시 대기(⏳)로 — 등록일을 오늘로 리셋해 새 10거래일 창을 줍니다" style="border-color:#666;color:#aaa">♻️복구</span>
-         </div>`
-      : '';
-  const broken = isBrokenRow(r);   // 손절≥진입 = 데이터 오류
-  // 종목 셀에 보조정보(탭·RS·섹터) 작게 접어넣기 — 컬럼은 줄이되 정보는 유지
-  const subInfo = [r.tab, r.rs != null ? 'RS '+r.rs : '', r.sector].filter(Boolean).join(' · ');
-  return `<tr class="${r.result_r===''&&st!=='missed'&&!broken?'open-pos':''}" style="border-left:3px solid ${borderCol};${st==='missed'||broken?'opacity:.5':st==='closed'?'opacity:.78':''}">
-    <td class="mono">${r.date}</td>
-    <td style="white-space:nowrap">${watchActive ? watchBadge : stBadge}${noStatus}${reachedBadge}${stActions}${broken?`<div class="st-badge" style="background:#3a2020;color:#ff6b6b;margin-top:3px" title="손절가가 진입가보다 높음 — 과거 버그로 저장된 깨진 데이터. 통계에서 제외됨. 삭제 권장.">⚠️데이터오류</div>`:''}</td>
-    <td><a href="${tvUrl(r.ticker, r.market)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none" title="트레이딩뷰 차트 열기">${r.name} <span style="font-size:9px;opacity:.5">↗</span>${r.manual?`<span class="st-badge" style="background:#1e3a2e;color:#5fd99a;margin-left:4px;font-size:9px">수동</span>`:''}<div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div>${subInfo?`<div style="font-size:10px;color:var(--muted);opacity:.8">${subInfo}</div>`:''}</a></td>
-    <td class="mono">${(() => {
-      const isKr = /\.(KS|KQ)$/i.test(r.ticker || '');
-      // v5.182(사용자 지시 — [4]/[5] 검증: "entry_val이 화면에 '참고' 라벨"):
-      // entry_source가 'actual'/'toss'(실제 확인된 값)가 아니면 이 진입가는
-      // 시스템이 채운 기준가일 뿐이라는 걸 진입가 칸 자체에 작게 표시 —
-      // pending(피벗)·entered(auto_pivot/auto_close) 전부 해당.
-      const isRealEntry = r.entry_source === 'actual' || r.entry_source === 'toss';
-      const entryStr = (r.entry ?? '-') + (r.entry != null && !isRealEntry
-        ? '<sup style="color:var(--amber);font-size:9px" title="참고 기준가 — 실제 체결가 아님">(참고)</sup>' : '');
-      // 토스 평단 대비 차이 — 참고용, entry를 덮어쓰지 않음. 진입 상태 + 토스
-      // 잔고에 같은 종목이 있을 때만(포지션 탭을 열어 _positionsData가 채워진
-      // 경우에 한함) 표시.
-      const tossAvg = (st === 'entered') ? tossAvgFor(r.ticker) : null;
-      const tossDiffHtml = (tossAvg && r.entry)
-        ? (() => {
-            const diffPct = Math.round((r.entry - tossAvg) / tossAvg * 1000) / 10;
-            return `<div style="font-size:9px;color:var(--muted)" title="토스 잔고 실제 평단가">토스평단 ${isKr ? Math.round(tossAvg).toLocaleString() : tossAvg.toFixed(2)} (${diffPct > 0 ? '+' : ''}${diffPct}%)</div>`;
-          })()
-        : '';
-      // 진입/대기 상태이고 현재가가 있으면 진입가 아래에 현재가 표시 (진입가 → 현재가 비교)
-      if (r.last_price && r.entry && (st === 'entered' || st === 'pending')) {
-        const px = parseFloat(r.last_price);
-        const pxStr = isKr ? Math.round(px).toLocaleString() : px.toFixed(2);
-        const up = px >= parseFloat(r.entry);
-        const col = up ? 'var(--px-up)' : 'var(--px-down)';
-        return `${entryStr}<div style="font-size:10px;color:${col};margin-top:1px">→ ${pxStr}</div>${tossDiffHtml}`;
-      }
-      return entryStr + tossDiffHtml;
-    })()}</td>
-    <td class="mono"${broken?' style="color:#ff6b6b"':''}>${r.stop ?? '-'}</td>
-    <td class="mono" style="${r.result_r&&parseFloat(r.result_r)>0?'color:var(--px-up)':r.result_r?'color:var(--px-down)':''}">${
-      // v4.85: 부분익절(2R에서 절반 등) 기록 이력 — 있으면 항상 맨 위에 작게 표시.
-      (r.partials && r.partials.length ? `<div style="font-size:9px;color:#f2b33d;font-weight:600">${r.partials.map((p,i) => `${i+1}차 ${p.pct}%@${p.r>=0?'+':''}${p.r}R`).join(' · ')}</div>` : '') +
-      (st === 'closed'
-        // ②재설계: R은 손절 데이터 있을 때만(result_r), 손익%는 청산가만 있으면
-        // 항상 계산(pnlPct) — 둘 다 있으면 R을 메인으로, %는 보조로 작게.
-        ? (() => {
-            const pct = pnlPct(r);
-            const rNum = r.result_r !== '' && !isNaN(parseFloat(r.result_r)) ? parseFloat(r.result_r) : null;
-            const pctStr = pct != null ? `${pct > 0 ? '+' : ''}${pct}%` : null;
-            const rStr = rNum != null ? `${rNum > 0 ? '+' : ''}${r.result_r}R` : null;
-            const mainVal = rNum != null ? rNum : pct;
-            const col = mainVal > 0 ? 'var(--px-up)' : mainVal < 0 ? 'var(--px-down)' : 'inherit';
-            return `<span style="color:${col}">${rStr || pctStr || '-'}</span>` +
-              (rStr && pctStr ? `<div style="font-size:9px;color:var(--muted)">${pctStr}</div>` : (!rStr && !pctStr ? `<div style="font-size:9px;color:var(--muted)">R 없음(손절 미기록)</div>` : '')) +
-              (r.exit_reason==='충동'?`<div style="font-size:9px;color:#ff6b6b;font-weight:700">⚠️ 충동</div>`:r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:'');
-          })()
-        : st === 'pending'
-            ? `<span style="color:var(--amber);font-size:11px">피벗 대기</span><div style="font-size:9px;color:var(--muted)">${r.last_price?'현재 '+(/\.(KS|KQ)$/i.test(r.ticker||'')?Math.round(parseFloat(r.last_price)).toLocaleString():parseFloat(r.last_price).toFixed(2)):'미진입'}</div>`
-        : st === 'missed'
-            ? `<span style="color:var(--muted);font-size:11px">무산</span>${r.closed_reason?`<div style="font-size:9px;color:var(--muted)">${r.closed_reason}</div>`:''}`
-        // v5.186(사용자 지시 — [2]): 관찰 종료(대기 만료) — 무산과 달리
-        // "실패"가 아니라 "10거래일 안에 확인이 안 됐을 뿐"이라는 뉘앙스.
-        : st === 'archived'
-            ? `<span style="color:var(--muted);font-size:11px">관찰 종료</span><div style="font-size:9px;color:var(--muted)">${r.closed_reason || '대기만료'}</div>`
-        // 관찰(watch)은 손절이 없을 수 있어 R 계산 대신 현재가만 표시 (v4.72)
-        // v5.44: trigger_price 있으면(돌파임박 관찰) "확인 후 진입" 트리거 정보 추가.
-        // v5.54: watch_kind==='leader_conversion'이면 눌림목 전환 관찰 정보도 추가
-        // (한 레코드가 둘 다에 해당할 일은 없지만, 둘 다 빈 문자열 반환하는
-        // 가드가 있어 나란히 이어붙여도 안전).
-        : st === 'watch'
-            ? (r.last_price
-                ? `<span style="color:var(--muted);font-size:11px">${/\.(KS|KQ)$/i.test(r.ticker||'') ? Math.round(parseFloat(r.last_price)).toLocaleString() : parseFloat(r.last_price).toFixed(2)}</span>${triggerInfoHtml(r)}${leaderWatchInfoHtml(r)}`
-                : `<span style="color:var(--muted);font-size:11px">관찰중</span>${triggerInfoHtml(r)}${leaderWatchInfoHtml(r)}`)
-        // v5.182(사용자 지시 — [4] "참고가로 R 계산하지 마라"): r.entry는
-        // 실제 체결가라는 보장이 없다(auto_pivot/auto_close는 시스템이
-        // 채운 참고가일 뿐) — 라이브 R은 entry_actual이 있을 때만
-        // 계산하고, 없으면 계산 자체를 안 하고 입력을 유도한다.
-        : (r.tracking && r.last_price && r.stop
-            ? (r.entry_actual != null
-                ? (() => {
-                    const entryN = parseFloat(r.entry_actual), stopN = parseFloat(r.stop);
-                    const liveR = (parseFloat(r.last_price) - entryN) / (entryN - stopN);
-                    const dheld = Math.floor((Date.now() - new Date(r.date)) / 86400000);
-                    const col = liveR >= 0 ? 'var(--px-up)' : 'var(--px-down)';
-                    // v4.76: 현재 R만 보고는 "얼마까지 가야 2R인지" 감이 안 와서, 2R 도달가를 같이 표시.
-                    const isKr2 = /\.(KS|KQ)$/i.test(r.ticker || '');
-                    const px2R = entryN + 2 * (entryN - stopN);
-                    const px2RStr = isKr2 ? Math.round(px2R).toLocaleString() : px2R.toFixed(2);
-                    return `<span style="color:${col};font-weight:600">${liveR>=0?'+':''}${liveR.toFixed(1)}R</span>`
-                         + `<div style="font-size:9px;color:var(--muted)">D+${dheld} · 2R ${px2RStr}${r.entry_source==='toss'?' · 🔄토스':''}</div>`
-                         // v4.68: 장중 손절가 터치 — 아직 종가 확정 전이라 자동종료는 안 됐지만 경고만.
-                         + (r.stop_touched_intraday ? `<div style="font-size:9px;color:#f87171;font-weight:600" title="장중 손절가를 스쳤지만 종가로만 손절을 확정합니다. 마감까지 지켜보세요.">⚠️ 장중 손절터치</div>` : '')
-                         // v4.95: 목표가 도달은 이제 자동 종료 안 하고 알림만 — 부분익절 고려 유도.
-                         + (r.target_reached ? `<div style="font-size:9px;color:#f2b33d;font-weight:600" title="목표가(2R) 도달 — 자동 종료되지 않습니다. 부분익절(🔪) 또는 직접 종료 여부를 판단하세요.">🎯 목표가 도달</div>` : '');
-                  })()
-                : `<span style="color:var(--amber);font-size:11px" title="entry=${r.entry ?? '-'}는 참고가(${{auto_pivot:'피벗 자동기입',auto_close:'확인일 종가 자동기입'}[r.entry_source]||'미상'})라 R 계산에 안 씀">R 미산출</span><div style="font-size:9px;color:var(--muted)">⚠️ 체결가 입력 (참고가 ${r.entry ?? '-'})</div>`)
-            : `<span style="color:var(--muted);font-size:11px">추적대기</span><div style="font-size:9px;color:var(--muted)">${_trackingWaitNote(r)}</div>`))
-    }</td>
-    <td style="white-space:normal;max-width:240px;font-size:11px;color:var(--muted)"><div class="note-clamp" title="${(r.note||'').replace(/"/g,'&quot;')}${r.review?' / 복기: '+r.review.replace(/"/g,'&quot;'):''}">${r.note || ''}${r.review?`<br><i style="color:var(--amber)">복기: ${r.review}</i>`:''}</div></td>
-    <td style="white-space:nowrap">
-      <span class="edit-btn" onclick="editingId=${r.id};renderJournal()" title="수정/상세">✏️</span>
-      <span class="del" onclick="delJournal(${r.id})" title="삭제">✕</span>
+    ? `<span class="st-dot st-good" title="가격이 피벗에 도달했습니다. 자동 진입하지 않습니다 — 실제로 사셨으면 행 메뉴의 진입을 누르세요.">피벗 도달 ↑</span>` : '';
+  const brokenBadge = broken
+    ? `<span class="st-dot st-bad" title="손절가가 진입가보다 높음 — 과거 버그로 저장된 깨진 데이터. 통계에서 제외됨. 삭제 권장.">데이터 오류</span>` : '';
+  // 행 메뉴 — 상태별 전환(예전 st-act 버튼들 그대로) + 편집·삭제.
+  const menu = [];
+  if (watchActive) {
+    menu.push(_jrMenuItem('진입함', `markWatchEntered(${r.id})`, '실제 매매로 전환'));
+    menu.push(_jrMenuItem('무산', `markWatchMissed(${r.id})`, '셋업 무산 — 관찰 종료'));
+    menu.push(_jrMenuItem('종료', `markWatchClosed(${r.id})`, '그냥 관찰 종료 (승패 판단 없음)'));
+  } else if (watch && st !== 'watch') {
+    menu.push(_jrMenuItem('재관찰', `reopenWatch(${r.id})`, '실수로 종료했으면 다시 관찰중으로'));
+  } else if (st === 'pending') {
+    menu.push(_jrMenuItem('진입', `markEntered(${r.id})`, '실제 진입함'));
+    menu.push(_jrMenuItem('무산', `markMissed(${r.id})`, '돌파 안 옴 · 무산'));
+  } else if (st === 'entered') {
+    menu.push(_jrMenuItem('부분 청산', `partialEditingId=${r.id};editingId=null;renderJournal()`, '부분 익절 기록 (예: 2R에서 절반)'));
+    menu.push(_jrMenuItem('종료', `markClosed(${r.id})`, '매매 종료 · 청산가 입력'));
+    if (!r.partials || !r.partials.length) menu.push(_jrMenuItem('대기로', `revertToPending(${r.id})`, '등록 직후 즉시 진입으로 잘못 전환된 기록을 대기 상태로 되돌리기'));
+  } else if (st === 'closed') {
+    // v4.95: 목표도달 자동종료가 남긴 실수를 되돌릴 수 있게.
+    menu.push(_jrMenuItem('재오픈', `reopenRow(${r.id})`, '실수로 종료됐거나, 부분익절 후 계속 보유 중이면 진입중 상태로 되돌리기'));
+  } else if (st === 'archived') {
+    menu.push(_jrMenuItem('대기로 복구', `restoreArchivedPending(${r.id})`, '다시 대기로 — 등록일을 오늘로 리셋해 새 10거래일 창을 줍니다'));
+  }
+  menu.push(_jrMenuItem('편집', `editingId=${r.id};renderJournal()`, '수정/상세'));
+  menu.push(_jrMenuItem('삭제', `delJournal(${r.id})`, '삭제', 'danger'));
+  const isKr = /\.(KS|KQ)$/i.test(r.ticker || '');
+  const fmtPx = v => isKr ? Math.round(parseFloat(v)).toLocaleString() : parseFloat(v).toFixed(2);
+  // 종목 셀 보조정보(탭·RS·섹터) — 컬럼은 줄이되 정보는 유지
+  const subInfo = [r.tab, r.rs != null ? 'RS ' + r.rs : '', r.sector].filter(Boolean).join(' · ');
+  const codeLine = [`<span class="num">${(r.ticker || '').replace(/\.(KS|KQ)$/i, '')}</span>`, cat, r.manual ? '수동' : null].filter(Boolean).join(' · ');
+  // v5.182: entry_source가 actual/toss가 아니면 이 진입가는 시스템이 채운 참고가.
+  const isRealEntry = r.entry_source === 'actual' || r.entry_source === 'toss';
+  const tossAvg = (st === 'entered') ? tossAvgFor(r.ticker) : null;
+  const entrySub = [];
+  if (r.entry != null && !isRealEntry) entrySub.push('<span title="참고 기준가 — 실제 체결가 아님">진입가는 참고가</span>');
+  if (r.last_price && r.entry && (st === 'entered' || st === 'pending')) {
+    const up = parseFloat(r.last_price) >= parseFloat(r.entry);
+    entrySub.push(`현재 <span class="num" style="color:${up ? 'var(--px-up)' : 'var(--px-down)'}">${fmtPx(r.last_price)}</span>`);
+  }
+  if (tossAvg && r.entry) {
+    const diffPct = Math.round((r.entry - tossAvg) / tossAvg * 1000) / 10;
+    entrySub.push(`<span title="토스 잔고 실제 평단가">토스평단 ${isKr ? Math.round(tossAvg).toLocaleString() : tossAvg.toFixed(2)} (${diffPct > 0 ? '+' : ''}${diffPct}%)</span>`);
+  }
+  const small = t => `<div class="jr-s">${t}</div>`;
+  const pnlHtml =
+    // v4.85: 부분익절 이력 — 있으면 항상 맨 위에 작게.
+    (r.partials && r.partials.length ? `<div class="jr-s" style="color:#f2b33d">${r.partials.map((p, i) => `${i + 1}차 ${p.pct}%@${p.r >= 0 ? '+' : ''}${p.r}R`).join(' · ')}</div>` : '') +
+    (st === 'closed'
+      // ②재설계: R은 손절 데이터 있을 때만(result_r), 손익%는 청산가만 있으면 항상.
+      ? (() => {
+          const pct = pnlPct(r);
+          const rNum = r.result_r !== '' && !isNaN(parseFloat(r.result_r)) ? parseFloat(r.result_r) : null;
+          const pctStr = pct != null ? `${pct > 0 ? '+' : ''}${pct}%` : null;
+          const rStr = rNum != null ? `${rNum > 0 ? '+' : ''}${r.result_r}R` : null;
+          const mainVal = rNum != null ? rNum : pct;
+          const col = mainVal > 0 ? 'var(--px-up)' : mainVal < 0 ? 'var(--px-down)' : 'inherit';
+          return `<span class="num" style="color:${col};font-weight:600">${rStr || pctStr || '-'}</span>` +
+            (rStr && pctStr ? small(pctStr) : (!rStr && !pctStr ? small('R 없음(손절 미기록)') : '')) +
+            (r.exit_reason === '충동' ? `<div class="jr-s" style="color:#f2848c;font-weight:600">규칙 외(충동)</div>` : r.closed_reason ? small(_escapeHtml(r.closed_reason)) : '');
+        })()
+      : st === 'pending'
+          ? `<span style="color:#e9c46a;font-size:13px">피벗 대기</span>${small(r.last_price ? '현재 ' + fmtPx(r.last_price) : '미진입')}`
+      : st === 'missed'
+          ? `<span class="n-sub" style="font-size:13px">무산</span>${r.closed_reason ? small(_escapeHtml(r.closed_reason)) : ''}`
+      // v5.186: 관찰 종료(대기 만료) — 실패가 아니라 "10거래일 안에 확인이 안 됐을 뿐".
+      : st === 'archived'
+          ? `<span class="n-sub" style="font-size:13px">관찰 종료</span>${small(_escapeHtml(r.closed_reason || '대기만료'))}`
+      // 관찰(watch)은 손절이 없을 수 있어 현재가만(v4.72) + 트리거/전환 정보(v5.44/v5.54).
+      : st === 'watch'
+          ? `<span class="n-sub" style="font-size:13px">${r.last_price ? fmtPx(r.last_price) : '관찰중'}</span>${triggerInfoHtml(r)}${leaderWatchInfoHtml(r)}`
+      // v5.182: 라이브 R은 entry_actual이 있을 때만 — 없으면 계산 안 하고 입력 유도.
+      : (r.tracking && r.last_price && r.stop
+          ? (r.entry_actual != null
+              ? (() => {
+                  const entryN = parseFloat(r.entry_actual), stopN = parseFloat(r.stop);
+                  const liveR = (parseFloat(r.last_price) - entryN) / (entryN - stopN);
+                  const dheld = Math.floor((Date.now() - new Date(r.date)) / 86400000);
+                  const col = liveR >= 0 ? 'var(--px-up)' : 'var(--px-down)';
+                  // v4.76: 2R 도달가를 같이 표시.
+                  const px2R = entryN + 2 * (entryN - stopN);
+                  return `<span class="num" style="color:${col};font-weight:600">${liveR >= 0 ? '+' : ''}${liveR.toFixed(1)}R</span>`
+                       + small(`D+${dheld} · 2R ${fmtPx(px2R)}${r.entry_source === 'toss' ? ' · 토스' : ''}`)
+                       // v4.68: 장중 손절가 터치 — 종가 확정 전이라 경고만.
+                       + (r.stop_touched_intraday ? `<div class="jr-s" style="color:#f2848c;font-weight:600" title="장중 손절가를 스쳤지만 종가로만 손절을 확정합니다. 마감까지 지켜보세요.">장중 손절 터치</div>` : '')
+                       // v4.95: 목표가 도달은 자동 종료 안 하고 알림만.
+                       + (r.target_reached ? `<div class="jr-s" style="color:#f2b33d;font-weight:600" title="목표가(2R) 도달 — 자동 종료되지 않습니다. 부분익절 또는 직접 종료 여부를 판단하세요.">목표가 도달</div>` : '');
+                })()
+              : `<span style="color:#e9c46a;font-size:13px" title="entry=${r.entry ?? '-'}는 참고가(${{auto_pivot:'피벗 자동기입',auto_close:'확인일 종가 자동기입'}[r.entry_source]||'미상'})라 R 계산에 안 씀">R 미산출</span><div><button type="button" class="n-link" onclick="editingId=${r.id};renderJournal()">체결가 입력</button></div>`)
+          : `<span class="n-sub" style="font-size:13px">추적대기</span>${small(_trackingWaitNote(r))}`));
+  const dim = st === 'missed' || broken ? 'opacity:.55' : st === 'closed' ? 'opacity:.85' : '';
+  return `<tr class="jr-row${r.result_r === '' && st !== 'missed' && !broken ? ' open-pos' : ''}" style="${dim}">
+    <td class="num jr-date" title="${r.date || ''}">${(r.date || '').slice(5) || '-'}</td>
+    <td class="jr-name">
+      <a href="${tvUrl(r.ticker, r.market)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기">${_escapeHtml(r.name || r.ticker || '')}</a>
+      <div class="jr-s">${codeLine} · <span class="st-dot ${stCls}" style="font-size:12px">${stText}</span></div>
+      ${(noStatus || reachedBadge || brokenBadge) ? `<div class="jr-s" style="display:flex;gap:8px;flex-wrap:wrap">${noStatus}${reachedBadge}${brokenBadge}</div>` : ''}
+      ${subInfo ? `<div class="jr-s" style="opacity:.8">${_escapeHtml(subInfo)}</div>` : ''}
     </td>
+    <td><span class="num"${broken ? ' style="color:#f2848c"' : ''}>${r.entry ?? '-'} → ${r.stop ?? '-'}</span>${entrySub.length ? `<div class="jr-s">${entrySub.join(' · ')}</div>` : ''}</td>
+    <td>${pnlHtml}</td>
+    <td class="jr-note"><div class="note-clamp" title="${(r.note || '').replace(/"/g, '&quot;')}${r.review ? ' / 복기: ' + r.review.replace(/"/g, '&quot;') : ''}">${r.note || ''}${r.review ? `<br><i style="color:var(--n-accent)">복기: ${r.review}</i>` : ''}</div></td>
+    <td class="jr-act"><details class="rowmenu"><summary aria-label="행 메뉴"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></summary><div class="jr-menu" role="menu">${menu.join('')}</div></details></td>
   </tr>${
-    // v5.196 [3]: "내 일지" 대기 행 전용 시나리오 토글 — pending 상태이고
-    // 저장 시점에 계산해둔 scenario가 있을 때만(⚡감시/+일지 경로, 수동
-    // 추가는 null). colspan은 위 <td> 8개(날짜·상태·종목·진입·손절·결과·
-    // 메모·액션)와 맞춤.
+    // v5.196 [3]: "내 일지" 대기 행 전용 시나리오 — colspan은 위 <td> 6개와 맞춤.
     (st === 'pending' && r.scenario)
-      ? `<tr><td colspan="8" style="padding:0 8px 6px 8px;border-top:none">${renderScenarioHtml(r.scenario, r.market, 'sc_jr_' + r.id, r.atr_pct)}</td></tr>`
+      ? `<tr><td colspan="6" style="padding:0 8px 6px 8px;border-top:none">${renderScenarioHtml(r.scenario, r.market, 'sc_jr_' + r.id, r.atr_pct)}</td></tr>`
       : ''
   }`;
 }
@@ -9452,7 +9522,7 @@ function renderWatchRows(rows) {
   const activeHtml = activeRows.map(rowHtml).join('');
   if (!closedRows.length) return activeHtml;
   const head = `<tr onclick="watchClosedOpen=!watchClosedOpen;renderJournal()" style="cursor:pointer;background:var(--surface)">
-    <td colspan="8" style="padding:9px 12px;font-weight:700">
+    <td colspan="6" style="padding:9px 12px;font-weight:700">
       ${watchClosedOpen ? '▾' : '▸'} 종료된 관찰 <span style="font-weight:400;color:var(--muted);font-size:12px">— ${closedRows.length}건 (진입함/무산/수동종료 포함)</span>
     </td></tr>`;
   const body = watchClosedOpen ? closedRows.map(rowHtml).join('') : '';
@@ -9463,7 +9533,7 @@ function renderWatchCleanupBar(all) {
   const n = all.filter(r => (r.status || 'watch') === 'watch' && (r.category || '') === '관찰'
     && watchStartDate(r) && businessDaysSince(watchStartDate(r)) >= watchExpiryDays(r) && !isWatchResolved(r)).length;
   if (!n) return '';
-  return `<div style="margin:6px 0"><button class="exp" style="background:#3a2a1a;border-color:#8c6d2d;color:#f2b33d" onclick="cleanupExpiredWatches()">🧹 확인/전환 기간 종료 관찰 일괄정리 (${n}건)</button></div>`;
+  return `<div style="margin:6px 0"><button class="exp" style="background:#3a2a1a;border-color:#8c6d2d;color:#f2b33d" onclick="cleanupExpiredWatches()">확인/전환 기간 종료 관찰 일괄정리 (${n}건)</button></div>`;
 }
 
 // v4.85: 부분익절 입력 행 — 청산비율(%)·청산가만 받는다. R은 진입가/손절로 자동계산.
@@ -9471,7 +9541,7 @@ function renderWatchCleanupBar(all) {
 function partialRow(r) {
   return `<tr class="editing">
     <td class="mono">${r.date}</td>
-    <td colspan="7">
+    <td colspan="5">
       <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
         <div><label style="display:block;font-size:11px;color:var(--muted);margin-bottom:3px">${r.name} — 몇 차 익절이든 순서대로 기록</label></div>
         <div><label style="display:block;font-size:10px;color:var(--muted)">청산 비율(%)</label>
@@ -9517,14 +9587,13 @@ function editRow(r) {
   const partialsSummary = (r.partials && r.partials.length)
     ? `<div style="font-size:11px;color:#f2b33d;margin-bottom:6px">이미 청산: ${r.partials.map((p,i) => `${i+1}차 ${p.pct}%@${p.price}(${p.r>=0?'+':''}${p.r}R)`).join(' · ')} — 나머지 ${100 - r.partials.reduce((s,p)=>s+p.pct,0)}%에 대해 아래 청산가/R을 입력하세요.</div>`
     : '';
-  // 7컬럼 구조: 날짜 / 상태 / 종목 / 진입가 / 손절 / 결과R(청산가) / [상세입력 colspan]
+  // v5.294: 6열 구조(표와 맞춤): 날짜 / 종목(+상태) / 진입·손절 / 결과R(청산가) / [상세입력 colspan 2]
   return `<tr class="editing">
     <td class="mono">${r.date}</td>
-    <td style="font-size:11px;color:var(--muted)">${r.status||'entered'}</td>
-    <td>${r.name}<div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker}</div>
+    <td>${r.name}<div class="mono" style="font-size:10px;color:var(--muted)">${r.ticker} · ${r.status||'entered'}</div>
       <div style="font-size:10px;color:var(--muted);opacity:.8;margin-top:2px">${[r.tab, r.rs!=null?'RS '+r.rs:'', r.sector].filter(Boolean).join(' · ')}</div></td>
-    <td><input id="e_entry" class="ein" value="${r.entry ?? ''}" inputmode="decimal" style="width:70px"></td>
-    <td><input id="e_stop" class="ein" value="${r.stop ?? ''}" inputmode="decimal" style="width:70px"></td>
+    <td><label class="jr-s" style="display:block">진입</label><input id="e_entry" class="ein" value="${r.entry ?? ''}" inputmode="decimal" style="width:80px">
+        <label class="jr-s" style="display:block;margin-top:4px">손절</label><input id="e_stop" class="ein" value="${r.stop ?? ''}" inputmode="decimal" style="width:80px"></td>
     <td><input id="e_exit" class="ein" value="${r.exit || ''}" placeholder="청산가" style="width:70px" inputmode="decimal" title="청산가를 넣으면 결과R 자동 계산 (부분익절 기록이 있으면 블렌디드 R로 합산)">
         <input id="e_result" class="ein" value="${r.result_r || ''}" placeholder="또는 R" style="width:70px;margin-top:4px">
         <select id="e_reason" class="ein" style="width:120px;margin-top:4px" title="종료 사유 — 종료 시 필수. 규칙 안에서 나갔는지 스스로에게 답하는 게이트">

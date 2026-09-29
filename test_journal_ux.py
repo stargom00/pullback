@@ -85,17 +85,23 @@ def test_lookup_failure_is_visible():
 # ── 2. 목록이 통계보다 위 ───────────────────────────────────────────
 def test_list_comes_before_the_stat_cards():
     """"내가 지금 뭘 들고 있나"가 스크롤 없이 보여야 한다(사용자 지시)."""
+    # v5.294: 통계 카드(jrnl-stats)는 목록 **옆**의 "카테고리 성적" 표(jr-cats)로
+    # 바뀌었다 — 최종 배치 문자열에서 기록 표(recordsHtml)가 먼저 나와야 한다.
     src = _fn("renderJournal")
-    assert src.index('<table class="jtable">') < src.index("jrnl-stats"), \
+    assert '<table class="jr-table">' in src
+    layout = src[src.index("wrap.innerHTML = `\n    ${titleHtml}"):]
+    assert layout.index("${recordsHtml}") < layout.index("${catStatsHtml}"), \
         "통계 카드가 아직 목록보다 위에 있다"
 
 
 def test_heavy_charts_are_below_the_list_too():
     src = _fn("renderJournal")
-    t = src.index('<table class="jtable">')
-    for fn in ("renderJCal(", "renderRCurve(", "renderSignalValidation(",
-               "renderPaperTrackCard("):
-        assert src.index(fn) > t, f"{fn}가 목록보다 위에 있다"
+    layout = src[src.index("wrap.innerHTML = `\n    ${titleHtml}"):]
+    t = layout.index("${recordsHtml}")
+    for fn in ("renderJCal(", "renderRCurve(", "renderSignalValidation("):
+        assert layout.index(fn) > t, f"{fn}가 목록보다 위에 있다"
+    # v5.294: 페이퍼 트래킹은 신호 검증 카드 안의 접기로 옮겨졌다.
+    assert "renderPaperTrackCard()" in _fn("renderSignalValidation")
 
 
 def test_default_tab_is_holdings():

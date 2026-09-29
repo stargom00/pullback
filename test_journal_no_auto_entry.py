@@ -95,8 +95,9 @@ def test_pending_still_tracks_price_for_display():
 def test_archived_label_says_expiry_not_observation():
     """`archived`는 **pending 만료**에서만 생기는데 라벨이 "관찰종료"였다 —
     관찰(watch)과 무관해 이름이 의미와 어긋났다."""
-    assert "🗄️대기만료" in TEXT
-    assert "🗄️관찰종료" not in TEXT, "옛 배지 라벨이 남아 있다"
+    # v5.294: 일지 이모지 제거 — 상태 글자는 _JR_ST_TEXT 한 곳에 있다.
+    assert "archived: ['대기만료'" in TEXT
+    assert "관찰종료'" not in TEXT[TEXT.index("const _JR_ST_TEXT"):][:400], "옛 배지 라벨이 남아 있다"
     # `관찰종료(무산)` 같은 closed_reason은 **진짜 watch 레코드**의 사유라
     # 그대로 둔다 — archived(=pending 만료) 배지만 바꾼 것이다.
 
