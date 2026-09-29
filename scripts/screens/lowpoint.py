@@ -257,9 +257,13 @@ def kr_universe(board: str = "kospi") -> tuple[dict, dict]:
                  "admin_snapshot": len(admin), "admin_excluded": excluded}
 
 
-def us_universe() -> dict:
-    from universe import get_universe
-    return get_universe("us")
+def us_universe(refresh: bool = False) -> tuple[dict, dict]:
+    """미국 보통주 전체(Nasdaq Trader 심볼 디렉터리) — **이 스크린 전용**.
+    스캐너 공용 `universe.get_universe("us")`를 쓰지 않는 이유는 us_listings.py
+    docstring 참고(시총 $500M+ 필터 때문에 ZUMZ 같은 소형주가 빠진다).
+    반환: ({yahoo심볼: 이름}, stats)"""
+    import us_listings
+    return us_listings.build_universe(refresh=refresh)
 
 
 # ── 데이터 ─────────────────────────────────────────────────────────────
@@ -285,15 +289,29 @@ def fetch_kr(tickers: list, tf: str, concurrency: int = 10) -> tuple[dict, list]
     return data, failed
 
 
-def fetch_us(tickers: list, tf: str, batch: int = 100) -> tuple[dict, list]:
-    """스캐너와 같은 소스·파라미터(yf.download, auto_adjust=True) — 기간만 길게."""
+# 옵션 필터(--us-min-price / --us-min-avg-volume)용 평균 거래량 창. 기본 필터가
+# 꺼져 있으므로 이 값은 "옵션을 켰을 때 무엇을 재는지"만 정한다(임계값 아님).
+US_AVG_VOLUME_WINDOW = 60
+
+
+def fetch_us(tickers: list, tf: str, batch: int = 100) -> tuple[dict, list, dict]:
+    """스캐너와 같은 소스·파라미터(yf.download, auto_adjust=True) — 기간만 길게.
+    반환: (종가 시리즈 dict, 실패 목록, {티커: {last_close, avg_volume}})
+    세 번째 값은 CLI 옵션 필터용 부가정보다 — 기본값에서는 쓰이지 않는다."""
     import harness
-    data = {}
+    data, extra = {}, {}
     for i in range(0, len(tickers), batch):
         got = harness._fetch_us_batch(tickers[i:i + batch], period=US_PERIOD[tf])
-        data.update({t: df["Close"].dropna() for t, df in got.items()})
-    failed = [t for t in tickers if t not in data or data[t].empty]
-    return {t: c for t, c in data.items() if not c.empty}, failed
+        for t, df in got.items():
+            c = df["Close"].dropna()
+            if c.empty:
+                continue
+            data[t] = c
+            vol = df["Volume"].dropna().tail(US_AVG_VOLUME_WINDOW)
+            extra[t] = {"last_close": float(c.iloc[-1]),
+                        "avg_volume": float(vol.mean()) if len(vol) else None}
+    failed = [t for t in tickers if t not in data]
+    return data, failed, extra
 
 
 # ── 실행 ───────────────────────────────────────────────────────────────
@@ -307,16 +325,29 @@ def clock_of(market: str) -> str:
     return "kr" if market in KR_BOARDS or market == "kr" else "us"
 
 
-def screen_market(market: str, tf: str, now: datetime) -> dict:
-    """market: 'kospi' | 'kosdaq' | 'us'."""
+def screen_market(market: str, tf: str, now: datetime, refresh_universe: bool = False,
+                  min_price: float | None = None, min_avg_volume: float | None = None) -> dict:
+    """market: 'kospi' | 'kosdaq' | 'us'.
+    min_price·min_avg_volume은 **US 전용 옵션 필터**로 기본은 None(끔) — 임계값을
+    임의로 정하지 않는다(사용자 지시). 켜면 몇 건이 빠졌는지 결과에 남는다."""
     t0 = time.time()
     meta = {}
+    opt_dropped = {}
     if market in KR_BOARDS:
         uni, meta = kr_universe(market)
         data, failed = fetch_kr(list(uni), tf)
     else:
-        uni = us_universe()
-        data, failed = fetch_us(list(uni), tf)
+        uni, meta = us_universe(refresh=refresh_universe)
+        data, failed, extra = fetch_us(list(uni), tf)
+        if min_price is not None or min_avg_volume is not None:
+            for t in list(data):
+                x = extra.get(t) or {}
+                if min_price is not None and (x.get("last_close") or 0) < min_price:
+                    opt_dropped[t] = f"price {x.get('last_close')}"
+                elif min_avg_volume is not None and (x.get("avg_volume") or 0) < min_avg_volume:
+                    opt_dropped[t] = f"avg_volume {x.get('avg_volume')}"
+            for t in opt_dropped:
+                data.pop(t, None)
 
     # 거래정지/상폐 추정: 일봉 마지막 날짜가 시장 직전 거래일(전 종목 최빈값)보다 오래됨
     last_dates = Counter(c.index[-1].normalize() for c in data.values())
@@ -339,7 +370,37 @@ def screen_market(market: str, tf: str, now: datetime) -> dict:
                          "RSI[0]": round(res["r0"], 2)})
     return {"market": market, "universe": len(uni), "fetched": len(data), "failed": sorted(failed),
             "session": session, "stale": stale, "short": short, "rows": rows, "meta": meta,
-            "elapsed": time.time() - t0, "names": uni}
+            "opt_dropped": opt_dropped, "elapsed": time.time() - t0, "names": uni}
+
+
+def exclusion_detail_lines(res: dict, tf: str) -> list:
+    """실행 끝에 찍는 "무엇이 왜 빠졌나" 목록. 시장마다 meta 모양이 다르다 —
+    KR은 KIND 관리종목(`admin_excluded`), US는 상장목록 통계(`excluded_by_reason`).
+    US 유니버스 분리(2026-09-29) 직후 이 블록이 `meta["admin_excluded"]`를 무조건
+    읽어 KeyError로 죽었다(CSV는 이미 쓰인 뒤라 결과는 멀쩡했지만 실행이 비정상 종료).
+    시장별 분기를 한 곳에 모으고 테스트로 고정한다."""
+    m = res["market"].upper()
+    out = [f"\n[{m}] 조회 실패 {len(res['failed'])}종목: "
+           + (", ".join(f"{t}({res['names'].get(t, '')})" for t in res["failed"]) or "없음")]
+    if res["stale"]:
+        out.append(f"[{m}] 정지추정 제외 {len(res['stale'])}종목(마지막 일봉 < 직전 거래일): "
+                   + ", ".join(f"{t}({res['names'].get(t, '')}) {d}"
+                               for t, d in sorted(res["stale"].items())))
+    if res["short"]:
+        out.append(f"[{m}] 번인부족 제외 {len(res['short'])}종목(마감 봉 < {MIN_BARS[tf]}): "
+                   + ", ".join(f"{t}({n})" for t, n in sorted(res["short"].items())))
+    meta = res.get("meta") or {}
+    if "admin_excluded" in meta:                       # KR(KIND)
+        out.append(f"[{m}] 관리종목 제외: "
+                   + (", ".join(f"{t}({n})" for t, n in sorted(meta["admin_excluded"].items()))
+                      or "없음"))
+    elif "excluded_by_reason" in meta:                  # US(Nasdaq Trader 상장목록)
+        out.append(f"[{m}] 상장목록 제외(사유별): {meta['excluded_by_reason']} "
+                   f"— 원본 {meta['total']}행 → 보통주 {meta['kept']}")
+    if res.get("opt_dropped"):
+        out.append(f"[{m}] 옵션 필터 제외 {len(res['opt_dropped'])}종목: "
+                   + ", ".join(f"{t}({v})" for t, v in sorted(res["opt_dropped"].items())[:20]))
+    return out
 
 
 def main(argv=None):
@@ -347,6 +408,12 @@ def main(argv=None):
     ap.add_argument("--market", choices=["kr", "kospi", "kosdaq", "us", "all"], required=True,
                     help="kr = kospi+kosdaq, all = kospi+kosdaq+us")
     ap.add_argument("--tf", choices=["week", "month"], required=True)
+    ap.add_argument("--refresh-universe", action="store_true",
+                    help="US 상장목록 캐시를 다시 받는다(기본은 캐시 재사용, us_listings.py)")
+    ap.add_argument("--us-min-price", type=float, default=None,
+                    help="US 옵션 필터: 마지막 종가 하한(기본 없음 — 임계값을 임의로 두지 않는다)")
+    ap.add_argument("--us-min-avg-volume", type=float, default=None,
+                    help=f"US 옵션 필터: 최근 {US_AVG_VOLUME_WINDOW}일 평균 거래량 하한(기본 없음)")
     ap.add_argument("--publish", action="store_true",
                     help="data/lowpoint_latest.json에 이번 실행분 기록(앱 캘린더 카드용). "
                          "다른 tf 결과는 보존된다. 커밋·push는 안 함.")
@@ -366,17 +433,26 @@ def main(argv=None):
         print(f"[{m.upper()}] 0봉 = {labels[m].date()} 마감 봉 ({tf_ko} 구간 라벨, 진행 중 봉 제외)")
     print("조건: A 1봉전 종가 < 0봉 종가 / B RSI(14)[1] < 30 and RSI[2] >= 30\n")
 
-    results = [screen_market(m, args.tf, now) for m in markets]
+    results = [screen_market(m, args.tf, now, refresh_universe=args.refresh_universe,
+                             min_price=args.us_min_price,
+                             min_avg_volume=args.us_min_avg_volume) for m in markets]
     all_rows = []
     for res in results:
         m = res["market"].upper()
         print(f"── {m}: 유니버스 {res['universe']} / 조회성공 {res['fetched']} / "
               f"정지추정 제외 {len(res['stale'])} / 번인부족 제외 {len(res['short'])} / "
               f"신호 {len(res['rows'])} ({res['elapsed']:.0f}s)")
-        if res["meta"]:
+        if res["meta"] and "admin_excluded" in res["meta"]:
             ex = res["meta"]["admin_excluded"]
             print(f"   KIND {m} {res['meta']['kind_total']}종목(원본 {res['meta']['kind_rows']}행, 중복 병합), "
                   f"관리종목 스냅샷 {res['meta']['admin_snapshot']}건 중 {len(ex)}건 제외")
+        elif res["meta"]:
+            st = res["meta"]
+            print(f"   Nasdaq Trader 심볼목록 원본 {st['total']}행 → 보통주 {st['kept']} "
+                  f"(파일생성 {st.get('file_creation_time')}, 캐시 {st.get('fetched_at')})")
+            print(f"   제외: {st['excluded_by_reason']}")
+        if res.get("opt_dropped"):
+            print(f"   옵션 필터 제외 {len(res['opt_dropped'])}종목(--us-min-price/--us-min-avg-volume)")
         print(f"   직전 거래일(일봉 최빈값) = {res['session'].date() if res['session'] is not None else None}")
         all_rows.extend(res["rows"])
 
@@ -402,18 +478,8 @@ def main(argv=None):
 
     # 조용한 누락 금지 — 제외/실패 전부 목록으로
     for res in results:
-        m = res["market"].upper()
-        print(f"\n[{m}] 조회 실패 {len(res['failed'])}종목: "
-              + (", ".join(f"{t}({res['names'].get(t, '')})" for t in res["failed"]) or "없음"))
-        if res["stale"]:
-            print(f"[{m}] 정지추정 제외 {len(res['stale'])}종목(마지막 일봉 < 직전 거래일): "
-                  + ", ".join(f"{t}({res['names'].get(t, '')}) {d}" for t, d in sorted(res["stale"].items())))
-        if res["short"]:
-            print(f"[{m}] 번인부족 제외 {len(res['short'])}종목(마감 봉 < {MIN_BARS[args.tf]}): "
-                  + ", ".join(f"{t}({n})" for t, n in sorted(res["short"].items())))
-        if res["meta"]:
-            print(f"[{m}] 관리종목 제외: "
-                  + (", ".join(f"{t}({n})" for t, n in sorted(res["meta"]["admin_excluded"].items())) or "없음"))
+        for line in exclusion_detail_lines(res, args.tf):
+            print(line)
     return df
 
 

@@ -68,10 +68,20 @@ def _fetch_us_batch(tickers, period="2y"):
         return out
     if raw is None or len(raw) == 0:
         return out
-    single = len(tickers) == 1
+    # 티커 1개여도 group_by="ticker"면 컬럼이 MultiIndex로 온다 — 예전엔 single일 때
+    # raw를 그대로 써서 "Close" not in df.columns에 걸려 **항상 빈 결과**였다
+    # (2026-09-28 조사에서 재현: _fetch_us_batch(["ZUMZ"]) → {} → 호출부 KeyError).
+    # 컬럼 구조를 보고 판단한다(티커 개수로 추측하지 않는다).
+    multi = isinstance(raw.columns, pd.MultiIndex)
+    level0 = set(raw.columns.get_level_values(0)) if multi else set()
     for t in tickers:
         try:
-            df = raw.copy() if single else raw[t].copy()
+            if multi:
+                if t not in level0:
+                    continue
+                df = raw[t].copy()
+            else:
+                df = raw.copy()
             df = df.dropna(how="all")
             if df is None or df.empty or "Close" not in df.columns:
                 continue
