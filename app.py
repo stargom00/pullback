@@ -5,6 +5,23 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.300 [일지 저장을 레코드 단위로 — 사용자 지시] [근본 원인] POST /api/journal이 배열 전체를
+    받아 "서버엔 있고 배열엔 없고 최근 5분 안 갱신 아님 = 삭제"로 병합하는 사실상 덮어쓰기라,
+    옛 배열을 보내는 어떤 경로(옛 일지 이전·오래 열린 탭 1분 자동저장·로드 실패 후 저장)든
+    서버 일지를 지울 수 있었다(v5.299 로컬 재현 60→3). [수정] PUT /api/journal/{id}(한 건
+    생성/수정, body {record, base_rev, edit} — 서버 rev와 다르면 409 + 서버 최신본, 삭제된
+    레코드엔 409 gone) · DELETE /api/journal/{id}(명시적 삭제만, journal_deletions.log에
+    시각·id·클라이언트·레코드 기록) · POST /api/journal은 410(옛 탭이 보내도 무변화).
+    rev(레코드별 정수 버전) 신설 — updated_at은 운영 163건 중 94건이 1970 기본값·143건이
+    같은 값이라 판정에 못 씀. load_journal()이 rev 없는 레코드에 1을 채운다(운영 사본으로
+    보정 전후 163건·id·다른 필드 불변 확인). 서버 내부 쓰기(감시 등록 rev=1, 토스 실체결
+    자동채움, 포지션 손절 동기화 — 예전엔 updated_at도 안 찍음)도 _journal_bump로 rev 증가.
+    프론트: setJournal 호출부 26곳은 그대로 두고, 서버와 맞춘 사본 대비 바뀐 레코드만 PUT,
+    배열에서 빠진 것만으론 절대 삭제 안 함(삭제는 deletedIds만 DELETE — 전체 삭제도 id 명시),
+    409면 서버본으로 교체 + 알림. localStorage 옛 일지(pullback_journal_v1) 자동 이전 제거
+    (키는 지우지 않음 — 마지막 사본일 수 있음). 백업: 일지 폴더에 journal_YYYYMMDD.json을
+    서버 시작 직후 1회 + 스케줄러 하루 1회, 최근 14개 보관, 원자적(tmp→rename).
+    ⚠ scripts/maintenance/2026-09-02_journal_date_kst_migration.py는 전체 배열 POST라 이제 410.
 v5.299 [일지 훼손 경로 차단 — 사용자 지시, 서버 코드 변경 없음] [재현 확정(로컬)] 서버
     일지 60건 + 브라우저 localStorage 옛 일지(pullback_journal_v1, v4.x 시절) 3건 상태에서
     GET /api/journal이 502 "upstream error"(2026-09-29 실제 발생한 프록시 타임아웃 형태)를
@@ -8368,7 +8385,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.299"
+VERSION = "v5.300"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -12703,6 +12720,7 @@ async def _scheduler_loop():
             await _maybe_run_jongga_snapshot()
             _maybe_refresh_macro_calendar()   # v5.108: 캘린더 탭 매크로 일정, 주 1회
             await _maybe_run_weekly_money_flow()   # v5.147: 돈의흐름 주 1회 전환
+            _journal_daily_backup()   # v5.300: 날짜별 일지 사본(그날 없을 때만)
         except Exception as e:
             print(f"[scheduler] loop error: {e}")
         await asyncio.sleep(240)  # 4분
@@ -12767,6 +12785,10 @@ async def _start_scheduler():
         # "누가 불렀는지"가 안 보인다. 더 키우면 메모리·속도 부담이 커진다.
         tracemalloc.start(5)
         print("[memory-diag] tracemalloc 시작(frames=5) — MEMORY_DIAG=1", flush=True)
+    try:
+        _journal_daily_backup(force=True)   # v5.300: 서버 시작 직후 1회
+    except Exception as e:
+        print(f"[journal-backup] 시작 백업 실패: {e}", flush=True)
     asyncio.create_task(_scheduler_loop())
 
 
@@ -15761,6 +15783,11 @@ def load_journal() -> list:
             # 기준 필드라 없으면 안 된다 — 아주 오래된 값으로 채워 "최근에
             # 안 바뀐 레코드"로 취급되게 한다(동시-보존 윈도우에 걸리지 않음).
             r["updated_at"] = "1970-01-01T00:00:00+09:00"
+            migrated = True
+        if "rev" not in r:
+            # v5.300(사용자 지시 — 레코드 단위 저장): 동시성 판정용 정수 버전.
+            # 다른 필드는 건드리지 않는다(레코드 수·내용 불변 — test_journal_record_api 검증).
+            r["rev"] = 1
             migrated = True
     if migrated:
         try:
@@ -19049,7 +19076,7 @@ async def watch_quick(request: Request):
         # entered 전환될 때만 예외로 entry_source='auto_close'가 붙는다
         # (static/index.html의 확인 카드 자동승격 로직 참고).
         "entry_source": None, "entry_actual": None, "entry_actual_date": None,
-        "updated_at": _now_iso(),
+        "updated_at": _now_iso(), "rev": 1,   # v5.300: 레코드 버전
         "note": watch_note, "scenario": watch_scenario,   # v5.196 [3][4]
     }
     if entered_now:
@@ -19148,110 +19175,146 @@ def _write_journal_file(data: list):
     os.replace(tmp, JOURNAL_PATH)
 
 
-# v5.187(사용자 지시 — [1] 병합 가드): 이 3필드는 실제 체결 기록이라
-# 저널의 다른 필드(메모·손절 조정 등)와 성격이 다르다 — 어떤 자동저장
-# 경로도(updateTracking의 주기적 재저장 포함) 스테일 캐시가 들고 있는
-# 값으로 이걸 덮어쓰면 안 되고, 오직 saveEdit()의 명시적 편집(edit_id로
-# 표시)만 갱신할 수 있다.
+# v5.187(사용자 지시 — [1] 병합 가드): 이 3필드는 실제 체결 기록이라 저널의 다른
+# 필드(메모·손절 조정 등)와 성격이 다르다 — 자동저장 경로가 스테일 캐시 값으로
+# 덮어쓰면 안 되고, 오직 saveEdit()의 명시적 편집(PUT body의 edit=true)만 갱신한다.
 PROTECTED_JOURNAL_FIELDS = ("entry_actual", "entry_actual_date", "entry_source")
-# 서버에 있는데 이번 저장 배열엔 없는 레코드 — 삭제 의도인지, 이 저장이
-# 모르는 동시 추가/수정인지 구분할 방법이 없다(전체배열 저장 방식의 구조적
-# 한계). "최근에 갱신된 적 있으면 삭제로 보지 않는다" 휴리스틱으로 절충.
-JOURNAL_CONCURRENT_KEEP_WINDOW_SEC = 300
+
+# ══════════════════════════════════════════════════════════════════
+# v5.300(사용자 지시 — 일지 저장을 레코드 단위로): 예전 POST /api/journal은 배열
+# 전체를 받아 "서버엔 있는데 배열엔 없고 최근 5분 안에 안 바뀐 레코드 = 사용자가
+# 지움"으로 병합했다 — 사실상 덮어쓰기. 옛 배열을 보내는 모든 경로(옛 일지 이전,
+# 오래 열린 탭의 1분 자동저장, 로드 실패 후 저장)가 서버 일지를 지울 수 있었다
+# (로컬 재현 60건 → 3건, v5.299). 이제:
+#   · PUT /api/journal/{id}   한 건 생성/수정. body {record, base_rev, edit}.
+#     서버 rev와 base_rev가 다르면 409 + 서버 최신본(덮어쓰지 않음).
+#   · DELETE /api/journal/{id} 명시적 삭제만. journal_deletions.log에 기록.
+#   · POST /api/journal       410 — 전체 배열 쓰기 금지(옛 탭이 보내도 무변화).
+# rev: 레코드별 정수 버전. updated_at은 94/163건이 1970 기본값이고 같은 값이
+# 143건이라(2026-09-30 운영 사본 확인) 동시성 판정에 쓸 수 없어 새로 둔다.
+# 서버 내부 쓰기(감시 등록·토스 실체결 자동채움·포지션 손절 동기화)도 전부
+# _journal_bump()로 rev를 올린다 — 그래야 그 사이 낡은 탭의 PUT이 409로 막힌다.
+# ══════════════════════════════════════════════════════════════════
+import threading as _threading
+_JOURNAL_LOCK = _threading.RLock()
+JOURNAL_DELETE_LOG_PATH = os.path.join(os.path.dirname(JOURNAL_PATH), "journal_deletions.log")
+JOURNAL_BACKUP_KEEP = 14
+
+
+def _journal_bump(r: dict):
+    """레코드가 실제로 바뀌었을 때 rev +1, updated_at 갱신(서버 내부 쓰기 공용)."""
+    r["rev"] = int(r.get("rev") or 0) + 1
+    r["updated_at"] = _now_iso()
+
+
+def _journal_same(a: dict, b: dict) -> bool:
+    ign = ("rev", "updated_at")
+    return {k: v for k, v in a.items() if k not in ign} == {k: v for k, v in b.items() if k not in ign}
+
+
+def _journal_daily_backup(force: bool = False) -> str | None:
+    """/data(JOURNAL_PATH 폴더)에 날짜별 사본 journal_YYYYMMDD.json. 하루 1회(스케줄러) +
+    서버 시작 직후 1회(force=True, 그날 사본을 현재 파일로 갱신). 원자적(tmp→rename),
+    최근 JOURNAL_BACKUP_KEEP개만 보관(날짜 오래된 것부터 삭제). 반환: 쓴 경로 또는 None."""
+    import shutil, re as _re
+    d = os.path.dirname(JOURNAL_PATH)
+    if not os.path.exists(JOURNAL_PATH):
+        return None
+    today = datetime.now(KST).strftime("%Y%m%d")
+    dst = os.path.join(d, f"journal_{today}.json")
+    wrote = None
+    if force or not os.path.exists(dst):
+        with _JOURNAL_LOCK:
+            tmp = dst + ".tmp"
+            shutil.copy2(JOURNAL_PATH, tmp)
+            os.replace(tmp, dst)
+        wrote = dst
+        print(f"[journal-backup] {os.path.basename(dst)} 저장({'시작 직후' if force else '일일'})", flush=True)
+    backups = sorted(f for f in os.listdir(d) if _re.fullmatch(r"journal_\d{8}\.json", f))
+    for old in backups[:-JOURNAL_BACKUP_KEEP] if len(backups) > JOURNAL_BACKUP_KEEP else []:
+        try:
+            os.remove(os.path.join(d, old))
+            print(f"[journal-backup] 보관 {JOURNAL_BACKUP_KEEP}개 초과 — {old} 삭제", flush=True)
+        except OSError:
+            pass
+    return wrote
 
 
 @app.post("/api/journal")
-async def save_journal(request: Request):
-    """일지 저장 — v5.187(사용자 지시 [1] 병합 가드) 전에는 받은 배열을
-    그대로 덮어썼다. 그 방식이 CLAUDE.md에 이미 기록된 사고의 구조적
-    원인이었다: 브라우저 탭이 들고 있는 journalCache는 그 탭이 열려있는
-    내내 서버 재조회 없이 메모리에만 남는데, updateTracking() 자동저장이
-    주기적으로 그 스냅샷을 그대로 여기 던진다 — 그 사이 다른 경로(토스
-    동기화의 entry_actual 자동채움, /api/watch/quick의 새 레코드 추가 등)가
-    서버 쪽 저널을 이미 바꿨으면 그 변경이 스테일 캐시로 조용히 덮어써진다.
+async def save_journal_disabled(request: Request):
+    """v5.300: 전체 배열 저장 금지 — 오래 열린 옛 탭(v5.299 이하 프론트)이 보내도
+    아무것도 바뀌지 않는다. 새 프론트는 PUT/DELETE /api/journal/{id}만 쓴다."""
+    return JSONResponse({"ok": False, "code": "reload_required",
+                         "error": "일지 저장 방식이 바뀌었어요 — 새로고침이 필요해요(이 저장은 반영되지 않았어요)."},
+                        status_code=410)
 
-    이제 서버가 현재 파일을 다시 읽어 레코드별로 병합한다:
-      1) PROTECTED_JOURNAL_FIELDS(실체결 3필드)는 이 요청이 명시적으로
-         "지금 이 id를 편집한다"고 표시한 경우(edit_id == 그 레코드 id)만
-         클라이언트 값을 받아들인다 — 그 외(자동저장 포함 전부)는 서버의
-         현재 값을 그대로 유지하고 클라이언트가 뭘 보냈든 버린다.
-      2) 서버엔 있는데 이번 배열엔 없는 레코드는 JOURNAL_CONCURRENT_KEEP_
-         WINDOW_SEC 안에 갱신된 적 있으면(동시에 다른 경로가 막 추가·
-         수정했을 가능성) 삭제로 보지 않고 결과에 되살린다. 그보다 오래된
-         값이면 사용자의 의도적 삭제(전체 삭제·개별 삭제)로 보고 그대로 뺀다.
-         **단, deleted_ids에 명시된 id는 이 가드를 건너뛰고 무조건 삭제
-         한다**(v5.247, 사용자 지시 — "일지 삭제가 안 된다" 사고 후속).
-         [확정된 원인] 계속 추적 중인(자동 가격갱신 대상) 레코드는
-         updateTracking()이 60초마다 last_price/last_checked를 바꿔
-         updated_at이 사실상 항상 "5분 이내"였다 — 그래서 그런 레코드는
-         delJournal()로 지워도 이 가드가 "누락"과 "삭제"를 구분 못 해
-         매번 되살렸다(배열에 없다는 사실만으론 "사용자가 지웠다"와
-         "이 요청이 그 레코드를 몰라서 안 보냈다"를 구분할 수 없음).
-         deleted_ids는 그 구분을 클라이언트가 명시적으로 알려주는 필드 —
-         가드 자체(두 탭 동시 편집 보호)는 그대로 유지.
-      3) 실제로 내용이 바뀐 레코드만 updated_at을 지금 시각으로 새로
-         찍는다 — 안 바뀐 레코드는 서버가 이미 갖고 있던 updated_at을
-         그대로 보존(그래야 2번의 "최근 갱신" 판정이 매 저장마다 전부
-         갱신되는 걸 막는다).
 
-    body: 배열(구형, 하위호환 — 이 경로는 edit_id/deleted_ids 없이 모든
-    레코드를 "자동저장"으로 취급) 또는 {"records": [...], "edit_id":
-    <id 또는 null>, "deleted_ids": [id, ...] (선택, 기본 빈 배열)}.
-    원자적 쓰기(temp→rename) + 직전 백업으로 손상/유실 방지는 그대로."""
-    body = await request.json()
-    if isinstance(body, list):
-        incoming, edit_id, deleted_ids = body, None, set()
-    elif isinstance(body, dict) and isinstance(body.get("records"), list):
-        incoming, edit_id = body["records"], body.get("edit_id")
-        deleted_ids = set(body.get("deleted_ids") or [])
-    else:
-        return JSONResponse({"ok": False, "error": "배열 또는 {records:[...]} 필요"}, status_code=400)
-
-    current = load_journal()
-    current_by_id = {r.get("id"): r for r in current if r.get("id") is not None}
-    incoming_ids = {r.get("id") for r in incoming if r.get("id") is not None}
-    now = _now_iso()
-    now_dt = datetime.now(KST)
-
-    merged = []
-    for r in incoming:
-        rid = r.get("id")
-        srv = current_by_id.get(rid) if rid is not None else None
-        if srv is not None:
-            if rid != edit_id:
-                for f in PROTECTED_JOURNAL_FIELDS:
-                    r[f] = srv.get(f)
-            changed = any(r.get(k) != srv.get(k) for k in (r.keys() | srv.keys()) if k != "updated_at")
-            r["updated_at"] = now if changed else srv.get("updated_at", now)
-        else:
-            r["updated_at"] = now
-        merged.append(r)
-
-    revived = 0
-    explicitly_deleted = 0
-    for rid, srv in current_by_id.items():
-        if rid in incoming_ids:
-            continue
-        if rid in deleted_ids:
-            explicitly_deleted += 1
-            continue
-        try:
-            ts = datetime.fromisoformat(srv.get("updated_at", ""))
-        except (ValueError, TypeError):
-            continue
-        if (now_dt - ts).total_seconds() < JOURNAL_CONCURRENT_KEEP_WINDOW_SEC:
-            merged.append(srv)
-            revived += 1
-    if revived:
-        print(f"[journal] 병합 가드: 저장 배열에 없던 최근 갱신 레코드 {revived}건 보존")
-    if explicitly_deleted:
-        print(f"[journal] 명시적 삭제(deleted_ids): {explicitly_deleted}건 — 병합 가드 우회")
-
+@app.put("/api/journal/{rid}")
+async def journal_put(rid: int, request: Request):
     try:
-        _write_journal_file(merged)
-    except OSError as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-    return JSONResponse({"ok": True, "count": len(merged), "path": JOURNAL_PATH, "journal": merged})
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "JSON 본문 필요"}, status_code=400)
+    rec = body.get("record") if isinstance(body, dict) else None
+    if not isinstance(rec, dict) or rec.get("id") != rid:
+        return JSONResponse({"ok": False, "error": "record.id가 경로 id와 같아야 함"}, status_code=400)
+    base_rev = body.get("base_rev")
+    edit = bool(body.get("edit"))
+    with _JOURNAL_LOCK:
+        j = load_journal()
+        idx = next((i for i, r in enumerate(j) if r.get("id") == rid), None)
+        if idx is None:
+            if base_rev not in (None, 0):
+                # 클라이언트는 있다고 믿는데 서버엔 없다 — 다른 곳에서 삭제됨. 되살리지 않는다.
+                return JSONResponse({"ok": False, "code": "gone", "record": None,
+                                     "error": "서버에서 이미 삭제된 기록이에요"}, status_code=409)
+            new = dict(rec)
+            new["rev"] = 1
+            new["updated_at"] = _now_iso()
+            j.append(new)
+            _write_journal_file(j)
+            return JSONResponse(_clean_nan({"ok": True, "created": True, "record": new}))
+        srv = j[idx]
+        if int(base_rev or 0) != int(srv.get("rev") or 0):
+            return JSONResponse(_clean_nan({"ok": False, "code": "conflict", "record": srv,
+                                            "error": "다른 곳에서 먼저 바뀐 기록이에요 — 서버 최신본으로 갱신하세요"}),
+                                status_code=409)
+        new = dict(rec)
+        if not edit:
+            for f in PROTECTED_JOURNAL_FIELDS:
+                if f in srv:
+                    new[f] = srv.get(f)
+                else:
+                    new.pop(f, None)
+        new["rev"] = srv.get("rev")
+        new["updated_at"] = srv.get("updated_at")
+        if _journal_same(new, srv):
+            return JSONResponse(_clean_nan({"ok": True, "unchanged": True, "record": srv}))
+        _journal_bump(new)
+        j[idx] = new
+        _write_journal_file(j)
+        return JSONResponse(_clean_nan({"ok": True, "record": new}))
+
+
+@app.delete("/api/journal/{rid}")
+async def journal_delete(rid: int, request: Request):
+    with _JOURNAL_LOCK:
+        j = load_journal()
+        idx = next((i for i, r in enumerate(j) if r.get("id") == rid), None)
+        if idx is None:
+            return JSONResponse({"ok": True, "already_gone": True})
+        removed = j.pop(idx)
+        _write_journal_file(j)
+        entry = {"ts": _now_iso(), "id": rid,
+                 "client": (request.client.host if request.client else None),
+                 "user_agent": request.headers.get("user-agent"), "record": removed}
+        try:
+            with open(JOURNAL_DELETE_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(_json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError as e:
+            print(f"[journal] 삭제 로그 기록 실패(삭제 자체는 완료): {e}", flush=True)
+        print(f"[journal] 삭제 id={rid} {removed.get('ticker')} {removed.get('name')}", flush=True)
+    return JSONResponse({"ok": True, "deleted": rid})
 
 
 @app.post("/api/prices")
@@ -19468,7 +19531,7 @@ async def positions_sync(request: Request):
             # v5.187(사용자 지시 — [1] 병합 가드): save_journal()의 병합·
             # 동시성-보존 판정이 이 필드로 "방금 서버가 건드렸다"를 안다 —
             # 안 찍으면 이 레코드가 "오래 안 바뀐 것"으로 오판될 수 있다.
-            r["updated_at"] = _now_iso()
+            _journal_bump(r)   # v5.300: rev도 올린다 — 그 사이 낡은 탭의 PUT이 409로 막히게
             journal_changed = True
             print(f"[positions_sync] 토스 자동채움: {r.get('ticker')} entry_actual={pos['avg_price']}")
         if journal_changed:
@@ -19550,11 +19613,13 @@ async def positions_set_stop(request: Request):
         changed = False
         for r in j:
             if r.get("ticker") == ticker and (r.get("status") or "entered") == "entered" and r.get("result_r", "") == "":
-                r["stop"] = stop_val
-                changed = True
+                if r.get("stop") != stop_val:
+                    r["stop"] = stop_val
+                    _journal_bump(r)   # v5.300: rev·updated_at(예전엔 안 찍어 병합 판정이 틀렸다)
+                    changed = True
                 journal_synced += 1
         if changed:
-            _save_json_atomic(JOURNAL_PATH, j)
+            _write_journal_file(j)   # v5.300: 다른 일지 쓰기와 같은 백업·원자적 쓰기 경로
     return JSONResponse({"ok": True, "journal_synced": journal_synced})
 
 

@@ -1,5 +1,7 @@
 """delJournal()이 서버 응답을 기다린 뒤 그 결과로 렌더하는지 검증 (v5.247,
 사용자 지시 — "낙관적 렌더 금지: 실패가 성공처럼 보이면 안 된다").
+v5.300: 저장이 레코드 단위(PUT/DELETE /api/journal/{id})로 바뀌어 시나리오를 새
+프로토콜로 옮겼다 — 삭제는 DELETE 1건만, 다른 레코드 PUT 0건, 서버 실패면 되돌림.
 
 setJournal()/_saveJournalToServer()/delJournal() 세 함수를 실제 소스
 그대로 추출해 Node에서 실행 — fetch/confirm/alert/renderJournal을
@@ -53,13 +55,9 @@ def _extract_function(name: str) -> str:
     raise AssertionError(f"`{name}` 함수의 닫는 중괄호를 못 찾음")
 
 
-SET_JOURNAL_SRC = _extract_function("setJournal")
-SAVE_TO_SERVER_SRC = _extract_function("_saveJournalToServer")
-DEL_JOURNAL_SRC = _extract_function("delJournal")
-# v5.298: _saveJournalToServer가 응답을 apiParse(API JSON 공통 헬퍼)로 읽는다 —
-# 헬퍼 원문도 같이 넣어야 production과 같은 경로를 탄다(없으면 참조 오류가 기존
-# "파싱 실패 무시" catch에 삼켜져 서버 반영이 조용히 빠진다).
-API_HELPER_SRC = _extract_function("_apiError") + "\n" + _extract_function("apiParse")
+SRC = "\n".join(_extract_function(n) for n in (
+    "_apiError", "apiParse", "_jrKey", "_journalMarkSynced", "setJournal",
+    "_journalReplaceLocal", "_showJournalConflictToast", "_saveJournalToServer", "delJournal"))
 
 
 def _run_node(script: str, timeout=15):
@@ -72,103 +70,75 @@ def _run_node(script: str, timeout=15):
 
 
 def _harness(fetch_impl_js: str, seed_records_json: str):
-    """공통 스텁 환경 — fetch만 시나리오별로 다르게 주입."""
+    """공통 스텁 환경 — fetch만 시나리오별로 다르게 주입. 시드는 '서버와 맞춘 상태'."""
     return f"""
 let journalCache = {seed_records_json};
-let _journalLoadError = null;   // v5.299: setJournal 쓰기 잠금 플래그 — 로드 성공 상태
+let _journalLoadError = null;   // v5.299: 로드 성공 상태
+let _journalSynced = new Map(); let _journalConflictNotes = [];
 let editingId = null;
 let _journalSaveChain = Promise.resolve();
 let renderCallCount = 0;
 let alertMessages = [];
 let showSaveErrorCalled = false;
+const calls = [];
+const document = {{ getElementById: () => null, createElement: () => ({{ style: {{}}, setAttribute() {{}} }}), body: {{ appendChild() {{}} }} }};
+function _normalize(a) {{ return a; }}
 function getJournal() {{ return journalCache; }}
 function renderJournal() {{ renderCallCount++; }}
 function showSaveError() {{ showSaveErrorCalled = true; }}
 function confirm(msg) {{ return true; }}
 function alert(msg) {{ alertMessages.push(msg); }}
 {fetch_impl_js}
-{API_HELPER_SRC}
-{SET_JOURNAL_SRC}
-{SAVE_TO_SERVER_SRC}
-{DEL_JOURNAL_SRC}
-
+{SRC}
+_journalMarkSynced(journalCache);
 (async () => {{
   await delJournal(1001);
-  console.log(JSON.stringify({{
-    journalCache, renderCallCount, alertMessages, showSaveErrorCalled
-  }}));
+  console.log(JSON.stringify({{ journalCache, renderCallCount, alertMessages, showSaveErrorCalled, calls }}));
 }})();
 """
 
 
+SEED = json.dumps([{"id": 1001, "ticker": "008930.KS", "rev": 1}, {"id": 1002, "ticker": "005930.KS", "rev": 1}])
+
+
 def test_normal_delete_removes_record_and_renders_once():
-    """정상 케이스: 서버가 실제로 지운 배열(1001 없음)을 돌려줌."""
-    seed = json.dumps([{"id": 1001, "ticker": "008930.KS"}, {"id": 1002, "ticker": "005930.KS"}])
     fetch_impl = """
     async function fetch(url, opts) {
-      return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, journal: [{id:1002, ticker:'005930.KS'}] }) };
+      calls.push((opts && opts.method || 'GET') + ' ' + url);
+      return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, deleted: 1001 }) };
     }
     """
-    out = json.loads(_run_node(_harness(fetch_impl, seed)))
+    out = json.loads(_run_node(_harness(fetch_impl, SEED)))
     ids = [r["id"] for r in out["journalCache"]]
-    assert 1001 not in ids
-    assert 1002 in ids
-    assert out["renderCallCount"] == 1
-    assert out["alertMessages"] == []
+    assert ids == [1002]
+    assert out["calls"] == ["DELETE /api/journal/1001"], "삭제 외 다른 요청(PUT·POST)이 나갔다"
+    assert out["renderCallCount"] == 1 and out["alertMessages"] == []
 
 
-def test_server_rejects_deletion_record_stays_and_alerts():
-    """★ 핵심. 서버 응답은 성공(ok=true)이지만 그 id가 journal에 여전히
-    있음(가드가 거부한 것처럼) — 화면(journalCache)에도 남아야 하고
-    사용자에게 알림이 떠야 한다. 낙관적 렌더 금지 확인."""
-    seed = json.dumps([{"id": 1001, "ticker": "008930.KS"}, {"id": 1002, "ticker": "005930.KS"}])
+def test_server_error_keeps_record_and_alerts():
+    """★ 서버가 삭제에 실패(500, 재시도까지) — 화면에서 지워진 채로 두면 실패가 성공처럼
+    보인다. 되돌리고 알린다(낙관적 렌더 금지)."""
     fetch_impl = """
     async function fetch(url, opts) {
-      // deletedIds를 보냈는데도 서버가 되살린 상황을 흉내(이상 상황 방어 확인용)
-      return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, journal: [{id:1001, ticker:'008930.KS'}, {id:1002, ticker:'005930.KS'}] }) };
+      calls.push((opts && opts.method || 'GET') + ' ' + url);
+      return { ok: false, status: 500, text: async () => 'boom' };
     }
     """
-    out = json.loads(_run_node(_harness(fetch_impl, seed)))
+    out = json.loads(_run_node(_harness(fetch_impl, SEED), timeout=20))
     ids = [r["id"] for r in out["journalCache"]]
-    assert 1001 in ids, "서버가 거부했는데 화면에서 사라짐 — 낙관적 렌더 금지 위반"
+    assert 1001 in ids and 1002 in ids, "서버가 실패했는데 화면에서 사라짐"
+    assert out["showSaveErrorCalled"] is True
     assert len(out["alertMessages"]) == 1
-    assert "삭제되지 않았어요" in out["alertMessages"][0]
-    assert out["renderCallCount"] == 1
+    assert out["calls"] == ["DELETE /api/journal/1001"] * 2   # 최초 + 1회 재시도
 
 
 def test_network_failure_reverts_optimistic_removal_and_alerts():
-    """★ 네트워크 완전 실패(재시도까지 실패) — setJournal()이 이미
-    journalCache를 낙관적으로 지운 상태이므로, delJournal()이 되돌려야
-    한다(실패가 성공처럼 보이면 안 됨)."""
-    seed = json.dumps([{"id": 1001, "ticker": "008930.KS"}, {"id": 1002, "ticker": "005930.KS"}])
     fetch_impl = """
     async function fetch(url, opts) { throw new Error('network down'); }
     """
-    out = json.loads(_run_node(_harness(fetch_impl, seed), timeout=20))
+    out = json.loads(_run_node(_harness(fetch_impl, SEED), timeout=20))
     ids = [r["id"] for r in out["journalCache"]]
-    assert 1001 in ids, "네트워크 실패인데도 삭제된 것처럼 보임 — 낙관적 렌더 금지 위반"
-    assert 1002 in ids
+    assert 1001 in ids and 1002 in ids
     assert out["showSaveErrorCalled"] is True
-    assert len(out["alertMessages"]) == 1
-    assert "네트워크" in out["alertMessages"][0]
+    assert len(out["alertMessages"]) == 1 and "네트워크" in out["alertMessages"][0]
     assert out["renderCallCount"] == 1
-
-
-def test_del_journal_sends_deleted_ids():
-    """delJournal()이 실제로 deletedIds를 payload에 실어 보내는지 —
-    fetch 호출 인자를 그대로 캡처해서 확인."""
-    seed = json.dumps([{"id": 1001, "ticker": "008930.KS"}])
-    fetch_impl = """
-    let capturedBody = null;
-    async function fetch(url, opts) {
-      capturedBody = JSON.parse(opts.body);
-      return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, journal: [] }) };
-    }
-    """
-    script = _harness(fetch_impl, seed).replace(
-        "console.log(JSON.stringify({",
-        "console.log(JSON.stringify({ capturedBody,"
-    )
-    out = json.loads(_run_node(script))
-    assert out["capturedBody"]["deleted_ids"] == [1001]
-    assert out["capturedBody"]["records"] == []

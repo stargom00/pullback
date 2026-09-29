@@ -892,7 +892,7 @@ details.rowmenu>summary:hover{background:#1b2029}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.299</span>
+      <span class="ver mono" id="verBadge">v5.300</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -6614,7 +6614,7 @@ function liquidityCheck(s) {
 }
 
 // ════════════════ 매매 일지 (서버 저장, 기기 간 동기화) ════════════════
-const JKEY = 'pullback_journal_v1';   // 구 localStorage 키 (마이그레이션용)
+const JKEY = 'pullback_journal_v1';   // 구 localStorage 키 — v5.300부터 읽지도 쓰지도 않음(지우지도 않음, 마지막 사본 보존)
 let journalCache = [];                 // 메모리 캐시 (서버와 동기화)
 
 function _normalize(arr) {
@@ -6663,9 +6663,20 @@ let _journalSaveChain = Promise.resolve();
 // 안 보냈을 뿐"인지 구분 못 했다. deletedIds로 그 구분 자체를 명시한다
 // (가드는 그대로 유지 — 두 탭 동시 편집 보호는 여전히 필요, "누락"과
 // "삭제"만 구분).
+// v5.300(사용자 지시 — 일지 저장을 레코드 단위로): 서버의 전체 배열 POST는 410으로
+// 닫혔다. setJournal(arr, opts)의 호출 방식(26곳)은 그대로 두고, 여기서 "마지막으로
+// 서버와 맞춘 사본"(_journalSynced: id → {rev, key}) 대비 **바뀐 레코드만** PUT
+// /api/journal/{id}(base_rev 동봉)로 보낸다. 배열에서 빠졌다는 사실만으로는 절대
+// 지우지 않는다 — 삭제는 opts.deletedIds에 명시된 id만 DELETE. 409(다른 곳에서 먼저
+// 바뀜/삭제됨)는 서버 최신본으로 화면을 바꾸고 알린다(덮어쓰지 않는다).
+// opts.editId: 이 id는 saveEdit()의 명시적 편집 — 서버가 실체결 3필드를 받아들인다.
+let _journalSynced = new Map();
+function _jrKey(r) { return JSON.stringify(r); }
+function _journalMarkSynced(arr) {
+  _journalSynced = new Map((arr || []).map(r => [r.id, { rev: r.rev || 0, key: _jrKey(r) }]));
+}
 function setJournal(arr, opts) {
-  // v5.299: 일지를 못 불러온 상태(캐시가 비었거나 낡음)에서 저장하면 서버 병합 규칙상
-  // 서버 일지가 지워질 수 있다 — 쓰기를 거부하고 원인을 알린다. 캐시도 바꾸지 않는다.
+  // v5.299: 일지를 못 불러온 상태(캐시가 비었거나 낡음)에서는 서버 쓰기를 거부한다.
   if (_journalLoadError) {
     alert(`일지를 불러오지 못해 저장하지 않았어요 — ${_journalLoadError.message}\n새로고침한 뒤 다시 시도해 주세요.`);
     return Promise.resolve(false);
@@ -6673,52 +6684,83 @@ function setJournal(arr, opts) {
   journalCache = arr;
   const editId = (opts && opts.editId != null) ? opts.editId : null;
   const deletedIds = (opts && Array.isArray(opts.deletedIds) && opts.deletedIds.length) ? opts.deletedIds : null;
-  _journalSaveChain = _journalSaveChain.catch(() => {}).then(() => _saveJournalToServer(journalCache, true, editId, deletedIds));
+  _journalSaveChain = _journalSaveChain.catch(() => {}).then(() => _saveJournalToServer(true, editId, deletedIds));
   return _journalSaveChain;
 }
 
-// 서버 저장 (성공 확인 + 1회 재시도 + 실패 시 알림). setJournal()을 통해서만 호출됨.
-async function _saveJournalToServer(arr, _retry = true, editId = null, deletedIds = null) {
+function _journalReplaceLocal(id, rec) {
+  const i = journalCache.findIndex(x => x.id === id);
+  if (rec) {
+    const n = _normalize([rec])[0];
+    if (i >= 0) journalCache[i] = n; else journalCache.push(n);
+    _journalSynced.set(id, { rev: n.rev || 0, key: _jrKey(n) });
+  } else {
+    if (i >= 0) journalCache.splice(i, 1);
+    _journalSynced.delete(id);
+  }
+}
+
+let _journalConflictNotes = [];
+function _showJournalConflictToast() {
+  if (!_journalConflictNotes.length) return;
+  const names = _journalConflictNotes.splice(0);
+  let bar = document.getElementById('journalConflictBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'journalConflictBar';
+    bar.setAttribute('role', 'status');
+    bar.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);max-width:min(92vw,560px);background:#1c1a12;border:1px solid #3a3320;color:#f2e2b3;padding:12px 16px;border-radius:12px;z-index:9999;font-size:13px;box-shadow:0 12px 32px rgba(0,0,0,.45)';
+    document.body.appendChild(bar);
+  }
+  bar.textContent = `다른 곳에서 먼저 바뀐 기록 ${names.length}건을 서버 최신본으로 바꿨어요(내 변경은 저장 안 됨): ${names.slice(0, 3).join(', ')}${names.length > 3 ? ' 외' : ''}`;
+  clearTimeout(bar._t); bar._t = setTimeout(() => bar.remove(), 9000);
+}
+
+// 서버 저장 — setJournal()을 통해서만 호출됨(체인으로 직렬화). 반환: 전부 성공이면 true.
+async function _saveJournalToServer(_retry = true, editId = null, deletedIds = null) {
   try {
-    // v5.247: editId도 deletedIds도 없는(가장 흔한 자동저장/편집) 경로는
-    // 기존 그대로 배열만 전송 — 새 필드가 필요 없는 저장까지 구조를
-    // 바꾸지 않는다.
-    const payload = (editId != null || deletedIds)
-      ? { records: arr, edit_id: editId, deleted_ids: deletedIds || [] }
-      : arr;
-    const res = await fetch('/api/journal', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (!res.ok) throw _apiError(res.status, await res.text(), false);
-    // v5.187(사용자 지시 — [1] 병합 가드): 서버가 병합 후 실제로 저장된
-    // 배열을 돌려준다(보호 필드가 서버값으로 되돌려졌거나, 동시 갱신
-    // 레코드가 되살아났을 수 있음) — journalCache를 그 결과로 갱신해
-    // 다음 자동저장이 이미 낡은 로컬 값을 다시 밀어넣는 걸 막는다.
-    try {
-      const data = await apiParse(res);
-      if (data && Array.isArray(data.journal)) journalCache = data.journal;
-    } catch (e) { /* 응답 파싱 실패해도 저장 자체는 성공 — 무시 */ }
+    const puts = journalCache.filter(r => r && r.id != null
+      && (!_journalSynced.has(r.id) || _journalSynced.get(r.id).key !== _jrKey(r)));
+    for (const r of puts) {
+      const base = _journalSynced.get(r.id);
+      const res = await fetch('/api/journal/' + encodeURIComponent(r.id), {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ record: r, base_rev: base ? base.rev : null, edit: r.id === editId }),
+      });
+      const d = await apiParse(res, { allow: [409] });
+      if (res.status === 409) {
+        _journalReplaceLocal(r.id, d.record);        // gone이면 null → 로컬에서도 뺀다
+        _journalConflictNotes.push(r.name || r.ticker || String(r.id));
+      } else {
+        _journalReplaceLocal(r.id, d.record);        // 서버가 되돌린 보호 필드·rev 반영
+      }
+    }
+    for (const id of (deletedIds || [])) {
+      const res = await fetch('/api/journal/' + encodeURIComponent(id), { method: 'DELETE' });
+      await apiParse(res);
+      _journalReplaceLocal(id, null);
+    }
+    _showJournalConflictToast();
     return true;
   } catch (e) {
-    if (_retry) {   // 1회 재시도
+    if (_retry) {   // 1회 재시도 — 이미 반영된 레코드는 사본과 같아져 다시 안 나간다
       await new Promise(r => setTimeout(r, 800));
-      return _saveJournalToServer(arr, false, editId, deletedIds);
+      return _saveJournalToServer(false, editId, deletedIds);
     }
     console.error('일지 저장 실패:', e);
-    if (typeof showSaveError === 'function') showSaveError();
+    if (typeof showSaveError === 'function') showSaveError(e);
     return false;
   }
 }
 
-function showSaveError() {
+function showSaveError(err) {
   let bar = document.getElementById('saveErrorBar');
   if (!bar) {
     bar = document.createElement('div');
     bar.id = 'saveErrorBar';
     bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:var(--up);color:#fff;padding:10px;text-align:center;z-index:9999;font-size:13px';
-    bar.textContent = '⚠️ 일지 저장에 실패했어요. 네트워크 확인 후 다시 시도하세요. (화면 데이터는 유지됨)';
+    bar.textContent = '일지 저장에 실패했어요. 네트워크 확인 후 다시 시도하세요. (화면 데이터는 유지됨)'
+      + (err && err.message ? ' — ' + err.message : '');
     document.body.appendChild(bar);
     setTimeout(() => bar.remove(), 6000);
   }
@@ -6738,10 +6780,6 @@ function showSaveError() {
 // 쓰기를 거부한다 — 빈 캐시로 저장해 서버를 덮어쓰는 일이 없게. 다음에 로드가
 // 성공하면 풀린다.
 let _journalLoadError = null;
-function journalShouldMigrate(serverData, loadError, localData) {
-  return !loadError && Array.isArray(serverData) && serverData.length === 0
-    && Array.isArray(localData) && localData.length > 0;
-}
 async function loadJournalFromServer() {
   let serverData = null, loadError = null;
   try {
@@ -6761,19 +6799,11 @@ async function loadJournalFromServer() {
   }
   _journalLoadError = null;
 
-  // 마이그레이션: 서버가 **정상 응답으로** 비었고 localStorage에 옛 일지가 있을 때만 한 번 올림
-  let localData = [];
-  try { localData = JSON.parse(localStorage.getItem(JKEY) || '[]'); } catch(e) {}
-  if (journalShouldMigrate(serverData, loadError, localData)) {
-    journalCache = _normalize(localData);
-    await fetch('/api/journal', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(journalCache)
-    }).catch(()=>{});
-    console.log('localStorage 일지 ' + localData.length + '건을 서버로 이전했어요.');
-  } else {
-    journalCache = _normalize(serverData);
-  }
+  // v5.300(사용자 지시): localStorage 옛 일지(JKEY) 자동 이전 **제거**. 옛 배열을 서버에
+  // 올리는 경로 자체가 훼손 위험이었다(v5.299 재현). 브라우저 키는 지우지 않는다 —
+  // 그 브라우저에 남은 마지막 사본일 수 있다(필요하면 사람이 직접 꺼내 본다).
+  journalCache = _normalize(serverData);
+  _journalMarkSynced(journalCache);
   // 일지 탭이 열려있으면 갱신
   if (typeof renderJournal === 'function' && document.getElementById('journalView').style.display !== 'none') {
     renderJournal();
@@ -8401,7 +8431,7 @@ function renderJournal() {
             : Notification.permission === 'granted'
             ? '<span class="jr-menu-note">급락 알림 켜짐</span>'
             : `<button type="button" role="menuitem" onclick="Notification.requestPermission().then(()=>renderJournal())">급락 알림 켜기</button>`}
-          <button type="button" role="menuitem" class="danger" onclick="if(confirm('일지를 모두 지울까요? 되돌릴 수 없어요.')){setJournal([]);renderJournal();}">전체 삭제</button>
+          <button type="button" role="menuitem" class="danger" onclick="if(confirm('일지를 모두 지울까요? 되돌릴 수 없어요.')){const ids=getJournal().map(r=>r.id);setJournal([], { deletedIds: ids }).then(()=>renderJournal());}">전체 삭제</button>
         </div>
       </details>
     </div>`;

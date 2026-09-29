@@ -179,7 +179,7 @@ def test_row_menu_keeps_every_existing_action():
 def test_journal_title_menu_keeps_tools():
     src = _fn("renderJournal")
     for call in ("refreshPrices()", "openManualAdd()", "exportCSV()",
-                 "Notification.requestPermission()", "setJournal([])", "openRSettings()"):
+                 "Notification.requestPermission()", "setJournal([], { deletedIds: ids })", "openRSettings()"):
         assert call in src, call
 
 

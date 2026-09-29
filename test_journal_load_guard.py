@@ -7,7 +7,7 @@ setJournal · apiJson 원문을 그대로 추출해 가짜 fetch/localStorage로
 
 사보타주 확인(2026-09-30): 이전 발동 조건을 v5.298 것(`(!serverData ||
 serverData.length === 0) && localData.length > 0`, 실패는 빈 배열)으로 되돌리면
-test_502_text_never_migrates FAIL — 원복.
+test_502_text_never_migrates FAIL — 원복. v5.300에서 이전 기능 자체를 제거.
 """
 import json
 import shutil
@@ -46,14 +46,15 @@ def _run(get_status, get_body, local=OLD, then_save=False):
         "function updateTracking() { tracked++; }",
         "function renderJournal() {} function renderCalendar() {}",
         "const document = { getElementById: () => ({ style: { display: 'none' } }) };",
-        "let _journalSaveChain = Promise.resolve();",
+        "let _journalSaveChain = Promise.resolve(); let _journalSynced = new Map();",
         f"""async function fetch(url, opts) {{
   if (opts && opts.method === 'POST') {{ posts.push(url); return {{ ok: true, status: 200, text: async () => '{{"ok":true}}' }}; }}
   return {{ ok: {json.dumps(200 <= get_status < 300)}, status: {get_status}, text: async () => {json.dumps(get_body)} }};
 }}""",
         "async function _saveJournalToServer() { posts.push('/api/journal(save)'); return true; }",
         _fn("_apiError"), _fn("apiParse"), _fn("apiJson"),
-        TEXT[TEXT.index("let _journalLoadError = null;"):TEXT.index("async function loadJournalFromServer(")],
+        "let _journalLoadError = null;",
+        _fn("_jrKey"), _fn("_journalMarkSynced"),
         _fn("loadJournalFromServer"), _fn("setJournal"),
         f"""(async () => {{
   await loadJournalFromServer();
@@ -74,10 +75,12 @@ def test_502_text_never_migrates():
     assert r["tracked"] == 0, "로드 실패인데 자동 추적(자동저장)이 돌았다"
 
 
-def test_200_empty_with_local_migrates():
+def test_200_empty_with_local_does_not_migrate_any_more():
+    """v5.300: 옛 일지 자동 이전 기능 제거 — 서버가 정상으로 비어 있어도 올리지 않는다.
+    브라우저 키는 지우지 않는다(마지막 사본일 수 있음)."""
     r = _run(200, "[]")
-    assert r["posts"] == ["/api/journal"] and r["err"] is None
-    assert r["cache"] == OLD
+    assert r["posts"] == [] and r["err"] is None and r["cache"] == []
+    assert "localStorage.removeItem" not in TEXT and "setItem(JKEY" not in TEXT
 
 
 def test_200_normal_journal_does_not_migrate():
