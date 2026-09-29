@@ -594,6 +594,12 @@ tr.editing{background:rgba(242,179,61,.06)}
   --n-chip:#1c222b; --n-row:#1a1f27;
   --n-good:#63c89b; --n-warn:#d9a92e; --n-bad:#e5484d; --n-unknown:#5a6578;
   --n-num:'IBM Plex Mono',ui-monospace,monospace;
+  /* v5.295(사용자 지시): 숫자 타일 축소 비율 — 홈 시장 타일·오늘 할 일, 일지 리스크 5칸·
+     R 누적의 여백·큰 숫자·높이만 이 값으로 줄인다(라벨·본문 글자는 그대로). */
+  --n-k:.85;
+  /* 내 추적 표 — 헤더와 행이 **같은 열 정의**를 쓴다. 트리거 열은 입력칸+이상/이하
+     선택이 들어가 내용 폭이 고정이라 fr이 아니라 고정 폭(모자라면 옆 '상태' 열을 침범했다). */
+  --track-cols:minmax(0,1.5fr) minmax(0,1fr) 164px minmax(0,1.1fr) minmax(0,.7fr) minmax(0,.9fr);
 }
 .num{font-family:var(--n-num);font-variant-numeric:tabular-nums}
 
@@ -654,13 +660,13 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .st-good{color:var(--n-good)} .st-neutral{color:#e9c46a} .st-bad{color:#f2848c} .st-unknown{color:var(--n-muted)}
 .st-warn{color:#e9c46a} .st-accent{color:var(--n-accent)}
 .home-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:16px}
-.tile{background:var(--n-card);border:1px solid var(--n-line);border-radius:14px;padding:18px 20px;
-  display:flex;flex-direction:column;gap:10px;min-width:0}
+.tile{background:var(--n-card);border:1px solid var(--n-line);border-radius:14px;padding:calc(18px * var(--n-k)) calc(20px * var(--n-k));
+  display:flex;flex-direction:column;gap:calc(10px * var(--n-k));min-width:0}
 .tile-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .tile-name{font-size:13px;color:var(--n-sub);text-decoration:none}
 .tile-name:hover{color:var(--n-text)}
 .tile-val{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-.tile-val .v{font-size:26px;font-weight:600}
+.tile-val .v{font-size:calc(26px * var(--n-k));font-weight:600}
 .tile-val .c{font-size:13px}
 .tile-foot{font-size:12px;color:var(--n-muted)}
 .tile-row{display:flex;justify-content:space-between;gap:8px;font-size:13px}
@@ -674,20 +680,20 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .home-col>div{display:flex;flex-direction:column;gap:24px;min-width:0}
 .home-side,.home-side>div{gap:16px}
 .home-warn{display:flex;flex-wrap:wrap;gap:6px 16px;padding:12px 16px;border-radius:12px;background:#1a1712;border:1px solid #3a3020;font-size:13px}
-.todo{background:#16140f;border:1px solid rgba(232,162,92,.33);border-radius:16px;padding:24px 28px;display:flex;flex-direction:column;gap:20px}
+.todo{background:#16140f;border:1px solid rgba(232,162,92,.33);border-radius:16px;padding:calc(24px * var(--n-k)) calc(28px * var(--n-k));display:flex;flex-direction:column;gap:calc(20px * var(--n-k))}
 .todo-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .todo-h .t{font-size:12px;font-weight:600;color:var(--n-accent);letter-spacing:.4px}
-.todo-item{display:flex;flex-direction:column;gap:14px}
-.todo-item+.todo-item{border-top:1px solid #2a2519;padding-top:20px}
+.todo-item{display:flex;flex-direction:column;gap:calc(14px * var(--n-k))}
+.todo-item+.todo-item{border-top:1px solid #2a2519;padding-top:calc(20px * var(--n-k))}
 .todo-top{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
 .todo-name{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.todo-name .nm{font-size:24px;font-weight:700;color:var(--n-text)}
+.todo-name .nm{font-size:calc(24px * var(--n-k));font-weight:700;color:var(--n-text)}
 .chip{font-size:12px;padding:3px 8px;border-radius:6px;background:var(--n-chip);color:#c9ced7;white-space:nowrap}
 .chip.accent{background:#2a2114;color:var(--n-accent);font-weight:600}
 .todo-cells{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:#2a2519;border-radius:12px;overflow:hidden}
-.todo-cells>div{background:#1b1811;padding:14px 16px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.todo-cells>div{background:#1b1811;padding:calc(14px * var(--n-k)) calc(16px * var(--n-k));display:flex;flex-direction:column;gap:4px;min-width:0}
 .todo-cells .k{font-size:12px;color:#9a927f}
-.todo-cells .v{font-size:20px;font-weight:600;overflow-wrap:anywhere}
+.todo-cells .v{font-size:calc(20px * var(--n-k));font-weight:600;overflow-wrap:anywhere}
 .todo-foot{font-size:12px;color:#9a927f;line-height:1.6}
 .cand{padding:18px 22px}
 .cand-h{display:flex;align-items:center;gap:10px;cursor:pointer;min-height:32px}
@@ -695,9 +701,10 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .home .cand-card{border:1px solid var(--n-line);background:#10141a;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;min-height:140px}
 .track{padding:22px 0 8px}
 .track-h{display:flex;align-items:center;gap:10px;padding:0 28px 14px}
-.track-row{display:grid;grid-template-columns:1.5fr 1fr 1.25fr 1.1fr .7fr .9fr;align-items:center;gap:8px;padding:0 28px;min-height:52px;border-bottom:1px solid var(--n-row);font-size:14px;cursor:pointer}
+.track-row{display:grid;grid-template-columns:var(--track-cols);align-items:center;gap:12px;padding:0 28px;min-height:52px;border-bottom:1px solid var(--n-row);font-size:14px;cursor:pointer}
 .track-head{min-height:0;padding:10px 28px;font-size:12px;color:var(--n-muted);border-top:1px solid var(--n-line);border-bottom:1px solid var(--n-line);cursor:default}
 .track-row .r{text-align:right}
+.track-row>:nth-child(4){padding-left:8px}
 .track-row .nm{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .track-row .trig{display:flex;justify-content:flex-end;gap:4px;align-items:center}
 .track-row .trig input{width:84px;min-height:32px;background:#0f1318;border:1px solid var(--n-line2);border-radius:6px;color:var(--n-text);text-align:right;font-family:var(--n-num);font-size:13px;padding:0 6px}
@@ -764,10 +771,11 @@ details.jr-more>summary{width:44px;justify-content:center;padding:0}
 .jr-menu button.danger{color:#f2848c}
 .jr-menu-note{font-size:12px;color:var(--n-muted);padding:10px 12px}
 .jr-risk{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr 1.2fr;overflow:hidden}
-.jr-risk>div{padding:18px 22px;display:flex;flex-direction:column;gap:8px;border-right:1px solid var(--n-line);min-width:0}
+.jr-risk>div{padding:calc(18px * var(--n-k)) calc(22px * var(--n-k));display:flex;flex-direction:column;gap:calc(8px * var(--n-k));border-right:1px solid var(--n-line);min-width:0}
 .jr-risk>div:last-child{border-right:0}
 .jr-risk .k{font-size:12px;color:var(--n-muted)}
-.jr-risk .v{font-size:22px;font-weight:600}
+.jr-risk .v{font-size:calc(22px * var(--n-k));font-weight:600}
+.jr-big{font-size:calc(26px * var(--n-k));font-weight:600}   /* R 누적 큰 숫자 */
 .jr-gate{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 18px;border-radius:12px;background:var(--n-card);border:1px solid var(--n-line)}
 .jr-gate-bad{background:#1d1417;border-color:#3a2226;color:#f2b8bd}
 .jr-gate-bad b{color:#ffd5d8}
@@ -861,7 +869,7 @@ details.rowmenu>summary:hover{background:#1b2029}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.294</span>
+      <span class="ver mono" id="verBadge">v5.295</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -7429,8 +7437,8 @@ function renderRCurve(all) {
   return `<section class="n-card side-card" aria-label="R 누적" style="padding:20px 24px;gap:14px">
     <div style="display:flex;align-items:baseline;gap:10px"><span class="n-h">R 누적</span><span class="n-sub">종료 ${pts.length}건 · 관찰 제외</span></div>
     <div style="display:flex;gap:32px;flex-wrap:wrap">
-      <div style="display:flex;flex-direction:column;gap:2px"><span class="n-sub">누적</span><span class="num" style="font-size:26px;font-weight:600;color:${last >= 0 ? 'var(--px-up)' : 'var(--px-down)'}">${last > 0 ? '+' : ''}${last.toFixed(2)}R</span></div>
-      <div style="display:flex;flex-direction:column;gap:2px"><span class="n-sub">최대 낙폭</span><span class="num" style="font-size:26px;font-weight:600;color:var(--px-down)">${mdd.toFixed(2)}R</span></div>
+      <div style="display:flex;flex-direction:column;gap:2px"><span class="n-sub">누적</span><span class="num jr-big" style="color:${last >= 0 ? 'var(--px-up)' : 'var(--px-down)'}">${last > 0 ? '+' : ''}${last.toFixed(2)}R</span></div>
+      <div style="display:flex;flex-direction:column;gap:2px"><span class="n-sub">최대 낙폭</span><span class="num jr-big" style="color:var(--px-down)">${mdd.toFixed(2)}R</span></div>
     </div>
     <svg width="100%" height="200" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="R 누적 곡선">
       <line x1="0" y1="${zero.toFixed(1)}" x2="${W}" y2="${zero.toFixed(1)}" stroke="#2a303b" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>
@@ -8495,7 +8503,7 @@ function renderJournal() {
   const all = getJournal();
   const titleHtml = `<div class="jr-title">
       <h2>내 일지</h2>
-      <span class="n-sub" style="font-size:13px">신호 추적 기록 · 실제 체결과 다를 수 있음 — 계좌 성과는 포지션 탭</span>
+      <span class="n-sub" style="font-size:13px">신호 추적 기록 · 실제 체결과 다를 수 있음</span>
       <span class="jr-title-sp"></span>
       <button type="button" class="n-btn" onclick="refreshPrices()">현재가 갱신</button>
       <button type="button" class="n-btn primary" onclick="openManualAdd()">+ 기록 추가</button>
@@ -8596,7 +8604,7 @@ function renderJournal() {
   else { gateMsg = `시장 게이트 <b>${gateLabel}</b>`; gateLv = GL; }
   const gateHtml = `<div class="jr-gate jr-gate-${gateLv}" role="status">
       <span class="st-dot ${_N_LV_CLASS[gateLv]}" aria-hidden="true"></span>
-      <span style="font-size:14px">${gateMsg}${rSettings.equity && (!_gate.allowed || _consec >= 3) ? ` · 게이트 ${gateLabel}` : ''}</span>
+      <span style="font-size:14px">${gateMsg}</span>
       <span class="jr-title-sp"></span>${sugHtml}
       <button type="button" class="n-link" onclick="openRSettings()">R 설정</button>
     </div>`;

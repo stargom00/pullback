@@ -193,3 +193,39 @@ def test_category_stats_reuse_journal_stats_only():
     """카테고리 성적 표는 기존 statcard 값 재배치 — 새 통계 함수 호출이 없어야 한다."""
     src = _fn("renderJournal")
     assert src.count("journalStats(") == 3   # 추세추종·단타·재량 (v5.187과 동일)
+
+
+# ── v5.295: 숫자 타일 85% · 내 추적 grid ────────────────────────────
+def _css_rule(sel: str) -> str:
+    i = TEXT.index(sel + "{")
+    return TEXT[i:TEXT.index("}", i)]
+
+
+def test_number_tiles_scaled_through_one_variable():
+    assert "--n-k:.85;" in TEXT
+    # (선택자, v5.294 기존 px) — 큰 숫자가 기존값 × --n-k로 계산되는가
+    for sel, px in ((".tile-val .v", 26), (".jr-risk .v", 22), (".jr-big", 26),
+                    (".todo-name .nm", 24), (".todo-cells .v", 20)):
+        rule = _css_rule(sel)
+        assert f"font-size:calc({px}px * var(--n-k))" in rule, (sel, rule)
+    for sel in (".tile", ".jr-risk>div", ".todo", ".todo-cells>div"):
+        assert "var(--n-k)" in _css_rule(sel), sel
+    # R 누적 큰 숫자가 인라인 고정 px로 남아 있지 않다
+    assert "font-size:26px;font-weight:600" not in TEXT
+    # 라벨 글자는 그대로
+    assert "font-size:12px" in _css_rule(".jr-risk .k")
+
+
+def test_track_header_and_rows_share_one_grid():
+    row = _css_rule(".track-row")
+    assert "grid-template-columns:var(--track-cols)" in row
+    head = _css_rule(".track-head")
+    assert "grid-template" not in head, "헤더가 행과 다른 열 정의를 쓴다"
+    fn = _fn("renderMyTrackBoard")
+    assert 'class="track-row track-head"' in fn
+
+
+def test_gate_line_does_not_repeat_gate_label():
+    fn = _fn("renderJournal")
+    assert "· 게이트 ${gateLabel}" not in fn
+    assert "계좌 성과는 포지션 탭" not in fn
