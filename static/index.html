@@ -34,7 +34,7 @@ if ('serviceWorker' in navigator) {
 }
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <!-- v5.89: 💰 돈의 흐름 탭 — AI 해석 리포트(markdown) 렌더용. /moneyflow 페이지와 동일 버전. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
 <style>
@@ -69,7 +69,6 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .tab:focus-visible,button:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
 /* v5.92: 탭 메뉴 전면 개편 — 계열 구분 얇은 세로선 + "⋯ 실험" 접기 그룹. */
 .tab-group-sep{width:1px;align-self:stretch;background:var(--line);margin:2px 3px;flex-shrink:0}
-.app-tagline{font-size:11.5px;color:#7aa3c9;margin-top:1px}
 
 .refresh{border:1px solid var(--line);background:var(--surface);color:var(--text);
   font:inherit;font-size:13px;padding:8px 16px;border-radius:8px;cursor:pointer}
@@ -583,117 +582,178 @@ tr.editing{background:rgba(242,179,61,.06)}
   .modal{padding:18px;width:94vw}
   .modal input,.modal textarea{font-size:16px} /* 16px 미만이면 iOS가 확대해버림 */
 }
+/* ══════════════ v5.294(사용자 지시): 헤더·홈·일지 재디자인 ══════════════
+   시안: docs/design/2026-09-29/home.dc.html · journal.dc.html.
+   색 토큰은 **새 이름(--n-*)으로만** 둔다 — 기존 --bg/--surface 등을 바꾸면
+   범위 밖인 다른 탭 본문까지 색이 바뀐다. 헤더·홈(#calendarView)·일지
+   (#journalView)만 이 토큰을 쓴다. 상승/하락 색은 기존 --px-up/--px-down 그대로. */
+:root{
+  --n-bg:#0d1015; --n-card:#141820; --n-line:#1f252f; --n-line2:#2c333e;
+  --n-text:#e7e9ee; --n-sub:#b4bbc7; --n-muted:#8e97a6; --n-accent:#e8a25c;
+  --n-chip:#1c222b; --n-row:#1a1f27;
+  --n-good:#63c89b; --n-warn:#d9a92e; --n-bad:#e5484d; --n-unknown:#5a6578;
+  --n-num:'IBM Plex Mono',ui-monospace,monospace;
+}
+.num{font-family:var(--n-num);font-variant-numeric:tabular-nums}
+
+/* ── 헤더 ── */
+header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1px solid var(--n-line)}
+.hdr-row{display:flex;align-items:center;gap:20px;min-height:64px;padding:0 40px}
+.hdr-brand{display:flex;align-items:baseline;gap:8px;flex-shrink:0}
+.hdr-title{font-size:17px;font-weight:700;letter-spacing:-.2px;color:var(--n-text)}
+.hdr-brand .ver{font-size:11px;color:var(--n-muted);border:0;padding:0}
+.hdr-guide{font-size:12px;color:var(--n-muted);text-decoration:none}
+.hdr-guide:hover{color:var(--n-accent)}
+.hdr-navs{display:flex;align-items:center;gap:8px;min-width:0}
+.hdr .tabs{margin:0;background:none;border:0;padding:0;gap:2px;border-radius:0}
+.hdr .tab{min-height:44px;border-radius:8px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.hdr-main .tab{padding:10px 14px;font-size:14px;color:var(--n-sub)}
+.hdr-util .tab{padding:10px 12px;font-size:13px;color:var(--n-muted)}
+.hdr-main .tab.active,.hdr-util .tab.active,.hdr-more.has-active{background:#1b2029;color:#fff;font-weight:600}
+.hdr-sep{width:1px;height:20px;background:#262c36;flex-shrink:0}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.hdr-filters .tab{padding:8px 10px;font-size:12px;color:var(--n-muted)}
+.hdr-filters .tab.active{background:#1b2029;color:#fff}
+.hdr .hdr-seg{background:#151920;border:1px solid #232933;border-radius:9px;padding:2px}
+.hdr-seg .tab{padding:0 14px;font-size:13px;color:var(--n-muted);border-radius:7px;min-height:40px}
+.hdr-seg .tab.active{background:#262c37;color:#fff;font-weight:600}
+.hdr .refresh{height:44px;padding:0 16px;border-radius:9px;border:1px solid var(--n-line2);background:#151920;
+  color:var(--n-text);font-size:13px;display:inline-flex;align-items:center;gap:8px}
+.more-panel{position:absolute;top:calc(100% - 8px);left:0;z-index:120;display:flex;gap:16px;flex-wrap:wrap;
+  background:var(--n-card);border:1px solid #232933;border-radius:12px;padding:10px;
+  box-shadow:0 12px 32px rgba(0,0,0,.45)}
+.more-panel[hidden]{display:none}
+.more-sec{display:flex;flex-direction:column;min-width:170px}
+.more-h{font-size:11px;color:var(--n-muted);padding:6px 12px}
+.more-panel .tab{width:100%;justify-content:flex-start;padding:0 12px;font-size:14px;color:var(--n-sub)}
+.more-panel .tab:hover{background:#1b2029}
+.more-panel .tab.active{background:#1b2029;color:#fff;font-weight:600}
+.hdr-strip{display:flex;align-items:center;gap:12px;min-height:40px;padding:0 40px;font-size:12px;
+  color:var(--n-muted);border-bottom:1px solid var(--n-line);background:var(--n-bg)}
+.hdr-strip b{color:#c9ced7;font-weight:600}
+.hdr-strip-link{background:none;border:0;color:var(--n-accent);font:inherit;font-size:12px;min-height:40px;padding:0 4px;cursor:pointer}
+.hdr-strip-link:hover{color:#f3bd83}
+.hdr-strip-meta{margin-left:auto;white-space:nowrap}
+.hdr-basis{margin:10px 40px 0}
+@media (max-width:899px){
+  .hdr-row{flex-wrap:wrap;gap:8px 12px;padding:10px 16px}
+  .hdr-navs{order:3;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .hdr-navs::-webkit-scrollbar{display:none}
+  .hdr .tabs{width:auto;flex-wrap:nowrap;overflow:visible}
+  .hdr .tab{flex-shrink:0}
+  .hdr-right{gap:8px}
+  .hdr-filters{order:4;width:100%}
+  .hdr-right{flex-wrap:wrap;justify-content:flex-end}
+  .hdr .refresh{padding:0 12px}
+  .more-panel{left:16px!important;right:16px}
+  .more-sec{flex:1 1 150px;min-width:0}
+  .hdr-strip{flex-wrap:wrap;padding:6px 16px;gap:4px 10px}
+  .hdr-strip-meta{margin-left:0;width:100%}
+  .hdr-basis{margin:8px 16px 0}
+}
 </style>
 </head>
 <body>
 
-<header>
-  <div>
-    <h1>돌파·눌림 스캐너 <span class="ver" id="verBadge">v5.293</span> <a href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴" style="text-decoration:none;font-size:15px;vertical-align:2px">📖</a> <span class="dot">●</span></h1>
-    <div class="app-tagline">KR 히트는 관심 신호 — 진입은 종가베팅·재점화·돌파임박 종가확인만</div>
-    <div class="sub" id="subDesc">우상향 추세(200일선) · 이평선 지지 · 거래량 수축 · RS 50+</div>
+<!-- v5.294(사용자 지시 — 헤더 재디자인, 시안 docs/design/2026-09-29/home.dc.html):
+     탭 15개가 한 줄에 쌓이던 것을 **메인 5개**(홈·US눌림목·ABC·추세전환·더보기▾)
+     + 오른쪽 작은 메뉴 3개(업종/테마·마감정리·일지)로 줄였다. 나머지는 전부
+     더보기 패널(#moreTabsPanel)로. **라벨과 위치만 바뀐다** — data-mode 키,
+     FORCED_MARKET_BY_MODE, 시장 강제/복원, 일지 `tab` 저장값(MODE_TAB_LABEL)은
+     전부 그대로다. 클릭 핸들러는 `[data-mode]` 전체에 붙으므로 패널 안
+     버튼도 예전과 같은 경로로 탭을 바꾼다.
+     예전 이력(v5.108 캘린더 신설 · v5.165 탭↔시장 연동 제거 · v5.255 업종/테마
+     승격 · v5.283 추추 그룹/US눌림목 라벨 · v5.284 순서 · v5.228 급등 관찰)은
+     git 기록에 남아 있다. -->
+<header class="hdr">
+  <div class="hdr-row">
+    <div class="hdr-brand">
+      <span class="hdr-title">눌림목 스캐너</span>
+      <span class="ver mono" id="verBadge">v5.294</span>
+      <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
+    </div>
+    <div class="hdr-navs">
+      <nav class="tabs hdr-main" role="tablist" aria-label="메인" id="modeTabs">
+        <!-- 기본 탭은 여전히 캘린더(키 calendar) — 라벨만 "홈". -->
+        <button class="tab active" data-mode="calendar">홈</button>
+        <!-- v5.283: 라벨만 "US눌림목" — 내부 키 pullback·저장 식별자 '눌림목'은 그대로. -->
+        <button class="tab" data-mode="pullback" title="진입 시 시장 필터가 미국으로 전환됩니다(탭을 벗어나면 원래대로).">US눌림목</button>
+        <button class="tab" data-mode="abc" title="A(하락)·B(바닥다지기)·C(돌파) 패턴 — KR 전용, 관심 신호(진입 근거 없음, 측정 전)">ABC</button>
+        <button class="tab" data-mode="turnaround">추세전환</button>
+        <button class="tab hdr-more" id="moreTabsToggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="moreTabsPanel">더보기<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+      </nav>
+      <span class="hdr-sep" aria-hidden="true"></span>
+      <nav class="tabs hdr-util" role="tablist" aria-label="기록" id="utilTabs">
+        <button class="tab" data-mode="themes" title="업종·테마별 구성종목 — 스캐너가 이미 계산한 값만 표시(새 계산 없음)">업종/테마</button>
+        <button class="tab" data-mode="eod">마감정리</button>
+        <button class="tab" data-mode="journal">일지</button>
+      </nav>
+    </div>
+    <div class="hdr-right">
+      <div class="tabs hdr-filters" id="filterToggles">
+        <button class="tab" id="strictToggle" title="RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓ 만 표시 (주도주 엄선)">주도주만</button>
+        <button class="tab" id="riskSortToggle" title="손절폭(리스크%) 좁은 순으로 정렬 — 타이트한 진입 자리가 위로. 단 ATR(일상 변동)보다 좁은 손절은 노이즈에 털릴 수 있어 ⚠️ 표시">손절좁은순</button>
+        <div class="dropdown-wrap">
+          <button class="tab" id="riskTierDropdownToggle" style="display:none" title="손절폭 절대값 4단계로 거르기 (다중선택 가능)">손절폭 ▾</button>
+          <div class="risktier-dropdown" id="riskTierBar" style="display:none"></div>
+        </div>
+        <button class="tab" id="bearOkToggle" title="약세장 적격(💎)만 표시 — 탄탄한베이스 + RS90+ + 손절폭적정, 3조건 전부 충족. 게이트 🟡🔴일 때 125개 후보에서 옥석을 가리는 필터. 대부분 걸러져서 몇 개만 남는 게 정상.">적격만</button>
+        <button class="tab" id="accumSortToggle" title="🧲 매집흔적 점수(A-B-C 패턴 전용, 보조 지표) 높은 순 정렬 — 판정 불가(데이터 부족) 종목은 맨 뒤로">매집순</button>
+        <button class="tab" id="superOnlyToggle" style="display:none" title="슈퍼대장(RS95+ · 3개월 모멘텀15%+) 소속 종목만 — 신호등 🟢(RS≥90)의 부분집합인 더 엄격한 좁히기 필터(참고용). ⚠️ 2026-09-03 재검증: EV 개선 근거 철회 — 90개 창 소속 -0.020R vs 비소속 +0.049R(z=-1.57, 비유의). 진입 우위 근거 아님(docs/kr_us_strategy_map.md 재검증 결과 우선순위6)">슈퍼대장만</button>
+        <button class="tab" id="hiddenToggle" style="display:none" title="숨긴 종목 — 클릭하면 목록에서 바로 복구할 수 있어요 (90일 지나면 자동으로 다시 보임)">숨김 <span id="hiddenCount">0</span></button>
+      </div>
+      <div class="tabs hdr-seg" role="group" aria-label="시장">
+        <button class="tab active" data-market="all">전체</button>
+        <button class="tab" data-market="kr">한국</button>
+        <button class="tab" data-market="us">미국</button>
+      </div>
+      <button class="refresh" id="refresh"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></svg>다시 스캔</button>
+    </div>
   </div>
-  <div class="tabs" role="tablist" id="modeTabs">
-    <!-- v5.108: 캘린더 탭 신설 + 로그인 후 기본 화면으로(사용자 지시) —
-         탭 줄 맨 앞에 위치, active/기본 mode도 이쪽으로 이동.
-         v5.165: 🇺🇸/🇰🇷 라벨·★ 표시·탭↔시장 자동연동(TAB_MARKET_LABEL) 전부
-         제거(사용자 지시) — 2026-09-04 KR 확인진입 5탭 재검증에서 KR·US
-         양쪽 유효 확인, 시장 구분이 아니라 확인진입 여부가 핵심이라는
-         결론. 메인 탭 순서 = 캘린더·눌림목·돌파임박·박스돌파·돌파·
-         추세전환·종가베팅·마감정리·포지션·내 일지·⋯실험. 슈퍼대장/
-         대장관찰/섹터/돈의흐름/인버스/붕괴는 ⋯실험 드롭다운으로 이동
-         (기능 유지, 위치만 변경). -->
-    <button class="tab active" data-mode="calendar">📅 캘린더</button>
-    <!-- v5.255(사용자 지시): 🧭 업종/테마를 ⋯실험 드롭다운 → 캘린더 바로 옆으로.
-         드롭다운 안이면 매번 두 번 눌러야 해서 상시 탭으로 승격. 기존 📊 섹터
-         (일일 등락 3패널)는 드롭다운에 그대로 둔다 — 다른 화면이다. -->
-    <button class="tab" data-mode="themes" title="업종·테마별 구성종목 — 스캐너가 이미 계산한 값만 표시(새 계산 없음)">🧭 업종/테마</button>
-    <span class="tab-group-sep"></span>
-    <!-- v5.284(사용자 지시): 구분선 오른쪽 최상위 순서만 변경 —
-         US눌림목 · 🔺ABC · 종가베팅 · 추세전환 · 추추 ▾ · 🔥급등.
-         data-mode·라벨·하위메뉴·시장 강제/복원(FORCED_MARKET_BY_MODE)은
-         전부 불변이고 기본 탭도 캘린더 그대로다. 순서만 바뀐다. -->
-    <!-- v5.283(사용자 지시): 라벨만 "US눌림목". **내부 키(data-mode="pullback")와
-         저장 식별자는 그대로다** — `MODE_TAB_LABEL.pullback`이 일지 `tab` 필드로
-         저장되고(`"눌림목"`), app.py의 EV 조회키·분기(`tab == "눌림목"`)가 같은
-         문자열을 쓴다. 라벨을 키까지 따라 바꾸면 기존 일지 레코드가 끊긴다. -->
-    <button class="tab" data-mode="pullback" title="진입 시 시장 필터가 미국으로 전환됩니다(탭을 벗어나면 원래대로).">US눌림목</button>
-    <!-- v5.267(사용자 지시): 🔺 ABC — 더양봉맨식 패턴. **관심 신호**이지
-         진입 근거가 아니다(측정 전). 스캔/게이트/즉시행동과 분리. -->
-    <button class="tab" data-mode="abc" title="A(하락)·B(바닥다지기)·C(돌파) 패턴 — KR 전용, 관심 신호(진입 근거 없음, 측정 전)">🔺 ABC</button>
-    <button class="tab" data-mode="jongga" title="T일 종가매수→T+1일 시가매도, 단기 오버나이트 전략(v5.97)">종가베팅</button>
-    <button class="tab" data-mode="turnaround">추세전환</button>
-    <!-- v5.283(사용자 지시): 메인 과밀 해소 — 돌파임박·박스돌파·돌파를
-         "추추" 하위로. **위치만 이동**이고 스캔·알림·forward 기록·내부 키는
-         전부 불변이다(탭 전환 핸들러에 이 세 모드 전용 분기가 원래 없다).
-         ⋯실험 그룹과 같은 방식(display:contents 토글)이라 모바일에서도
-         같은 폭 규칙으로 줄바꿈된다. -->
-    <button class="tab" id="chuchuToggle" type="button" title="돌파 계열 3탭">추추 ▾</button>
-    <span id="chuchuGroup" style="display:none">
+  <!-- 더보기 패널 — 탭 줄(#modeTabs)은 모바일에서 가로 스크롤(overflow-x)이라
+       그 **안에** 두면 패널이 잘린다. 그래서 header 직속(position:sticky라
+       absolute 기준점이 됨)에 두고 위치만 토글 버튼에 맞춘다. -->
+  <div class="more-panel" id="moreTabsPanel" role="menu" aria-label="더보기" hidden>
+    <div class="more-sec">
+      <div class="more-h">탭</div>
+      <button class="tab" data-mode="jongga" title="T일 종가매수→T+1일 시가매도, 단기 오버나이트 전략(v5.97)">종가베팅</button>
       <button class="tab" data-mode="imminent">돌파임박</button>
       <button class="tab" data-mode="boxbreak">박스돌파</button>
       <button class="tab" data-mode="breakout">돌파</button>
-    </span>
-    <!-- v5.228(사용자 지시): 🔥 급등 관찰 — 임시 2주 실험. 기존 ⋯실험
-         드롭다운의 "⚡급등"(data-mode="surge", analyze_surge 게이트 스캔)과
-         완전히 다른 기능이라 별도 mode 키(surge_observe) 사용 — 판정 없이
-         당일 급등 종목을 저장해두고 이후 가격을 관찰만 한다. -->
-    <button class="tab" data-mode="surge_observe" title="당일 +15%↑ & 거래량 20일평균 10배↑ KR — 판정/EV/진입가 없음, 순수 관찰(2주 실험)">🔥 급등<span class="exp-tag">2주 실험</span></button>
-    <span class="tab-group-sep"></span>
-    <button class="tab" data-mode="eod">📋 마감정리</button>
-    <button class="tab" data-mode="positions">💼 포지션</button>
-    <button class="tab" data-mode="journal">📒 내 일지</button>
-    <span class="tab-group-sep"></span>
-    <button class="tab" id="expTabsToggle" type="button">⋯ 실험</button>
-    <span id="expTabsGroup" style="display:none">
-      <!-- v5.165: 슈퍼대장/대장관찰/섹터/돈의흐름/인버스/붕괴 — 메인 탭 재배치로
-           이쪽에 이동(기능 유지, 위치만 변경, 사용자 지시). -->
+      <!-- v5.228: 급등 관찰(surge_observe) — 판정 없이 관찰만. 아래 실험의
+           "급등 스캔"(surge, analyze_surge 게이트)과 다른 기능이다. -->
+      <button class="tab" data-mode="surge_observe" title="당일 +15%↑ & 거래량 20일평균 10배↑ KR — 판정/EV/진입가 없음, 순수 관찰(2주 실험)">급등<span class="exp-tag">2주 실험</span></button>
+      <button class="tab" data-mode="positions">포지션</button>
+    </div>
+    <div class="more-sec">
+      <div class="more-h">실험</div>
       <button class="tab" data-mode="super">슈퍼대장</button>
       <button class="tab" data-mode="leader">대장관찰</button>
-      <button class="tab" data-mode="sectors">📊 섹터</button>
-      <button class="tab" data-mode="moneyflow">💰 돈의흐름<span class="mf-unread-dot" id="moneyflowUnreadDot" style="display:none"> ●</span></button>
-      <button class="tab tab-exp" data-mode="inverse">🔻인버스<span class="exp-tag">하락</span></button>
-      <button class="tab tab-exp" data-mode="breakdown">🩸붕괴<span class="exp-tag">숏</span></button>
-      <!-- v5.50: 패턴/Stage2 — 전체 유니버스 실측(시점매칭 대조군 대비)에서
-           선별력 없음/역선택 확인 → "검증실패" 라벨.
-           docs/all_tabs_common_yardstick_investigation.md 참고. -->
-      <button class="tab tab-exp" data-mode="pattern">🧩 패턴<span class="exp-tag danger">검증실패</span></button>
-      <!-- v5.81(2026-08-25): "검증실패"→"참고"로 정정 — 유동성매칭 대조군 재측정
-           결과 상승우위가 5개 시드 전부 양수(+9.02pp 평균, docs/pullback_stop_width_
-           and_entry_timing.md "8/17 캠페인 마무리" 참고)로 견고하게 확인돼 완전한
-           "실패"는 아니라고 판단. 다만 하락위험 차이는 시드마다 부호가 흔들려
-           (-3.92~+3.59pp) 진입 신호로 확정하긴 이르므로 danger(빨강)는 빼되
-           "실험" 탭들과 같은 참고용 취급 유지. -->
-      <button class="tab tab-exp" data-mode="stage2">📐Stage2<span class="exp-tag">참고</span></button>
+      <button class="tab" data-mode="sectors">섹터</button>
+      <button class="tab" data-mode="moneyflow">돈의흐름<span class="mf-unread-dot" id="moneyflowUnreadDot" style="display:none"> ●</span></button>
+      <button class="tab tab-exp" data-mode="inverse">인버스<span class="exp-tag">하락</span></button>
+      <button class="tab tab-exp" data-mode="breakdown">붕괴<span class="exp-tag">숏</span></button>
+      <!-- v5.50: 패턴/Stage2 — 시점매칭 대조군 대비 선별력 없음/역선택 → "검증실패".
+           v5.81: Stage2는 "참고"로 정정(docs/pullback_stop_width_and_entry_timing.md). -->
+      <button class="tab tab-exp" data-mode="pattern">패턴<span class="exp-tag danger">검증실패</span></button>
+      <button class="tab tab-exp" data-mode="stage2">Stage2<span class="exp-tag">참고</span></button>
       <button class="tab" data-mode="ibd9">IBD9</button>
       <button class="tab tab-exp" data-mode="strong_pivot">강한피벗<span class="exp-tag">실험</span></button>
-      <button class="tab" data-mode="earnings">💰실적우수</button>
-      <button class="tab tab-exp" data-mode="surge">⚡급등<span class="exp-tag">실험</span></button>
-    </span>
-  </div>
-  <div class="tabs" role="tablist">
-    <button class="tab active" data-market="all">전체</button>
-    <button class="tab" data-market="kr">한국</button>
-    <button class="tab" data-market="us">미국</button>
-    <button class="tab" id="strictToggle" title="RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓ 만 표시 (주도주 엄선)">🎯 주도주만</button>
-    <button class="tab" id="riskSortToggle" title="손절폭(리스크%) 좁은 순으로 정렬 — 타이트한 진입 자리가 위로. 단 ATR(일상 변동)보다 좁은 손절은 노이즈에 털릴 수 있어 ⚠️ 표시">↕ 손절좁은순</button>
-    <div class="dropdown-wrap">
-      <button class="tab" id="riskTierDropdownToggle" style="display:none" title="손절폭 절대값 4단계로 거르기 (다중선택 가능)">손절폭 ▾</button>
-      <div class="risktier-dropdown" id="riskTierBar" style="display:none"></div>
+      <button class="tab" data-mode="earnings">실적우수</button>
+      <button class="tab tab-exp" data-mode="surge">급등 스캔<span class="exp-tag">실험</span></button>
     </div>
-    <button class="tab" id="bearOkToggle" title="약세장 적격(💎)만 표시 — 탄탄한베이스 + RS90+ + 손절폭적정, 3조건 전부 충족. 게이트 🟡🔴일 때 125개 후보에서 옥석을 가리는 필터. 대부분 걸러져서 몇 개만 남는 게 정상.">💎 적격만</button>
-    <button class="tab" id="accumSortToggle" title="🧲 매집흔적 점수(A-B-C 패턴 전용, 보조 지표) 높은 순 정렬 — 판정 불가(데이터 부족) 종목은 맨 뒤로">🧲 매집순</button>
-    <button class="tab" id="superOnlyToggle" style="display:none" title="슈퍼대장(RS95+ · 3개월 모멘텀15%+) 소속 종목만 — 신호등 🟢(RS≥90)의 부분집합인 더 엄격한 좁히기 필터(참고용). ⚠️ 2026-09-03 재검증: EV 개선 근거 철회 — 90개 창 소속 -0.020R vs 비소속 +0.049R(z=-1.57, 비유의). 진입 우위 근거 아님(docs/kr_us_strategy_map.md 재검증 결과 우선순위6)">👑 슈퍼대장만</button>
-    <button class="tab" id="hiddenToggle" style="display:none" title="숨긴 종목 — 클릭하면 목록에서 바로 복구할 수 있어요 (90일 지나면 자동으로 다시 보임)">🙈 숨김 <span id="hiddenCount">0</span></button>
   </div>
-  <button class="refresh" id="refresh">다시 스캔</button>
 </header>
 
-<!-- v5.171(동결 해제): 확인진입 안내 배너 — 5탭(눌림목/돌파임박/박스돌파/
-     돌파/추세전환) 전부 복원. v5.167에서 ①②③④ 검증 대기로 2탭만 남겼던 걸,
-     검증 통과(docs/kr_us_strategy_map.md "후속 확인 ①②③④") 후 v5.165 원안대로
-     되돌림. CONFIRM_ENTRY_MODES/renderCards() 참고. -->
-<div class="stopwidth-warn" id="confirmEntryBanner" style="display:none">KR 히트는 관심 신호다 — 5탭 확인진입 EV는 피벗 지정가 체결 가정의 산물로 밝혀져 철회됐다(2026-09-05). 한때 한계적으로 유효했던 돌파임박 KR 종가진입(0.157R, z=2.37)도 벤치마크 룩어헤드 수정 재검증에서 기준 미달로 철회됐다(2026-09-11) — 5탭 전부 확인돼도 진입 근거 없음. 상세: docs/confirm_entry_lookahead_2026-09-04.md, docs/confirm_entry_close_bench_revalidation.md</div>
+<!-- v5.294(사용자 지시): 헤더 아래 한 줄 띠 — 예전 app-tagline·subDesc 두 줄을
+     대체. "근거"를 누르면 기존 확인진입 배너(#confirmEntryBanner) 내용이
+     펼쳐진다(자동 표시 없음 — 전 탭 공통 한 줄 안내로 합쳤다). -->
+<div class="hdr-strip" id="hdrStrip">
+  <span class="hdr-strip-msg">KR 히트는 관심 신호 · 진입 근거는 <b>KR 종가베팅</b>과 <b>US 눌림목</b>뿐</span>
+  <button type="button" class="hdr-strip-link" id="basisToggle" aria-expanded="false" aria-controls="confirmEntryBanner">근거</button>
+  <span class="hdr-strip-meta mono" id="scanMeta"></span>
+</div>
+<div class="stopwidth-warn hdr-basis" id="confirmEntryBanner" style="display:none">KR 히트는 관심 신호다 — 5탭 확인진입 EV는 피벗 지정가 체결 가정의 산물로 밝혀져 철회됐다(2026-09-05). 한때 한계적으로 유효했던 돌파임박 KR 종가진입(0.157R, z=2.37)도 벤치마크 룩어헤드 수정 재검증에서 기준 미달로 철회됐다(2026-09-11) — 5탭 전부 확인돼도 진입 근거 없음. 상세: docs/confirm_entry_lookahead_2026-09-04.md, docs/confirm_entry_close_bench_revalidation.md</div>
 <div class="stopwidth-warn" id="stopWidthWarnBanner" style="display:none"></div>
 <div class="jongga-safety-banner" id="jonggaSafetyBanner" style="display:none">⚠️ 단기 오버나이트 전략 — 소액 고정 비중, 익일 아침 무조건 정리. 갭하락 리스크 있음(백테스트 평균이며 개별 결과 아님).</div>
 <div class="stopwidth-warn" id="jonggaSessionBanner" style="display:none"></div>
@@ -1169,15 +1229,7 @@ const RISK_TIER_MODES = new Set(['pullback', 'turnaround', 'breakout', 'boxbreak
 // signal_high가 없어 null로 저장돼 조용히 no-op이 되므로 RISK_TIER_MODES와
 // 같은 패턴으로 Set을 명시.
 const TRIGGER_WATCH_MODES = new Set(['imminent', 'pullback']);
-// v5.171(동결 해제, 사용자 지시): 확인진입(종가>피벗 & 거래량배수+ 확인
-// 후 진입) 안내 배너 노출 대상 — 5탭 전부로 복원. v5.167에서 ①②③④
-// (슬리피지·dedup·손절스냅샷·레이스시작일) 검증 대기로 2탭만 남겼던 걸,
-// `2026-09-04_kr_confirm_entry_all_tabs_90cp_checks.py`로 검증 통과
-// 확인 후 v5.165 원안대로 되돌림(app.py CONFIRM_RULE_BY_TAB 참고 —
-// 5탭 전부 프로덕션 채택 규칙 보유). 거래량배수는 탭마다 다를 수 있음
-// (돌파만 3.0배, 나머지 1.5배 — app.py CONFIRM_VOL_MULT_BY_TAB) — 이
-// Set은 배너 노출 여부만 결정, 배수 자체는 서버가 판정.
-const CONFIRM_ENTRY_MODES = new Set(['pullback', 'imminent', 'boxbreak', 'breakout', 'turnaround']);
+// v5.294: CONFIRM_ENTRY_MODES(확인진입 배너 5탭 자동 노출) 제거 — 배너는 헤더 띠 "근거"로만 연다.
 let riskTierFilter = new Set();   // 선택된 tier key들 (비어있으면 필터 없음)
 // v5.56: 탭별 필터 유효성 전수조사 결과 반영. 필드가 없는 탭에서 필터를
 // 걸면 "아무 일도 안 함"이 아니라 조건에 따라 결과가 다름 — RISK_TIER_MODES
@@ -2682,6 +2734,12 @@ const DESC = {
   breakdown: '🩸 Stage 4 숏 셋업 · 역배열(20<60<200)+200일선 하락+지지 이탈+하락 거래량+RS 약세 · ⚠️ 숏은 손실 무한·숏스퀴즈·급반등 위험, 한국은 개인 공매도 제약 · 미국 종목 위주',
   jongga: '🇰🇷 종가베팅 · T일 종가매수→T+1일 시가매도 단기 오버나이트 · 거래대금 상위100 · +3%↑ 짧은윗꼬리 양봉 · 거래량 20일평균 2배+ · 20일선 위·52주고점-15%이내 · 사전 등록 백테스트 채택(수치는 docs/kr_jongga_betting_backtest.md 참고 — 재측정마다 바뀌어 여기 고정 수치를 안 둠)'
 };
+// v5.294(사용자 지시 — subDesc 줄 제거): 탭 설명은 화면 한 줄 대신 **탭 버튼
+// 툴팁**으로 옮긴다(슈퍼대장 재검증 경고 같은 내용이 사라지지 않게). 버튼에
+// 이미 title이 있으면 그걸 우선한다.
+for (const b of document.querySelectorAll('[data-mode]')) {
+  if (!b.title && DESC[b.dataset.mode]) b.title = DESC[b.dataset.mode];
+}
 
 // v5.56: 필터/정렬 버튼 표시 여부 — renderCards()가 안 도는 뷰(인버스/섹터/
 // 마감정리)로 전환할 때도 버튼이 이전 탭 상태로 남아있지 않게 load() 진입
@@ -2742,6 +2800,20 @@ function _krEarningsUnknownHtml(diag) {
   if (!n) return '';
   const all = n >= diag.kr_earnings_checked;
   return `<span style="color:${all ? '#FF6B6B' : 'var(--muted)'}" title="KR 종목의 실적 데이터를 못 받아와 판정하지 못한 건수입니다. 판정불가는 '조건 미달'이 아니라 '확인 못 함'이라 이 탭 결과에서 빠집니다.">${all ? '⚠️ ' : ''}KR 실적 판정불가 ${n}/${diag.kr_earnings_checked}</span>`;
+}
+// v5.294(사용자 지시): 헤더 띠 오른쪽 스캔 메타 — "스캔 09-29 18:39 KST · 3,241 / 3,266종목".
+// /api/scan 응답(generated_at "YYYY-MM-DD HH:MM:SS" KST, fetched/scanned)을
+// 그대로 줄여 쓰기만 한다. 홈(/api/calendar)에는 이 값이 없어 스캔 탭을 한 번
+// 열기 전까지는 비어 있다 — 지어내지 않는다.
+function scanMetaText(data) {
+  if (!data || !data.generated_at) return '';
+  const g = String(data.generated_at);
+  const m = g.match(/^\d{4}-(\d{2}-\d{2})[ T](\d{2}:\d{2})/);
+  const when = m ? `${m[1]} ${m[2]}` : g;
+  const scanned = data.scanned != null ? Number(data.scanned) : null;
+  const fetched = data.fetched != null ? Number(data.fetched) : scanned;
+  const cnt = scanned != null ? ` · ${fetched.toLocaleString('en-US')} / ${scanned.toLocaleString('en-US')}종목` : '';
+  return `스캔 ${when} KST${data.cached ? ' (캐시)' : ''}${cnt}`;
 }
 async function load(refresh = false) {
   hideFilterButtonsIfNotApplicable();
@@ -2807,6 +2879,7 @@ async function load(refresh = false) {
     });
     lastHits = data.hits;
     lastScanMeta = data;
+    { const sm = document.getElementById('scanMeta'); if (sm) sm.textContent = scanMetaText(data); }
     favorites = data.favorites || [];
     sectorFilter = null;
     searchQuery = '';
@@ -3849,9 +3922,9 @@ function renderCards() {
   // 시장 필터 (클라이언트에서 거름 — 재스캔 없음)
   if (market === 'kr') list = list.filter(h => h.market === 'KR');
   else if (market === 'us') list = list.filter(h => h.market === 'US');
-  // v5.171: 확인진입 안내 배너 — 5탭 전부(CONFIRM_ENTRY_MODES 참고, 동결 해제로 복원).
-  const confirmBar = document.getElementById('confirmEntryBanner');
-  if (confirmBar) confirmBar.style.display = CONFIRM_ENTRY_MODES.has(mode) ? '' : 'none';
+  // v5.294(사용자 지시): 확인진입 배너(#confirmEntryBanner)는 더 이상 5탭에서
+  // 자동으로 뜨지 않는다 — 헤더 띠의 한 줄 안내 + "근거" 펼침으로 대체
+  // (basisToggle). 여기서 display를 건드리면 사용자가 펼친 걸 탭 전환마다 닫는다.
   // v5.97: 종가베팅 탭 — 고정 안전 배너 + 시간대별 세션 상태 배너(사용자
   // 지시 4·8번). lastScanMeta는 load()가 채워줌(hits 밖의 session_state 등).
   const jSafety = document.getElementById('jonggaSafetyBanner');
@@ -6168,21 +6241,43 @@ document.querySelectorAll('[data-market]').forEach(t => t.addEventListener('clic
   else if (mode === 'abc') { if (_abcData) renderAbcPage(); }
   else { renderCards(); }  // 재스캔 없이 화면만 다시 그림 (lastHits는 전체 보유)
 }));
-// v5.92: "⋯ 실험" 접기 그룹 — 패턴/Stage2/IBD9/강한피벗/실적우수/급등 6개.
-// 상태 저장 안 함(새로고침마다 항상 접힘부터 시작, 사용자 지시).
-let expTabsExpanded = false;
-// v5.283: 추추 그룹 토글 — ⋯실험과 같은 방식(display:contents).
-let chuchuExpanded = false;
-document.getElementById('chuchuToggle').addEventListener('click', (e) => {
-  chuchuExpanded = !chuchuExpanded;
-  document.getElementById('chuchuGroup').style.display = chuchuExpanded ? 'contents' : 'none';
-  e.target.textContent = chuchuExpanded ? '추추 ▴' : '추추 ▾';
+// v5.294(사용자 지시): 추추 ▾·⋯실험 두 접기 그룹(display:contents 토글)을
+// **더보기 패널 하나**로 합쳤다. 패널 안 버튼도 `[data-mode]` 공통 클릭
+// 핸들러를 그대로 탄다(아래) — 여기선 열기/닫기·위치·활성 표시만 한다.
+const moreTabsToggle = document.getElementById('moreTabsToggle');
+const moreTabsPanel = document.getElementById('moreTabsPanel');
+function setMoreTabsOpen(open) {
+  moreTabsPanel.hidden = !open;
+  moreTabsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (!open) return;
+  // 모바일(<900px)은 CSS가 좌우 16px로 고정(!important) — 데스크톱만 버튼 아래로.
+  const hdr = moreTabsToggle.closest('header');
+  const left = moreTabsToggle.getBoundingClientRect().left - hdr.getBoundingClientRect().left;
+  moreTabsPanel.style.left = Math.max(16, left) + 'px';
+}
+moreTabsToggle.addEventListener('click', (e) => {
+  e.stopPropagation();
+  setMoreTabsOpen(moreTabsPanel.hidden);
 });
-
-document.getElementById('expTabsToggle').addEventListener('click', (e) => {
-  expTabsExpanded = !expTabsExpanded;
-  document.getElementById('expTabsGroup').style.display = expTabsExpanded ? 'contents' : 'none';
-  e.target.textContent = expTabsExpanded ? '⋯ 접기' : '⋯ 실험';
+document.addEventListener('click', (e) => {
+  if (!moreTabsPanel.hidden && !moreTabsPanel.contains(e.target)) setMoreTabsOpen(false);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !moreTabsPanel.hidden) { setMoreTabsOpen(false); moreTabsToggle.focus(); }
+});
+// 현재 탭이 더보기 안에 있으면 토글 버튼에 활성 표시 + 라벨에 탭 이름.
+function updateMoreTabsToggle() {
+  const cur = moreTabsPanel.querySelector(`[data-mode="${mode}"]`);
+  moreTabsToggle.classList.toggle('has-active', !!cur);
+  const label = cur ? cur.firstChild.textContent.trim() : '더보기';
+  moreTabsToggle.firstChild.textContent = label;
+}
+// 헤더 띠의 "근거" — 예전 확인진입 배너(#confirmEntryBanner)를 펼친다.
+document.getElementById('basisToggle').addEventListener('click', (e) => {
+  const bar = document.getElementById('confirmEntryBanner');
+  const open = bar.style.display === 'none';
+  bar.style.display = open ? '' : 'none';
+  e.currentTarget.setAttribute('aria-expanded', open ? 'true' : 'false');
 });
 // v5.108: 탭별 뷰 전환 로직을 함수로 분리 — 기존엔 [data-mode] 클릭
 // 핸들러 안에만 있어서 부트스트랩(첫 로드) 경로가 이걸 안 타고 바로
@@ -6224,12 +6319,7 @@ function applyTabViewState() {
   document.getElementById('searchBar').style.display = isCustomView ? 'none' : '';
   document.getElementById('diagBar').style.display = isCustomView ? 'none' : '';
   document.getElementById('patternSubTabs').style.display = (mode === 'pattern') ? 'flex' : 'none';
-  document.getElementById('subDesc').textContent = isJournal
-    ? '🔥/추세전환 신호를 기록하고 결과(R)를 추적 — 주말에 CSV로 내보내 구글시트에 백업'
-    : isMoneyflow ? '💰 돈의 흐름 — 관찰용 정보(진입 신호 아님), KR/US는 위 시장 필터로 전환'
-    : isCalendar ? '📅 오늘 요약 + D+14 매크로 일정·휴장일·실적 — 참고용, 실제 일정은 바뀔 수 있어요'
-    : isSurgeObserve ? '🔥 급등 (실험 · 2주 관찰) — 당일 +15%↑ & 거래량 10배↑ KR, 판정 없음. 그 뒤 어떻게 됐는지만 관찰'
-    : DESC[mode];
+  updateMoreTabsToggle();              // v5.294: 더보기 안의 탭이면 토글에 활성 표시
   if (isJournal) { renderJournal(); }
   else if (isMoneyflow) { onEnterMoneyflowTab(); }
   else if (isPositions) { onEnterPositionsTab(); }
@@ -6245,6 +6335,7 @@ document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click'
   // v5.283: 시장 강제/복원은 `applyForcedMarket()` 한 곳에서. 예전엔 여기
   // 종가베팅에만 `setMarket('kr')`이 박혀 있었고 복원이 없었다.
   applyForcedMarket(_prevMode, mode);
+  setMoreTabsOpen(false);   // v5.294: 더보기 패널에서 골랐으면 닫는다
   if (mode === 'jongga') { loadJonggaForwardStats(); }
   // v5.125: 대장관찰 탭 진입 시 🔁 재점화 대기 섹션 데이터 로드(KR 전용
   // 데이터라 이 탭 자체의 시장 필터는 안 건드림 — 미국 대장후보도 계속

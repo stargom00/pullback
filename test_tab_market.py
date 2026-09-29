@@ -1,4 +1,5 @@
 """v5.283 — 추추 메뉴 신설 + 시장 강제 탭의 진입/이탈 규칙.
+(v5.294: 추추·⋯실험은 더보기 패널로 합쳐졌다 — 메뉴 구조 검사를 그 기준으로 교체.)
 
 [시장 강제] 예전엔 종가베팅만 탭 클릭 핸들러에 `setMarket('kr')`이 박혀
 있었고 **복원이 없었다** — 보고 나오면 다른 탭에도 kr이 남았다. US눌림목이
@@ -42,81 +43,59 @@ def _fn(name: str) -> str:
     raise AssertionError(name)
 
 
-def _top_level_modes() -> list:
-    """최상위(드롭다운 밖) 탭의 data-mode 목록 — 등장 순서 그대로.
+def _modes_in(elem_id: str) -> list:
+    """`id=elem_id` 요소(nav/div) 안의 data-mode 목록 — 등장 순서 그대로.
 
-    v5.284: 예전엔 `chuchuToggle` **앞까지만** 잘라서 목록을 만들었다. 그건
-    추추가 맨 뒤에 있을 때만 맞는 방식이라, 순서가 바뀌어 추추 뒤로 최상위
-    탭이 가면 그 탭들이 조용히 목록에서 빠진다(순서 검사를 무력화). 그래서
-    자르지 않고 `#modeTabs` 전체에서 **그룹 <span> 안쪽만 제거**한다.
+    v5.294: 추추·⋯실험 접기 그룹이 **더보기 패널 하나**로 합쳐졌다. 메인 탭
+    줄(#modeTabs), 오른쪽 작은 메뉴(#utilTabs), 더보기 패널(#moreTabsPanel)을
+    각자 닫는 태그까지 잘라 본다(중첩 없는 구조라 첫 닫는 태그로 충분 —
+    패널은 섹션 div가 중첩돼 있어 `</header>` 직전까지 자른다).
     """
-    i = TEXT.index('id="modeTabs"')
-    body = TEXT[i:TEXT.index("</div>", i)]
-    for gid in ("chuchuGroup", "expTabsGroup"):
-        a = body.index(f'<span id="{gid}"')
-        # 그룹의 닫는 태그는 버튼과 같은 줄에 안 붙어 있다(4칸 들여쓰기 전용
-        # 줄). 단순히 "다음 </span>"을 찾으면 버튼 **안쪽** <span>(예: 돈의흐름
-        # 미확인 점 .mf-unread-dot)에 먼저 걸려 그룹이 덜 잘린다.
-        b = body.index("\n    </span>", a)
-        body = body[:a] + body[b:]
-    return re.findall(r'<button class="tab[^"]*" data-mode="(\w+)"', body)
-
-
-def _group_modes(group_id: str) -> list:
-    i = TEXT.index(f'<span id="{group_id}"')
-    j = TEXT.index("</span>", i)
+    i = TEXT.index(f'id="{elem_id}"')
+    if elem_id == "moreTabsPanel":
+        j = TEXT.index("</header>", i)
+    else:
+        j = TEXT.index("</nav>", i)
     return re.findall(r'data-mode="(\w+)"', TEXT[i:j])
 
 
-# ── 메뉴 구조 ───────────────────────────────────────────────────────
-# 구분선 오른쪽 최상위 순서(v5.284, 사용자 지시). 왼쪽(캘린더·업종/테마)과
-# 🔥급등 뒤 항목(마감정리·포지션·내 일지·⋯실험)은 이 검사 대상이 아니다.
-EXPECTED_MAIN_ORDER = ["pullback", "abc", "jongga", "turnaround", "surge_observe"]
+# ── 메뉴 구조 (v5.294, 사용자 지시) ─────────────────────────────────
+# 메인: 홈 · US눌림목 · ABC · 추세전환 · 더보기▾ / 오른쪽: 업종/테마 · 마감정리 · 일지
+EXPECTED_MAIN = ["calendar", "pullback", "abc", "turnaround"]
+EXPECTED_UTIL = ["themes", "eod", "journal"]
+EXPECTED_MORE_TABS = ["jongga", "imminent", "boxbreak", "breakout", "surge_observe", "positions"]
 
 
 def test_main_tab_order():
-    """추추(드롭다운 토글)를 포함한 6개 순서:
-    US눌림목 · 🔺ABC · 종가베팅 · 추세전환 · 추추 ▾ · 🔥급등.
-
-    추추는 data-mode가 없는 토글 버튼이라 data-mode 목록만으론 위치가 안
-    잡힌다 — HTML 상의 실제 offset으로 추세전환 뒤·급등 앞임을 따로 본다.
-    """
-    top = _top_level_modes()
-    right = top[top.index("pullback"):]
-    assert right[:len(EXPECTED_MAIN_ORDER)] == EXPECTED_MAIN_ORDER, right
-
-    pos = lambda s: TEXT.index(s)
-    assert (pos('data-mode="turnaround"')
-            < pos('id="chuchuToggle"')
-            < pos('data-mode="surge_observe"')), "추추 ▾ 위치가 추세전환~급등 사이가 아니다"
+    assert _modes_in("modeTabs") == EXPECTED_MAIN
+    # 더보기 토글은 data-mode가 없는 버튼 — 메인 줄의 **마지막**이어야 한다
+    i = TEXT.index('id="modeTabs"')
+    body = TEXT[i:TEXT.index("</nav>", i)]
+    assert body.rstrip().endswith("</button>")
+    assert body.index('id="moreTabsToggle"') > body.index('data-mode="turnaround"')
 
 
-def test_left_of_the_separator_is_unchanged():
-    top = _top_level_modes()
-    assert top[:2] == ["calendar", "themes"], top
+def test_util_menu():
+    assert _modes_in("utilTabs") == EXPECTED_UTIL
 
 
-def test_tabs_after_surge_observe_are_unchanged():
-    top = _top_level_modes()
-    assert top[top.index("surge_observe") + 1:] == ["eod", "positions", "journal"], top
+def test_more_panel_tabs_section_order():
+    more = _modes_in("moreTabsPanel")
+    assert more[:len(EXPECTED_MORE_TABS)] == EXPECTED_MORE_TABS, more
 
 
 def test_default_tab_is_still_calendar():
-    assert '<button class="tab active" data-mode="calendar">' in TEXT
+    assert '<button class="tab active" data-mode="calendar">홈</button>' in TEXT
 
 
-def test_three_tabs_left_the_top_level():
-    top = _top_level_modes()
+def test_three_breakout_tabs_are_in_the_more_panel():
     for m in ("imminent", "boxbreak", "breakout"):
-        assert m not in top, f"{m}가 아직 최상위에 있다: {top}"
-
-
-def test_three_tabs_are_under_chuchu():
-    assert _group_modes("chuchuGroup") == ["imminent", "boxbreak", "breakout"]
+        assert m not in _modes_in("modeTabs")
+        assert m in _modes_in("moreTabsPanel")
 
 
 def test_pullback_and_turnaround_stay_on_top():
-    top = _top_level_modes()
+    top = _modes_in("modeTabs")
     assert "pullback" in top and "turnaround" in top, top
 
 
@@ -136,12 +115,6 @@ def test_internal_identifier_stays_korean():
     sys.path.insert(0, str(ROOT))
     import app
     assert app.GATE_MODE_LABELS["pullback"] == "눌림목"
-
-
-def test_chuchu_group_is_collapsible_like_the_experiment_group():
-    assert 'id="chuchuToggle"' in TEXT and 'id="chuchuGroup"' in TEXT
-    # 모바일 폭에서도 같은 규칙으로 줄바꿈되도록 display:contents 방식을 맞춘다
-    assert "chuchuGroup').style.display = chuchuExpanded ? 'contents' : 'none'" in TEXT
 
 
 # ── 시장 강제/복원 ──────────────────────────────────────────────────
