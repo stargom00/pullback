@@ -66,10 +66,15 @@ def test_normal_and_missing_states_render_nothing():
 def test_calendar_renders_the_badge_from_pipeline_health():
     """캘린더 렌더 경로에 실제로 호출부가 있어야 한다 — 함수만 있고 아무도
     안 부르던 것이 이번 사고의 형태다."""
-    assert "_krMcapFilterBadgeHtml(data.immediate_pipeline_health)" in TEXT
-    docTop = TEXT[TEXT.index("docTop.innerHTML = `"):]
+    # v5.294: 홈은 이모지 없는 표기(plain=true)로 부르고, 경고 한 줄(warnHtml)을
+    # 거쳐 #calendarDocTop에 들어간다 — 호출부와 그 경로를 둘 다 고정.
+    assert "_krMcapFilterBadgeHtml(data.immediate_pipeline_health, true)" in TEXT
+    fn = TEXT[TEXT.index("function renderCalendar(data) {"):]
+    fn = fn[:fn.index("\n}\n")]
+    assert "if (mcapBadge) warnParts.push(mcapBadge);" in fn
+    docTop = fn[fn.index("docTop.innerHTML = `"):]
     docTop = docTop[:docTop.index("`;")]
-    assert "${mcapBadgeHtml}" in docTop, docTop
+    assert "${warnHtml}" in docTop, docTop
 
 
 def test_both_screens_share_one_badge_function():

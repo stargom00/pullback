@@ -55,9 +55,13 @@ def _prelude() -> str:
     src = IDX.read_text(encoding="utf-8")
     dot_map = [l for l in src.splitlines() if "const GATE_LV_DOT" in l][0]
     return "\n".join([
+        extract_function("idxStaleInfo"),
         extract_function("idxStaleNote"),
         [l for l in src.splitlines() if l.strip().startswith("const IDX_STALE_DAYS")][0],
-        extract_const_arrow("gateOf"),
+        # v5.294: gateOf는 최상위 indexGateOf로 승격(홈 타일과 공유) — loadIndices
+        # 안엔 `const gateOf = indexGateOf;` 별칭만 남는다. 그 별칭 줄까지 그대로 쓴다.
+        extract_function("indexGateOf"),
+        [l for l in src.splitlines() if l.strip().startswith("const gateOf = indexGateOf")][0].strip(),
         dot_map,
         extract_const_arrow("regimeDot"),
     ])

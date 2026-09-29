@@ -100,3 +100,30 @@ def test_no_emoji_in_visible_header_text():
     visible = re.sub(r"<[^>]+>", " ", h)          # 태그(속성 포함) 제거 → 보이는 글자만
     found = _EMOJI.findall(visible)
     assert not found, f"헤더에 이모지: {found}"
+
+
+# ── 2단계: 홈 ──────────────────────────────────────────────────────
+def test_jongga_sell_rule_matches_app():
+    """홈 '오늘 할 일' 매도 칸 문구는 app.py JONGGA_SELL_RULE의 사본 — 어긋나면 FAIL."""
+    app_src = (ROOT / "app.py").read_text(encoding="utf-8")
+    m = re.search(r'^JONGGA_SELL_RULE = "([^"]+)"', app_src, re.M)
+    assert m
+    assert f"const JONGGA_SELL_RULE = '{m.group(1)}';" in TEXT
+
+
+def test_home_removed_blocks_are_gone():
+    fn = TEXT[TEXT.index("function renderCalendar(data) {"):]
+    fn = fn[:fn.index("\n}\n")]
+    for gone in ("homeStripBar", "positions_summary", "renderSectorFlowHtml"):
+        assert gone not in fn, gone
+    assert "IDXBAR_HIDDEN_MODES = new Set(['calendar'" in TEXT
+
+
+def test_home_column_order():
+    fn = TEXT[TEXT.index("function renderCalendar(data) {"):]
+    fn = fn[:fn.index("\n}\n")]
+    assert "docTop.innerHTML = `${warnHtml}${td.immediateHtml}${td.candidateHtml}${myTrackBoardHtml}`;" in fn
+    side = fn[fn.index("docSide.innerHTML ="):]
+    order = [side.index(x) for x in ("renderJonggaForwardCard", "renderSectorAccelCard",
+                                     "renderLowpointHtml", "renderUpcomingCard")]
+    assert order == sorted(order)

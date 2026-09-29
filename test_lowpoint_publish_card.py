@@ -263,8 +263,8 @@ def test_card_stale_badge_text():
         "console.log(JSON.stringify({w: lowpointSectionStatus(s,'week'),"
         " m: lowpointSectionStatus(s,'month'),"
         " fresh: lowpointSectionStatus({bar_date:'x',rows:[],stale:false},'week')}));")
-    assert got["w"]["stale"] is True and got["w"]["staleText"] == "⚠ 이번 주 미실행"
-    assert got["m"]["staleText"] == "⚠ 이번 달 미실행"
+    assert got["w"]["stale"] is True and got["w"]["staleText"] == "이번 주 미실행(기준봉 낡음)"
+    assert got["m"]["staleText"] == "이번 달 미실행(기준봉 낡음)"
     assert got["fresh"]["staleText"] == ""
 
 
