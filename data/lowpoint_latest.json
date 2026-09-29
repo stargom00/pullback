@@ -486,10 +486,10 @@
    "KOSDAQ": {
     "admin_excluded": 134,
     "failed": 0,
-    "fetched": 1684,
-    "short": 83,
+    "fetched": 1686,
+    "short": 85,
     "stale": 0,
-    "universe": 1684
+    "universe": 1686
    },
    "KOSPI": {
     "admin_excluded": 38,
@@ -501,11 +501,11 @@
    },
    "US": {
     "admin_excluded": 0,
-    "failed": 16,
-    "fetched": 2104,
-    "short": 72,
-    "stale": 11,
-    "universe": 2120
+    "failed": 1,
+    "fetched": 5617,
+    "short": 433,
+    "stale": 7,
+    "universe": 5618
    }
   },
   "markets": [
@@ -582,14 +582,135 @@
    },
    {
     "bar_date": "2026-09-25",
-    "close0": 35.75,
-    "close1": 35.51,
-    "code": "NKE",
+    "close0": 3.65,
+    "close1": 3.4,
+    "code": "ADXN",
     "market": "US",
-    "name": "Nike Inc.",
-    "rsi0": 29.55,
-    "rsi1": 28.7,
-    "rsi2": 30.54
+    "name": "Addex Therapeutics Ltd - American Depositary Shares",
+    "rsi0": 32.64,
+    "rsi1": 29.59,
+    "rsi2": 30.05
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 5.5,
+    "close1": 4.8,
+    "code": "ATGL",
+    "market": "US",
+    "name": "Alpha Technology Group Limited - Class A Ordinary Shares",
+    "rsi0": 32.52,
+    "rsi1": 29.44,
+    "rsi2": 30.36
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 0.75,
+    "close1": 0.73,
+    "code": "FLNA",
+    "market": "US",
+    "name": "Filana Therapeutics, Inc. - Common Stock",
+    "rsi0": 30.27,
+    "rsi1": 29.2,
+    "rsi2": 30.06
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 1.41,
+    "close1": 1.36,
+    "code": "IMNN",
+    "market": "US",
+    "name": "Imunon, Inc. - Common Stock",
+    "rsi0": 30.74,
+    "rsi1": 29.05,
+    "rsi2": 30.57
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 2.7,
+    "close1": 2.66,
+    "code": "INTJ",
+    "market": "US",
+    "name": "Intelligent Group Limited - Class A Ordinary Shares",
+    "rsi0": 29.07,
+    "rsi1": 28.62,
+    "rsi2": 30.13
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 0.73,
+    "close1": 0.6,
+    "code": "INV",
+    "market": "US",
+    "name": "Innventure, Inc. - Common Stock",
+    "rsi0": 31.21,
+    "rsi1": 29.93,
+    "rsi2": 31.35
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 2.03,
+    "close1": 1.92,
+    "code": "IOTR",
+    "market": "US",
+    "name": "iOThree Limited - Ordinary Shares",
+    "rsi0": 31.05,
+    "rsi1": 29.53,
+    "rsi2": 32.2
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 4.99,
+    "close1": 4.88,
+    "code": "MOMO",
+    "market": "US",
+    "name": "Hello Group Inc.  - American Depositary Shares",
+    "rsi0": 32.95,
+    "rsi1": 29.59,
+    "rsi2": 30.49
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 1.99,
+    "close1": 1.95,
+    "code": "MRLN",
+    "market": "US",
+    "name": "Merlin, Inc. - Common Stock",
+    "rsi0": 29.34,
+    "rsi1": 29.03,
+    "rsi2": 32.49
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 1.47,
+    "close1": 1.31,
+    "code": "NXTS",
+    "market": "US",
+    "name": "Nexentis Technologies Inc. - Common Stock",
+    "rsi0": 30.36,
+    "rsi1": 29.26,
+    "rsi2": 30.12
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 10.3,
+    "close1": 9.42,
+    "code": "SAMG",
+    "market": "US",
+    "name": "Silvercrest Asset Management Group Inc. - Common Stock",
+    "rsi0": 42.76,
+    "rsi1": 29.55,
+    "rsi2": 33.93
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 13.31,
+    "close1": 13.2,
+    "code": "ZUMZ",
+    "market": "US",
+    "name": "Zumiez Inc. - Common Stock",
+    "rsi0": 29.09,
+    "rsi1": 28.54,
+    "rsi2": 31.26
    },
    {
     "bar_date": "2026-09-25",
@@ -597,10 +718,54 @@
     "close1": 43.59,
     "code": "APTV",
     "market": "US",
-    "name": "Aptiv PLC",
+    "name": "Aptiv PLC Ordinary Shares",
     "rsi0": 31.39,
     "rsi1": 28.85,
     "rsi2": 30.56
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 25.77,
+    "close1": 24.22,
+    "code": "BBW",
+    "market": "US",
+    "name": "Build-A-Bear Workshop, Inc. Common Stock",
+    "rsi0": 33.52,
+    "rsi1": 29.85,
+    "rsi2": 33.28
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 3.1,
+    "close1": 2.88,
+    "code": "BGS",
+    "market": "US",
+    "name": "B&G Foods, Inc. Common Stock",
+    "rsi0": 34.75,
+    "rsi1": 28.29,
+    "rsi2": 31.89
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 31.94,
+    "close1": 30.48,
+    "code": "CSV",
+    "market": "US",
+    "name": "Carriage Services, Inc. Common Stock",
+    "rsi0": 34.68,
+    "rsi1": 29.84,
+    "rsi2": 33.02
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 4.11,
+    "close1": 3.93,
+    "code": "ESRT",
+    "market": "US",
+    "name": "Empire State Realty Trust, Inc. Class A Common Stock",
+    "rsi0": 32.4,
+    "rsi1": 28.08,
+    "rsi2": 31.34
    },
    {
     "bar_date": "2026-09-25",
@@ -608,10 +773,21 @@
     "close1": 359.23,
     "code": "LII",
     "market": "US",
-    "name": "Lennox International Inc.",
+    "name": "Lennox International, Inc. Common Stock",
     "rsi0": 33.62,
     "rsi1": 29.96,
     "rsi2": 30.7
+   },
+   {
+    "bar_date": "2026-09-25",
+    "close0": 35.75,
+    "close1": 35.51,
+    "code": "NKE",
+    "market": "US",
+    "name": "Nike, Inc. Common Stock",
+    "rsi0": 29.55,
+    "rsi1": 28.7,
+    "rsi2": 30.54
    },
    {
     "bar_date": "2026-09-25",
@@ -619,7 +795,7 @@
     "close1": 26.76,
     "code": "VVV",
     "market": "US",
-    "name": "Valvoline Inc.",
+    "name": "Valvoline Inc. Common Stock",
     "rsi0": 36.55,
     "rsi1": 29.08,
     "rsi2": 35.99
@@ -627,8 +803,8 @@
   ],
   "run_stamp": {
    "local_tz_utc_offset_hours": 13.0,
-   "run_at_kst": "2026-09-28 06:09:33 KST",
-   "run_at_local": "2026-09-28 10:09:33 "
+   "run_at_kst": "2026-09-29 19:34:29 KST",
+   "run_at_local": "2026-09-29 23:34:29 "
   }
  }
 }
