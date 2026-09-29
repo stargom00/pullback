@@ -46,3 +46,8 @@ kr_mcap_allowed.json
 
 # 저점종목 스크린 출력 CSV (로컬 산출물)
 scripts/screens/out/
+
+# 저점종목 스크린 전용 US 상장목록 캐시(Nasdaq Trader 원본 13,280행, 1.9MB) —
+# --refresh-universe로 언제든 다시 받을 수 있는 외부 데이터 스냅샷이라 커밋하지 않는다
+# (2026-09-29 사용자 결정).
+scripts/screens/cache/
