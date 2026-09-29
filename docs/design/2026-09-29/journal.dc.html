@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>내 일지</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0d1015;font-family:'IBM Plex Sans KR',system-ui,sans-serif;color:#e7e9ee}
+a{color:#e8a25c;text-decoration:none}a:hover{color:#f3bd83}
+.num{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1760px; box-sizing: border-box; background: #0d1015; display: flex; flex-direction: column;">
+
+<header style="height: 64px; box-sizing: border-box; padding: 0 40px; display: flex; align-items: center; gap: 28px; border-bottom: 1px solid #1f242d;">
+<div style="display: flex; align-items: baseline; gap: 8px;">
+<span style="font-size: 17px; font-weight: 700; letter-spacing: -0.2px;">눌림목 스캐너</span>
+<span class="num" style="font-size: 11px; color: #8e97a6;">v5.293</span>
+</div>
+<nav aria-label="메인" style="display: flex; align-items: center; gap: 2px;">
+<a href="Main.dc.html" style="padding: 10px 14px; border-radius: 8px; color: #b4bbc7; font-size: 14px;">홈</a>
+<a href="#" style="padding: 10px 14px; border-radius: 8px; color: #b4bbc7; font-size: 14px;">US눌림목</a>
+<a href="#" style="padding: 10px 14px; border-radius: 8px; color: #b4bbc7; font-size: 14px;">ABC</a>
+<a href="#" style="padding: 10px 14px; border-radius: 8px; color: #b4bbc7; font-size: 14px;">추세전환</a>
+<button type="button" style="padding: 10px 14px; border-radius: 8px; color: #b4bbc7; font-size: 14px; background: none; border: 0; display: flex; align-items: center; gap: 4px;">더보기
+<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+</button>
+</nav>
+<div style="width: 1px; height: 20px; background: #262c36;"></div>
+<nav aria-label="기록" style="display: flex; gap: 2px;">
+<a href="#" style="padding: 10px 12px; color: #8e97a6; font-size: 13px;">업종/테마</a>
+<a href="#" style="padding: 10px 12px; color: #8e97a6; font-size: 13px;">마감정리</a>
+<a href="#" style="padding: 10px 12px; border-radius: 8px; background: #1b2029; color: #ffffff; font-size: 13px; font-weight: 600;">일지</a>
+</nav>
+<div style="flex-grow: 1;"></div>
+<div role="group" aria-label="시장" style="display: flex; background: #151920; border: 1px solid #232933; border-radius: 9px; padding: 3px;">
+<button type="button" style="padding: 7px 14px; border: 0; border-radius: 6px; background: none; color: #8e97a6; font-size: 13px;">전체</button>
+<button type="button" style="padding: 7px 14px; border: 0; border-radius: 6px; background: #262c37; color: #ffffff; font-size: 13px; font-weight: 600;">한국</button>
+<button type="button" style="padding: 7px 14px; border: 0; border-radius: 6px; background: none; color: #8e97a6; font-size: 13px;">미국</button>
+</div>
+</header>
+
+<main style="flex-grow: 1; box-sizing: border-box; padding: 32px 40px 48px; display: flex; flex-direction: column; gap: 24px;">
+
+<div style="display: flex; align-items: center; gap: 12px;">
+<h1 style="margin: 0; font-size: 24px; font-weight: 700;">내 일지</h1>
+<span style="font-size: 13px; color: #8e97a6;">신호 추적 기록 · 실제 체결과 다를 수 있음</span>
+<div style="flex-grow: 1;"></div>
+<button type="button" style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid #2c333e; background: #151920; color: #e7e9ee; font-size: 13px;">현재가 갱신</button>
+<button type="button" style="height: 44px; padding: 0 18px; border-radius: 10px; border: 0; background: {{accent}}; color: #1a1206; font-size: 14px; font-weight: 700;">+ 기록 추가</button>
+<button type="button" aria-label="더보기: CSV 내보내기, 급락 알림, 전체 삭제" style="width: 44px; height: 44px; border-radius: 10px; border: 1px solid #2c333e; background: #151920; color: #b4bbc7; display: flex; align-items: center; justify-content: center;">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg>
+</button>
+</div>
+
+<section aria-label="리스크" style="background: #141820; border: 1px solid #1f252f; border-radius: 16px; display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr 1.2fr; overflow: hidden;">
+<div style="padding: 18px 22px; display: flex; flex-direction: column; gap: 8px; border-right: 1px solid #1f252f;">
+<span style="font-size: 12px; color: #8e97a6;">오픈 리스크</span>
+<span class="num" style="font-size: 22px; font-weight: 600;">1.99R</span>
+<div style="height: 4px; border-radius: 2px; background: #232933;"><div style="width: 100%; height: 4px; border-radius: 2px; background: #e5484d;"></div></div>
+</div>
+<div style="padding: 18px 22px; display: flex; flex-direction: column; gap: 8px; border-right: 1px solid #1f252f;">
+<span style="font-size: 12px; color: #8e97a6;">주간 · 한도 −3R</span>
+<span class="num" style="font-size: 22px; font-weight: 600;">0R</span>
+</div>
+<div style="padding: 18px 22px; display: flex; flex-direction: column; gap: 8px; border-right: 1px solid #1f252f;">
+<span style="font-size: 12px; color: #8e97a6;">월간 · 한도 −6R</span>
+<span class="num" style="font-size: 22px; font-weight: 600; color: #f2848c;">+32.13R</span>
+</div>
+<div style="padding: 18px 22px; display: flex; flex-direction: column; gap: 8px; border-right: 1px solid #1f252f;">
+<span style="font-size: 12px; color: #8e97a6;">연속 손실</span>
+<span style="display: flex; align-items: baseline; gap: 8px;"><span class="num" style="font-size: 22px; font-weight: 600; color: #e9c46a;">7패</span><span style="font-size: 12px; color: #e9c46a;">R ½ 적용</span></span>
+</div>
+<div style="padding: 18px 22px; display: flex; flex-direction: column; gap: 8px;">
+<span style="font-size: 12px; color: #8e97a6;">투입 / 현금</span>
+<span class="num" style="font-size: 22px; font-weight: 600;">59만 <span style="color: #8e97a6; font-size: 16px;">/ 1,441만</span></span>
+</div>
+</section>
+
+<div style="display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-radius: 12px; background: #1d1417; border: 1px solid #3a2226;">
+<span style="width: 8px; height: 8px; border-radius: 50%; background: #e5484d;"></span>
+<span style="font-size: 14px; color: #f2b8bd;"><b style="color: #ffd5d8;">시장 게이트 조정</b> · 신규 진입 0, 현금 유지</span>
+<div style="flex-grow: 1;"></div>
+<a href="#" style="font-size: 12px;">R 설정</a>
+</div>
+
+<div style="display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr); gap: 24px; align-items: start;">
+
+<section aria-label="기록" style="background: #141820; border: 1px solid #1f252f; border-radius: 16px; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 16px; padding: 18px 24px; border-bottom: 1px solid #1f252f;">
+<div role="tablist" aria-label="상태" style="display: flex; background: #0f1318; border: 1px solid #232933; border-radius: 10px; padding: 3px;">
+<sc-for list="{{statusTabs}}" as="t" hint-placeholder-count="4">
+<button type="button" role="tab" style="{{t.style}}">{{t.label}} <span class="num" style="opacity: 0.7;">{{t.n}}</span></button>
+</sc-for>
+</div>
+<div style="flex-grow: 1;"></div>
+<div style="display: flex; gap: 6px;">
+<sc-for list="{{cats}}" as="c" hint-placeholder-count="6">
+<button type="button" style="{{c.style}}">{{c.label}}</button>
+</sc-for>
+</div>
+</div>
+<div style="display: grid; grid-template-columns: 0.9fr 1.5fr 1.3fr 1fr 1fr; padding: 10px 24px; font-size: 12px; color: #8e97a6; border-bottom: 1px solid #1f252f;">
+<span>날짜</span><span>종목</span><span class="num">진입 → 손절</span><span>손익</span><span>근거</span>
+</div>
+<div style="display: grid; grid-template-columns: 0.9fr 1.5fr 1.3fr 1fr 1fr; align-items: center; padding: 18px 24px; border-bottom: 1px solid #1a1f27;">
+<span class="num" style="font-size: 13px; color: #b4bbc7;">09-22</span>
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<span style="font-size: 15px; font-weight: 600;">대한항공</span>
+<span style="font-size: 12px; color: #8e97a6;"><span class="num">003490</span> · 재량 · 수동</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<span class="num" style="font-size: 14px;">31,450 → 30,000</span>
+<span style="font-size: 12px; color: #8e97a6;">진입가는 참고가</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<span style="font-size: 13px; color: #e9c46a;">R 미산출</span>
+<a href="#" style="font-size: 12px;">체결가 입력</a>
+</div>
+<div style="display: flex; align-items: center; justify-content: space-between;">
+<span style="font-size: 13px;">종가베팅</span>
+<button type="button" aria-label="행 메뉴" style="width: 36px; height: 36px; border-radius: 8px; border: 0; background: none; color: #8e97a6;">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg>
+</button>
+</div>
+</div>
+<div style="padding: 14px 24px; font-size: 12px; color: #8e97a6;">행 메뉴: 부분 청산 · 종료 · 대기로 · 편집 · 삭제</div>
+</section>
+
+<section aria-label="카테고리 성적" style="background: #141820; border: 1px solid #1f252f; border-radius: 16px; padding: 20px 0 6px;">
+<div style="display: flex; justify-content: space-between; align-items: baseline; padding: 0 22px 12px;">
+<span style="font-size: 15px; font-weight: 700;">카테고리 성적</span>
+<span style="font-size: 11px; color: #8e97a6;">실체결 · 참고가 분리</span>
+</div>
+<div style="display: grid; grid-template-columns: 1.1fr 0.6fr 1.2fr 1.2fr; padding: 8px 22px; font-size: 11px; color: #8e97a6; border-top: 1px solid #1f252f; border-bottom: 1px solid #1f252f;">
+<span>카테고리</span><span style="text-align: right;">종료</span><span style="text-align: right;">실체결</span><span style="text-align: right;">참고가</span>
+</div>
+<sc-for list="{{catStats}}" as="s" hint-placeholder-count="5">
+<div style="display: grid; grid-template-columns: 1.1fr 0.6fr 1.2fr 1.2fr; align-items: center; padding: 0 22px; min-height: 52px; border-bottom: 1px solid #1a1f27; font-size: 13px;">
+<span style="font-weight: 600;">{{s.name}}</span>
+<span class="num" style="text-align: right; color: #b4bbc7;">{{s.closed}}</span>
+<span class="num" style="text-align: right; color: {{s.realColor}};">{{s.real}}</span>
+<span class="num" style="text-align: right; color: #8e97a6;">{{s.ref}}</span>
+</div>
+</sc-for>
+<div style="padding: 12px 22px; font-size: 11px; color: #8e97a6;">추세추종 실체결은 n=2 · 판단 보류</div>
+</section>
+
+</div>
+
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px;">
+
+<section aria-label="기록 달력" style="background: #141820; border: 1px solid #1f252f; border-radius: 16px; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px;">
+<div style="display: flex; align-items: center; gap: 10px;">
+<span style="font-size: 15px; font-weight: 700;">2026년 9월</span>
+<span style="font-size: 12px; color: #8e97a6;">날짜별 기록 수</span>
+<div style="flex-grow: 1;"></div>
+<button type="button" aria-label="이전 달" style="width: 36px; height: 36px; border-radius: 8px; border: 1px solid #2c333e; background: none; color: #b4bbc7;">‹</button>
+<button type="button" aria-label="다음 달" style="width: 36px; height: 36px; border-radius: 8px; border: 1px solid #2c333e; background: none; color: #b4bbc7;">›</button>
+</div>
+<div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; font-size: 11px; color: #8e97a6; text-align: center;">
+<span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px;">
+<sc-for list="{{days}}" as="d" hint-placeholder-count="35">
+<div style="{{d.style}}">
+<span class="num" style="font-size: 11px; color: {{d.dayColor}};">{{d.day}}</span>
+<span class="num" style="font-size: 15px; font-weight: 600;">{{d.count}}</span>
+</div>
+</sc-for>
+</div>
+<span style="font-size: 12px; color: #8e97a6;">날짜를 누르면 그날 종목 목록</span>
+</section>
+
+<section aria-label="R 누적" style="background: #141820; border: 1px solid #1f252f; border-radius: 16px; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px;">
+<div style="display: flex; align-items: baseline; gap: 10px;">
+<span style="font-size: 15px; font-weight: 700;">R 누적</span>
+<span style="font-size: 12px; color: #8e97a6;">종료 64건 · 관찰 제외</span>
+</div>
+<div style="display: flex; gap: 32px;">
+<div style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 12px; color: #8e97a6;">누적</span><span class="num" style="font-size: 26px; font-weight: 600; color: #f2848c;">+18.97R</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 12px; color: #8e97a6;">최대 낙폭</span><span class="num" style="font-size: 26px; font-weight: 600; color: #6fa8ff;">−23.33R</span></div>
+</div>
+<svg width="100%" height="200" viewBox="0 0 600 200" preserveAspectRatio="none" aria-label="R 누적 곡선">
+<line x1="0" y1="120" x2="600" y2="120" stroke="#2a303b" stroke-dasharray="4 4"></line>
+<polyline fill="none" stroke="{{accent}}" stroke-width="2.5" stroke-linejoin="round" points="0,118 20,121 40,114 70,116 100,120 130,124 160,130 190,136 220,142 250,146 280,150 310,156 330,160 345,166 360,148 380,142 400,132 430,134 460,134 480,128 500,122 520,120 540,124 560,84 575,20 600,30"></polyline>
+</svg>
+</section>
+
+</div>
+
+<section aria-label="신호 검증" style="background: #141820; border: 1px solid #1f252f; border-radius: 16px; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px;">
+<div style="display: flex; align-items: baseline; gap: 10px;">
+<span style="font-size: 15px; font-weight: 700;">신호 검증</span>
+<span style="font-size: 12px; color: #8e97a6;">종료 71건 · 신호가 실제로 맞았는지</span>
+<div style="flex-grow: 1;"></div>
+<button type="button" style="height: 36px; padding: 0 12px; border-radius: 8px; border: 1px solid #2c333e; background: none; color: #b4bbc7; font-size: 12px;">경고 항목별 성과 펼치기</button>
+</div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px;">
+<div>
+<div style="display: grid; grid-template-columns: 1.4fr 0.8fr 0.8fr 0.8fr; padding: 8px 0; font-size: 11px; color: #8e97a6; border-bottom: 1px solid #1f252f;"><span>진입 신호등</span><span style="text-align: right;">건수</span><span style="text-align: right;">승률</span><span style="text-align: right;">평균</span></div>
+<sc-for list="{{lights}}" as="l" hint-placeholder-count="3">
+<div style="display: grid; grid-template-columns: 1.4fr 0.8fr 0.8fr 0.8fr; align-items: center; height: 44px; border-bottom: 1px solid #1a1f27; font-size: 13px;">
+<span style="display: flex; align-items: center; gap: 8px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{l.dot}};"></span>{{l.name}}</span>
+<span class="num" style="text-align: right;">{{l.n}}</span>
+<span class="num" style="text-align: right;">{{l.win}}</span>
+<span class="num" style="text-align: right; color: {{l.color}};">{{l.avg}}</span>
+</div>
+</sc-for>
+</div>
+<div>
+<div style="display: grid; grid-template-columns: 1.4fr 0.8fr 0.8fr 0.8fr; padding: 8px 0; font-size: 11px; color: #8e97a6; border-bottom: 1px solid #1f252f;"><span>AVWAP 존</span><span style="text-align: right;">건수</span><span style="text-align: right;">승률</span><span style="text-align: right;">평균</span></div>
+<sc-for list="{{avwap}}" as="l" hint-placeholder-count="3">
+<div style="display: grid; grid-template-columns: 1.4fr 0.8fr 0.8fr 0.8fr; align-items: center; height: 44px; border-bottom: 1px solid #1a1f27; font-size: 13px;">
+<span>{{l.name}}</span>
+<span class="num" style="text-align: right;">{{l.n}}</span>
+<span class="num" style="text-align: right;">{{l.win}}</span>
+<span class="num" style="text-align: right; color: {{l.color}};">{{l.avg}}</span>
+</div>
+</sc-for>
+</div>
+</div>
+<span style="font-size: 12px; color: #8e97a6;">표본 20건 미만 · 관심 신호</span>
+</section>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#e8a25c","options":["#e8a25c","#7aa7ff","#63c89b"]},"$preview":{"width":1440,"height":1760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent ?? '#e8a25c';
+    const up = '#f2848c', down = '#6fa8ff';
+    const tabBase = 'padding: 8px 14px; border: 0; border-radius: 7px; font-size: 13px; min-height: 36px; ';
+    const statusTabs = [
+      { label: '진입', n: 1, on: true }, { label: '대기', n: 14 }, { label: '종료', n: 64 }, { label: '무산', n: 45 }
+    ].map(t => ({ ...t, style: tabBase + (t.on ? 'background: #262c37; color: #ffffff; font-weight: 600;' : 'background: none; color: #8e97a6;') }));
+    const pillBase = 'height: 32px; padding: 0 12px; border-radius: 16px; font-size: 12px; ';
+    const cats = ['전체', '추세', '단타', '재량', '저점', '관찰'].map((c, i) => ({
+      label: c, style: pillBase + (i === 0 ? 'border: 1px solid ' + accent + '; background: #2a2114; color: ' + accent + '; font-weight: 600;' : 'border: 1px solid #2c333e; background: none; color: #b4bbc7;')
+    }));
+    const catStats = [
+      { name: '추세추종', closed: '56', real: '+18.06R', realColor: up, ref: '20% · −0.44R' },
+      { name: '재량', closed: '3', real: '—', realColor: '#8e97a6', ref: '0% · −1.00R' },
+      { name: '단타', closed: '0', real: '—', realColor: '#8e97a6', ref: '—' },
+      { name: '저점', closed: '0', real: '—', realColor: '#8e97a6', ref: '—' },
+      { name: '관찰', closed: '37', real: '통계 제외', realColor: '#8e97a6', ref: '' }
+    ];
+    const counts = { 7: 4, 8: 6, 11: 2, 12: 1, 14: 2, 22: 1, 23: 1, 27: 14 };
+    const days = [];
+    for (let i = 0; i < 35; i++) {
+      const d = i - 1;
+      const inMonth = d >= 1 && d <= 30;
+      const c = inMonth ? (counts[d] || 0) : 0;
+      const today = d === 29;
+      const bg = !inMonth ? 'transparent' : c >= 10 ? '#5a3d1c' : c >= 4 ? '#3f2d17' : c >= 1 ? '#2a2114' : '#171b22';
+      days.push({
+        day: inMonth ? String(d) : '',
+        count: c ? String(c) : '',
+        dayColor: (i % 7 === 0) ? '#f2848c' : '#8e97a6',
+        style: 'height: 52px; border-radius: 8px; padding: 6px 8px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; background: ' + bg + ';' + (today ? ' outline: 1.5px solid ' + accent + ';' : '')
+      });
+    }
+    const lights = [
+      { name: '진입 양호', dot: '#63c89b', n: '15', win: '27%', avg: '+0.59R', color: up },
+      { name: '주의', dot: '#d9a92e', n: '7', win: '29%', avg: '+0.82R', color: up },
+      { name: '자제', dot: '#e5484d', n: '2', win: '0%', avg: '−0.50R', color: down }
+    ];
+    const avwap = [
+      { name: 'AVWAP 건강', n: '16', win: '25%', avg: '+0.41R', color: up },
+      { name: 'AVWAP 근처', n: '5', win: '40%', avg: '+1.61R', color: up },
+      { name: 'AVWAP 아래', n: '1', win: '0%', avg: '−1.00R', color: down }
+    ];
+    return { accent, statusTabs, cats, catStats, days, lights, avwap };
+  }
+}
+</script>
+</body>
+</html>

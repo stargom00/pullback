@@ -32,6 +32,7 @@ v5.294 [헤더·홈·내 일지 재디자인] 시안 docs/design/2026-09-29/(hom
     기록 표 6열(행 ⋯ 메뉴에 기존 상태 전환·편집·삭제 전부) + 카테고리 성적 표(기존
     statcard 값 재배치) → 달력(기록 수 색 농도·날짜 클릭 목록) + R 누적 → 신호 검증
     (신호등·AVWAP 나란히, 경고 항목·페이퍼는 접기). 카테고리 칩에 저점 추가(필터만).
+    [홈 스캔 메타] /api/calendar에 last_scan(마지막 스캔 시각·종목수, 메모리 스캔 캐시 읽기 전용, 없으면 null) 추가 — 헤더 띠가 홈 진입 시에도 scanMetaText()로 채워진다.
 v5.293 [저점종목 홈 카드] 주간·월간 저점종목(주봉/월봉 RSI(14) 30 하향돌파 +
     직전봉 대비 반등) 결과를 캘린더 홈에 "📉 저점종목 (관심 신호 · 측정 전)"
     카드로 표시. **계산은 맥 로컬 스크립트, 앱은 표시만**(사용자 지시) —
@@ -17639,6 +17640,26 @@ def _lowpoint_view(now: "datetime | None" = None) -> dict | None:
     return out
 
 
+def _last_scan_meta() -> dict | None:
+    """v5.294(사용자 지시 — 홈 헤더 스캔 메타): 마지막 스캔의 시각·종목수를 **이미
+    메모리에 있는** `/api/scan` 결과 캐시(`_cache["{market}:{mode}"]`)에서만 읽는다.
+    새 스캔·새 fetch를 절대 유발하지 않는다. 디스크 캐시(datacache_*.pkl)는 시세
+    번들이라 스캔 시각·종목수가 없어 대상이 아니다. 캐시가 비었으면(재시작 직후 등)
+    None — 화면은 빈칸으로 둔다(값을 지어내지 않는다).
+    가장 최근(ts 최대) 항목 하나를 고른다. pending 응답은 캐시에 안 들어가지만
+    (scan()이 저장 전에 반환) 방어적으로 generated_at·scanned가 있는 것만 본다."""
+    best = None
+    for v in list(_cache.values()):
+        if not isinstance(v, dict) or not v.get("generated_at") or not v.get("scanned"):
+            continue
+        if best is None or (v.get("ts") or 0) > (best.get("ts") or 0):
+            best = v
+    if best is None:
+        return None
+    return {"generated_at": best["generated_at"], "scanned": best["scanned"],
+            "fetched": best.get("fetched"), "market": best.get("market"), "mode": best.get("mode")}
+
+
 @app.get("/api/calendar")
 async def get_calendar():
     """캘린더 탭 — 로그인 후 기본 화면(v5.108). v5.110(사용자 지시)에서
@@ -18580,6 +18601,8 @@ async def get_calendar():
         # v5.293(사용자 지시): 📉 저점종목 — 로컬 스크립트가 게시한 파일을
         # 읽기만 한다(새 계산·새 fetch 없음, 이 엔드포인트의 원칙 그대로).
         "lowpoint": lowpoint,
+        # v5.294(사용자 지시): 홈 헤더 띠 스캔 메타 — 메모리 스캔 캐시 읽기 전용, 없으면 None.
+        "last_scan": _last_scan_meta(),
     }))
 
 

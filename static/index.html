@@ -5197,6 +5197,9 @@ async function onEnterCalendarTab() {
     // "페이지 최초 로드 시 딱 한 번" 문제의 근본 수정). 수동 클릭 이후엔
     // userMarketOverride가 서버 기본값을 덮어쓰지 않게 막는다.
     if (!userMarketOverride && _calendarData.market_session) setMarket(_calendarData.market_session);
+    // v5.294: 헤더 띠 스캔 메타 — 스캔 탭과 같은 표시 함수(scanMetaText). 서버가
+    // last_scan=null(메모리 스캔 캐시 없음)을 주면 기존 표시를 건드리지 않는다.
+    if (_calendarData.last_scan) { const sm = document.getElementById('scanMeta'); if (sm) sm.textContent = scanMetaText(_calendarData.last_scan); }
     // v5.274: 캘린더 진입 시 돌던 자동 승격(_promoteConfirmCloseEntries)과
     // 자동 보관(_archiveExpiredPending)을 **제거**했다. 상태 전환은 전부
     // 사용자 클릭으로만 일어난다(자동 진입 제거, 사용자 지시).

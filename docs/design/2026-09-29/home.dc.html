@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>스캐너 홈</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0d1015;font-family:'IBM Plex Sans KR',system-ui,sans-serif;color:#e7e9ee}
+a{color:#e8a25c;text-decoration:none}a:hover{color:#f3bd83}
+.num{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1260px; box-sizing: border-box; background: #0d1015; display: flex; flex-direction: column;">
+
+<header style="height: 64px; box-sizing: border-box; padding: 0 40px; display: flex; align-items: center; gap: 28px; border-bottom: 1px solid #1f242d;">
+<div style="display: flex; align-items: baseline; gap: 8px;">
+<span style="font-size: 17px; font-weight: 700; letter-spacing: -0.2px;">눌림목 스캐너</span>
+<span class="num" style="font-size: 11px; color: #8e97a6;">v5.293</span>
+</div>
+<nav aria-label="메인" style="display: flex; align-items: center; gap: 2px;">
+<a href="#" style="padding: 10px 14px; border-radius: 8px; background: #1b2029; color: #ffffff; font-size: 14px; font-weight: 600;">홈</a>
+<a href="#" style="padding: 10px 14px; border-radius: 8px; color: #b4bbc7; font-size: 14px;">US눌림목</a>
+<a href="#" style="padding: 10px 14px; border-radius: 8px; color: #b4bbc7; font-size: 14px;">ABC</a>
+<a href="#" style="padding: 10px 14px; border-radius: 8px; color: #b4bbc7; font-size: 14px;">추세전환</a>
+<button type="button" style="padding: 10px 14px; border-radius: 8px; color: #b4bbc7; font-size: 14px; background: none; border: 0; display: flex; align-items: center; gap: 4px;">더보기
+<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+</button>
+</nav>
+<div style="width: 1px; height: 20px; background: #262c36;"></div>
+<nav aria-label="기록" style="display: flex; gap: 2px;">
+<a href="#" style="padding: 10px 12px; color: #8e97a6; font-size: 13px;">업종/테마</a>
+<a href="#" style="padding: 10px 12px; color: #8e97a6; font-size: 13px;">마감정리</a>
+<a href="Journal.dc.html" style="padding: 10px 12px; color: #8e97a6; font-size: 13px;">일지</a>
+</nav>
+<div style="flex-grow: 1;"></div>
+<div role="group" aria-label="시장" style="display: flex; background: #151920; border: 1px solid #232933; border-radius: 9px; padding: 3px;">
+<button type="button" style="padding: 7px 14px; border: 0; border-radius: 6px; background: none; color: #8e97a6; font-size: 13px;">전체</button>
+<button type="button" style="padding: 7px 14px; border: 0; border-radius: 6px; background: #262c37; color: #ffffff; font-size: 13px; font-weight: 600;">한국</button>
+<button type="button" style="padding: 7px 14px; border: 0; border-radius: 6px; background: none; color: #8e97a6; font-size: 13px;">미국</button>
+</div>
+<button type="button" style="height: 44px; padding: 0 16px; border-radius: 9px; border: 1px solid #2c333e; background: #151920; color: #e7e9ee; font-size: 13px; display: flex; align-items: center; gap: 8px;">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"></path><path d="M21 4v5h-5"></path></svg>
+다시 스캔
+</button>
+</header>
+
+<div style="height: 40px; box-sizing: border-box; padding: 0 40px; display: flex; align-items: center; gap: 12px; font-size: 12px; color: #8e97a6; border-bottom: 1px solid #1f242d;">
+<span>KR 히트는 관심 신호 · 진입 근거는 <b style="color: #c9ced7; font-weight: 600;">KR 종가베팅</b>과 <b style="color: #c9ced7; font-weight: 600;">US 눌림목</b>뿐</span>
+<a href="#" style="font-size: 12px;">근거</a>
+<div style="flex-grow: 1;"></div>
+<span class="num">스캔 09-29 18:39 KST · 3,241 / 3,266종목</span>
+</div>
+
+<main style="flex-grow: 1; box-sizing: border-box; padding: 28px 40px 40px; display: flex; flex-direction: column; gap: 24px;">
+
+<section aria-label="시장" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px;">
+<div style="background: #141820; border: 1px solid #1f252f; border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; justify-content: space-between; align-items: center;">
+<span style="font-size: 13px; color: #b4bbc7;">코스피</span>
+<span style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #f2848c;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #e5484d;"></span>약세</span>
+</div>
+<div style="display: flex; align-items: baseline; gap: 10px;">
+<span class="num" style="font-size: 26px; font-weight: 600;">6,870.81</span>
+<span class="num" style="font-size: 13px; color: #6fa8ff;">−0.27%</span>
+</div>
+<div style="font-size: 12px; color: #8e97a6;">분산일 5 · FTD</div>
+</div>
+<div style="background: #141820; border: 1px solid #1f252f; border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; justify-content: space-between; align-items: center;">
+<span style="font-size: 13px; color: #b4bbc7;">코스닥</span>
+<span style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #e9c46a;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #d9a92e;"></span>혼조</span>
+</div>
+<div style="display: flex; align-items: baseline; gap: 10px;">
+<span class="num" style="font-size: 26px; font-weight: 600;">849.80</span>
+<span class="num" style="font-size: 13px; color: #f2848c;">+0.38%</span>
+</div>
+<div style="font-size: 12px; color: #8e97a6;">분산일 4 · FTD</div>
+</div>
+<div style="background: #141820; border: 1px solid #1f252f; border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; justify-content: space-between; align-items: center;">
+<span style="font-size: 13px; color: #b4bbc7;">나스닥</span>
+<span style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #e9c46a;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #d9a92e;"></span>혼조</span>
+</div>
+<div style="display: flex; align-items: baseline; gap: 10px;">
+<span class="num" style="font-size: 26px; font-weight: 600;">26,820.38</span>
+<span class="num" style="font-size: 13px; color: #6fa8ff;">−0.92%</span>
+</div>
+<div style="font-size: 12px; color: #8e97a6;">분산일 4</div>
+</div>
+<div style="background: #141820; border: 1px solid #1f252f; border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px;">
+<div style="display: flex; justify-content: space-between; align-items: center;">
+<span style="font-size: 13px; color: #b4bbc7;">시장 게이트</span>
+<span style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #f2848c;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #e5484d;"></span>종합 약세</span>
+</div>
+<div style="display: flex; justify-content: space-between; font-size: 13px;"><span style="color: #8e97a6;">S&amp;P500</span><span class="num">7,683.69 <span style="color: #6fa8ff;">−0.77%</span></span></div>
+<div style="display: flex; justify-content: space-between; font-size: 13px;"><span style="color: #8e97a6;">닛케이</span><span class="num">65,481.27 <span style="color: #6fa8ff;">−0.60%</span></span></div>
+<div style="display: flex; justify-content: space-between; font-size: 13px;"><span style="color: #8e97a6;">비트코인</span><span class="num">84,267.42 <span style="color: #f2848c;">+0.92%</span></span></div>
+</div>
+</section>
+
+<label style="display: flex; align-items: center; gap: 12px; height: 48px; box-sizing: border-box; padding: 0 18px; background: #141820; border: 1px solid #1f252f; border-radius: 12px;">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8e97a6" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>
+<span style="position: absolute; width: 1px; height: 1px; overflow: hidden;">종목 검색</span>
+<input type="text" placeholder="종목명 또는 코드 — Enter로 진단" style="flex-grow: 1; background: none; border: 0; outline: none; color: #e7e9ee; font-size: 14px; font-family: inherit;">
+<span class="num" style="font-size: 11px; color: #8e97a6; border: 1px solid #2c333e; border-radius: 5px; padding: 2px 6px;">/</span>
+</label>
+
+<div style="display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr); gap: 24px; align-items: start;">
+
+<div style="display: flex; flex-direction: column; gap: 24px;">
+
+<section aria-label="즉시 행동" style="background: #16140f; border: 1px solid {{accentLine}}; border-radius: 16px; padding: 24px 28px; display: flex; flex-direction: column; gap: 20px;">
+<div style="display: flex; align-items: center; gap: 10px;">
+<span style="font-size: 12px; font-weight: 600; color: {{accent}}; letter-spacing: 0.4px;">오늘 할 일</span>
+<span style="font-size: 12px; color: #8e97a6;">즉시 행동 1건</span>
+</div>
+<div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<div style="display: flex; align-items: center; gap: 10px;">
+<span style="font-size: 24px; font-weight: 700;">현대바이오랜드</span>
+<span style="font-size: 12px; padding: 3px 8px; border-radius: 6px; background: #2a2114; color: {{accent}}; font-weight: 600;">종가진입</span>
+</div>
+<span style="font-size: 13px; color: #8e97a6;">KR · 화장품 · 섹터 RS 95</span>
+</div>
+<a href="#" style="height: 44px; padding: 0 18px; display: flex; align-items: center; border-radius: 10px; background: {{accent}}; color: #1a1206; font-size: 14px; font-weight: 700;">일지에 기록</a>
+</div>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: #2a2519; border-radius: 12px; overflow: hidden;">
+<div style="background: #1b1811; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 12px; color: #9a927f;">진입가</span><span class="num" style="font-size: 20px; font-weight: 600;">5,670원</span></div>
+<div style="background: #1b1811; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 12px; color: #9a927f;">수량</span><span class="num" style="font-size: 20px; font-weight: 600;">55주</span></div>
+<div style="background: #1b1811; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 12px; color: #9a927f;">매수</span><span class="num" style="font-size: 20px; font-weight: 600;">19:50–20:00</span></div>
+<div style="background: #1b1811; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 12px; color: #9a927f;">매도</span><span class="num" style="font-size: 20px; font-weight: 600;">익일 09:05</span></div>
+</div>
+<div style="font-size: 12px; color: #9a927f;">시각 KST · 손절 없음(시간 청산) · 수량은 게이트 상한 12% 기준</div>
+</section>
+
+<section aria-label="내 추적" style="background: #141820; border: 1px solid #1f252f; border-radius: 16px; padding: 22px 0 8px;">
+<div style="display: flex; align-items: center; gap: 10px; padding: 0 28px 14px;">
+<span style="font-size: 16px; font-weight: 700;">내 추적</span>
+<span style="font-size: 12px; color: #8e97a6;">14건 · 도달 3</span>
+<div style="flex-grow: 1;"></div>
+<a href="#" style="font-size: 13px;">+ 종목 추가</a>
+</div>
+<div style="display: grid; grid-template-columns: 1.5fr 1fr 1fr 1.1fr 0.7fr 0.9fr; padding: 10px 28px; font-size: 12px; color: #8e97a6; border-top: 1px solid #1f252f; border-bottom: 1px solid #1f252f;">
+<span>종목</span><span style="text-align: right;">현재가</span><span style="text-align: right;">트리거(이상)</span><span style="padding-left: 24px;">상태</span><span>경과</span><span style="text-align: right;"></span>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
+<div style="display: grid; grid-template-columns: 1.5fr 1fr 1fr 1.1fr 0.7fr 0.9fr; align-items: center; padding: 0 28px; height: 52px; border-bottom: 1px solid #1a1f27; font-size: 14px;">
+<span style="font-weight: 600;">{{r.name}}</span>
+<span class="num" style="text-align: right;">{{r.price}}</span>
+<span class="num" style="text-align: right; color: #8e97a6;">{{r.trig}}</span>
+<span style="padding-left: 24px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: {{r.stColor}};"><span style="width: 7px; height: 7px; border-radius: 50%; background: {{r.stColor}};"></span>{{r.status}}</span>
+<span class="num" style="font-size: 13px; color: #8e97a6;">{{r.day}}</span>
+<span style="text-align: right;"><button type="button" style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #2c333e; background: none; color: #b4bbc7; font-size: 12px;">관찰 종료</button></span>
+</div>
+</sc-for>
+<button type="button" style="width: 100%; height: 44px; background: none; border: 0; color: #8e97a6; font-size: 13px;">나머지 9건 보기</button>
+</section>
+
+</div>
+
+<aside style="display: flex; flex-direction: column; gap: 16px;">
+
+<section aria-label="종가베팅 실전" style="background: #141820; border: 1px solid #1f252f; border-radius: 16px; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; justify-content: space-between; align-items: baseline;">
+<span style="font-size: 13px; color: #8e97a6;">종가베팅 실전 기록</span>
+<span class="num" style="font-size: 15px; font-weight: 600;">[N] / 30</span>
+</div>
+<div style="height: 6px; border-radius: 3px; background: #232933; overflow: hidden;"><div style="width: 30%; height: 6px; background: {{accent}};"></div></div>
+<span style="font-size: 12px; color: #8e97a6;">30건이 되면 첫 재검증</span>
+</section>
+
+<section aria-label="섹터 가속" style="background: #141820; border: 1px solid #1f252f; border-radius: 16px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px;">
+<div style="display: flex; justify-content: space-between; align-items: baseline;">
+<span style="font-size: 15px; font-weight: 700;">섹터 가속</span>
+<a href="#" style="font-size: 12px;">업종/테마</a>
+</div>
+<sc-for list="{{sectors}}" as="s" hint-placeholder-count="3">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<div style="display: flex; justify-content: space-between; font-size: 14px;">
+<span style="font-weight: 600;">{{s.name}}</span>
+<span class="num" style="color: #f2848c;">{{s.chg}}</span>
+</div>
+<div style="display: flex; justify-content: space-between; font-size: 12px; color: #8e97a6;">
+<span>{{s.leaders}}</span>
+<span class="num">RS {{s.rs}}</span>
+</div>
+</div>
+</sc-for>
+</section>
+
+<section aria-label="저점종목" style="background: #141820; border: 1px solid #1f252f; border-radius: 16px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px;">
+<div style="display: flex; justify-content: space-between; align-items: baseline;">
+<span style="font-size: 15px; font-weight: 700;">저점종목</span>
+<span style="font-size: 11px; color: #8e97a6;">관심 신호 · 측정 전</span>
+</div>
+<div style="display: flex; justify-content: space-between; font-size: 12px; color: #8e97a6;"><span>주봉 · 09-25 기준</span><span class="num">10</span></div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px;">
+<sc-for list="{{lowWeek}}" as="t" hint-placeholder-count="10">
+<span style="font-size: 12px; padding: 5px 9px; border-radius: 6px; background: #1c222b; color: #c9ced7;">{{t}}</span>
+</sc-for>
+</div>
+<a href="#" style="display: flex; justify-content: space-between; font-size: 13px; padding-top: 10px; border-top: 1px solid #1f252f;"><span>월봉 · 08-31 기준</span><span class="num">40종목 보기</span></a>
+</section>
+
+<section aria-label="일정" style="background: #141820; border: 1px solid #1f252f; border-radius: 16px; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px;">
+<span style="font-size: 15px; font-weight: 700;">다가오는 일정</span>
+<div style="display: flex; gap: 14px; font-size: 13px;"><span class="num" style="width: 64px; color: #8e97a6;">10-09 금</span><span>한국 휴장</span></div>
+<div style="display: flex; gap: 14px; font-size: 13px;"><span class="num" style="width: 64px; color: #8e97a6;">[날짜]</span><span>[매크로 일정]</span></div>
+<div style="display: flex; gap: 14px; font-size: 13px;"><span class="num" style="width: 64px; color: #8e97a6;">[날짜]</span><span>[보유 종목 실적]</span></div>
+<a href="#" style="font-size: 12px;">D+14 전체</a>
+</section>
+
+<a href="#" style="font-size: 13px; color: #8e97a6; padding: 4px 2px;">오늘 메모 쓰기</a>
+
+</aside>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#e8a25c","options":["#e8a25c","#7aa7ff","#63c89b"]},"$preview":{"width":1440,"height":1260}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent ?? '#e8a25c';
+    const hit = '#63c89b', near = '#e9c46a';
+    return {
+      accent: accent,
+      accentLine: accent + '55',
+      rows: [
+        { name: 'DB', price: '1,741', trig: '1,705.10', status: '도달', stColor: hit, day: 'D+2/30' },
+        { name: '케이씨에스', price: '10,730', trig: '10,594.85', status: '도달', stColor: hit, day: 'D+2/30' },
+        { name: '티케이케미칼', price: '1,848', trig: '1,846.15', status: '도달', stColor: hit, day: 'D+2/30' },
+        { name: '퓨릿', price: '9,010', trig: '9,049.45', status: '접근 −0.4%', stColor: near, day: 'D+2/30' },
+        { name: '에프에스티', price: '32,050', trig: '32,556.05', status: '접근 −1.6%', stColor: near, day: 'D+2/30' }
+      ],
+      sectors: [
+        { name: '반도체-제조', chg: '+30.88%', leaders: '샘씨엔에스 · 하나마이크론 · 네패스', rs: '53→99' },
+        { name: '반도체-장비', chg: '+27.39%', leaders: '주성엔지니어 · 엑시콘 · 피에스케이홀', rs: '35→97' },
+        { name: '전기제품', chg: '+20.36%', leaders: '삼화콘덴서 · 상신이디피 · 피노', rs: '25→94' }
+      ],
+      lowWeek: ['대교', '노브랜드', '프레스티지바이오', '카페24', '티비씨', '세코닉스', 'NKE', 'APTV', 'LII', 'VVV']
+    };
+  }
+}
+</script>
+</body>
+</html>
