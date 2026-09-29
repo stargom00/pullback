@@ -262,3 +262,38 @@ def test_us_universe_has_no_bare_numeric_codes():
     us = universe.get_universe("us")
     bad = [t for t in us if re.fullmatch(r"\d{5}[0-9A-Z]", t)]
     assert not bad, bad
+
+
+# ── v5.297: 탭 필터는 헤더 밖 · 전 탭 본문 끝선 · 재점화 감시 블록 제거 ──
+def test_tab_filters_live_outside_header():
+    hdr = _header()
+    for bid in ("strictToggle", "riskSortToggle", "riskTierDropdownToggle", "bearOkToggle",
+                "accumSortToggle", "superOnlyToggle", "hiddenToggle"):
+        assert f'id="{bid}"' not in hdr, f"{bid}가 헤더 안에 있다(겹침 원인)"
+        assert TEXT.count(f'id="{bid}"') == 1, bid
+    bar = TEXT[TEXT.index('id="filterToggles"'):]
+    bar = bar[:bar.index('id="confirmEntryBanner"')]
+    for bid in ("strictToggle", "hiddenToggle", "riskTierBar"):
+        assert f'id="{bid}"' in bar, bid
+    assert TEXT.index('id="hdrStrip"') < TEXT.index('id="filterToggles"')
+
+
+def test_every_tab_body_uses_the_same_gutter():
+    i = TEXT.index("@media (min-width:900px){\n  .statusbar,.idxbar")
+    block = TEXT[i:TEXT.index("\n}\n", i)]
+    for sel in (".statusbar", ".idxbar", ".sectorbar", ".alert-panel", ".psubbar", ".jrnl-wrap",
+                "#searchBar", "#diagBar", "#content"):
+        assert sel in block, sel
+    assert "var(--n-gutter)" in block
+    assert "--n-maxw:" in TEXT and TEXT.count("--n-maxw:") == 1, "새 폭 변수를 만들지 말 것"
+
+
+def test_reignition_watch_block_is_gone_but_data_kept_for_home():
+    for gone in ("function reignitionPullbackSectionHtml", "function reignitionManualRefresh",
+                 "function reignitionRefreshPanelHtml", "재점화 감시 현황 (${"):
+        assert gone not in TEXT, gone
+    rc = _fn("renderCards")
+    assert "reignitionPullback" not in rc
+    # 홈 📌 내 추적은 같은 데이터를 계속 쓴다
+    assert "function loadReignitionPullbackStatus(" in TEXT
+    assert "myTrackReignitionCandidates()" in _fn("renderMyTrackBoard")

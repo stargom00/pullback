@@ -625,8 +625,10 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .hdr-main .tab.active,.hdr-util .tab.active,.hdr-more.has-active{background:#1b2029;color:#fff;font-weight:600}
 .hdr-sep{width:1px;height:20px;background:#262c36;flex-shrink:0}
 .hdr-right{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0}
-.hdr-filters .tab{padding:8px 10px;font-size:12px;color:var(--n-muted)}
-.hdr-filters .tab.active{background:#1b2029;color:#fff}
+.tab-filters{display:flex;align-items:center;gap:4px;flex-wrap:wrap;padding:8px var(--n-gutter) 0}
+.tab-filters[hidden]{display:none}
+.tab-filters .tab{min-height:36px;padding:0 12px;font-size:12px;color:var(--n-muted);border:1px solid var(--n-line2);border-radius:8px;background:none}
+.tab-filters .tab.active{background:#1b2029;color:#fff;border-color:#3a4150}
 .hdr .hdr-seg{background:#151920;border:1px solid #232933;border-radius:9px;padding:2px}
 .hdr-seg .tab{padding:0 14px;font-size:13px;color:var(--n-muted);border-radius:7px;min-height:40px}
 .hdr-seg .tab.active{background:#262c37;color:#fff;font-weight:600}
@@ -842,6 +844,20 @@ details.rowmenu>summary:hover{background:#1b2029}
   .jr-menu{position:static;box-shadow:none;margin-top:4px}
   .jr-cat-row{padding:8px 16px}
 }
+/* ── v5.297(사용자 지시): 모든 탭 본문도 헤더와 같은 좌우 끝선 ──
+   새 변수 없이 --n-gutter(= --n-maxw 기반)를 재사용. 각 블록이 원래 갖고 있던 24px
+   좌우 여백을 이 값으로 바꾼다(배경·테두리 띠는 전체 폭 그대로). 900px 미만은 기존. */
+@media (min-width:900px){
+  .statusbar,.idxbar,.legend,.sectorbar,.alert-panel,.psubbar,.jrnl-wrap,
+  #searchBar,#diagBar,#content{
+    padding-left:var(--n-gutter)!important;padding-right:var(--n-gutter)!important}
+  /* #content 안쪽은 탭마다 래퍼가 달라(스캔 탭 .grid 24px · ABC/업종테마 여백 없음 ·
+     종가베팅/대장관찰 .jongga-forward-box 24px) 바깥(#content)에서만 여백을 주고
+     안쪽 좌우 여백은 0으로 맞춘다 — 그래야 모든 탭이 같은 끝선이 된다. */
+  #content .grid,#content>.empty,#content>.loading{padding-left:0!important;padding-right:0!important}
+  #content .jongga-forward-box{margin-left:0;margin-right:0}
+  .stopwidth-warn,.jongga-safety-banner{margin-left:var(--n-gutter);margin-right:var(--n-gutter)}
+}
 @media (max-width:899px){
   .hdr-row{flex-wrap:wrap;gap:8px 12px;padding:10px 16px}
   .hdr-navs{order:3;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
@@ -849,7 +865,7 @@ details.rowmenu>summary:hover{background:#1b2029}
   .hdr .tabs{width:auto;flex-wrap:nowrap;overflow:visible}
   .hdr .tab{flex-shrink:0}
   .hdr-right{gap:8px}
-  .hdr-filters{order:4;width:100%}
+  .tab-filters{padding:8px 16px 0}
   .hdr-right{flex-wrap:wrap;justify-content:flex-end}
   .hdr .refresh{padding:0 12px}
   .more-panel{left:16px!important;right:16px}
@@ -876,7 +892,7 @@ details.rowmenu>summary:hover{background:#1b2029}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.296</span>
+      <span class="ver mono" id="verBadge">v5.297</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -897,18 +913,6 @@ details.rowmenu>summary:hover{background:#1b2029}
       </nav>
     </div>
     <div class="hdr-right">
-      <div class="tabs hdr-filters" id="filterToggles">
-        <button class="tab" id="strictToggle" title="RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓ 만 표시 (주도주 엄선)">주도주만</button>
-        <button class="tab" id="riskSortToggle" title="손절폭(리스크%) 좁은 순으로 정렬 — 타이트한 진입 자리가 위로. 단 ATR(일상 변동)보다 좁은 손절은 노이즈에 털릴 수 있어 ⚠️ 표시">손절좁은순</button>
-        <div class="dropdown-wrap">
-          <button class="tab" id="riskTierDropdownToggle" style="display:none" title="손절폭 절대값 4단계로 거르기 (다중선택 가능)">손절폭 ▾</button>
-          <div class="risktier-dropdown" id="riskTierBar" style="display:none"></div>
-        </div>
-        <button class="tab" id="bearOkToggle" title="약세장 적격(💎)만 표시 — 탄탄한베이스 + RS90+ + 손절폭적정, 3조건 전부 충족. 게이트 🟡🔴일 때 125개 후보에서 옥석을 가리는 필터. 대부분 걸러져서 몇 개만 남는 게 정상.">적격만</button>
-        <button class="tab" id="accumSortToggle" title="🧲 매집흔적 점수(A-B-C 패턴 전용, 보조 지표) 높은 순 정렬 — 판정 불가(데이터 부족) 종목은 맨 뒤로">매집순</button>
-        <button class="tab" id="superOnlyToggle" style="display:none" title="슈퍼대장(RS95+ · 3개월 모멘텀15%+) 소속 종목만 — 신호등 🟢(RS≥90)의 부분집합인 더 엄격한 좁히기 필터(참고용). ⚠️ 2026-09-03 재검증: EV 개선 근거 철회 — 90개 창 소속 -0.020R vs 비소속 +0.049R(z=-1.57, 비유의). 진입 우위 근거 아님(docs/kr_us_strategy_map.md 재검증 결과 우선순위6)">슈퍼대장만</button>
-        <button class="tab" id="hiddenToggle" style="display:none" title="숨긴 종목 — 클릭하면 목록에서 바로 복구할 수 있어요 (90일 지나면 자동으로 다시 보임)">숨김 <span id="hiddenCount">0</span></button>
-      </div>
       <div class="tabs hdr-seg" role="group" aria-label="시장">
         <button class="tab active" data-market="all">전체</button>
         <button class="tab" data-market="kr">한국</button>
@@ -960,6 +964,23 @@ details.rowmenu>summary:hover{background:#1b2029}
   <button type="button" class="hdr-strip-link" id="basisToggle" aria-expanded="false" aria-controls="confirmEntryBanner">근거</button>
   <span class="hdr-strip-meta mono" id="scanMeta"></span>
 </div>
+<!-- v5.297(사용자 지시): 탭 전용 필터(주도주만·손절좁은순·손절폭▾·적격만·매집순·슈퍼대장만·숨김)
+     — v5.294에서 헤더 오른쪽(.hdr-right, 줄어들지 않는 flex 항목)에 넣었더니 눌림목 탭에서
+     버튼이 켜지면 가운데 메뉴(업종/테마·마감정리·일지)를 덮었다. 헤더에는 전역 요소만
+     두고, 필터는 헤더 띠 아래 **본문 첫 줄**로. 보일 버튼이 하나도 없으면 줄 자체를
+     숨긴다(updateFilterBar — 버튼 표시 여부는 기존 코드가 그대로 정한다). -->
+<div class="tab-filters" id="filterToggles" role="toolbar" aria-label="탭 필터" hidden>
+    <button class="tab" id="strictToggle" title="RS 90+ · 거래량 동반 · 손익비 2R+ · 리스크 8%↓ 만 표시 (주도주 엄선)">주도주만</button>
+    <button class="tab" id="riskSortToggle" title="손절폭(리스크%) 좁은 순으로 정렬 — 타이트한 진입 자리가 위로. 단 ATR(일상 변동)보다 좁은 손절은 노이즈에 털릴 수 있어 ⚠️ 표시">손절좁은순</button>
+    <div class="dropdown-wrap">
+      <button class="tab" id="riskTierDropdownToggle" style="display:none" title="손절폭 절대값 4단계로 거르기 (다중선택 가능)">손절폭 ▾</button>
+      <div class="risktier-dropdown" id="riskTierBar" style="display:none"></div>
+    </div>
+    <button class="tab" id="bearOkToggle" title="약세장 적격(💎)만 표시 — 탄탄한베이스 + RS90+ + 손절폭적정, 3조건 전부 충족. 게이트 🟡🔴일 때 125개 후보에서 옥석을 가리는 필터. 대부분 걸러져서 몇 개만 남는 게 정상.">적격만</button>
+    <button class="tab" id="accumSortToggle" title="🧲 매집흔적 점수(A-B-C 패턴 전용, 보조 지표) 높은 순 정렬 — 판정 불가(데이터 부족) 종목은 맨 뒤로">매집순</button>
+    <button class="tab" id="superOnlyToggle" style="display:none" title="슈퍼대장(RS95+ · 3개월 모멘텀15%+) 소속 종목만 — 신호등 🟢(RS≥90)의 부분집합인 더 엄격한 좁히기 필터(참고용). ⚠️ 2026-09-03 재검증: EV 개선 근거 철회 — 90개 창 소속 -0.020R vs 비소속 +0.049R(z=-1.57, 비유의). 진입 우위 근거 아님(docs/kr_us_strategy_map.md 재검증 결과 우선순위6)">슈퍼대장만</button>
+    <button class="tab" id="hiddenToggle" style="display:none" title="숨긴 종목 — 클릭하면 목록에서 바로 복구할 수 있어요 (90일 지나면 자동으로 다시 보임)">숨김 <span id="hiddenCount">0</span></button>
+  </div>
 <div class="stopwidth-warn hdr-basis" id="confirmEntryBanner" style="display:none">KR 히트는 관심 신호다 — 5탭 확인진입 EV는 피벗 지정가 체결 가정의 산물로 밝혀져 철회됐다(2026-09-05). 한때 한계적으로 유효했던 돌파임박 KR 종가진입(0.157R, z=2.37)도 벤치마크 룩어헤드 수정 재검증에서 기준 미달로 철회됐다(2026-09-11) — 5탭 전부 확인돼도 진입 근거 없음. 상세: docs/confirm_entry_lookahead_2026-09-04.md, docs/confirm_entry_close_bench_revalidation.md</div>
 <div class="stopwidth-warn" id="stopWidthWarnBanner" style="display:none"></div>
 <div class="jongga-safety-banner" id="jonggaSafetyBanner" style="display:none">⚠️ 단기 오버나이트 전략 — 소액 고정 비중, 익일 아침 무조건 정리. 갭하락 리스크 있음(백테스트 평균이며 개별 결과 아님).</div>
@@ -2047,7 +2068,6 @@ function reignitionWatchSectionHtml() {
 // _refresh_reignition_watch()에서 이미 계산해둔 스냅샷(exec/confirm)
 // 그대로 — 여기서 새로 계산하지 않는다(🔴 카드와 동일 원칙).
 let reignitionPullbackData = null;
-let reignitionPullbackExpiredOpen = false;   // v5.190([7]): 만료분 기본 접기
 async function loadReignitionPullbackStatus() {
   try {
     const res = await fetch('/api/reignition/watchlist?include_expired=1');
@@ -2055,148 +2075,17 @@ async function loadReignitionPullbackStatus() {
   } catch (e) {
     reignitionPullbackData = null;
   }
-  if (mode === 'pullback') renderCards();
+  // v5.297: 눌림목 탭 "재점화 감시 현황" 블록 제거 — 이 데이터는 이제 홈 📌 내 추적만 쓴다.
   // v5.227(사용자 지시 — 재점화 감시를 📌에 노출): 캘린더 탭 진입 시에도
   // 이 데이터를 받아 📌 내 추적 보드가 렌더할 수 있게(onEnterCalendarTab
   // 참고) — 도착 시점에 이미 캘린더 탭이면 다시 그려서 반영.
   if (mode === 'calendar' && _calendarData) renderCalendar(_calendarData);
 }
-function toggleReignitionPullbackExpired() {
-  reignitionPullbackExpiredOpen = !reignitionPullbackExpiredOpen;
-  renderCards();
-}
-// v5.191(사용자 지시 — [2] 소급 만료 수동 갱신): 주말·휴장일엔
-// _warm_market() EOD 분기가 아예 안 돌아 v5.190의 pivot_touch_date
-// 소급계산·만료가 다음 KR 거래일까지 미뤄진다 — 지금 바로 반영하고 싶을
-// 때 누르는 수동 트리거(POST /api/reignition/refresh, 세션 로그인 필요).
-let reignitionRefreshBusy = false;
-// v5.193(사용자 지시 — [4]): alert()는 복사·공유가 불편하고 닫으면
-// 휘발된다 — 복사 가능한 패널로 교체(서버가 reignition_refresh_log.json
-// 에도 같은 내용을 남기니 새로고침해도 이력은 안 없어짐, /api/reignition/
-// refresh_log 참고).
-let reignitionRefreshPanelText = null;
-let reignitionRefreshPanelOpen = false;
-function closeReignitionRefreshPanel() {
-  reignitionRefreshPanelOpen = false;
-  renderCards();
-}
-async function reignitionCopyRefreshPanel(btn) {
-  try {
-    await navigator.clipboard.writeText(reignitionRefreshPanelText || '');
-    const orig = btn.textContent;
-    btn.textContent = '복사됨!';
-    setTimeout(() => { btn.textContent = orig; }, 1500);
-  } catch (e) {
-    alert('복사 실패 — 직접 드래그해서 복사해주세요');
-  }
-}
-async function reignitionManualRefresh(btn) {
-  if (reignitionRefreshBusy) return;
-  reignitionRefreshBusy = true;
-  const origText = btn.textContent;
-  btn.textContent = '갱신 중…';
-  btn.disabled = true;
-  try {
-    const res = await fetch('/api/reignition/refresh', { method: 'POST' });
-    const d = await res.json();
-    if (!d.ok) {
-      reignitionRefreshPanelText = `갱신 실패: ${d.error || res.status}`;
-    } else {
-      const lines = [
-        `총 ${d.n_total}건 중 ${d.n_changed}건 상태 변경`,
-        `감시(터치 없음) ${d.watching_no_touch} · 감시(터치) ${d.watching_touched} · 체결 ${d.confirmed} · 만료 ${d.expired}`,
-      ];
-      // v5.194(사용자 지시): 티커 옆에 종목명 병기("105560.KS KB금융"
-      // 형식) — 티커만으로는 뭔지 바로 안 와닿는다는 지적.
-      const tag = o => `${o.ticker}${o.name ? ' ' + o.name : ''}`;
-      if (d.changed.length) {
-        lines.push('', '변경 내역:');
-        d.changed.forEach(c => lines.push(`- ${tag(c)}(${c.theme}) ${c.status_before || '(신규)'} → ${c.status_after}${c.expire_detail ? ` [${c.expire_detail}]` : (c.expire_reason ? ` [${c.expire_reason}]` : '')}`));
-      }
-      // v5.192([2][3] 보고): 이번 실행에서 스킵된 중복 후보 + 터치 대기
-      // 종목의 확인 기한을 갱신 결과에 바로 표시.
-      if (d.touched_detail && d.touched_detail.length) {
-        lines.push('', `터치 대기 ${d.touched_detail.length}건:`);
-        d.touched_detail.forEach(t => lines.push(`- ${tag(t)}(${t.theme}) 터치 ${t.pivot_touch_date} · D+${t.days_since_touch} · 확인 기한 ~${t.confirm_deadline_approx || '?'}`));
-      }
-      if (d.dropped_duplicates && d.dropped_duplicates.length) {
-        lines.push('', `중복 스킵 ${d.dropped_duplicates.length}건:`);
-        d.dropped_duplicates.forEach(dd => lines.push(`- ${tag(dd)} D0=${dd.d0_date}: "${dd.dropped_theme}" 스킵(대표 "${dd.kept_theme}")`));
-      }
-      // v5.193([5] 확인용) 재량 기준 미달, [6] 구버전 키 정리 보고.
-      // v5.194: 서버가 이미 합쳐준 reason("200일선 아래 + 조정폭 55%" 식
-      // — 걸린 조건 전부 하나의 문구로) 그대로 사용, 프론트에서 다시
-      // 조합 안 함(둘 다 걸려도 애매하게 안 보이도록).
-      if (d.discretion_fail && d.discretion_fail.length) {
-        lines.push('', `⚠️ 재량 기준 미달 ${d.discretion_fail.length}건(회색+접힘):`);
-        d.discretion_fail.forEach(f => lines.push(`- ${tag(f)}: ${f.reason}`));
-      }
-      if (d.old_format_keys) {
-        const o = d.old_format_keys;
-        lines.push('', `구버전 키: 정리 전 ${o.n_before_cleanup}건 → 정리 후 ${o.n_after_cleanup}건(watching ${o.purged_watching}건 삭제) · 잔존(expired/confirmed) ${JSON.stringify(o.remaining_by_status)}`);
-      }
-      reignitionRefreshPanelText = lines.join('\n');
-      await loadReignitionPullbackStatus();
-    }
-  } catch (e) {
-    reignitionRefreshPanelText = `갱신 실패: ${e}`;
-  } finally {
-    reignitionRefreshPanelOpen = true;
-    reignitionRefreshBusy = false;
-    btn.textContent = origText;
-    btn.disabled = false;
-    renderCards();
-  }
-}
-function reignitionRefreshPanelHtml() {
-  if (!reignitionRefreshPanelOpen || reignitionRefreshPanelText == null) return '';
-  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  return `<div class="jongga-forward-box" style="margin-bottom:8px;border:1px solid var(--line)">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-      <b style="font-size:12px">갱신 결과</b>
-      <span>
-        <button class="journal-btn" style="padding:2px 8px;font-size:11px" onclick="reignitionCopyRefreshPanel(this)">복사</button>
-        <button class="journal-btn" style="padding:2px 8px;font-size:11px" onclick="closeReignitionRefreshPanel()">닫기</button>
-      </span>
-    </div>
-    <pre style="white-space:pre-wrap;font-size:11px;font-family:inherit;max-height:300px;overflow-y:auto;margin:0">${esc(reignitionRefreshPanelText)}</pre>
-  </div>`;
-}
-// v5.191(사용자 지시 — [3] 표시 수정): 상태를 감시(터치 없음)/감시(터치)/
-// 체결/만료 4단계로 명확히 분리. "터치"는 서버 status가 아니라
-// status==='watching' && pivot_touch_date 존재로 클라에서 판정.
-function reignitionStateMeta(it) {
-  if (it.status === 'confirmed') return { icon: '🔁', label: '체결' };
-  if (it.status === 'expired') return { icon: '⚰️', label: '만료' };
-  return it.pivot_touch_date ? { icon: '👆', label: '터치' } : { icon: '⏳', label: '감시' };
-}
-// v5.191([1] 정정 + [3] 표시 수정): 괄호 안엔 D0 날짜 대신 테마만 —
-// D0/창/터치 정보는 아래 상태줄에서 명시적으로 보여준다("D0 2025-12-23 ·
-// 창 ~2026-09-10 · 터치 없음" / "터치 09-03 · 확인 대기 D+2/3" 형식,
-// 사용자 지시). confirm_window_days는 /api/reignition/watchlist 응답의
-// 최상위 필드(theme_reignition.REIGNITE_CONFIRM_WINDOW_DAYS)를 그대로 씀
-// — 하드코딩 안 함.
-function reignitionStatusLine(it, confirmWindowDays) {
-  if (it.status === 'confirmed') {
-    return `확인 ${(it.confirm || {}).date || '-'} · 체결`;
-  }
-  if (it.status === 'expired') {
-    // v5.193(사용자 지시 — [3]): expire_detail(실제 비교값 포함, app.py가
-    // 만료 시점에 계산해 저장)이 있으면 그대로 — 없는 구버전 레코드만
-    // 하드코딩 문구로 폴백.
-    const reasonTxt = it.expire_detail || (it.expire_reason === 'pivot_touch_timeout'
-      ? `터치 후 ${confirmWindowDays}거래일 미확인`
-      : '창 종료(D0+180거래일)');
-    return `D0 ${it.d0_date} · 만료(${reasonTxt})`;
-  }
-  if (it.pivot_touch_date) {
-    const mmdd = it.pivot_touch_date.slice(5);
-    const n = it.days_since_touch != null ? it.days_since_touch : '?';
-    return `터치 ${mmdd} · 확인 대기 D+${n}/${confirmWindowDays}`;
-  }
-  const windowTxt = it.window_end_date ? `창 ~${it.window_end_date}` : '창 정보없음';
-  return `D0 ${it.d0_date} · ${windowTxt} · 터치 없음`;
-}
+// v5.297(사용자 지시): 눌림목 탭 "재점화 감시 현황" 블록(v5.188~v5.226)을 화면에서 제거.
+// 블록 전용이던 만료/미달 토글·수동 갱신(POST /api/reignition/refresh) 패널·상태 줄
+// 함수도 같이 지웠다. 서버의 감시 계산·기록 파일·forward 기록은 그대로다(재점화
+// buy-stop Rule 9 측정 대기). 재량 기준 판정(reignitionDiscretionFail)·체크리스트
+// 툴팁은 홈 📌 내 추적·🔎 관심 카드가 계속 쓴다.
 // v5.192(사용자 지시 — [5] 재량 기준 미달): (a) 종가<200일선 또는 (b)
 // 고점 대비 조정폭>35% — 둘 다 이미 계산 중인 값(app.py exec/confirm의
 // below_ma200·decline_from_peak_pct) 재사용, 새 계산 없음. 삭제·만료
@@ -2207,87 +2096,6 @@ function reignitionDiscretionFail(it) {
   const overDecline = src.decline_from_peak_pct != null && src.decline_from_peak_pct > 35;
   return { fail: belowMa200 || overDecline, belowMa200, overDecline };
 }
-let reignitionPullbackDiscretionOpen = false;   // v5.192([5]): 재량 기준 미달분 기본 접기
-function toggleReignitionPullbackDiscretion() {
-  reignitionPullbackDiscretionOpen = !reignitionPullbackDiscretionOpen;
-  renderCards();
-}
-function reignitionPullbackSectionHtml() {
-  const d = reignitionPullbackData;
-  // v5.193([4]): items가 비어도 방금 갱신한 결과 패널은 보여줘야 한다.
-  if (!d || !(d.items || []).length) return reignitionRefreshPanelHtml();
-  const confirmWindowDays = d.confirm_window_days != null ? d.confirm_window_days : 3;
-  const rowHtml = it => {
-    const st = reignitionStateMeta(it);
-    const confirmed = it.status === 'confirmed';
-    const pivot = confirmed ? (it.confirm || {}).pivot : (it.exec || {}).pivot;
-    const stop = confirmed ? (it.confirm || {}).stop : (it.exec || {}).atr_stop;
-    // v5.226(사용자 지시): "고가"는 오해 소지(pivot이지 그날 고가가 아님)라
-    // buy-stop으로 개명 + 현재가(it.close, 새 fetch 없음) 병기 + 현재가
-    // 대비 괴리% 추가.
-    const closeTxt = it.close != null ? `현재 ${fmtPrice(it.close, 'KR')} · ` : '';
-    const pivotPct = (pivot != null && it.close) ? Math.round((pivot - it.close) / it.close * 1000) / 10 : null;
-    const priceTxt = pivot != null
-      ? `buy-stop ${fmtPrice(pivot, 'KR')}${pivotPct != null ? ` (${pivotPct > 0 ? '+' : ''}${pivotPct}%)` : ''}`
-      : 'buy-stop -';
-    const stopTxt = stop != null ? `손절 ${fmtPrice(stop, 'KR')}` : '손절 -';
-    const nameLink = `<a class="name-link" href="${tvUrl(it.ticker, 'kr')}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기">${it.name}</a>`;
-    // v5.190([6]): 체결 행에만 재량 체크리스트 ⓘ — confirm 스냅샷에
-    // 실측값(vol_mult/decline_from_peak_pct)이 이미 있음(app.py 참고).
-    const checklistIcon = confirmed
-      ? ` <span style="cursor:help;opacity:.8;font-size:11px" title="${reignitionChecklistTooltip({...(it.confirm || {}), risk_pct: (pivot != null && stop != null && pivot > stop) ? Math.round((pivot - stop) / pivot * 10000) / 100 : null})}">ⓘ 재량 체크리스트</span>`
-      : '';
-    // v5.192(사용자 지시 — [4] 레이아웃): 고가·손절을 종목명 바로 옆(같은
-    // 줄, 왼쪽)으로 옮기고 우측 정렬 제거 — flex space-between이 가격을
-    // 오른쪽 끝에 붙여놔서 종목명과 매칭이 안 된다는 지적. D0/창/터치
-    // 상태줄은 그대로 아래 줄.
-    const df = reignitionDiscretionFail(it);
-    const dimStyle = df.fail ? 'opacity:.5' : '';
-    const failTag = df.fail
-      ? ` <span style="color:#f87171;font-size:10px" title="${df.belowMa200 ? '종가가 200일선 아래' : ''}${df.belowMa200 && df.overDecline ? ' · ' : ''}${df.overDecline ? '고점 대비 조정폭 35% 초과' : ''}">⚠️ 재량 기준 미달</span>`
-      : '';
-    // v5.196(사용자 지시 — 시나리오 카드 [3] 눌림목 탭 재점화 감시 항목):
-    // 확정 체결(confirmed)은 이미 진입 판정이 끝난 상태라 "미리 정해두는"
-    // 재량 시나리오의 대상이 아님 — watching(exec)에만 붙인다.
-    const scenarioHtml = (!confirmed && (it.exec || {}).scenario)
-      ? renderScenarioHtml(it.exec.scenario, 'KR', 'sc_reig_' + it.ticker, it.exec.atr_pct)
-      : '';
-    return `<div class="jongga-forward-sub" style="padding:3px 0;${dimStyle}">
-      <div>${st.icon} <b>${nameLink}</b> <span style="opacity:.7">(${it.theme})</span> · ${closeTxt}${priceTxt} · ${stopTxt}${checklistIcon}${failTag}</div>
-      <div style="opacity:.75;font-size:10px;padding-left:20px">${reignitionStatusLine(it, confirmWindowDays)}</div>
-      ${scenarioHtml}
-    </div>`;
-  };
-  // v5.190([7] 재점화 감시 만료): 만료분은 기본 접기 — 개수만 보이고
-  // 클릭해야 펼쳐짐(watching/confirmed는 그대로 항상 표시).
-  // v5.192([5]): 만료 아닌 것 중에서도 재량 기준 미달분은 별도로 접어둔다.
-  const nonExpired = d.items.filter(it => it.status !== 'expired');
-  const activeItems = nonExpired.filter(it => !reignitionDiscretionFail(it).fail);
-  const discretionFailItems = nonExpired.filter(it => reignitionDiscretionFail(it).fail);
-  const expiredItems = d.items.filter(it => it.status === 'expired');
-  const activeRows = activeItems.map(rowHtml).join('');
-  const discretionToggle = discretionFailItems.length
-    ? `<div class="jongga-forward-sub" style="opacity:.7;cursor:pointer;margin-top:4px" onclick="toggleReignitionPullbackDiscretion()">⚠️ 재량 기준 미달 ${discretionFailItems.length}건 ${reignitionPullbackDiscretionOpen ? '▴숨기기' : '▾펼치기'}</div>`
-    : '';
-  const discretionRows = reignitionPullbackDiscretionOpen ? discretionFailItems.map(rowHtml).join('') : '';
-  const expiredToggle = expiredItems.length
-    ? `<div class="jongga-forward-sub" style="opacity:.7;cursor:pointer;margin-top:4px" onclick="toggleReignitionPullbackExpired()">⚰️ 만료 ${expiredItems.length}건 ${reignitionPullbackExpiredOpen ? '▴숨기기' : '▾펼치기'}</div>`
-    : '';
-  const expiredRows = reignitionPullbackExpiredOpen ? expiredItems.map(rowHtml).join('') : '';
-  return `${reignitionRefreshPanelHtml()}<div class="jongga-forward-box" style="margin-bottom:12px">
-    <div class="jongga-forward-title" style="display:flex;justify-content:space-between;align-items:center">
-      <span>🔥 재점화 감시 현황 (${d.items.length}건)</span>
-      <button class="journal-btn" style="padding:2px 10px;font-size:11px" onclick="reignitionManualRefresh(this)" title="주말·휴장일엔 자동 갱신이 안 돌아요 — 지금 1회 강제 갱신">🔄 지금 갱신</button>
-    </div>
-    <div class="jongga-forward-sub" style="opacity:.85;margin-bottom:4px">🔎 관심(재량) — 근거 n=53, 시기반분 재현 미검증(Rule 9 미달) · buy-stop가/손절은 참고 표시, 체결은 재량 체크리스트로 판단 · 근거: docs/kr_theme_leader_reignition.md</div>
-    ${activeRows}
-    ${discretionToggle}
-    ${discretionRows}
-    ${expiredToggle}
-    ${expiredRows}
-  </div>`;
-}
-
 function breakdownCard(s) {
   const chgCls = s.change_pct >= 0 ? 'up' : 'down';
   const chgSign = s.change_pct >= 0 ? '+' : '';
@@ -4351,8 +4159,7 @@ function renderCards() {
   const mainHtmlShown = (!list.length && hugList.length)
     ? `<div class="empty">이 탭의 종목 ${hugList.length}건이 전부 ⛔ 피벗 밀착(0~0.5ATR) 구간이라 접혀 있습니다.<br>즉시진입 금지 구간이지만 아래 '펼치기'로 확인할 수 있어요.</div>`
     : mainHtml;
-  const reignitionTopHtml = (mode === 'pullback') ? reignitionPullbackSectionHtml() : '';
-  content.innerHTML = reignitionTopHtml + mainHtmlShown + hugHtml + frozenHtml + jonggaForwardFooterHtml() + reignitionWatchSectionHtml();
+  content.innerHTML = mainHtmlShown + hugHtml + frozenHtml + jonggaForwardFooterHtml() + reignitionWatchSectionHtml();
   const hugToggle = document.getElementById('pivotHugToggle');
   if (hugToggle) {
     hugToggle.addEventListener('click', () => {
@@ -5057,6 +4864,19 @@ function loadCalSearchBox() {
   if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') calRunSearch(); });   // [3]
   if (btn) btn.addEventListener('click', calRunSearch);
 }
+// v5.297: 탭 필터 줄 — 안의 버튼 표시 여부는 기존 코드(hideFilterButtonsIfNotApplicable ·
+// 숨김/손절폭 토글 로직)가 style.display로 정한다. 여기선 그 결과만 보고 "보이는 버튼이
+// 하나도 없으면 줄을 숨긴다"만 한다(판정 로직 사본 없음).
+function updateFilterBar() {
+  const bar = document.getElementById('filterToggles');
+  if (!bar) return;
+  const anyShown = [...bar.querySelectorAll(':scope > .tab, :scope > .dropdown-wrap > .tab')]
+    .some(b => b.style.display !== 'none');
+  bar.hidden = !anyShown;
+}
+new MutationObserver(updateFilterBar).observe(document.getElementById('filterToggles'),
+  { subtree: true, attributes: true, attributeFilter: ['style'] });
+updateFilterBar();
 // v5.294: 일지 행 메뉴·더보기(<details>)는 바깥을 누르면 닫는다(한 번에 하나만 열림).
 document.addEventListener('click', e => {
   document.querySelectorAll('#journalView details[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; });
@@ -6464,11 +6284,6 @@ document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click'
   // 데이터라 이 탭 자체의 시장 필터는 안 건드림 — 미국 대장후보도 계속
   // 그대로 보이게).
   if (mode === 'leader') { loadReignitionWatch(); }
-  // v5.188(사용자 지시 — 재점화 가시화): 눌림목 탭 상단 "🔥 재점화" 요약도
-  // 같은 워치리스트 데이터를 쓰지만 만료 포함 여부가 달라(대장관찰은
-  // 감시/체결만, 여긴 오늘 만료분도) 별도 캐시(reignitionPullbackData)로
-  // 분리 — 대장관찰 탭의 정렬/펼치기 상태를 건드리지 않기 위함.
-  if (mode === 'pullback') { loadReignitionPullbackStatus(); }
   applyTabViewState();
 }));
 
