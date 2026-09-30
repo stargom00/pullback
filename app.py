@@ -5,6 +5,8 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.303 [저점 탭 위치 — 사용자 지시] 더보기 → 헤더 오른쪽 작은 메뉴의 일지 옆(업종/테마 · 마감정리 ·
+    일지 · 저점). data-mode 키·핸들러·저장 불변. 지수 패널 숨김 대상(IDXBAR_HIDDEN_MODES)에 추가.
 v5.302 [저점 매매 기록 탭 — 사용자 지시] 더보기 → "저점"(data-mode lowpoint_track). 홈
     저점종목 카드(후보)와 별개인 **내 매매 기록**. 저장은 일지와 분리된
     /data/lowpoint_trades.json, v5.300 일지와 같은 레코드 단위 규칙: GET
@@ -8417,7 +8419,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.302"
+VERSION = "v5.303"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

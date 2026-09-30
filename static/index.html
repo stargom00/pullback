@@ -905,7 +905,7 @@ details.rowmenu>summary:hover{background:#1b2029}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.302</span>
+      <span class="ver mono" id="verBadge">v5.303</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -923,6 +923,8 @@ details.rowmenu>summary:hover{background:#1b2029}
         <button class="tab" data-mode="themes" title="업종·테마별 구성종목 — 스캐너가 이미 계산한 값만 표시(새 계산 없음)">업종/테마</button>
         <button class="tab" data-mode="eod">마감정리</button>
         <button class="tab" data-mode="journal">일지</button>
+        <!-- v5.302 저점종목 내 매매 기록(홈 저점종목 카드 = 후보와 별개). v5.303: 더보기 → 일지 옆. -->
+        <button class="tab" data-mode="lowpoint_track" title="저점종목 매매 기록 — 현재가·수익률·목표가, 일지와 별도 저장">저점</button>
       </nav>
     </div>
     <div class="hdr-right">
@@ -948,8 +950,6 @@ details.rowmenu>summary:hover{background:#1b2029}
            "급등 스캔"(surge, analyze_surge 게이트)과 다른 기능이다. -->
       <button class="tab" data-mode="surge_observe" title="당일 +15%↑ & 거래량 20일평균 10배↑ KR — 판정/EV/진입가 없음, 순수 관찰(2주 실험)">급등<span class="exp-tag">2주 실험</span></button>
       <button class="tab" data-mode="positions">포지션</button>
-      <!-- v5.302: 저점종목 내 매매 기록(홈 저점종목 카드 = 후보와 별개) -->
-      <button class="tab" data-mode="lowpoint_track" title="저점종목 매매 기록 — 현재가·수익률·목표가, 일지와 별도 저장">저점</button>
     </div>
     <div class="more-sec">
       <div class="more-h">실험</div>
@@ -6266,7 +6266,7 @@ function applyMarketButtonsEnabled(curMode) {
   });
 }
 
-const IDXBAR_HIDDEN_MODES = new Set(['calendar', 'journal']);
+const IDXBAR_HIDDEN_MODES = new Set(['calendar', 'journal', 'lowpoint_track']);
 // v5.294(사용자 지시 — 일지 탭에 종가베팅 배너 2개가 뜨던 문제의 근본 수정):
 // [원인] 이 배너들의 표시/숨김은 renderCards() 안에서만 정해졌다. 일지·홈 같은
 // 커스텀 뷰는 renderCards()를 안 타므로, 종가베팅 → 일지로 가면 직전 탭에서 켜진

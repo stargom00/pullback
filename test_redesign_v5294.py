@@ -27,7 +27,7 @@ EXISTING_MODES = {
     "imminent", "boxbreak", "breakout", "surge_observe", "eod", "positions",
     "journal", "super", "leader", "sectors", "moneyflow", "inverse",
     "breakdown", "pattern", "stage2", "ibd9", "strong_pivot", "earnings", "surge",
-    "lowpoint_track",   # v5.302 신설(더보기 → 저점) — 새 키는 여기 명시적으로 추가해야 통과
+    "lowpoint_track",   # v5.302 신설, v5.303부터 오른쪽 작은 메뉴(일지 옆) — 새 키는 여기 명시적으로 추가해야 통과
 }
 
 
@@ -150,7 +150,7 @@ def test_tab_owned_banners_are_hidden_on_tab_switch():
     src = _fn("applyTabViewState")
     assert "Object.entries(TAB_OWNED_BANNERS)" in src and "mode !== owner" in src
     assert "IDXBAR_HIDDEN_MODES.has(mode)" in src
-    assert "const IDXBAR_HIDDEN_MODES = new Set(['calendar', 'journal']);" in TEXT
+    assert "const IDXBAR_HIDDEN_MODES = new Set(['calendar', 'journal', 'lowpoint_track']);" in TEXT
 
 
 def test_journal_table_is_six_columns_everywhere():
@@ -298,3 +298,10 @@ def test_reignition_watch_block_is_gone_but_data_kept_for_home():
     # 홈 📌 내 추적은 같은 데이터를 계속 쓴다
     assert "function loadReignitionPullbackStatus(" in TEXT
     assert "myTrackReignitionCandidates()" in _fn("renderMyTrackBoard")
+
+
+def test_lowpoint_track_is_next_to_journal_not_in_more_panel():
+    util = re.findall(r'data-mode="(\w+)"', _element("utilTabs", "</nav>"))
+    assert util == ["themes", "eod", "journal", "lowpoint_track"], util
+    more = re.findall(r'data-mode="(\w+)"', _element("moreTabsPanel", "</header>"))
+    assert "lowpoint_track" not in more
