@@ -90,9 +90,9 @@ def test_the_actual_false_positive_it_exists_for():
 
 # ── v5.304: 색 토큰 해석 ─────────────────────────────────────────────
 # 1단계에서 하드코딩 색이 CSS 변수(var(--…))로 옮겨졌다. "이 요소가 이 색이다"를
-# 검사하던 테스트는 토큰을 **다크(기본 :root) 값**으로 풀어 비교한다 — 색 자체가
+# 검사하던 테스트는 토큰을 **다크 값(:root[data-theme="dark"])**으로 풀어 비교한다 — 색 자체가
 # 바뀌면 여전히 잡히고, 이름만 바뀐 건 통과한다.
-def css_root_vars(html: str, selector: str = ":root{") -> dict:
+def css_root_vars(html: str, selector: str = ':root[data-theme="dark"]{') -> dict:
     import re
     i = html.index(selector)
     block = html[i:html.index("\n}", i)]

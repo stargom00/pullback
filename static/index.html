@@ -18,6 +18,32 @@
 <link rel="manifest" href="/static/manifest.json">
 <link rel="apple-touch-icon" href="/static/icons/icon-180.png">
 <meta name="theme-color" content="#0C111B">
+<script>
+// v5.304(사용자 지시): 라이트/다크 테마 — 기본 라이트, localStorage 'scannerTheme'에 저장.
+// CSS보다 먼저 돌아야 다크 사용자가 새로고침 때 흰 화면 깜빡임을 안 본다.
+const THEME_META = { light: '#ffffff', dark: '#0C111B' };
+function themeFromStorage() {
+  try { return localStorage.getItem('scannerTheme') === 'dark' ? 'dark' : 'light'; } catch (e) { return 'light'; }
+}
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const m = document.querySelector('meta[name="theme-color"]');
+  if (m) m.setAttribute('content', THEME_META[theme]);
+  document.querySelectorAll('[data-theme-btn]').forEach(b => {
+    const on = b.dataset.themeBtn === theme;
+    b.classList.toggle('active', on);
+  });
+  const tg = document.getElementById('themeToggle');
+  if (tg) tg.setAttribute('aria-label', theme === 'dark' ? '다크 테마 사용 중 — 라이트로 전환' : '라이트 테마 사용 중 — 다크로 전환');
+}
+function toggleTheme() { setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); }
+function setTheme(theme) {
+  try { localStorage.setItem('scannerTheme', theme); } catch (e) {}
+  applyTheme(theme);
+}
+applyTheme(themeFromStorage());
+document.addEventListener('DOMContentLoaded', () => applyTheme(themeFromStorage()));
+</script>
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -38,7 +64,8 @@ if ('serviceWorker' in navigator) {
 <!-- v5.89: 💰 돈의 흐름 탭 — AI 해석 리포트(markdown) 렌더용. /moneyflow 페이지와 동일 버전. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
 <style>
-:root{
+:root[data-theme="dark"]{
+  color-scheme:dark;
   --bg:#0C111B; --surface:#141C2B; --surface2:#1A2436; --line:#233047;
   --text:#E6ECF5; --muted:#8A97AC; --dim:#5A6578;
   --up:#FF5A6E; --down:#4D8DFF; --amber:#F2B33D; --green:#3DD68C;
@@ -220,6 +247,219 @@ if ('serviceWorker' in navigator) {
   --c-orange-fg5:#ff9b6b;
   --c-orange-bg10:#3a2a1a;
   --c-amber-bg9:#3a2d12;
+  /* v5.294 헤더·홈·일지 토큰(--n-*) — v5.304에서 테마별 두 벌로 나누며 이 블록으로 옮김 */
+  --n-bg:#0d1015; --n-card:#141820; --n-line:#1f252f; --n-line2:#2c333e;
+  --n-text:#e7e9ee; --n-sub:#b4bbc7; --n-muted:#8e97a6; --n-accent:#e8a25c;
+  --n-chip:#1c222b; --n-row:#1a1f27;
+  --n-good:#63c89b; --n-warn:#d9a92e; --n-bad:#e5484d; --n-unknown:#5a6578;
+  --n-accent-fg:#e8a25c;   /* v5.304: 강조색을 글자로 쓸 때(라이트에선 대비 때문에 더 진함) */
+}
+/* v5.304(사용자 지시) 라이트 테마 — 기본값. 기준색: 배경 #ffffff · 카드 #fafafa · 선 #e6e8ec ·
+   글자 #1d2430 · 보조 #79818f(흰 바탕 4.0:1이라 4.5:1 미달 → 같은 색상으로 #606773까지 진하게) · 강조 #d98b3a.
+   색 글자는 같은 색상(hue)을 유지한 채 밝기만 낮춰 가장 어두운 라이트 표면에서도 4.5:1 이상.
+   다크 블록과 키 집합이 같아야 한다(test_theme_tokens.py가 강제). */
+:root,:root[data-theme="light"]{
+  color-scheme:light;
+  --bg:#ffffff;
+  --surface:#fafafa;
+  --surface2:#f1f3f6;
+  --line:#e6e8ec;
+  --text:#1d2430;
+  --muted:#606773;
+  --dim:#8a92a0;
+  --up:#d20019;
+  --down:#0059f8;
+  --amber:#8d5f09;
+  --green:#197649;
+  --px-up:#197649;
+  --px-down:#d20019;
+  --c-red-fg1:#d40000;
+  --c-green-bg1:#e7f7ed;
+  --c-red-fg2:#d00a0a;
+  --c-green-fg1:#167739;
+  --c-green-bg2:#d7f4e2;
+  --c-amber-fg1:#866102;
+  --c-red-fg3:#cf1623;
+  --c-gray-fg1:#1d2430;
+  --c-red-fg4:#d30000;
+  --c-amber-fg2:#836213;
+  --c-red-a1:rgba(255,61,61,0.4);
+  --c-blue-bg1:#eceef3;
+  --c-gray-bg1:#ffffff;
+  --c-amber-fg3:#8d5f00;
+  --c-blue-fg1:#266c9d;
+  --c-blue-bg2:#e9ebf0;
+  --c-red-a2:rgba(255,107,107,0.078);
+  --c-amber-fg4:#d0af6c;
+  --c-gray-bg2:#ebebee;
+  --c-gray-fg2:#616978;
+  --c-amber-fg5:#876108;
+  --c-violet-fg1:#6f42f7;
+  --c-blue-bg3:#f2f4f7;
+  --c-amber-bg1:#f4ecd7;
+  --c-amber-fg6:#876110;
+  --c-gray-bg3:#e3e3e8;
+  --c-amber-bg2:#f8f2e7;
+  --c-green-fg2:#2b7649;
+  --c-blue-bg4:#eff1f5;
+  --c-gray-a1:rgba(0,0,0,0.225);
+  --c-gray-fg3:#5d697e;
+  --c-orange-bg1:#f6f1eb;
+  --c-amber-bg3:#f1eee6;
+  --c-red-bg1:#f6e7e9;
+  --c-red-bg2:#f3d8db;
+  --c-gray-fg4:#5e6b5e;
+  --c-blue-bg5:#e7eef5;
+  --c-blue-fg2:#6c9bd0;
+  --c-red-bg3:#f1e6e6;
+  --c-orange-fg1:#ad4900;
+  --c-blue-fg3:#0556ff;
+  --c-blue-fg4:#005dec;
+  --c-green-fg3:#1a754e;
+  --c-red-fg5:#d20019;
+  --c-violet-fg2:#7c3def;
+  --c-violet-a1:rgba(147,112,219,0.55);
+  --c-amber-bg4:#f4f1eb;
+  --c-red-fg6:#d06c6c;
+  --c-red-bg4:#f4ebeb;
+  --c-violet-fg3:#8e23fa;
+  --c-blue-fg5:#0464cf;
+  --c-red-a3:rgba(255,107,107,0.156);
+  --c-blue-bg6:#e7eaef;
+  --c-orange-fg2:#9b570f;
+  --c-amber-bg5:#f3f1ec;
+  --c-gray-fg5:#6e6757;
+  --c-blue-bg7:#f1f3f6;
+  --c-amber-bg6:#f6f5f1;
+  --c-orange-bg2:#f8f0eb;
+  --c-orange-fg3:#8d5f10;
+  --c-orange-a1:rgba(242,179,61,0.182);
+  --c-orange-a2:rgba(184,124,12,0.55);
+  --c-blue-fg6:#0764d6;
+  --c-green-bg3:#ebf8f0;
+  --c-green-fg4:#1a7654;
+  --c-blue-bg8:#e4ebf4;
+  --c-green-fg5:#40734a;
+  --c-amber-fg7:#7e6503;
+  --c-blue-fg7:#0069be;
+  --c-gray-bg4:#ede6e6;
+  --c-green-a1:rgba(40,180,120,0.13);
+  --c-green-a2:rgba(34,155,103,0.6);
+  --c-amber-a1:rgba(230,170,40,0.13);
+  --c-amber-a2:rgba(176,127,20,0.6);
+  --c-red-a4:rgba(255,90,110,0.13);
+  --c-red-a5:rgba(255,57,81,0.6);
+  --c-green-a3:rgba(40,180,120,0.104);
+  --c-green-a4:rgba(34,155,103,0.55);
+  --c-amber-a3:rgba(230,170,40,0.104);
+  --c-amber-a4:rgba(176,127,20,0.55);
+  --c-red-a6:rgba(255,90,110,0.104);
+  --c-red-a7:rgba(255,57,81,0.55);
+  --c-blue-bg9:#e5ecf3;
+  --c-blue-fg8:#709ccc;
+  --c-blue-fg9:#0064d2;
+  --c-gray-a2:rgba(15,20,30,0.36);
+  --c-orange-a3:rgba(242,179,61,0.13);
+  --c-orange-a4:rgba(184,124,12,0.5);
+  --c-orange-a5:rgba(242,179,61,0.052);
+  --c-gray-a3:rgba(0,0,0,0.015);
+  --c-violet-a2:rgba(147,112,219,0.182);
+  --c-violet-a3:rgba(147,112,219,0.13);
+  --c-gray-fg6:#d6d6d6;
+  --c-gray-fg7:#686868;
+  --c-gray-a4:rgba(0,0,0,0.06);
+  --c-green-fg6:#1d7642;
+  --c-blue-bg10:#eef2f8;
+  --c-orange-a6:rgba(242,179,61,0.078);
+  --c-violet-a4:rgba(168,85,247,0.325);
+  --c-violet-a5:rgba(168,85,247,0.104);
+  --c-violet-a6:rgba(168,85,247,0.45);
+  --c-amber-a5:rgba(251,191,36,0.104);
+  --c-amber-a6:rgba(177,128,3,0.45);
+  --c-red-a8:rgba(255,107,107,0.13);
+  --c-red-a9:rgba(255,61,61,0.5);
+  --c-blue-a1:rgba(96,165,250,0.078);
+  --c-blue-a2:rgba(44,136,248,0.4);
+  --c-red-a10:rgba(255,107,107,0.195);
+  --c-amber-a7:rgba(245,196,81,0.156);
+  --c-gray-a5:rgba(0,0,0,0.2);
+  --c-violet-a7:rgba(167,139,250,0.208);
+  --c-blue-fg10:#6943fa;
+  --c-gray-bg5:#c7cad1;
+  --c-gray-bg6:#e3e4e8;
+  --c-orange-a7:rgba(184,124,12,0.7);
+  --c-amber-a8:rgba(178,128,10,0.65);
+  --c-amber-a9:rgba(245,196,81,0.325);
+  --c-red-fg7:#bf3333;
+  --c-green-a5:rgba(33,155,96,0.5);
+  --c-amber-a10:rgba(178,128,10,0.6);
+  --c-amber-a11:rgba(245,196,81,0.104);
+  --c-gray-a6:rgba(0,0,0,0.125);
+  --c-blue-bg11:#eef2f8;
+  --c-gray-bg7:#e8eaef;
+  --c-gray-bg8:#c4c9d4;
+  --c-orange-bg3:#1a1206;
+  --c-orange-bg4:#f6f4f1;
+  --c-orange-bg5:#dbcfbd;
+  --c-amber-bg7:#f7f6f3;
+  --c-orange-a8:rgba(201,115,28,0.48);
+  --c-amber-bg8:#f6f5f1;
+  --c-orange-a9:rgba(232,162,92,0.13);
+  --c-red-bg5:#f5f0f2;
+  --c-red-bg6:#d9bfc3;
+  --c-red-fg8:#c92533;
+  --c-red-fg9:#d2000f;
+  --c-gray-bg9:#c6ccd2;
+  --c-gray-a7:rgba(0,0,0,0.15);
+  --c-orange-a10:rgba(242,179,61,0.091);
+  --c-cyan-fg1:#046fa2;
+  --c-blue-bg12:#e5f1f8;
+  --c-blue-fg11:#1d5a8c;
+  --c-red-bg7:#f3ecec;
+  --c-orange-a11:rgba(242,179,61,0.104);
+  --c-orange-a12:rgba(184,124,12,0.45);
+  --c-blue-fg12:#0061db;
+  --c-violet-fg4:#cc0061;
+  --c-orange-fg4:#b74000;
+  --c-orange-bg6:#e2c4b6;
+  --c-blue-fg13:#1a54ff;
+  --c-blue-bg13:#b6c4e2;
+  --c-orange-bg7:#f6f3f1;
+  --c-green-fg7:#1c7648;
+  --c-gray-bg10:#ecf1ec;
+  --c-red-a11:rgba(255,107,107,0.104);
+  --c-red-a12:rgba(255,61,61,0.45);
+  --c-gray-bg11:#d6d6d6;
+  --c-gray-bg12:#eeeef3;
+  --c-blue-fg14:#6cacd0;
+  --c-amber-a12:rgba(245,196,81,0.208);
+  --c-green-fg8:#287633;
+  --c-cyan-fg2:#076f9e;
+  --c-green-bg4:#e6f2eb;
+  --c-amber-fg8:#7f6416;
+  --c-gray-a8:rgba(0,0,0,0.175);
+  --c-orange-bg8:#f3e7da;
+  --c-orange-bg9:#f5ede3;
+  --c-blue-bg14:#eff0f4;
+  --c-gray-bg13:#e6e8ed;
+  --c-orange-fg5:#ba3c00;
+  --c-orange-bg10:#f4ece5;
+  --c-amber-bg9:#f7f1e5;
+  --n-bg:#ffffff;
+  --n-card:#fafafa;
+  --n-line:#e6e8ec;
+  --n-line2:#d5d9e0;
+  --n-text:#1d2430;
+  --n-sub:#3d4655;
+  --n-muted:#606773;
+  --n-accent:#d98b3a;
+  --n-chip:#f1f3f6;
+  --n-row:#eef0f3;
+  --n-good:#297554;
+  --n-warn:#826418;
+  --n-bad:#cb1d22;
+  --n-unknown:#8a92a0;
+  --n-accent-fg:#94560f;
 }
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans KR',sans-serif;min-height:100vh}
@@ -765,10 +1005,6 @@ tr.editing{background:var(--c-orange-a6)}
    범위 밖인 다른 탭 본문까지 색이 바뀐다. 헤더·홈(#calendarView)·일지
    (#journalView)만 이 토큰을 쓴다. 상승/하락 색은 기존 --px-up/--px-down 그대로. */
 :root{
-  --n-bg:#0d1015; --n-card:#141820; --n-line:#1f252f; --n-line2:#2c333e;
-  --n-text:#e7e9ee; --n-sub:#b4bbc7; --n-muted:#8e97a6; --n-accent:#e8a25c;
-  --n-chip:#1c222b; --n-row:#1a1f27;
-  --n-good:#63c89b; --n-warn:#d9a92e; --n-bad:#e5484d; --n-unknown:#5a6578;
   --n-num:'IBM Plex Mono',ui-monospace,monospace;
   /* v5.295(사용자 지시): 숫자 타일 축소 비율 — 홈 시장 타일·오늘 할 일, 일지 리스크 5칸·
      R 누적의 여백·큰 숫자·높이만 이 값으로 줄인다(라벨·본문 글자는 그대로). */
@@ -792,7 +1028,7 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .hdr-title{font-size:17px;font-weight:700;letter-spacing:-.2px;color:var(--n-text)}
 .hdr-brand .ver{font-size:11px;color:var(--n-muted);border:0;padding:0}
 .hdr-guide{font-size:12px;color:var(--n-muted);text-decoration:none}
-.hdr-guide:hover{color:var(--n-accent)}
+.hdr-guide:hover{color:var(--n-accent-fg)}
 .hdr-navs{display:flex;align-items:center;gap:8px;min-width:0}
 .hdr .tabs{margin:0;background:none;border:0;padding:0;gap:2px;border-radius:0}
 .hdr .tab{min-height:44px;border-radius:8px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
@@ -822,18 +1058,21 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .hdr-strip{display:flex;align-items:center;gap:12px;min-height:40px;padding:0 var(--n-gutter);font-size:12px;
   color:var(--n-muted);border-bottom:1px solid var(--n-line);background:var(--n-bg)}
 .hdr-strip b{color:var(--c-gray-fg3);font-weight:600}
-.hdr-strip-link{background:none;border:0;color:var(--n-accent);font:inherit;font-size:12px;min-height:40px;padding:0 4px;cursor:pointer}
+.hdr-strip-link{background:none;border:0;color:var(--n-accent-fg);font:inherit;font-size:12px;min-height:40px;padding:0 4px;cursor:pointer}
 .hdr-strip-link:hover{color:var(--c-orange-fg2)}
 .hdr-strip-meta{margin-left:auto;white-space:nowrap}
+.hdr-theme{background:none;border:1px solid var(--n-line2);border-radius:7px;color:var(--n-muted);font:inherit;font-size:12px;min-height:28px;padding:0 10px;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.hdr-theme:hover{border-color:var(--n-accent)}
+.hdr-theme .active{color:var(--n-text);font-weight:600}
 .hdr-basis{margin:10px var(--n-gutter) 0}
 /* ── 홈(#calendarView) ── */
 .jrnl-wrap.home{padding:28px var(--n-gutter) 40px;background:var(--n-bg);color:var(--n-text);max-width:none}
-.home a{color:var(--n-accent)}
+.home a{color:var(--n-accent-fg)}
 .home .name-link{color:inherit}
 .n-card{background:var(--n-card);border:1px solid var(--n-line);border-radius:16px}
 .n-h{font-size:15px;font-weight:700;color:var(--n-text)}
 .n-sub{font-size:12px;color:var(--n-muted)}
-.n-link{background:none;border:0;padding:0 2px;color:var(--n-accent);font:inherit;font-size:12px;cursor:pointer;min-height:32px}
+.n-link{background:none;border:0;padding:0 2px;color:var(--n-accent-fg);font:inherit;font-size:12px;cursor:pointer;min-height:32px}
 .n-link:hover{color:var(--c-orange-fg2)}
 .n-btn{min-height:44px;padding:0 16px;border-radius:10px;border:1px solid var(--n-line2);background:var(--c-blue-bg4);
   color:var(--n-text);font:inherit;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
@@ -842,7 +1081,7 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .st-dot{display:inline-flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap}
 .st-dot::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor;flex-shrink:0}
 .st-good{color:var(--n-good)} .st-neutral{color:var(--c-amber-fg2)} .st-bad{color:var(--c-red-fg3)} .st-unknown{color:var(--n-muted)}
-.st-warn{color:var(--c-amber-fg2)} .st-accent{color:var(--n-accent)}
+.st-warn{color:var(--c-amber-fg2)} .st-accent{color:var(--n-accent-fg)}
 .home-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:16px}
 .tile{background:var(--n-card);border:1px solid var(--n-line);border-radius:14px;padding:calc(18px * var(--n-k)) calc(20px * var(--n-k));
   display:flex;flex-direction:column;gap:calc(10px * var(--n-k));min-width:0}
@@ -866,14 +1105,14 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .home-warn{display:flex;flex-wrap:wrap;gap:6px 16px;padding:12px 16px;border-radius:12px;background:var(--c-orange-bg4);border:1px solid var(--c-orange-bg5);font-size:13px}
 .todo{background:var(--c-amber-bg7);border:1px solid var(--c-orange-a8);border-radius:16px;padding:calc(24px * var(--n-k)) calc(28px * var(--n-k));display:flex;flex-direction:column;gap:calc(20px * var(--n-k))}
 .todo-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.todo-h .t{font-size:12px;font-weight:600;color:var(--n-accent);letter-spacing:.4px}
+.todo-h .t{font-size:12px;font-weight:600;color:var(--n-accent-fg);letter-spacing:.4px}
 .todo-item{display:flex;flex-direction:column;gap:calc(14px * var(--n-k))}
 .todo-item+.todo-item{border-top:1px solid var(--c-amber-bg5);padding-top:calc(20px * var(--n-k))}
 .todo-top{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
 .todo-name{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .todo-name .nm{font-size:calc(24px * var(--n-k));font-weight:700;color:var(--n-text)}
 .chip{font-size:12px;padding:3px 8px;border-radius:6px;background:var(--n-chip);color:var(--c-gray-fg3);white-space:nowrap}
-.chip.accent{background:var(--c-orange-bg1);color:var(--n-accent);font-weight:600}
+.chip.accent{background:var(--c-orange-bg1);color:var(--n-accent-fg);font-weight:600}
 .todo-cells{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--c-amber-bg5);border-radius:12px;overflow:hidden}
 .todo-cells>div{background:var(--c-amber-bg8);padding:calc(14px * var(--n-k)) calc(16px * var(--n-k));display:flex;flex-direction:column;gap:4px;min-width:0}
 .todo-cells .k{font-size:12px;color:var(--c-gray-fg5)}
@@ -986,7 +1225,7 @@ details.jr-more>summary{width:44px;justify-content:center;padding:0}
 .jr-seg-b.on{background:var(--c-blue-bg6);color:var(--c-gray-fg1);font-weight:600}
 .jr-pills{display:flex;gap:6px;flex-wrap:wrap}
 .jr-pill{min-height:32px;padding:0 12px;border-radius:16px;border:1px solid var(--n-line2);background:none;color:var(--n-sub);font:inherit;font-size:12px;cursor:pointer}
-.jr-pill.on{border-color:var(--n-accent);background:var(--c-orange-bg1);color:var(--n-accent);font-weight:600}
+.jr-pill.on{border-color:var(--n-accent);background:var(--c-orange-bg1);color:var(--n-accent-fg);font-weight:600}
 .jr-records .jrnl-stats{padding:12px 24px 0}
 .jr-table-wrap{overflow:visible;position:relative}   /* .sr 절대배치가 스크롤 밖으로 새지 않게 */
 table.jr-table{width:100%;border-collapse:collapse;font-size:14px}
@@ -996,7 +1235,7 @@ table.jr-table td{padding:16px 12px;border-bottom:1px solid var(--n-row);vertica
 table.jr-table tbody tr:nth-child(even) td{background:none}
 .jr-date{font-size:13px;color:var(--n-sub);white-space:nowrap}
 .jr-name>a{font-size:15px;font-weight:600;text-decoration:none}
-.jr-name>a:hover{color:var(--n-accent)}
+.jr-name>a:hover{color:var(--n-accent-fg)}
 .jr-s{font-size:12px;color:var(--n-muted);margin-top:4px;line-height:1.45}
 .jr-note{font-size:13px;color:var(--n-sub);max-width:220px}
 .jr-act{width:44px;text-align:right;padding-right:16px!important}
@@ -1154,6 +1393,9 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <span class="hdr-strip-msg">KR 히트는 관심 신호 · 진입 근거는 <b>KR 종가베팅</b>과 <b>US 눌림목</b>뿐</span>
   <button type="button" class="hdr-strip-link" id="basisToggle" aria-expanded="false" aria-controls="confirmEntryBanner">근거</button>
   <span class="hdr-strip-meta mono" id="scanMeta"></span>
+  <!-- v5.304(사용자 지시) 테마 토글. 헤더 윗줄은 1440px에서도 탭 줄이 이미 41px 모자라(탭 609px / 자리 568px)
+       버튼을 더 넣으면 '저점' 탭이 가려진다 — 그래서 헤더 띠 오른쪽 끝에 둔다. -->
+  <button type="button" class="hdr-theme" id="themeToggle" onclick="toggleTheme()" title="라이트/다크 테마 전환"><span data-theme-btn="light">라이트</span>/<span data-theme-btn="dark">다크</span></button>
 </div>
 <!-- v5.297(사용자 지시): 탭 전용 필터(주도주만·손절좁은순·손절폭▾·적격만·매집순·슈퍼대장만·숨김)
      — v5.294에서 헤더 오른쪽(.hdr-right, 줄어들지 않는 flex 항목)에 넣었더니 눌림목 탭에서
@@ -9225,7 +9467,7 @@ function viewRow(r) {
     </td>
     <td><span class="num"${broken ? ' style="color:var(--c-red-fg3)"' : ''}>${r.entry ?? '-'} → ${r.stop ?? '-'}</span>${entrySub.length ? `<div class="jr-s">${entrySub.join(' · ')}</div>` : ''}</td>
     <td>${pnlHtml}</td>
-    <td class="jr-note"><div class="note-clamp" title="${(r.note || '').replace(/"/g, '&quot;')}${r.review ? ' / 복기: ' + r.review.replace(/"/g, '&quot;') : ''}">${r.note || ''}${r.review ? `<br><i style="color:var(--n-accent)">복기: ${r.review}</i>` : ''}</div></td>
+    <td class="jr-note"><div class="note-clamp" title="${(r.note || '').replace(/"/g, '&quot;')}${r.review ? ' / 복기: ' + r.review.replace(/"/g, '&quot;') : ''}">${r.note || ''}${r.review ? `<br><i style="color:var(--n-accent-fg)">복기: ${r.review}</i>` : ''}</div></td>
     <td class="jr-act"><details class="rowmenu"><summary aria-label="행 메뉴"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></summary><div class="jr-menu" role="menu">${menu.join('')}</div></details></td>
   </tr>${
     // v5.196 [3]: "내 일지" 대기 행 전용 시나리오 — colspan은 위 <td> 6개와 맞춤.
@@ -9893,7 +10135,7 @@ function renderMyTrackBoard() {
     ? `<button type="button" class="track-more" style="text-align:left;padding:0 28px" aria-expanded="${_myTrackNoTriggerExpanded}" onclick="toggleMyTrackNoTriggerExpanded()">${_myTrackNoTriggerExpanded ? '▾' : '▸'} 트리거 미입력 ${noTrigger.length}건</button>`
     : '';
   const noTriggerBulkBtn = (noTrigger.length && _myTrackNoTriggerExpanded)
-    ? `<div style="padding:4px 28px 8px"><button type="button" class="n-btn sm" style="color:var(--n-accent);border-color:var(--n-accent)" onclick="myTrackCloseAllNoTrigger()">전체 관찰 종료 (${noTrigger.length}건)</button></div>` : '';
+    ? `<div style="padding:4px 28px 8px"><button type="button" class="n-btn sm" style="color:var(--n-accent-fg);border-color:var(--n-accent)" onclick="myTrackCloseAllNoTrigger()">전체 관찰 종료 (${noTrigger.length}건)</button></div>` : '';
   const noTriggerRowsHtml = _myTrackNoTriggerExpanded ? noTrigger.map(r => {
     const mkt = r.market || (/\.(KS|KQ)$/i.test(r.ticker || '') ? 'KR' : 'US');
     const priceStr = r.last_price != null ? fmtPrice(parseFloat(r.last_price), mkt) : '-';
