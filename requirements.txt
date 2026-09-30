@@ -8,3 +8,4 @@ pykrx
 python-dotenv
 beautifulsoup4
 anthropic
+lxml

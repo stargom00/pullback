@@ -892,7 +892,7 @@ details.rowmenu>summary:hover{background:#1b2029}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.300</span>
+      <span class="ver mono" id="verBadge">v5.301</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -5743,9 +5743,17 @@ function toggleLowpointMonth(btn) {
 let _lpMonthOpen = false;
 function _lowpointSectionHtml(lp, tf) {
   const meta = _LOWPOINT_TF_META[tf];
-  const entry = lp && lp[tf];
+  const raw = lp && lp[tf];
+  // v5.301: 서버 자동 실행이 실패했으면 refresh_failed(시각·오류) — 이전 결과는 그대로 보이고
+  // "갱신 실패"를 덧붙인다. 결과 자체가 없는 채 실패만 있으면(missing) 미실행과 같게 판정.
+  const failed = raw && raw.refresh_failed;
+  const entry = raw && raw.missing ? null : raw;
   const st = lowpointSectionStatus(entry, tf);
   const ranAt = (entry && entry.run_stamp && entry.run_stamp.run_at_kst) || null;
+  const failAt = failed && failed.at ? String(failed.at).replace('T', ' ').slice(5, 16) + ' KST' : '';
+  const failHtml = failed
+    ? `<div class="st-dot st-bad" style="font-size:12px;white-space:normal" title="${String(failed.error || '').replace(/"/g, '&quot;')}">갱신 실패${entry ? ' · 이전 결과 표시 중' : ''}${failAt ? ` (${failAt})` : ''}</div>` : '';
+  const ranHtml = ranAt ? `<div class="n-sub" style="font-size:11px">실행 ${String(ranAt).slice(5, 16)} KST</div>` : '';
   const staleBadge = st.staleText
     ? ` <span class="st-dot st-bad" title="기준봉 ${st.barDate || '없음'} · 기대 ${(lp && lp.expected && lp.expected[tf]) || '?'} — 로컬 스크립트를 다시 돌려야 해요">${st.staleText}</span>` : '';
   const label = st.state === 'missing'
@@ -5756,15 +5764,17 @@ function _lowpointSectionHtml(lp, tf) {
   if (tf === 'month' && st.state === 'rows') {
     const open = typeof _lpMonthOpen !== 'undefined' && _lpMonthOpen;
     return `<div style="border-top:1px solid var(--n-line);padding-top:10px;display:flex;flex-direction:column;gap:10px">
+      ${failHtml}
       <button type="button" class="n-link" style="display:flex;justify-content:space-between;width:100%;font-size:13px;min-height:36px" aria-expanded="${open}" onclick="toggleLowpointMonth(this)"><span class="lp-month-lbl">${labelHtml}</span><span class="num">${st.count}종목 보기</span></button>
       <div class="lp-chips" id="lpMonthChips"${open ? '' : ' hidden'}>${chips}</div>
+      ${ranHtml}
     </div>`;
   }
   const head = `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--n-muted)">${labelHtml}${st.state === 'rows' ? `<span class="num">${st.count}</span>` : ''}</div>`;
   const body = st.state === 'rows'
     ? `<div class="lp-chips">${chips}</div>`
     : (st.state === 'empty' ? `<div class="n-sub">${st.text}</div>` : '');
-  return `<div style="display:flex;flex-direction:column;gap:10px${tf === 'month' ? ';border-top:1px solid var(--n-line);padding-top:10px' : ''}">${head}${body}</div>`;
+  return `<div style="display:flex;flex-direction:column;gap:10px${tf === 'month' ? ';border-top:1px solid var(--n-line);padding-top:10px' : ''}">${failHtml}${head}${body}${ranHtml}</div>`;
 }
 // lp가 null(파일 자체 없음)이어도 **카드를 숨기지 않는다** — "미실행"이
 // 보여야 안 돌린 걸 알 수 있다(조용한 누락 금지).

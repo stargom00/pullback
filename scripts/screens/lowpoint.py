@@ -257,12 +257,16 @@ def kr_universe(board: str = "kospi") -> tuple[dict, dict]:
                  "admin_snapshot": len(admin), "admin_excluded": excluded}
 
 
-def us_universe(refresh: bool = False) -> tuple[dict, dict]:
+def us_universe(refresh: bool = False, path: str | None = None) -> tuple[dict, dict]:
     """미국 보통주 전체(Nasdaq Trader 심볼 디렉터리) — **이 스크린 전용**.
     스캐너 공용 `universe.get_universe("us")`를 쓰지 않는 이유는 us_listings.py
     docstring 참고(시총 $500M+ 필터 때문에 ZUMZ 같은 소형주가 빠진다).
     반환: ({yahoo심볼: 이름}, stats)"""
     import us_listings
+    # path: 상장목록 캐시 위치 — 맥 CLI는 기본(scripts/screens/cache/), 서버 자동 실행은
+    # /data 볼륨(v5.301). 목록을 만드는 로직은 us_listings 하나다(사본 없음).
+    if path:
+        return us_listings.build_universe(refresh=refresh, path=path)
     return us_listings.build_universe(refresh=refresh)
 
 
@@ -326,7 +330,8 @@ def clock_of(market: str) -> str:
 
 
 def screen_market(market: str, tf: str, now: datetime, refresh_universe: bool = False,
-                  min_price: float | None = None, min_avg_volume: float | None = None) -> dict:
+                  min_price: float | None = None, min_avg_volume: float | None = None,
+                  us_listings_path: str | None = None) -> dict:
     """market: 'kospi' | 'kosdaq' | 'us'.
     min_price·min_avg_volume은 **US 전용 옵션 필터**로 기본은 None(끔) — 임계값을
     임의로 정하지 않는다(사용자 지시). 켜면 몇 건이 빠졌는지 결과에 남는다."""
@@ -337,7 +342,7 @@ def screen_market(market: str, tf: str, now: datetime, refresh_universe: bool = 
         uni, meta = kr_universe(market)
         data, failed = fetch_kr(list(uni), tf)
     else:
-        uni, meta = us_universe(refresh=refresh_universe)
+        uni, meta = us_universe(refresh=refresh_universe, path=us_listings_path)
         data, failed, extra = fetch_us(list(uni), tf)
         if min_price is not None or min_avg_volume is not None:
             for t in list(data):
@@ -371,6 +376,20 @@ def screen_market(market: str, tf: str, now: datetime, refresh_universe: bool = 
     return {"market": market, "universe": len(uni), "fetched": len(data), "failed": sorted(failed),
             "session": session, "stale": stale, "short": short, "rows": rows, "meta": meta,
             "opt_dropped": opt_dropped, "elapsed": time.time() - t0, "names": uni}
+
+
+ALL_MARKETS = ["kospi", "kosdaq", "us"]
+
+
+def screen_all(tf: str, now: datetime, markets: list | None = None, refresh_universe: bool = False,
+               us_listings_path: str | None = None) -> tuple[list, dict]:
+    """KOSPI·KOSDAQ·US를 한 번에 — CLI `--market all`과 **같은 경로**(v5.301, 서버 자동
+    실행이 이 함수를 그대로 부른다). 반환: (screen_market 결과 목록, {market: 0봉 라벨})."""
+    markets = markets or ALL_MARKETS
+    labels = {m: last_closed_label(tf, clock_of(m), now) for m in markets}
+    results = [screen_market(m, tf, now, refresh_universe=refresh_universe,
+                             us_listings_path=us_listings_path) for m in markets]
+    return results, labels
 
 
 def exclusion_detail_lines(res: dict, tf: str) -> list:

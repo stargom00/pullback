@@ -5,6 +5,22 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.301 [저점종목 서버 자동 실행 — 사용자 지시] 맥 수동 실행(→커밋→push)이라 잊기 쉬웠다.
+    서버가 주봉은 매주 토요일 09:00 KST, 월봉은 매월 첫 토요일 09:20 KST에 직접 돌린다
+    (_maybe_run_lowpoint, 스케줄러 4분 틱에서 백그라운드 create_task, 계산은 전용 1스레드
+    run_in_executor — 이벤트 루프·정규 스캔 무차단, 한 번에 한 tf만). 계산은
+    scripts/screens/lowpoint.py를 그대로 import(screen_all → publish_entry → write_publish,
+    조건·유니버스 사본 없음 — screen_all·us_listings 경로 인자만 추가). 결과는 /data의
+    lowpoint_latest.json(원자적 tmp→rename)에만 쓰고, 맥 --publish는 계속 레포 파일만 쓴다
+    (충돌 없음). 표시는 tf별 /data 우선·레포 폴백. 실행 상태는 /data의
+    lowpoint_run_state.json에 영속(같은 기준봉 성공 시 재실행 없음 — 재시작 반복 방지,
+    실패 시 60분 뒤 최대 3회 재시도, 멈춘 running은 120분 뒤 실패 취급 — 셋 다 AI 판단
+    어림값). 따라잡기는 예약 시각 뒤 48시간 안에만 — 상태 파일이 없는 첫 배포 직후(평일)
+    지난 토요일 슬롯을 따라잡아 운영에서 바로 도는 일을 막는다(첫 실행은 10/3 토). 실패하면 이전 결과를 그대로 두고 카드에 "갱신 실패 · 이전 결과 표시 중
+    (시각)". US 상장목록 캐시(us_listings.json)도 /data, 없거나 7일 지나면 실행 때 갱신.
+    실행 전후 RSS를 로그로 남기고 끝나면 _release_memory. 카드에 각 탭 실행 시각(KST)
+    표시. requirements.txt에 lxml 추가 — KIND 목록 파싱(pd.read_html)이 lxml 없이는
+    실패한다(로컬엔 다른 패키지 덕에 설치돼 있었을 뿐, 운영은 requirements 기준 설치).
 v5.300 [일지 저장을 레코드 단위로 — 사용자 지시] [근본 원인] POST /api/journal이 배열 전체를
     받아 "서버엔 있고 배열엔 없고 최근 5분 안 갱신 아님 = 삭제"로 병합하는 사실상 덮어쓰기라,
     옛 배열을 보내는 어떤 경로(옛 일지 이전·오래 열린 탭 1분 자동저장·로드 실패 후 저장)든
@@ -8385,7 +8401,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.300"
+VERSION = "v5.301"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -12721,6 +12737,7 @@ async def _scheduler_loop():
             _maybe_refresh_macro_calendar()   # v5.108: 캘린더 탭 매크로 일정, 주 1회
             await _maybe_run_weekly_money_flow()   # v5.147: 돈의흐름 주 1회 전환
             _journal_daily_backup()   # v5.300: 날짜별 일지 사본(그날 없을 때만)
+            asyncio.create_task(_maybe_run_lowpoint())   # v5.301: 저점종목 토요일 자동 실행(백그라운드)
         except Exception as e:
             print(f"[scheduler] loop error: {e}")
         await asyncio.sleep(240)  # 4분
@@ -17655,6 +17672,167 @@ async def refresh_market(market: str = "all"):
     return JSONResponse({"ok": bundle is not None, "market": market})
 
 
+# ── 📉 저점종목 서버 자동 실행 — v5.301(사용자 지시) ─────────────────────
+# 예전엔 맥에서 lowpoint.py --publish → 커밋 → push로만 갱신돼 잊기 쉬웠다. 이제
+# 서버가 주봉은 매주 토요일 09:00 KST, 월봉은 매월 첫 토요일 09:20 KST에 직접 돌린다
+# (금요일 US 장 확정 뒤, KR·US 모두 휴장 — 정규 스캔과 안 겹침). 계산은
+# scripts/screens/lowpoint.py(screen_all → publish_entry → write_publish)를 **그대로**
+# import해서 쓴다(조건·유니버스 사본 없음). 결과는 /data(영구 볼륨)의 lowpoint_latest.json
+# 에만 쓴다 — 맥 --publish가 쓰는 레포 파일(data/lowpoint_latest.json)은 건드리지 않는다
+# (서버는 /data만, 맥은 레포만 → 충돌 없음). 표시는 tf별로 /data 우선, 없으면 레포 폴백.
+# 실행 상태(성공·실패·시도 횟수)는 lowpoint_run_state.json(/data)에 영속한다 — 컨테이너
+# 재시작마다 다시 도는 일(v5.141 사고와 같은 모양)이 없게. 실패하면 이전 결과는 그대로
+# 두고 카드에 "갱신 실패 · 이전 결과 표시 중"을 띄운다.
+LOWPOINT_DATA_PATH = _resolve_persistent_path("lowpoint_latest.json")
+LOWPOINT_STATE_PATH = _resolve_persistent_path("lowpoint_run_state.json")
+LOWPOINT_US_LISTINGS_PATH = _resolve_persistent_path("us_listings.json")
+LOWPOINT_SCHEDULE_HM = {"week": (9, 0), "month": (9, 20)}   # KST, 사용자 지시
+LOWPOINT_RETRY_MIN = 60          # 실패 후 재시도 간격(분) — AI 판단 어림값
+LOWPOINT_MAX_ATTEMPTS = 3        # 한 기준봉당 최대 시도 — AI 판단 어림값(무한 재시도 방지)
+LOWPOINT_RUNNING_STALE_MIN = 120  # "running"으로 남은 기록을 죽은 실행으로 볼 시간(분)
+LOWPOINT_US_LISTINGS_MAX_AGE_DAYS = 7   # US 상장목록 캐시 주 1회 갱신(사용자 지시)
+# 따라잡기 창: 예약 시각 뒤 이 시간 안에만 실행한다. 컨테이너가 토요일 아침에 재시작 중이었어도
+# 주말 안에는 돈다. 창을 두지 않으면 **상태 파일이 없는 첫 배포 직후(평일)** 지난 토요일 슬롯을
+# 따라잡아 운영에서 즉시 돌아 버린다(사용자 지시 "운영 강제 실행 금지 — 토요일 자연 실행"과
+# 충돌, 2026-09-30 로컬 확인). 48시간 = 토 09:00 → 월 09:00 — AI 판단 어림값.
+LOWPOINT_CATCHUP_HOURS = 48
+_lowpoint_running = False
+_LOWPOINT_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lowpoint")
+
+
+def _lowpoint_last_slot(tf: str, now: "datetime") -> "tuple[datetime, str]":
+    """now(아무 타임존이든) 기준 가장 최근의 예약 시각(KST)과 그 실행이 만들 기준봉 라벨.
+    주봉: 토요일 09:00 KST → 전날(금요일) 라벨. 월봉: 그 달 첫 토요일 09:20 KST → 전월 말일.
+    판정은 **KST 달력**으로 한다(서버·맥 로컬 타임존과 무관)."""
+    now_k = now.astimezone(KST)
+    hh, mm = LOWPOINT_SCHEDULE_HM[tf]
+    if tf == "week":
+        d = now_k.date() - timedelta(days=(now_k.weekday() - 5) % 7)   # 이번 주(또는 오늘) 토요일
+        slot = datetime(d.year, d.month, d.day, hh, mm, tzinfo=KST)
+        if slot > now_k:
+            slot -= timedelta(days=7)
+        return slot, (slot.date() - timedelta(days=1)).isoformat()
+
+    def first_sat(y, m):
+        d1 = datetime(y, m, 1).date()
+        return d1 + timedelta(days=(5 - d1.weekday()) % 7)
+    d = first_sat(now_k.year, now_k.month)
+    slot = datetime(d.year, d.month, d.day, hh, mm, tzinfo=KST)
+    if slot > now_k:
+        py, pm = (now_k.year - 1, 12) if now_k.month == 1 else (now_k.year, now_k.month - 1)
+        d = first_sat(py, pm)
+        slot = datetime(d.year, d.month, d.day, hh, mm, tzinfo=KST)
+    return slot, (slot.date().replace(day=1) - timedelta(days=1)).isoformat()
+
+
+def _lowpoint_load_state() -> dict:
+    try:
+        with open(LOWPOINT_STATE_PATH, encoding="utf-8") as f:
+            d = _json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _lowpoint_save_state(state: dict):
+    _save_json_atomic(LOWPOINT_STATE_PATH, state)
+
+
+def _lowpoint_due(tf: str, now: "datetime", state: dict) -> "str | None":
+    """지금 돌려야 하면 목표 기준봉 라벨, 아니면 None. 순수 함수(테스트 대상).
+    같은 라벨을 이미 성공했으면 None, 실패했으면 LOWPOINT_RETRY_MIN 뒤 최대
+    LOWPOINT_MAX_ATTEMPTS번까지. 'running'이 오래 남아 있으면(컨테이너가 실행 중 죽음)
+    실패로 보고 재시도 규칙을 따른다."""
+    slot, target = _lowpoint_last_slot(tf, now)
+    if now - slot > timedelta(hours=LOWPOINT_CATCHUP_HOURS):
+        return None   # 슬롯이 너무 지났다 — 다음 예약 시각을 기다린다
+    st = state.get(tf) or {}
+    if st.get("target") != target:
+        return target
+    status = st.get("status")
+    if status == "ok":
+        return None
+    try:
+        last = datetime.fromisoformat(st.get("started_at") or st.get("finished_at") or "")
+    except ValueError:
+        last = None
+    if status == "running" and last and (now - last) < timedelta(minutes=LOWPOINT_RUNNING_STALE_MIN):
+        return None
+    if int(st.get("attempts") or 0) >= LOWPOINT_MAX_ATTEMPTS:
+        return None
+    if last and (now - last) < timedelta(minutes=LOWPOINT_RETRY_MIN):
+        return None
+    return target
+
+
+def _lowpoint_job_blocking(tf: str, now: "datetime") -> dict:
+    """스레드풀에서 돈다(이벤트 루프 밖). lowpoint.py 함수를 그대로 부른다."""
+    screens = os.path.join(os.path.dirname(__file__), "scripts", "screens")
+    if screens not in sys.path:
+        sys.path.insert(0, screens)
+    import lowpoint as lp
+    import harness
+    refresh = True
+    try:
+        with open(LOWPOINT_US_LISTINGS_PATH, encoding="utf-8") as f:
+            fetched_at = datetime.fromisoformat(_json.load(f).get("fetched_at"))
+        refresh = (datetime.now(fetched_at.tzinfo) - fetched_at) > timedelta(days=LOWPOINT_US_LISTINGS_MAX_AGE_DAYS)
+    except Exception:
+        refresh = True   # 없거나 깨졌으면 새로 받는다
+    results, labels = lp.screen_all(tf, now, refresh_universe=refresh,
+                                    us_listings_path=LOWPOINT_US_LISTINGS_PATH)
+    entry = lp.publish_entry(results, tf, labels, harness.run_stamp())
+    lp.write_publish(tf, entry, path=LOWPOINT_DATA_PATH)   # tmp → os.replace(원자적)
+    return {"bar_date": entry["bar_date"], "rows": len(entry["rows"]),
+            "listings_refreshed": refresh,
+            "counts": {m: {"universe": c["universe"], "fetched": c["fetched"], "failed": c["failed"]}
+                       for m, c in entry["excluded_counts"].items()}}
+
+
+async def _maybe_run_lowpoint(now: "datetime | None" = None, *, _job=None) -> "dict | None":
+    """스케줄러 루프(4분 주기)에서 부른다. 한 번에 한 tf만(메모리) — 월봉은 다음 틱.
+    _job은 테스트 주입용(기본 _lowpoint_job_blocking). 반환: 이번에 돈 실행 기록 또는 None."""
+    global _lowpoint_running
+    if _lowpoint_running:
+        return None
+    now = now or datetime.now(KST)
+    state = _lowpoint_load_state()
+    for tf in ("week", "month"):
+        target = _lowpoint_due(tf, now, state)
+        if not target:
+            continue
+        prev = state.get(tf) or {}
+        attempts = (int(prev.get("attempts") or 0) + 1) if prev.get("target") == target else 1
+        rec = {"target": target, "status": "running", "attempts": attempts,
+               "started_at": now.isoformat(), "last_ok_at": prev.get("last_ok_at")}
+        state[tf] = rec
+        _lowpoint_save_state(state)
+        _lowpoint_running = True
+        rss0 = _rss_mb()
+        t0 = time.time()
+        print(f"[lowpoint] {tf} 자동 실행 시작 — 목표 기준봉 {target} · 시도 {attempts}/{LOWPOINT_MAX_ATTEMPTS} "
+              f"· rss {rss0}MB", flush=True)
+        try:
+            loop = asyncio.get_event_loop()
+            summary = await loop.run_in_executor(_LOWPOINT_EXECUTOR, _job or _lowpoint_job_blocking, tf, now)
+            rec.update(status="ok", finished_at=datetime.now(KST).isoformat(), summary=summary,
+                       last_ok_at=datetime.now(KST).isoformat(), error=None)
+            print(f"[lowpoint] {tf} 자동 실행 완료 — 기준봉 {summary.get('bar_date')} · 신호 {summary.get('rows')}건 "
+                  f"· {time.time() - t0:.0f}s · rss {rss0} → {_rss_mb()}MB · {summary.get('counts')}", flush=True)
+        except Exception as e:
+            rec.update(status="failed", finished_at=datetime.now(KST).isoformat(),
+                       error=f"{type(e).__name__}: {e}"[:300])
+            print(f"[lowpoint] {tf} 자동 실행 실패(이전 결과 유지) — {rec['error']} · {time.time() - t0:.0f}s "
+                  f"· rss {rss0} → {_rss_mb()}MB", flush=True)
+        finally:
+            _lowpoint_running = False
+            state[tf] = rec
+            _lowpoint_save_state(state)
+            await _release_memory(f"lowpoint {tf}")
+        return rec
+    return None
+
+
 # ── 📉 저점종목(주간·월간 RSI 하향돌파) — 표시 전용 ─────────────────────
 # 계산은 맥 로컬 스크립트(scripts/screens/lowpoint.py --publish)가 하고
 # 앱은 그 결과 파일을 읽어 캘린더 홈 카드로 **표시만** 한다(사용자 지시).
@@ -17698,31 +17876,53 @@ def _lowpoint_expected_label(tf: str, now: "datetime | None" = None) -> str:
     return label.isoformat()
 
 
-def _lowpoint_view(now: "datetime | None" = None) -> dict | None:
-    """캘린더 페이로드용. 파일이 없으면 None(프론트가 "미실행" 표시),
-    파싱 실패도 경고 로그 + None. tf별로 낡음(stale) 판정을 서버가 한다
-    (프론트는 렌더만 — v5.232와 같은 원칙)."""
-    if not os.path.exists(LOWPOINT_LATEST_PATH):
+def _lowpoint_read(path: str) -> "dict | None":
+    """게시 파일 하나 읽기. 없으면 None, 깨졌으면 경고 로그 + None."""
+    if not path or not os.path.exists(path):
         return None
     try:
-        with open(LOWPOINT_LATEST_PATH, encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = _json.load(f)
         if not isinstance(data, dict):
             raise ValueError("최상위가 dict가 아님")
+        return data
     except (ValueError, OSError) as e:
-        print(f"[lowpoint] {LOWPOINT_LATEST_PATH} 읽기 실패: {e}", flush=True)
+        print(f"[lowpoint] {path} 읽기 실패: {e}", flush=True)
+        return None
+
+
+def _lowpoint_view(now: "datetime | None" = None) -> dict | None:
+    """캘린더 페이로드용. v5.301: tf별로 **/data(서버 자동 실행 결과)를 먼저**, 그 칸이
+    없으면 레포 파일(맥 --publish, git 배포) 폴백 — 첫 배포 직후나 한 tf만 돈 상태에서도
+    카드가 비지 않게. 서버 실행 상태(LOWPOINT_STATE_PATH)가 실패면 그 tf에
+    refresh_failed(시각·오류)를 붙인다 — 이전 결과를 그대로 보이면서 "갱신 실패"를 알린다.
+    둘 다 없으면 None(프론트가 "미실행" 표시). 낡음 판정은 서버가 한다(v5.232 원칙)."""
+    data = _lowpoint_read(globals().get("LOWPOINT_DATA_PATH")) or {}
+    repo = _lowpoint_read(LOWPOINT_LATEST_PATH) or {}
+    state_path = globals().get("LOWPOINT_STATE_PATH")
+    state = {}
+    if state_path and os.path.exists(state_path):
+        try:
+            with open(state_path, encoding="utf-8") as f:
+                state = _json.load(f) or {}
+        except (ValueError, OSError) as e:
+            print(f"[lowpoint] {state_path} 읽기 실패: {e}", flush=True)
+    if not data and not repo and not state:
         return None
     out = {"expected": {}}
     for tf in LOWPOINT_TFS:
         expected = _lowpoint_expected_label(tf, now)
         out["expected"][tf] = expected
-        entry = data.get(tf)
+        src, entry = ("data", data.get(tf)) if isinstance(data.get(tf), dict) else ("repo", repo.get(tf))
+        st = state.get(tf) if isinstance(state.get(tf), dict) else None
+        failed = ({"at": st.get("finished_at"), "error": st.get("error"), "target": st.get("target")}
+                  if st and st.get("status") == "failed" else None)
         if not isinstance(entry, dict):
-            out[tf] = None
+            out[tf] = {"rows": [], "missing": True, "refresh_failed": failed} if failed else None
             continue
         bar_date = str(entry.get("bar_date") or "")
         out[tf] = {**entry, "stale": (not bar_date) or bar_date < expected,
-                   "expected_bar_date": expected}
+                   "expected_bar_date": expected, "source": src, "refresh_failed": failed}
     return out
 
 
