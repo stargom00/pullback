@@ -42,15 +42,16 @@ def test_week_slot_is_kst_not_local_tz():
     assert t == "2026-10-02"
 
 
-# v5.306(사용자 지시): 월봉 = 매월 1일 09:20 KST(예전 첫 토요일 09:20).
+# v5.306(사용자 지시): 월봉 = 매월 1일(예전 첫 토요일 09:20). v5.307: 1일 09:20 → 08:00 KST
+# (KR 장 시작 스캔과 메모리 경합 회피, 월봉 확정은 늦어도 1일 06:00 KST).
 @pytest.mark.parametrize("now,slot,target", [
-    ("2026-10-01 09:19", "2026-09-01 09:20", "2026-08-31"),   # 1일 09:20 전 → 지난달 1일 슬롯
-    ("2026-10-01 09:20", "2026-10-01 09:20", "2026-09-30"),   # 1일 09:20 정각
-    ("2026-10-03 09:20", "2026-10-01 09:20", "2026-09-30"),   # 첫 토요일은 더 이상 슬롯이 아니다
-    ("2026-11-01 09:20", "2026-11-01 09:20", "2026-10-31"),   # 일요일인 1일도 1일
-    ("2027-01-01 09:20", "2027-01-01 09:20", "2026-12-31"),   # 해 넘김
-    ("2027-01-01 09:19", "2026-12-01 09:20", "2026-11-30"),
-    ("2026-03-01 09:20", "2026-03-01 09:20", "2026-02-28"),   # 2월 말일
+    ("2026-10-01 07:59", "2026-09-01 08:00", "2026-08-31"),   # 1일 08:00 전 → 지난달 1일 슬롯
+    ("2026-10-01 08:00", "2026-10-01 08:00", "2026-09-30"),   # 1일 08:00 정각
+    ("2026-10-03 09:20", "2026-10-01 08:00", "2026-09-30"),   # 첫 토요일은 더 이상 슬롯이 아니다
+    ("2026-11-01 08:00", "2026-11-01 08:00", "2026-10-31"),   # 일요일인 1일도 1일
+    ("2027-01-01 08:00", "2027-01-01 08:00", "2026-12-31"),   # 해 넘김
+    ("2027-01-01 07:59", "2026-12-01 08:00", "2026-11-30"),
+    ("2026-03-01 08:00", "2026-03-01 08:00", "2026-02-28"),   # 2월 말일
 ])
 def test_month_slot_first_day_kst(now, slot, target):
     s, t = app._lowpoint_last_slot("month", _k(now))
@@ -58,19 +59,20 @@ def test_month_slot_first_day_kst(now, slot, target):
 
 
 def test_month_slot_is_kst_not_local_tz():
-    # NZDT 10-01 13:19 = KST 09:19 → 아직 9월분 슬롯 전
-    assert app._lowpoint_last_slot("month", _k("2026-10-01 13:19", NZDT))[1] == "2026-08-31"
-    assert app._lowpoint_last_slot("month", _k("2026-10-01 13:20", NZDT))[1] == "2026-09-30"
+    # NZDT 10-01 11:59 = KST 07:59 → 아직 9월분 슬롯 전 / NZDT 12:00 = KST 08:00
+    assert app._lowpoint_last_slot("month", _k("2026-10-01 11:59", NZDT))[1] == "2026-08-31"
+    assert app._lowpoint_last_slot("month", _k("2026-10-01 12:00", NZDT))[1] == "2026-09-30"
 
 
 @pytest.mark.parametrize("now,due", [
-    ("2026-10-01 09:19", None),            # 슬롯 전(9월 1일 슬롯은 창 밖)
-    ("2026-10-01 09:20", "2026-09-30"),    # 1일 09:20
+    ("2026-10-01 07:59", None),            # 슬롯 전(9월 1일 슬롯은 창 밖)
+    ("2026-10-01 08:00", "2026-09-30"),    # 1일 08:00
+    ("2026-10-01 09:20", "2026-09-30"),    # 옛 v5.306 시각도 창 안
     ("2026-10-02 12:00", "2026-09-30"),    # 2일 — 창 안(따라잡기)
-    ("2026-10-03 09:19", "2026-09-30"),    # 1일 09:20 + 47시간 59분
-    ("2026-10-03 09:21", None),            # +48시간 넘음
-    ("2026-10-04 09:20", None),            # 4일 — 창 밖
-    ("2026-10-03 09:30", None),            # 첫 토요일(옛 기준 시각) — 더 이상 실행 아님
+    ("2026-10-03 07:59", "2026-09-30"),    # 1일 08:00 + 47시간 59분
+    ("2026-10-03 08:01", None),            # +48시간 넘음
+    ("2026-10-04 08:00", None),            # 4일 — 창 밖
+    ("2026-10-03 09:20", None),            # 첫 토요일(옛 기준 시각) — 더 이상 실행 아님
 ])
 def test_month_due_window_first_day(now, due):
     assert app._lowpoint_due("month", _k(now), {}) == due
@@ -89,19 +91,19 @@ def test_month_due_window_first_day(now, due):
     ({}, "2026-09-30"),                                                                  # 상태 파일 없음/빈 파일
 ])
 def test_old_first_saturday_state_does_not_skip_oct1(old_state, due):
-    assert app._lowpoint_due("month", _k("2026-10-01 09:20"), old_state) == due
-    assert app._lowpoint_due("week", _k("2026-10-01 09:20"), old_state) is None   # 주봉은 토요일 그대로
+    assert app._lowpoint_due("month", _k("2026-10-01 08:00"), old_state) == due
+    assert app._lowpoint_due("week", _k("2026-10-01 08:00"), old_state) is None   # 주봉은 토요일 그대로
 
 
 def test_month_ok_on_1st_is_not_rerun_on_first_saturday():
     ok = {"month": {"target": "2026-09-30", "status": "ok", "attempts": 1,
-                    "started_at": _k("2026-10-01 09:20").isoformat()}}
-    for now in ("2026-10-01 09:40", "2026-10-02 09:20", "2026-10-03 09:20"):
+                    "started_at": _k("2026-10-01 08:00").isoformat()}}
+    for now in ("2026-10-01 08:20", "2026-10-02 08:00", "2026-10-03 07:59", "2026-10-03 09:20"):
         assert app._lowpoint_due("month", _k(now), ok) is None, now
 
 
 def test_schedule_times_unchanged():
-    assert app.LOWPOINT_SCHEDULE_HM == {"week": (9, 0), "month": (9, 20)}
+    assert app.LOWPOINT_SCHEDULE_HM == {"week": (9, 0), "month": (8, 0)}   # v5.307: 월봉 08:00
     assert app.LOWPOINT_CATCHUP_HOURS == 48
 
 
@@ -165,22 +167,23 @@ def test_success_writes_data_and_state(paths):
     state = json.loads(paths["state"].read_text())
     assert state["week"]["status"] == "ok"
     assert json.loads(paths["data"].read_text())["week"]["bar_date"] == "2026-10-02"
-    # 같은 라벨(주봉 10-02)은 다시 안 돈다. 월봉은 10-01 09:20 슬롯 +48시간이 지나 이날은 없다(v5.306)
+    # 같은 라벨(주봉 10-02)은 다시 안 돈다. 월봉은 10-01 08:00 슬롯 +48시간이 지나 이날은 없다(v5.307)
     assert asyncio.run(app._maybe_run_lowpoint(_k("2026-10-03 09:30"), _job=job)) is None
     st = json.loads(paths["state"].read_text())
     assert st["week"]["attempts"] == 1 and st["week"]["status"] == "ok"
 
 
 def test_month_runs_on_the_1st_through_runner(paths):
-    """스케줄러가 부르는 경로 그대로: 10-01 09:24(4분 틱) — 주봉은 창 밖이라 건너뛰고 월봉만 돈다."""
+    """스케줄러가 부르는 경로 그대로: 10-01 08:04(4분 틱) — 주봉은 창 밖이라 건너뛰고 월봉만 돈다."""
     ran = []
 
     def job(tf, now):
         ran.append(tf)
         return {"bar_date": "2026-09-30", "rows": 0, "counts": {}}
-    rec = asyncio.run(app._maybe_run_lowpoint(_k("2026-10-01 09:24"), _job=job))
+    assert asyncio.run(app._maybe_run_lowpoint(_k("2026-10-01 07:59"), _job=job)) is None   # 슬롯 전
+    rec = asyncio.run(app._maybe_run_lowpoint(_k("2026-10-01 08:04"), _job=job))
     assert ran == ["month"] and rec["target"] == "2026-09-30" and rec["status"] == "ok"
-    assert asyncio.run(app._maybe_run_lowpoint(_k("2026-10-01 09:28"), _job=job)) is None
+    assert asyncio.run(app._maybe_run_lowpoint(_k("2026-10-01 08:08"), _job=job)) is None
     # 첫 토요일: 주봉(토 09:00)은 정상 실행, 월봉은 재실행 없음
     assert asyncio.run(app._maybe_run_lowpoint(_k("2026-10-03 09:20"), _job=job))["target"] == "2026-10-02"
     assert asyncio.run(app._maybe_run_lowpoint(_k("2026-10-03 09:24"), _job=job)) is None

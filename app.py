@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.307 [저점 월봉 슬롯 1일 09:20 → 1일 08:00 KST — 사용자 지시 "v5.306 월봉 슬롯(1일 09:20 KST)이 KR 장 시작
+    직후라 장 시작 스캔과 메모리 경합. 월봉 확정은 늦어도 1일 06:00 KST(US 겨울 마감)라 08:00 KST면 두 시장
+    확정 후 + KR 개장 전"] LOWPOINT_SCHEDULE_HM["month"]만 (9,20)→(8,0) — 따라잡기 창(슬롯 +48시간)도
+    같이 이동, 주봉·스크린 조건·유니버스 불변. 첫 실행 예정 2026-10-01 08:00 KST(9월 월봉).
 v5.306 [저점 월봉 자동 실행 = 매월 1일 09:20 KST — 사용자 지시 "월봉 확정 시점: KR = 월말 마지막 거래일
     20:10 KST, US = 다음날 05:00 KST(서머타임, 겨울 06:00). 매월 1일 09:20 KST면 두 시장 모두 확정 후"]
     예전 "매월 첫 토요일 09:20"은 월말 마감 뒤 최대 6일 늦었다. _lowpoint_last_slot("month")만 변경 —
@@ -8457,7 +8461,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.306"
+VERSION = "v5.307"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -17733,9 +17737,10 @@ async def refresh_market(market: str = "all"):
 # ── 📉 저점종목 서버 자동 실행 — v5.301(사용자 지시) ─────────────────────
 # 예전엔 맥에서 lowpoint.py --publish → 커밋 → push로만 갱신돼 잊기 쉬웠다. 이제
 # 서버가 주봉은 매주 토요일 09:00 KST(금요일 US 장 확정 뒤, KR·US 모두 휴장 — 정규 스캔과
-# 안 겹침), 월봉은 v5.306부터 매월 1일 09:20 KST에 직접 돌린다(예전 "첫 토요일"은 월말 마감 뒤
+# 안 겹침), 월봉은 매월 1일 08:00 KST에 직접 돌린다(v5.306 1일 09:20 → v5.307 08:00. 예전 "첫 토요일"은 월말 마감 뒤
 # 최대 6일 늦었다 — 사용자 지시 "월봉 확정 시점: KR = 월말 마지막 거래일 20:10 KST, US = 다음날
-# 05:00 KST(서머타임, 겨울 06:00). 매월 1일 09:20 KST면 두 시장 모두 확정 후"). 계산은
+# 05:00 KST(서머타임, 겨울 06:00). 매월 1일 09:20 KST면 두 시장 모두 확정 후"; v5.307 "09:20은 KR 장 시작
+# 직후라 장 시작 스캔과 메모리 경합 … 08:00 KST면 두 시장 확정 후 + KR 개장 전"). 계산은
 # scripts/screens/lowpoint.py(screen_all → publish_entry → write_publish)를 **그대로**
 # import해서 쓴다(조건·유니버스 사본 없음). 결과는 /data(영구 볼륨)의 lowpoint_latest.json
 # 에만 쓴다 — 맥 --publish가 쓰는 레포 파일(data/lowpoint_latest.json)은 건드리지 않는다
@@ -17746,12 +17751,12 @@ async def refresh_market(market: str = "all"):
 LOWPOINT_DATA_PATH = _resolve_persistent_path("lowpoint_latest.json")
 LOWPOINT_STATE_PATH = _resolve_persistent_path("lowpoint_run_state.json")
 LOWPOINT_US_LISTINGS_PATH = _resolve_persistent_path("us_listings.json")
-LOWPOINT_SCHEDULE_HM = {"week": (9, 0), "month": (9, 20)}   # KST, 사용자 지시
+LOWPOINT_SCHEDULE_HM = {"week": (9, 0), "month": (8, 0)}   # KST, 사용자 지시(월봉 v5.307: 1일 09:20 → 08:00)
 LOWPOINT_RETRY_MIN = 60          # 실패 후 재시도 간격(분) — AI 판단 어림값
 LOWPOINT_MAX_ATTEMPTS = 3        # 한 기준봉당 최대 시도 — AI 판단 어림값(무한 재시도 방지)
 LOWPOINT_RUNNING_STALE_MIN = 120  # "running"으로 남은 기록을 죽은 실행으로 볼 시간(분)
 LOWPOINT_US_LISTINGS_MAX_AGE_DAYS = 7   # US 상장목록 캐시 주 1회 갱신(사용자 지시)
-# 따라잡기 창: 예약 시각 뒤 이 시간 안에만 실행한다(주봉 토 09:00~, 월봉 1일 09:20~ 각각 +48시간).
+# 따라잡기 창: 예약 시각 뒤 이 시간 안에만 실행한다(주봉 토 09:00~, 월봉 1일 08:00~ 각각 +48시간).
 # 컨테이너가 예약 시각에 재시작 중이었어도 창 안에는 돈다. 창을 두지 않으면 **상태 파일이 없는 첫 배포 직후(평일)** 지난 토요일 슬롯을
 # 따라잡아 운영에서 즉시 돌아 버린다(사용자 지시 "운영 강제 실행 금지 — 토요일 자연 실행"과
 # 충돌, 2026-09-30 로컬 확인). 48시간 = 토 09:00 → 월 09:00 — AI 판단 어림값.
@@ -17762,7 +17767,7 @@ _LOWPOINT_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lowpo
 
 def _lowpoint_last_slot(tf: str, now: "datetime") -> "tuple[datetime, str]":
     """now(아무 타임존이든) 기준 가장 최근의 예약 시각(KST)과 그 실행이 만들 기준봉 라벨.
-    주봉: 토요일 09:00 KST → 전날(금요일) 라벨. 월봉: 매월 1일 09:20 KST → 전월 말일(v5.306,
+    주봉: 토요일 09:00 KST → 전날(금요일) 라벨. 월봉: 매월 1일 08:00 KST → 전월 말일(v5.306 1일·v5.307 08:00,
     예전 첫 토요일). 판정은 **KST 달력**으로 한다(서버·맥 로컬 타임존과 무관).
     라벨(전월 말일)은 옛 기준과 같으므로 상태 파일의 target 비교가 기준 변경 뒤에도 그대로
     맞는다 — 1일에 성공한 달은 같은 달 첫 토요일에 다시 돌지 않는다."""
