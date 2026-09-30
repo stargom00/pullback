@@ -5,6 +5,13 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.306 [저점 월봉 자동 실행 = 매월 1일 09:20 KST — 사용자 지시 "월봉 확정 시점: KR = 월말 마지막 거래일
+    20:10 KST, US = 다음날 05:00 KST(서머타임, 겨울 06:00). 매월 1일 09:20 KST면 두 시장 모두 확정 후"]
+    예전 "매월 첫 토요일 09:20"은 월말 마감 뒤 최대 6일 늦었다. _lowpoint_last_slot("month")만 변경 —
+    주봉(토 09:00)·시각 상수·따라잡기 창(슬롯 +48시간)·스크린 조건·유니버스 불변. 라벨(전월 말일)은
+    옛 기준과 같아 상태 파일 target 비교가 그대로 맞고, 1일에 성공한 달은 첫 토요일에 다시 안 돈다.
+    진행 중인 새 달 봉은 lowpoint.py drop_in_progress가 버린다(1일 장중 실행이어도 결과 동일).
+    첫 실행 예정: 2026-10-01 09:20 KST(9월 월봉, 상태 파일에 월봉 기록 없음 → 목표 2026-09-30).
 v5.305 [시선 둘 곳 — 사용자 지시 "강조색(앰버)은 행동·현재 위치에만, 의미색은 상태에만, 장식용 색 금지"]
     static/index.html만. 새 토큰(두 테마 같은 키): --n-primary-bg/-hover/-fg · --n-hit-tint · --n-rs-hi-bg/-fg ·
     --n-good-tint · --n-card-hover-line · --n-card-shadow. 즉시 행동 종목명(.nm)은 이미 본문 14px보다 큰 20px라
@@ -8450,7 +8457,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.305"
+VERSION = "v5.306"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -17725,8 +17732,10 @@ async def refresh_market(market: str = "all"):
 
 # ── 📉 저점종목 서버 자동 실행 — v5.301(사용자 지시) ─────────────────────
 # 예전엔 맥에서 lowpoint.py --publish → 커밋 → push로만 갱신돼 잊기 쉬웠다. 이제
-# 서버가 주봉은 매주 토요일 09:00 KST, 월봉은 매월 첫 토요일 09:20 KST에 직접 돌린다
-# (금요일 US 장 확정 뒤, KR·US 모두 휴장 — 정규 스캔과 안 겹침). 계산은
+# 서버가 주봉은 매주 토요일 09:00 KST(금요일 US 장 확정 뒤, KR·US 모두 휴장 — 정규 스캔과
+# 안 겹침), 월봉은 v5.306부터 매월 1일 09:20 KST에 직접 돌린다(예전 "첫 토요일"은 월말 마감 뒤
+# 최대 6일 늦었다 — 사용자 지시 "월봉 확정 시점: KR = 월말 마지막 거래일 20:10 KST, US = 다음날
+# 05:00 KST(서머타임, 겨울 06:00). 매월 1일 09:20 KST면 두 시장 모두 확정 후"). 계산은
 # scripts/screens/lowpoint.py(screen_all → publish_entry → write_publish)를 **그대로**
 # import해서 쓴다(조건·유니버스 사본 없음). 결과는 /data(영구 볼륨)의 lowpoint_latest.json
 # 에만 쓴다 — 맥 --publish가 쓰는 레포 파일(data/lowpoint_latest.json)은 건드리지 않는다
@@ -17742,8 +17751,8 @@ LOWPOINT_RETRY_MIN = 60          # 실패 후 재시도 간격(분) — AI 판�
 LOWPOINT_MAX_ATTEMPTS = 3        # 한 기준봉당 최대 시도 — AI 판단 어림값(무한 재시도 방지)
 LOWPOINT_RUNNING_STALE_MIN = 120  # "running"으로 남은 기록을 죽은 실행으로 볼 시간(분)
 LOWPOINT_US_LISTINGS_MAX_AGE_DAYS = 7   # US 상장목록 캐시 주 1회 갱신(사용자 지시)
-# 따라잡기 창: 예약 시각 뒤 이 시간 안에만 실행한다. 컨테이너가 토요일 아침에 재시작 중이었어도
-# 주말 안에는 돈다. 창을 두지 않으면 **상태 파일이 없는 첫 배포 직후(평일)** 지난 토요일 슬롯을
+# 따라잡기 창: 예약 시각 뒤 이 시간 안에만 실행한다(주봉 토 09:00~, 월봉 1일 09:20~ 각각 +48시간).
+# 컨테이너가 예약 시각에 재시작 중이었어도 창 안에는 돈다. 창을 두지 않으면 **상태 파일이 없는 첫 배포 직후(평일)** 지난 토요일 슬롯을
 # 따라잡아 운영에서 즉시 돌아 버린다(사용자 지시 "운영 강제 실행 금지 — 토요일 자연 실행"과
 # 충돌, 2026-09-30 로컬 확인). 48시간 = 토 09:00 → 월 09:00 — AI 판단 어림값.
 LOWPOINT_CATCHUP_HOURS = 48
@@ -17753,8 +17762,10 @@ _LOWPOINT_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lowpo
 
 def _lowpoint_last_slot(tf: str, now: "datetime") -> "tuple[datetime, str]":
     """now(아무 타임존이든) 기준 가장 최근의 예약 시각(KST)과 그 실행이 만들 기준봉 라벨.
-    주봉: 토요일 09:00 KST → 전날(금요일) 라벨. 월봉: 그 달 첫 토요일 09:20 KST → 전월 말일.
-    판정은 **KST 달력**으로 한다(서버·맥 로컬 타임존과 무관)."""
+    주봉: 토요일 09:00 KST → 전날(금요일) 라벨. 월봉: 매월 1일 09:20 KST → 전월 말일(v5.306,
+    예전 첫 토요일). 판정은 **KST 달력**으로 한다(서버·맥 로컬 타임존과 무관).
+    라벨(전월 말일)은 옛 기준과 같으므로 상태 파일의 target 비교가 기준 변경 뒤에도 그대로
+    맞는다 — 1일에 성공한 달은 같은 달 첫 토요일에 다시 돌지 않는다."""
     now_k = now.astimezone(KST)
     hh, mm = LOWPOINT_SCHEDULE_HM[tf]
     if tf == "week":
@@ -17764,16 +17775,11 @@ def _lowpoint_last_slot(tf: str, now: "datetime") -> "tuple[datetime, str]":
             slot -= timedelta(days=7)
         return slot, (slot.date() - timedelta(days=1)).isoformat()
 
-    def first_sat(y, m):
-        d1 = datetime(y, m, 1).date()
-        return d1 + timedelta(days=(5 - d1.weekday()) % 7)
-    d = first_sat(now_k.year, now_k.month)
-    slot = datetime(d.year, d.month, d.day, hh, mm, tzinfo=KST)
+    slot = datetime(now_k.year, now_k.month, 1, hh, mm, tzinfo=KST)
     if slot > now_k:
         py, pm = (now_k.year - 1, 12) if now_k.month == 1 else (now_k.year, now_k.month - 1)
-        d = first_sat(py, pm)
-        slot = datetime(d.year, d.month, d.day, hh, mm, tzinfo=KST)
-    return slot, (slot.date().replace(day=1) - timedelta(days=1)).isoformat()
+        slot = datetime(py, pm, 1, hh, mm, tzinfo=KST)
+    return slot, (slot.date() - timedelta(days=1)).isoformat()
 
 
 def _lowpoint_load_state() -> dict:
