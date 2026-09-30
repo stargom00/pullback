@@ -86,3 +86,21 @@ def test_the_actual_false_positive_it_exists_for():
            'const stageRow = [_abcChip("강돌파")];\n')
     assert "toggleAbcGateBreak" in src, "재현 전제가 깨졌다"
     assert "toggleAbcGateBreak" not in code_only(src)
+
+
+# ── v5.304: 색 토큰 해석 ─────────────────────────────────────────────
+# 1단계에서 하드코딩 색이 CSS 변수(var(--…))로 옮겨졌다. "이 요소가 이 색이다"를
+# 검사하던 테스트는 토큰을 **다크(기본 :root) 값**으로 풀어 비교한다 — 색 자체가
+# 바뀌면 여전히 잡히고, 이름만 바뀐 건 통과한다.
+def css_root_vars(html: str, selector: str = ":root{") -> dict:
+    import re
+    i = html.index(selector)
+    block = html[i:html.index("\n}", i)]
+    return {k: v.strip() for k, v in re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", block)}
+
+
+def resolve_colors(text: str, html: str) -> str:
+    """text 안의 var(--x)를 기본 :root 값으로 바꾼 문자열(소문자)."""
+    import re
+    vars_ = css_root_vars(html)
+    return re.sub(r"var\((--[\w-]+)\)", lambda m: vars_.get(m.group(1), m.group(0)), text).lower()

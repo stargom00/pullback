@@ -43,15 +43,21 @@ def _badge(tm) -> str:
     return json.loads(p.stdout.strip())
 
 
+def _resolved(html):
+    """v5.304: 색이 토큰(var(--…))으로 옮겨졌다 — 기본(다크) 값으로 풀어 비교."""
+    from test_helpers import resolve_colors
+    return resolve_colors(html, TEXT)
+
+
 def test_fail_open_is_red():
-    html = _badge({"kr_mcap_filter_source": "fail_open"})
-    assert "#FF6B6B" in html and "미적용" in html
+    html = _resolved(_badge({"kr_mcap_filter_source": "fail_open"}))
+    assert "#ff6b6b" in html and "미적용" in html
 
 
 def test_stale_disk_is_yellow_and_says_the_filter_is_on():
-    html = _badge({"kr_mcap_filter_source": "stale_disk"})
+    html = _resolved(_badge({"kr_mcap_filter_source": "stale_disk"}))
     assert "#f2b33d" in html, html
-    assert "#FF6B6B" not in html, "stale_disk는 빨강이면 안 된다(fail_open과 구분)"
+    assert "#ff6b6b" not in html, "stale_disk는 빨강이면 안 된다(fail_open과 구분)"
     assert "낡음" in html
 
 

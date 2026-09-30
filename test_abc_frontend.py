@@ -246,8 +246,10 @@ def test_baseline_label_comes_from_the_server_not_a_literal():
 
 def test_hot_pink_is_defined_once():
     assert TEXT.count("const ABC_MA_COLOR") == 1
+    from test_helpers import resolve_colors
     i = TEXT.index("const ABC_MA_COLOR")
-    assert re.search(r"#[0-9A-Fa-f]{6}", TEXT[i:i + 80]), "색이 상수로 안 잡혀 있다"
+    # v5.304: 색은 토큰(var(--…))으로 옮겨졌다 — 풀어서 실제 hex가 나오는지 본다
+    assert re.search(r"#[0-9a-f]{6}", resolve_colors(TEXT[i:i + 80], TEXT)), "색이 상수로 안 잡혀 있다"
 
 
 def test_unavailable_baseline_count_is_surfaced():

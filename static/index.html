@@ -44,6 +44,182 @@ if ('serviceWorker' in navigator) {
   --up:#FF5A6E; --down:#4D8DFF; --amber:#F2B33D; --green:#3DD68C;
   /* 가격/등락 '방향' 전용 색 — 상승=연두, 하락=빨강 (경고용 --up/--down 과 분리) */
   --px-up:#3DD68C; --px-down:#FF5A6E;
+
+  /* v5.304(사용자 지시) 1단계: 하드코딩 색을 토큰으로 옮김 — 값은 옮기기 전과 같다(화면 변화 0).
+     이름 = --c-{계열}-{역할}{번호}: 계열은 색상(gray/red/orange/amber/green/cyan/blue/violet),
+     역할 bg=어두운 배경 틴트 · fg=글자·선 · a=반투명 오버레이. 라이트 값은 [data-theme="light"]에. */
+  --c-red-fg1:#ff6b6b;
+  --c-green-bg1:#12351f;
+  --c-red-fg2:#f87171;
+  --c-green-fg1:#4ade80;
+  --c-green-bg2:#1d6b3a;
+  --c-amber-fg1:#fbbf24;
+  --c-red-fg3:#f2848c;
+  --c-gray-fg1:#ffffff;
+  --c-red-fg4:#ff9b9b;
+  --c-amber-fg2:#e9c46a;
+  --c-red-a1:rgba(255,107,107,0.25);
+  --c-blue-bg1:#1b2029;
+  --c-gray-bg1:#000000;
+  --c-amber-fg3:#ffd98a;
+  --c-blue-fg1:#7fb8e0;
+  --c-blue-bg2:#232933;
+  --c-red-a2:rgba(255,107,107,0.06);
+  --c-amber-fg4:#8c6d2d;
+  --c-gray-bg2:#26262e;
+  --c-gray-fg2:#9ca3af;
+  --c-amber-fg5:#f5c451;
+  --c-violet-fg1:#a78bfa;
+  --c-blue-bg3:#0f1318;
+  --c-amber-bg1:#6b5518;
+  --c-amber-fg6:#e6aa28;
+  --c-gray-bg3:#3f3f4a;
+  --c-amber-bg2:#33270f;
+  --c-green-fg2:#8fd6ac;
+  --c-blue-bg4:#151920;
+  --c-gray-a1:rgba(0,0,0,0.45);
+  --c-gray-fg3:#c9ced7;
+  --c-orange-bg1:#2a2114;
+  --c-amber-bg3:#3a3320;
+  --c-red-bg1:#341418;
+  --c-red-bg2:#6b2028;
+  --c-gray-fg4:#7a8a7a;
+  --c-blue-bg5:#152535;
+  --c-blue-fg2:#2d5a8c;
+  --c-red-bg3:#3a2020;
+  --c-orange-fg1:#ffb27a;
+  --c-blue-fg3:#8fb3ff;
+  --c-blue-fg4:#6fa8ff;
+  --c-green-fg3:#28b478;
+  --c-red-fg5:#ff5a6e;
+  --c-violet-fg2:#b794f6;
+  --c-violet-a1:rgba(147,112,219,0.4);
+  --c-amber-bg4:#2a2417;
+  --c-red-fg6:#8c2d2d;
+  --c-red-bg4:#2a1717;
+  --c-violet-fg3:#c084fc;
+  --c-blue-fg5:#93c5fd;
+  --c-red-a3:rgba(255,107,107,0.12);
+  --c-blue-bg6:#262c37;
+  --c-orange-fg2:#f3bd83;
+  --c-amber-bg5:#2a2519;
+  --c-gray-fg5:#9a927f;
+  --c-blue-bg7:#10141a;
+  --c-amber-bg6:#1c1a12;
+  --c-orange-bg2:#2a1a0f;
+  --c-orange-fg3:#f0c479;
+  --c-orange-a1:rgba(242,179,61,0.14);
+  --c-orange-a2:rgba(242,179,61,0.4);
+  --c-blue-fg6:#60a5fa;
+  --c-green-bg3:#0f2a1a;
+  --c-green-fg4:#34d399;
+  --c-blue-bg8:#1a2a3f;
+  --c-green-fg5:#7fb88a;
+  --c-amber-fg7:#facc15;
+  --c-blue-fg7:#9fd4ff;
+  --c-gray-bg4:#3a2a2a;
+  --c-green-a1:rgba(40,180,120,0.1);
+  --c-green-a2:rgba(40,180,120,0.45);
+  --c-amber-a1:rgba(230,170,40,0.1);
+  --c-amber-a2:rgba(230,170,40,0.45);
+  --c-red-a4:rgba(255,90,110,0.1);
+  --c-red-a5:rgba(255,90,110,0.45);
+  --c-green-a3:rgba(40,180,120,0.08);
+  --c-green-a4:rgba(40,180,120,0.4);
+  --c-amber-a3:rgba(230,170,40,0.08);
+  --c-amber-a4:rgba(230,170,40,0.4);
+  --c-red-a6:rgba(255,90,110,0.08);
+  --c-red-a7:rgba(255,90,110,0.4);
+  --c-blue-bg9:#1b2a3a;
+  --c-blue-fg8:#3b6ea5;
+  --c-blue-fg9:#cfe6ff;
+  --c-gray-a2:rgba(0,0,0,0.6);
+  --c-orange-a3:rgba(242,179,61,0.1);
+  --c-orange-a4:rgba(242,179,61,0.35);
+  --c-orange-a5:rgba(242,179,61,0.04);
+  --c-gray-a3:rgba(255,255,255,0.015);
+  --c-violet-a2:rgba(147,112,219,0.14);
+  --c-violet-a3:rgba(147,112,219,0.1);
+  --c-gray-fg6:#555555;
+  --c-gray-fg7:#bbbbbb;
+  --c-gray-a4:rgba(255,255,255,0.06);
+  --c-green-fg6:#7fe0a7;
+  --c-blue-bg10:#0d1420;
+  --c-orange-a6:rgba(242,179,61,0.06);
+  --c-violet-a4:rgba(168,85,247,0.25);
+  --c-violet-a5:rgba(168,85,247,0.08);
+  --c-violet-a6:rgba(168,85,247,0.3);
+  --c-amber-a5:rgba(251,191,36,0.08);
+  --c-amber-a6:rgba(251,191,36,0.3);
+  --c-red-a8:rgba(255,107,107,0.1);
+  --c-red-a9:rgba(255,107,107,0.35);
+  --c-blue-a1:rgba(96,165,250,0.06);
+  --c-blue-a2:rgba(96,165,250,0.25);
+  --c-red-a10:rgba(255,107,107,0.15);
+  --c-amber-a7:rgba(245,196,81,0.12);
+  --c-gray-a5:rgba(0,0,0,0.4);
+  --c-violet-a7:rgba(167,139,250,0.16);
+  --c-blue-fg10:#c4b5fd;
+  --c-gray-bg5:#33363d;
+  --c-gray-bg6:#454852;
+  --c-orange-a7:rgba(242,179,61,0.55);
+  --c-amber-a8:rgba(245,196,81,0.5);
+  --c-amber-a9:rgba(245,196,81,0.25);
+  --c-red-fg7:#e08a8a;
+  --c-green-a5:rgba(61,214,140,0.35);
+  --c-amber-a10:rgba(245,196,81,0.45);
+  --c-amber-a11:rgba(245,196,81,0.08);
+  --c-gray-a6:rgba(0,0,0,0.25);
+  --c-blue-bg11:#0e1420;
+  --c-gray-bg7:#262c36;
+  --c-gray-bg8:#3a4150;
+  --c-orange-bg3:#1a1206;
+  --c-orange-bg4:#1a1712;
+  --c-orange-bg5:#3a3020;
+  --c-amber-bg7:#16140f;
+  --c-orange-a8:rgba(232,162,92,0.33);
+  --c-amber-bg8:#1b1811;
+  --c-orange-a9:rgba(232,162,92,0.1);
+  --c-red-bg5:#1d1417;
+  --c-red-bg6:#3a2226;
+  --c-red-fg8:#f2b8bd;
+  --c-red-fg9:#ffd5d8;
+  --c-gray-bg9:#30363d;
+  --c-gray-a7:rgba(0,0,0,0.3);
+  --c-orange-a10:rgba(242,179,61,0.07);
+  --c-cyan-fg1:#7dd3fc;
+  --c-blue-bg12:#0f2a3a;
+  --c-blue-fg11:#1d5a8c;
+  --c-red-bg7:#2a1a1a;
+  --c-orange-a11:rgba(242,179,61,0.08);
+  --c-orange-a12:rgba(242,179,61,0.3);
+  --c-blue-fg12:#7fb8ff;
+  --c-violet-fg4:#ff4fa3;
+  --c-orange-fg4:#ff9f6b;
+  --c-orange-bg6:#6b3f2a;
+  --c-blue-fg13:#9fb7ff;
+  --c-blue-bg13:#2a3f6b;
+  --c-orange-bg7:#1a1410;
+  --c-green-fg7:#5fd99a;
+  --c-gray-bg10:#1e2a1e;
+  --c-red-a11:rgba(255,107,107,0.08);
+  --c-red-a12:rgba(255,107,107,0.3);
+  --c-gray-bg11:#333333;
+  --c-gray-bg12:#1a1a24;
+  --c-blue-fg14:#2d6a8c;
+  --c-amber-a12:rgba(245,196,81,0.16);
+  --c-green-fg8:#3fb950;
+  --c-cyan-fg2:#4fc3f7;
+  --c-green-bg4:#1e3a2a;
+  --c-amber-fg8:#f2e2b3;
+  --c-gray-a8:rgba(0,0,0,0.35);
+  --c-orange-bg8:#5a3d1c;
+  --c-orange-bg9:#3f2d17;
+  --c-blue-bg14:#171b22;
+  --c-gray-bg13:#2a303b;
+  --c-orange-fg5:#ff9b6b;
+  --c-orange-bg10:#3a2a1a;
+  --c-amber-bg9:#3a2d12;
 }
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans KR',sans-serif;min-height:100vh}
@@ -98,9 +274,9 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .mkt-banner{padding:6px 14px;border-radius:10px;font-size:11px;font-weight:400;border:1px solid var(--line)}
 .gate-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
 .gate-row .mkt-banner{flex:1;min-width:200px}
-.mkt-banner.mkt-good{background:rgba(40,180,120,.1);border-color:rgba(40,180,120,.45);color:#28b478}
-.mkt-banner.mkt-neutral{background:rgba(230,170,40,.1);border-color:rgba(230,170,40,.45);color:#e6aa28}
-.mkt-banner.mkt-bad{background:rgba(255,90,110,.1);border-color:rgba(255,90,110,.45);color:#FF5A6E}
+.mkt-banner.mkt-good{background:var(--c-green-a1);border-color:var(--c-green-a2);color:var(--c-green-fg3)}
+.mkt-banner.mkt-neutral{background:var(--c-amber-a1);border-color:var(--c-amber-a2);color:var(--c-amber-fg6)}
+.mkt-banner.mkt-bad{background:var(--c-red-a4);border-color:var(--c-red-a5);color:var(--c-red-fg5)}
 /* v5.257: 판정 근거가 없을 때 — 색(초록/노랑/빨강)을 내지 않는 회색 상태.
    "데이터 없음"과 "괜찮음"이 같아 보이면 안 된다. */
 .mkt-banner.mkt-unknown{background:var(--surface);border-color:var(--line);color:var(--muted)}
@@ -116,17 +292,17 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .idx .ch{font-size:12px;font-variant-numeric:tabular-nums}
 .idx .ch.up{color:var(--px-up)} .idx .ch.down{color:var(--px-down)} .idx .ch.flat{color:var(--muted)}
 .entry-sig{margin-top:10px;padding:9px 11px;border-radius:9px;border:1px solid var(--line)}
-.entry-sig.sig-ok{background:rgba(40,180,120,.08);border-color:rgba(40,180,120,.4)}
-.entry-sig.sig-warn{background:rgba(230,170,40,.08);border-color:rgba(230,170,40,.4)}
-.entry-sig.sig-danger{background:rgba(255,90,110,.08);border-color:rgba(255,90,110,.4)}
+.entry-sig.sig-ok{background:var(--c-green-a3);border-color:var(--c-green-a4)}
+.entry-sig.sig-warn{background:var(--c-amber-a3);border-color:var(--c-amber-a4)}
+.entry-sig.sig-danger{background:var(--c-red-a6);border-color:var(--c-red-a7)}
 .entry-sig .sig-head{font-size:13px;font-weight:700;margin-bottom:6px}
-.entry-sig.sig-ok .sig-head{color:#28b478}
-.entry-sig.sig-warn .sig-head{color:#e6aa28}
+.entry-sig.sig-ok .sig-head{color:var(--c-green-fg3)}
+.entry-sig.sig-warn .sig-head{color:var(--c-amber-fg6)}
 .entry-sig.sig-danger .sig-head{color:var(--up)}
 .entry-sig .sig-list{display:flex;flex-direction:column;gap:3px}
 .entry-sig .chk{font-size:11.5px;color:var(--muted)}
 .entry-sig .chk-ok{color:var(--muted)}
-.entry-sig .chk-warn{color:#e6aa28}
+.entry-sig .chk-warn{color:var(--c-amber-fg6)}
 .entry-sig .chk-danger{color:var(--up)}
 .entry-sig .chk-ref{color:var(--muted);opacity:.5}
 .entry-sig .chk-reftag{font-size:9px;opacity:.8;border:1px solid currentColor;border-radius:4px;padding:0 3px;margin-left:3px}
@@ -134,7 +310,7 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .fund-btn{width:100%;margin-top:10px;padding:7px;background:transparent;
   border:1px solid var(--line);color:var(--muted);border-radius:8px;font-size:12px;
   cursor:pointer;font-family:inherit;transition:all .12s}
-.fund-btn:hover{border-color:var(--accent,#4D8DFF);color:var(--text)}
+.fund-btn:hover{border-color:var(--accent,var(--down));color:var(--text)}
 .fund-btn:disabled{opacity:.6;cursor:default}
 .fund-box{margin-top:8px;font-size:12px;color:var(--muted);line-height:1.7}
 .fund-box .row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
@@ -159,12 +335,12 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
   font-size:11.5px;line-height:1.5;cursor:pointer;font-family:inherit;white-space:nowrap;
   transition:all .12s}
 .abc-chip:hover{border-color:var(--amber);color:var(--amber)}
-.abc-chip.on{background:#1b2a3a;border-color:#3b6ea5;color:#cfe6ff}
+.abc-chip.on{background:var(--c-blue-bg9);border-color:var(--c-blue-fg8);color:var(--c-blue-fg9)}
 /* 한 줄 = 한 그룹. 모바일에선 줄바꿈 허용(가로 스크롤 금지). */
 .abc-chiprow{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-bottom:4px}
 .abc-chiprow>.abc-lbl{color:var(--muted);font-size:10.5px;letter-spacing:.02em;
   margin-right:2px;flex-shrink:0}
-.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;
+.modal-bg{position:fixed;inset:0;background:var(--c-gray-a2);display:none;
   align-items:center;justify-content:center;z-index:100}
 .modal-bg.open{display:flex}
 .drag-handle{cursor:grab;user-select:none}
@@ -186,12 +362,12 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .modal .actions{display:flex;gap:10px;margin-top:18px}
 .modal .actions button{flex:1;padding:10px;border-radius:8px;font-size:14px;font-weight:600;
   cursor:pointer;border:none;font-family:inherit}
-.modal .save{background:var(--amber);color:#000}
+.modal .save{background:var(--amber);color:var(--c-gray-bg1)}
 .modal .cancel{background:var(--surface2);color:var(--text)}
 .jrnl-wrap{padding:0 24px 40px}
 /* v5.89: 💰 돈의 흐름 탭 — /moneyflow 페이지의 마크다운 렌더 스타일을 이 사이트
    색상 변수(--surface/--line/--text/--muted/--green/--amber)로 옮겨옴. */
-.mf-warn-banner{background:rgba(242,179,61,.1);border:1px solid rgba(242,179,61,.35);color:var(--amber);
+.mf-warn-banner{background:var(--c-orange-a3);border:1px solid var(--c-orange-a4);color:var(--amber);
   padding:10px 14px;border-radius:8px;font-size:13.5px;margin:14px 0}
 .mf-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
 .mf-toolbar select,.mf-toolbar button{background:var(--surface);border:1px solid var(--line);color:var(--text);
@@ -207,36 +383,36 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 #moneyflowDoc code{background:var(--surface);padding:1px 5px;border-radius:4px;font-size:12.5px}
 #moneyflowDoc blockquote{border-left:3px solid var(--green);margin:0;padding:2px 14px;color:var(--muted)}
 #moneyflowDoc hr{border:none;border-top:1px solid var(--line);margin:24px 0}
-#moneyflowDoc strong{color:#ffd98a}
+#moneyflowDoc strong{color:var(--c-amber-fg3)}
 #moneyflowDoc .mf-note{color:var(--muted);font-size:12px;margin:6px 0}
 #moneyflowDoc .mf-err{color:var(--up);font-size:13px;margin:10px 0}
 .jrnl-tools{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
 .jrnl-tools button{padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer;
   border:1px solid var(--line);background:var(--surface);color:var(--text);font-family:inherit}
-.jrnl-tools .exp{background:var(--amber);color:#000;border:none;font-weight:600}
+.jrnl-tools .exp{background:var(--amber);color:var(--c-gray-bg1);border:none;font-weight:600}
 .jrnl-tools .stat{color:var(--muted);font-size:13px;margin-left:auto}
 .jtable{width:100%;border-collapse:collapse;font-size:12.5px}
 .jtable th,.jtable td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);
   white-space:nowrap}
 .jtable th{color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase}
 .jtable td.mono{font-family:var(--mono)}
-.jtable .del{color:#FF6B6B;cursor:pointer}
-.jtable tr.open-pos{background:rgba(242,179,61,.04)}
-.jtable tbody tr:nth-child(even){background:rgba(255,255,255,.015)}
+.jtable .del{color:var(--c-red-fg1);cursor:pointer}
+.jtable tr.open-pos{background:var(--c-orange-a5)}
+.jtable tbody tr:nth-child(even){background:var(--c-gray-a3)}
 .jtable td:nth-child(3) a{font-size:13.5px;font-weight:600}
 .note-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.merger-tag{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;background:rgba(147,112,219,.14);color:#b794f6;border:1px solid rgba(147,112,219,.4);white-space:nowrap;cursor:help}
+.merger-tag{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;background:var(--c-violet-a2);color:var(--c-violet-fg2);border:1px solid var(--c-violet-a1);white-space:nowrap;cursor:help}
 /* v5.90: 가격고정(M&A 의심) 숨김 요약 줄 + 펼침 그리드 */
 .pf-frozen-bar{padding:14px 24px 4px;text-align:center}
-.pf-frozen-toggle{background:var(--surface);border:1px solid rgba(147,112,219,.4);color:#b794f6;font:inherit;font-size:12.5px;font-weight:600;padding:8px 16px;border-radius:8px;cursor:pointer}
-.pf-frozen-toggle:hover{background:rgba(147,112,219,.1)}
+.pf-frozen-toggle{background:var(--surface);border:1px solid var(--c-violet-a1);color:var(--c-violet-fg2);font:inherit;font-size:12.5px;font-weight:600;padding:8px 16px;border-radius:8px;cursor:pointer}
+.pf-frozen-toggle:hover{background:var(--c-violet-a3)}
 .pf-frozen-grid{margin-top:10px;opacity:.85}
 .st-badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px;white-space:nowrap}
 /* v4.85: 상태배지(꽉 찬 배경)와 확실히 구분되는 '버튼' 느낌 — 점선 테두리 + 투명배경.
    이전엔 둘 다 진한 배경이라 '지금 상태'와 '누르는 버튼'이 한눈에 안 구분됐음. */
 .st-act{display:inline-block;font-size:10.5px;font-weight:600;padding:3px 7px;border-radius:5px;
-  cursor:pointer;background:transparent;border:1px dashed #555;color:#bbb}
-.st-act:hover{background:rgba(255,255,255,.06);color:#fff}
+  cursor:pointer;background:transparent;border:1px dashed var(--c-gray-fg6);color:var(--c-gray-fg7)}
+.st-act:hover{background:var(--c-gray-a4);color:var(--c-gray-fg1)}
 .jtable input.result{width:70px;background:var(--bg);border:1px solid var(--line);
   color:var(--text);padding:4px 6px;border-radius:6px;font-size:12px;font-family:var(--mono)}
 .jrnl-empty{color:var(--muted);text-align:center;padding:60px 20px;line-height:1.7}
@@ -255,8 +431,8 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .rcalc{margin:6px 0 10px;padding:8px 10px;border-radius:8px;background:var(--surface);
   border:1px dashed var(--line);font-size:12px;line-height:1.5;min-height:16px}
 .rcalc b{color:var(--green)}
-.rcalc.warn{border-color:#8c6d2d;background:#2a2417}
-.rcalc.lock{border-color:#8c2d2d;background:#2a1717}
+.rcalc.warn{border-color:var(--c-amber-fg4);background:var(--c-amber-bg4)}
+.rcalc.lock{border-color:var(--c-red-fg6);background:var(--c-red-bg4)}
 .riskbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 12px;
   padding:10px 14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;font-size:12px}
 .riskbar .rb-item{display:flex;flex-direction:column;gap:2px;min-width:90px}
@@ -265,10 +441,10 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .riskbar .rb-gauge{flex:1;min-width:140px;height:8px;background:var(--card);border-radius:4px;overflow:hidden;position:relative}
 .riskbar .rb-fill{height:100%;border-radius:4px;background:var(--green);transition:width .3s}
 .riskbar .rb-fill.hot{background:var(--amber)}
-.riskbar .rb-fill.max{background:#ff6b6b}
+.riskbar .rb-fill.max{background:var(--c-red-fg1)}
 .rlock-banner{margin:0 0 12px;padding:10px 14px;border-radius:10px;font-size:12.5px;font-weight:600;
-  background:#2a1717;border:1px solid #8c2d2d;color:#ff9b9b}
-.rlock-banner.soft{background:#2a2417;border-color:#8c6d2d;color:#ffd98a}
+  background:var(--c-red-bg4);border:1px solid var(--c-red-fg6);color:var(--c-red-fg4)}
+.rlock-banner.soft{background:var(--c-amber-bg4);border-color:var(--c-amber-fg4);color:var(--c-amber-fg3)}
 /* ── 등급/성숙도 배지 (v4.48.3) ── */
 /* v5.58: A/B/C/D 등급이 실측상 성과를 못 가름(눌림목은 A가 최저·D가
    최고로 완전 역순 — docs/ud_volume_ratio_investigation.md, trend_grade
@@ -276,51 +452,51 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
    — 4등급 전부 같은 중립색으로 통일, 우열 암시 색상 제거. */
 .gbadge{display:inline-block;font-size:9px;font-weight:500;padding:1px 7px;border-radius:6px;
   margin-left:4px;vertical-align:1px;cursor:help;letter-spacing:.2px;
-  background:#26262e;color:#9ca3af;border:1px solid #3f3f4a}
+  background:var(--c-gray-bg2);color:var(--c-gray-fg2);border:1px solid var(--c-gray-bg3)}
 .pmat{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:6px;
   margin-left:4px;cursor:help;vertical-align:1px}
-.pmat.wait{background:#33270f;color:#ffd98a;border:1px dashed #8c6d2d}
-.pmat.ok{background:#12351f;color:#7fe0a7;border:1px solid #1d6b3a}
+.pmat.wait{background:var(--c-amber-bg2);color:var(--c-amber-fg3);border:1px dashed var(--c-amber-fg4)}
+.pmat.ok{background:var(--c-green-bg1);color:var(--c-green-fg6);border:1px solid var(--c-green-bg2)}
 .statcard-t{font-size:13px;font-weight:700;margin-bottom:4px}
 .statcard-v{font-size:12px;color:var(--muted)}
 .jrnl-filter{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
 .fbtn{padding:6px 14px;border-radius:20px;font-size:12px;cursor:pointer;background:var(--surface);border:1px solid var(--line);color:var(--muted)}
-.fbtn.on{background:var(--amber);color:#000;border-color:var(--amber);font-weight:600}
+.fbtn.on{background:var(--amber);color:var(--c-gray-bg1);border-color:var(--amber);font-weight:600}
 /* v4.77: 진입중/대기/관찰 — 상태 탭. 나머지(전체/종료/추세/단타)보다 크고 눈에 띄게. */
 .jrnl-tab{padding:9px 18px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;
   background:var(--surface);border:1px solid var(--line);color:var(--muted)}
-.jrnl-tab.on{background:var(--amber);color:#000;border-color:var(--amber)}
+.jrnl-tab.on{background:var(--amber);color:var(--c-gray-bg1);border-color:var(--amber)}
 .jrnl-tab-sep{width:1px;align-self:stretch;background:var(--line);margin:0 4px}
-.ein{background:#0d1420;border:1px solid var(--line);border-radius:6px;color:var(--text);
+.ein{background:var(--c-blue-bg10);border:1px solid var(--line);border-radius:6px;color:var(--text);
   padding:5px 7px;font-size:12px;font-family:inherit;width:64px}
 textarea.ein{line-height:1.5;resize:vertical}
 .edit-btn,.save-btn{cursor:pointer;font-size:13px;margin-right:6px}
-tr.editing{background:rgba(242,179,61,.06)}
+tr.editing{background:var(--c-orange-a6)}
 .tab-exp{position:relative}
-.exp-tag{font-size:8px;background:rgba(168,85,247,.25);color:#c084fc;
+.exp-tag{font-size:8px;background:var(--c-violet-a4);color:var(--c-violet-fg3);
   padding:1px 4px;border-radius:4px;margin-left:4px;vertical-align:middle;font-weight:700}
 /* v5.50: 패턴/Stage2 — "실험"(보라, 아직 안 굳었지만 시도해볼 만함)과 다른
    신호. 대조군 대비 선별력이 없다고 실측 확인된 탭이라 danger(빨강) 톤으로
    구분 — docs/all_tabs_common_yardstick_investigation.md 근거. */
-.exp-tag.danger{background:rgba(255,107,107,.25);color:#ff9b9b}
-.surge-warn{background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.3);
-  border-radius:8px;padding:8px 11px;font-size:11px;color:#c084fc;margin-top:8px;line-height:1.5}
+.exp-tag.danger{background:var(--c-red-a1);color:var(--c-red-fg4)}
+.surge-warn{background:var(--c-violet-a5);border:1px solid var(--c-violet-a6);
+  border-radius:8px;padding:8px 11px;font-size:11px;color:var(--c-violet-fg3);margin-top:8px;line-height:1.5}
 /* v5.66: 손절폭 배지/필터가 "타이트=고품질"로 오독되는 걸 막는 안내줄.
    눌림목 탭에서 🔵 필터나 손절좁은순 정렬을 켰을 때만 노출(renderCards). */
-.stopwidth-warn{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);
-  border-radius:8px;padding:8px 11px;font-size:12px;color:#fbbf24;margin:0 24px 12px;line-height:1.5}
+.stopwidth-warn{background:var(--c-amber-a5);border:1px solid var(--c-amber-a6);
+  border-radius:8px;padding:8px 11px;font-size:12px;color:var(--c-amber-fg1);margin:0 24px 12px;line-height:1.5}
 @media (max-width:600px){.stopwidth-warn{margin:0 16px 12px}}
 /* v5.97: 종가베팅 탭 고정 안전 배너 — 손절폭 안내(amber)보다 진하게, 위험
    경고 톤(red-amber)으로 구분. 탭 상단 항상 표시(사용자 지시 8번). */
-.jongga-safety-banner{background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.35);
-  border-radius:8px;padding:9px 12px;font-size:12.5px;font-weight:600;color:#ff9b9b;
+.jongga-safety-banner{background:var(--c-red-a8);border:1px solid var(--c-red-a9);
+  border-radius:8px;padding:9px 12px;font-size:12.5px;font-weight:600;color:var(--c-red-fg4);
   margin:0 24px 8px;line-height:1.5}
 @media (max-width:600px){.jongga-safety-banner{margin:0 16px 8px}}
 /* v5.98: 종가베팅 탭 하단 포워드 트래킹 성적 — 목록 다음, 카드 그리드 밖.
    백테스트 수치와 계속 대조하는 섹션이라 중립 톤(파랑 계열)으로 구분. */
-.jongga-forward-box{background:rgba(96,165,250,.06);border:1px solid rgba(96,165,250,.25);
+.jongga-forward-box{background:var(--c-blue-a1);border:1px solid var(--c-blue-a2);
   border-radius:10px;padding:12px 16px;margin:16px 24px 24px;font-size:12.5px;line-height:1.7}
-.jongga-forward-title{font-weight:700;color:#93c5fd;margin-bottom:4px}
+.jongga-forward-title{font-weight:700;color:var(--c-blue-fg5);margin-bottom:4px}
 .jongga-forward-sub{color:var(--muted)}
 @media (max-width:600px){.jongga-forward-box{margin:16px 16px 24px}}
 .legend{display:flex;gap:18px;flex-wrap:wrap;padding:0 24px 10px;font-size:12px}
@@ -333,12 +509,12 @@ tr.editing{background:rgba(242,179,61,.06)}
 .sectorbar{display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;padding:0 24px 12px;
   scrollbar-width:thin}
 .sectorbar:empty{padding:0}
-.alert-tag{font-size:11px;color:#FF6B6B;background:rgba(255,107,107,.12);
+.alert-tag{font-size:11px;color:var(--c-red-fg1);background:var(--c-red-a3);
   padding:2px 7px;border-radius:6px;font-weight:600;vertical-align:middle}
 .climax-tag{font-size:9px;padding:2px 7px;border-radius:6px;font-weight:400;
   vertical-align:middle;margin-left:4px}
-.climax-tag.danger{color:#FF6B6B;background:rgba(255,107,107,.15)}
-.climax-tag.caution{color:#f5c451;background:rgba(245,196,81,.12)}
+.climax-tag.danger{color:var(--c-red-fg1);background:var(--c-red-a10)}
+.climax-tag.caution{color:var(--c-amber-fg5);background:var(--c-amber-a7)}
 .alert-mgr{margin-left:12px;font-size:12px;color:var(--muted);cursor:pointer;
   text-decoration:underline;text-underline-offset:3px}
 .alert-mgr:hover{color:var(--amber)}
@@ -347,10 +523,10 @@ tr.editing{background:rgba(242,179,61,.06)}
 .alert-panel.open{display:flex}
 .alert-panel input,.alert-panel select{background:var(--bg);border:1px solid var(--line);
   color:var(--text);padding:6px 10px;border-radius:8px;font-size:13px;font-family:inherit}
-.alert-panel button{background:var(--amber);color:#000;border:none;padding:6px 14px;
+.alert-panel button{background:var(--amber);color:var(--c-gray-bg1);border:none;padding:6px 14px;
   border-radius:8px;font-size:13px;font-weight:600;cursor:pointer}
 .alert-list{display:flex;gap:6px;flex-wrap:wrap;margin-left:8px}
-.alert-list .chip{font-size:11px;background:rgba(255,107,107,.12);color:#FF6B6B;
+.alert-list .chip{font-size:11px;background:var(--c-red-a3);color:var(--c-red-fg1);
   padding:3px 8px;border-radius:6px;cursor:pointer}
 .alert-list .chip:hover{text-decoration:line-through}
 @media (max-width:600px){.alert-panel{padding:12px 16px}}
@@ -377,7 +553,7 @@ tr.editing{background:rgba(242,179,61,.06)}
 .dropdown-wrap{position:relative;display:inline-flex}
 .risktier-dropdown{position:absolute;top:calc(100% + 6px);left:0;z-index:50;
   background:var(--surface);border:1px solid var(--line);border-radius:10px;
-  padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.4);
+  padding:8px;box-shadow:0 8px 24px var(--c-gray-a5);
   display:flex;flex-wrap:wrap;gap:6px;min-width:230px}
 /* v5.46: 패턴 서브탭 — 섹터 칩(.schip, 둥근 pill·amber)과 완전히 다른
    외형(사각 모서리·보라 액센트)으로 "이 탭 안의 하위분류 선택"임을 시각적으로
@@ -386,9 +562,9 @@ tr.editing{background:rgba(242,179,61,.06)}
 .psubbar:empty{padding:0}
 .psub{font-size:12px;padding:6px 13px;border-radius:8px;background:var(--surface);
   border:1px solid var(--line);color:var(--muted);cursor:pointer;transition:all .12s;font-weight:500}
-.psub:hover{border-color:#a78bfa;color:var(--text)}
-.psub.on{background:rgba(167,139,250,.16);color:#c4b5fd;border-color:#a78bfa;font-weight:700}
-.psub b{color:#a78bfa;margin-left:5px}
+.psub:hover{border-color:var(--c-violet-fg1);color:var(--text)}
+.psub.on{background:var(--c-violet-a7);color:var(--c-blue-fg10);border-color:var(--c-violet-fg1);font-weight:700}
+.psub b{color:var(--c-violet-fg1);margin-left:5px}
 .psub.empty{opacity:.45}
 @media (max-width:600px){.sectorbar{padding:0 16px 12px}.psubbar{padding:0 16px 12px}}
 
@@ -409,19 +585,19 @@ tr.editing{background:rgba(242,179,61,.06)}
    슈퍼대장 전용 테두리 강조)은 v5.162에서 제거 — "소속=우위"라는 근거가
    재검증(2026-09-03)으로 철회됐다(docs/kr_us_strategy_map.md "재검증
    결과 — 우선순위6"). 카드 배지(👑 아이콘)는 소속 여부 정보로만 유지. */
-.card{background:var(--surface);border:1px solid #33363d;border-radius:12px;
+.card{background:var(--surface);border:1px solid var(--c-gray-bg5);border-radius:12px;
   padding:16px;display:flex;flex-direction:column;gap:12px}
-.card:hover{border-color:#454852}
-.card.fired{border-color:rgba(242,179,61,.55)}
-.card.fav{border-color:rgba(245,196,81,.5);box-shadow:0 0 0 1px rgba(245,196,81,.25)}
+.card:hover{border-color:var(--c-gray-bg6)}
+.card.fired{border-color:var(--c-orange-a7)}
+.card.fav{border-color:var(--c-amber-a8);box-shadow:0 0 0 1px var(--c-amber-a9)}
 .fav-btn{background:none;border:none;cursor:pointer;font-size:20px;line-height:1;
   color:var(--muted);padding:0;margin-top:1px;transition:color .15s;flex-shrink:0}
-.fav-btn:hover{color:#f5c451}
-.fav-btn.on{color:#f5c451}
+.fav-btn:hover{color:var(--c-amber-fg5)}
+.fav-btn.on{color:var(--c-amber-fg5)}
 /* v5.72: 숨김 X 버튼 — 즐겨찾기 별 옆, 평소엔 흐리게 있다가 hover 시 진해짐 */
 .hide-btn{background:none;border:none;cursor:pointer;font-size:14px;line-height:1;
   color:var(--muted);padding:0;margin-top:2px;opacity:.35;transition:opacity .15s,color .15s;flex-shrink:0}
-.hide-btn:hover{opacity:1;color:#ff6b6b}
+.hide-btn:hover{opacity:1;color:var(--c-red-fg1)}
 .card-top{display:flex;align-items:flex-start;gap:12px}
 .card{transition:opacity .2s ease,transform .2s ease;cursor:pointer}
 .card.hiding{opacity:0;transform:scale(.96);pointer-events:none}
@@ -450,8 +626,8 @@ tr.editing{background:rgba(242,179,61,.06)}
   white-space:nowrap;font-variant-numeric:tabular-nums}
 .cc-chg{font-size:11px;font-weight:500;flex-shrink:0;white-space:nowrap;
   margin-left:1px;font-variant-numeric:tabular-nums}
-.cc-chg.up{color:#8fd6ac}
-.cc-chg.down{color:#e08a8a}
+.cc-chg.up{color:var(--c-green-fg2)}
+.cc-chg.down{color:var(--c-red-fg7)}
 .cc-mkt{font-size:9px;font-weight:600;padding:1px 5px;border-radius:4px;
   background:var(--surface2);color:var(--muted);flex-shrink:0}
 .cc-spark{flex-shrink:0;width:80px;height:24px;display:block}
@@ -481,11 +657,11 @@ tr.editing{background:rgba(242,179,61,.06)}
 .name{font-size:15px;font-weight:700;line-height:1.2}
 .tick{font-size:11px;color:var(--muted);margin-top:2px}
 .tv-link{color:var(--muted);text-decoration:none;cursor:pointer}
-.tv-link:hover{color:#7fb8e0;text-decoration:underline}
+.tv-link:hover{color:var(--c-blue-fg1);text-decoration:underline}
 /* v5.82: 종목명 클릭 → 트레이딩뷰 차트. 평소엔 기존 텍스트와 완전히
    동일하게(color:inherit, 밑줄 없음), hover 시에만 클릭 가능하다는 힌트. */
 .name-link{color:inherit;text-decoration:none;cursor:pointer}
-.name-link:hover{color:#7fb8e0;text-decoration:underline}
+.name-link:hover{color:var(--c-blue-fg1);text-decoration:underline}
 .mkt{font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;
   border:1px solid var(--line);color:var(--muted);margin-left:6px;vertical-align:1px}
 
@@ -515,8 +691,8 @@ tr.editing{background:rgba(242,179,61,.06)}
 .badges{display:flex;gap:6px;flex-wrap:wrap}
 .badge{font-size:10px;padding:3px 8px;border-radius:99px;
   background:var(--surface2);color:var(--muted);border:1px solid var(--line)}
-.badge.on{color:var(--green);border-color:rgba(61,214,140,.35)}
-.badge.warn{color:#f5c451;border-color:rgba(245,196,81,.45);background:rgba(245,196,81,.08)}
+.badge.on{color:var(--green);border-color:var(--c-green-a5)}
+.badge.warn{color:var(--c-amber-fg5);border-color:var(--c-amber-a10);background:var(--c-amber-a11)}
 
 .empty{padding:80px 24px;text-align:center;color:var(--muted);font-size:14px}
 .loading{padding:80px 24px;text-align:center;color:var(--muted)}
@@ -577,8 +753,8 @@ tr.editing{background:rgba(242,179,61,.06)}
   .jtable th,.jtable td{padding:10px 9px}
   .jtable th:nth-child(3),.jtable td:nth-child(3){
     position:sticky;left:0;background:var(--bg);z-index:1;
-    box-shadow:2px 0 4px rgba(0,0,0,.25)}
-  .jtable tbody tr:nth-child(even) td:nth-child(3){background:#0e1420}
+    box-shadow:2px 0 4px var(--c-gray-a6)}
+  .jtable tbody tr:nth-child(even) td:nth-child(3){background:var(--c-blue-bg11)}
 
   .modal{padding:18px;width:94vw}
   .modal input,.modal textarea{font-size:16px} /* 16px 미만이면 iOS가 확대해버림 */
@@ -622,32 +798,32 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .hdr .tab{min-height:44px;border-radius:8px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
 .hdr-main .tab{padding:10px 14px;font-size:14px;color:var(--n-sub)}
 .hdr-util .tab{padding:10px 12px;font-size:13px;color:var(--n-muted)}
-.hdr-main .tab.active,.hdr-util .tab.active,.hdr-more.has-active{background:#1b2029;color:#fff;font-weight:600}
-.hdr-sep{width:1px;height:20px;background:#262c36;flex-shrink:0}
+.hdr-main .tab.active,.hdr-util .tab.active,.hdr-more.has-active{background:var(--c-blue-bg1);color:var(--c-gray-fg1);font-weight:600}
+.hdr-sep{width:1px;height:20px;background:var(--c-gray-bg7);flex-shrink:0}
 .hdr-right{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0}
 .tab-filters{display:flex;align-items:center;gap:4px;flex-wrap:wrap;padding:8px var(--n-gutter) 0}
 .tab-filters[hidden]{display:none}
 .tab-filters .tab{min-height:36px;padding:0 12px;font-size:12px;color:var(--n-muted);border:1px solid var(--n-line2);border-radius:8px;background:none}
-.tab-filters .tab.active{background:#1b2029;color:#fff;border-color:#3a4150}
-.hdr .hdr-seg{background:#151920;border:1px solid #232933;border-radius:9px;padding:2px}
+.tab-filters .tab.active{background:var(--c-blue-bg1);color:var(--c-gray-fg1);border-color:var(--c-gray-bg8)}
+.hdr .hdr-seg{background:var(--c-blue-bg4);border:1px solid var(--c-blue-bg2);border-radius:9px;padding:2px}
 .hdr-seg .tab{padding:0 14px;font-size:13px;color:var(--n-muted);border-radius:7px;min-height:40px}
-.hdr-seg .tab.active{background:#262c37;color:#fff;font-weight:600}
-.hdr .refresh{height:44px;padding:0 16px;border-radius:9px;border:1px solid var(--n-line2);background:#151920;
+.hdr-seg .tab.active{background:var(--c-blue-bg6);color:var(--c-gray-fg1);font-weight:600}
+.hdr .refresh{height:44px;padding:0 16px;border-radius:9px;border:1px solid var(--n-line2);background:var(--c-blue-bg4);
   color:var(--n-text);font-size:13px;display:inline-flex;align-items:center;gap:8px}
 .more-panel{position:absolute;top:calc(100% - 8px);left:0;z-index:120;display:flex;gap:16px;flex-wrap:wrap;
-  background:var(--n-card);border:1px solid #232933;border-radius:12px;padding:10px;
-  box-shadow:0 12px 32px rgba(0,0,0,.45)}
+  background:var(--n-card);border:1px solid var(--c-blue-bg2);border-radius:12px;padding:10px;
+  box-shadow:0 12px 32px var(--c-gray-a1)}
 .more-panel[hidden]{display:none}
 .more-sec{display:flex;flex-direction:column;min-width:170px}
 .more-h{font-size:11px;color:var(--n-muted);padding:6px 12px}
 .more-panel .tab{width:100%;justify-content:flex-start;padding:0 12px;font-size:14px;color:var(--n-sub)}
-.more-panel .tab:hover{background:#1b2029}
-.more-panel .tab.active{background:#1b2029;color:#fff;font-weight:600}
+.more-panel .tab:hover{background:var(--c-blue-bg1)}
+.more-panel .tab.active{background:var(--c-blue-bg1);color:var(--c-gray-fg1);font-weight:600}
 .hdr-strip{display:flex;align-items:center;gap:12px;min-height:40px;padding:0 var(--n-gutter);font-size:12px;
   color:var(--n-muted);border-bottom:1px solid var(--n-line);background:var(--n-bg)}
-.hdr-strip b{color:#c9ced7;font-weight:600}
+.hdr-strip b{color:var(--c-gray-fg3);font-weight:600}
 .hdr-strip-link{background:none;border:0;color:var(--n-accent);font:inherit;font-size:12px;min-height:40px;padding:0 4px;cursor:pointer}
-.hdr-strip-link:hover{color:#f3bd83}
+.hdr-strip-link:hover{color:var(--c-orange-fg2)}
 .hdr-strip-meta{margin-left:auto;white-space:nowrap}
 .hdr-basis{margin:10px var(--n-gutter) 0}
 /* ── 홈(#calendarView) ── */
@@ -658,15 +834,15 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .n-h{font-size:15px;font-weight:700;color:var(--n-text)}
 .n-sub{font-size:12px;color:var(--n-muted)}
 .n-link{background:none;border:0;padding:0 2px;color:var(--n-accent);font:inherit;font-size:12px;cursor:pointer;min-height:32px}
-.n-link:hover{color:#f3bd83}
-.n-btn{min-height:44px;padding:0 16px;border-radius:10px;border:1px solid var(--n-line2);background:#151920;
+.n-link:hover{color:var(--c-orange-fg2)}
+.n-btn{min-height:44px;padding:0 16px;border-radius:10px;border:1px solid var(--n-line2);background:var(--c-blue-bg4);
   color:var(--n-text);font:inherit;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
-.n-btn.primary{background:var(--n-accent);border-color:var(--n-accent);color:#1a1206;font-weight:700;font-size:14px}
+.n-btn.primary{background:var(--n-accent);border-color:var(--n-accent);color:var(--c-orange-bg3);font-weight:700;font-size:14px}
 .n-btn.sm{min-height:32px;padding:0 12px;font-size:12px;border-radius:8px;color:var(--n-sub);background:none}
 .st-dot{display:inline-flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap}
 .st-dot::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor;flex-shrink:0}
-.st-good{color:var(--n-good)} .st-neutral{color:#e9c46a} .st-bad{color:#f2848c} .st-unknown{color:var(--n-muted)}
-.st-warn{color:#e9c46a} .st-accent{color:var(--n-accent)}
+.st-good{color:var(--n-good)} .st-neutral{color:var(--c-amber-fg2)} .st-bad{color:var(--c-red-fg3)} .st-unknown{color:var(--n-muted)}
+.st-warn{color:var(--c-amber-fg2)} .st-accent{color:var(--n-accent)}
 .home-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:16px}
 .tile{background:var(--n-card);border:1px solid var(--n-line);border-radius:14px;padding:calc(18px * var(--n-k)) calc(20px * var(--n-k));
   display:flex;flex-direction:column;gap:calc(10px * var(--n-k));min-width:0}
@@ -687,26 +863,26 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .home-col{display:flex;flex-direction:column;gap:24px;min-width:0}
 .home-col>div{display:flex;flex-direction:column;gap:24px;min-width:0}
 .home-side,.home-side>div{gap:16px}
-.home-warn{display:flex;flex-wrap:wrap;gap:6px 16px;padding:12px 16px;border-radius:12px;background:#1a1712;border:1px solid #3a3020;font-size:13px}
-.todo{background:#16140f;border:1px solid rgba(232,162,92,.33);border-radius:16px;padding:calc(24px * var(--n-k)) calc(28px * var(--n-k));display:flex;flex-direction:column;gap:calc(20px * var(--n-k))}
+.home-warn{display:flex;flex-wrap:wrap;gap:6px 16px;padding:12px 16px;border-radius:12px;background:var(--c-orange-bg4);border:1px solid var(--c-orange-bg5);font-size:13px}
+.todo{background:var(--c-amber-bg7);border:1px solid var(--c-orange-a8);border-radius:16px;padding:calc(24px * var(--n-k)) calc(28px * var(--n-k));display:flex;flex-direction:column;gap:calc(20px * var(--n-k))}
 .todo-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .todo-h .t{font-size:12px;font-weight:600;color:var(--n-accent);letter-spacing:.4px}
 .todo-item{display:flex;flex-direction:column;gap:calc(14px * var(--n-k))}
-.todo-item+.todo-item{border-top:1px solid #2a2519;padding-top:calc(20px * var(--n-k))}
+.todo-item+.todo-item{border-top:1px solid var(--c-amber-bg5);padding-top:calc(20px * var(--n-k))}
 .todo-top{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
 .todo-name{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .todo-name .nm{font-size:calc(24px * var(--n-k));font-weight:700;color:var(--n-text)}
-.chip{font-size:12px;padding:3px 8px;border-radius:6px;background:var(--n-chip);color:#c9ced7;white-space:nowrap}
-.chip.accent{background:#2a2114;color:var(--n-accent);font-weight:600}
-.todo-cells{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:#2a2519;border-radius:12px;overflow:hidden}
-.todo-cells>div{background:#1b1811;padding:calc(14px * var(--n-k)) calc(16px * var(--n-k));display:flex;flex-direction:column;gap:4px;min-width:0}
-.todo-cells .k{font-size:12px;color:#9a927f}
+.chip{font-size:12px;padding:3px 8px;border-radius:6px;background:var(--n-chip);color:var(--c-gray-fg3);white-space:nowrap}
+.chip.accent{background:var(--c-orange-bg1);color:var(--n-accent);font-weight:600}
+.todo-cells{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--c-amber-bg5);border-radius:12px;overflow:hidden}
+.todo-cells>div{background:var(--c-amber-bg8);padding:calc(14px * var(--n-k)) calc(16px * var(--n-k));display:flex;flex-direction:column;gap:4px;min-width:0}
+.todo-cells .k{font-size:12px;color:var(--c-gray-fg5)}
 .todo-cells .v{font-size:calc(20px * var(--n-k));font-weight:600;overflow-wrap:anywhere}
-.todo-foot{font-size:12px;color:#9a927f;line-height:1.6}
+.todo-foot{font-size:12px;color:var(--c-gray-fg5);line-height:1.6}
 .cand{padding:18px 22px}
 .cand-h{display:flex;align-items:center;gap:10px;cursor:pointer;min-height:32px}
 .cand .grp{grid-column:1/-1;font-size:12px;font-weight:600;margin-top:4px}
-.home .cand-card{border:1px solid var(--n-line);background:#10141a;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;min-height:140px}
+.home .cand-card{border:1px solid var(--n-line);background:var(--c-blue-bg7);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;min-height:140px}
 .track{padding:22px 0 8px}
 .track-h{display:flex;align-items:center;gap:10px;padding:0 28px 14px}
 .track-row{display:grid;grid-template-columns:var(--track-cols);align-items:center;gap:12px;padding:0 28px;min-height:52px;border-bottom:1px solid var(--n-row);font-size:14px;cursor:pointer}
@@ -715,20 +891,20 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .track-row>:nth-child(4){padding-left:8px}
 .track-row .nm{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .track-row .trig{display:flex;justify-content:flex-end;gap:4px;align-items:center}
-.track-row .trig input{width:84px;min-height:32px;background:#0f1318;border:1px solid var(--n-line2);border-radius:6px;color:var(--n-text);text-align:right;font-family:var(--n-num);font-size:13px;padding:0 6px}
-.track-row .trig select{min-height:32px;background:#0f1318;border:1px solid var(--n-line2);border-radius:6px;color:var(--n-sub);font-size:12px}
+.track-row .trig input{width:84px;min-height:32px;background:var(--c-blue-bg3);border:1px solid var(--n-line2);border-radius:6px;color:var(--n-text);text-align:right;font-family:var(--n-num);font-size:13px;padding:0 6px}
+.track-row .trig select{min-height:32px;background:var(--c-blue-bg3);border:1px solid var(--n-line2);border-radius:6px;color:var(--n-sub);font-size:12px}
 .track-exp{padding:10px 28px 14px;border-bottom:1px solid var(--n-row);font-size:12px}
 .track-more{width:100%;min-height:44px;background:none;border:0;color:var(--n-muted);font:inherit;font-size:13px;cursor:pointer}
 .side-card{padding:20px 22px;display:flex;flex-direction:column;gap:12px}
-.bar{height:6px;border-radius:3px;background:#232933;overflow:hidden}
+.bar{height:6px;border-radius:3px;background:var(--c-blue-bg2);overflow:hidden}
 .bar>div{height:6px;background:var(--n-accent)}
 .sec-row{display:flex;flex-direction:column;gap:4px}
 .sec-row .a{display:flex;justify-content:space-between;gap:8px;font-size:14px}
 .sec-row .b{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--n-muted)}
 .sec-row .b>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lp-chips{display:flex;flex-wrap:wrap;gap:6px}
-.lp-chips a{font-size:12px;padding:5px 9px;border-radius:6px;background:var(--n-chip);color:#c9ced7;text-decoration:none;min-height:28px;display:inline-flex;align-items:center}
-.lp-chips a:hover{color:#fff}
+.lp-chips a{font-size:12px;padding:5px 9px;border-radius:6px;background:var(--n-chip);color:var(--c-gray-fg3);text-decoration:none;min-height:28px;display:inline-flex;align-items:center}
+.lp-chips a:hover{color:var(--c-gray-fg1)}
 .lp-chips[hidden]{display:none}
 .home .tile-name{color:var(--n-sub)}
 .home .tile-name:hover{color:var(--n-text)}
@@ -765,13 +941,13 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 #lowpointTrackView>*+*{margin-top:20px}
 .lpt-form{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:flex-end}
 .lpt-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--n-muted)}
-.lpt-form input,.lpt-form select{min-height:40px;background:#0f1318;border:1px solid var(--n-line2);border-radius:8px;color:var(--n-text);padding:0 10px;font:inherit;font-size:14px;min-width:0}
+.lpt-form input,.lpt-form select{min-height:40px;background:var(--c-blue-bg3);border:1px solid var(--n-line2);border-radius:8px;color:var(--n-text);padding:0 10px;font:inherit;font-size:14px;min-width:0}
 .lpt-form input[name=buyPrice],.lpt-form input[name=qty],.lpt-form input[name=sellPrice]{width:110px}
 .lpt-table td.r,.lpt-table th.r{text-align:right}
-.lpt-table tr.lpt-hit td{background:rgba(232,162,92,.10)}
+.lpt-table tr.lpt-hit td{background:var(--c-orange-a9)}
 .lpt-table tr.lpt-sep td{padding:6px 12px 6px 24px;border-bottom:1px solid var(--n-line2)}
 .lpt-table tr.lpt-sep span{font-size:11px;color:var(--n-muted);letter-spacing:.4px}
-.lpt-table tr.lpt-sell td{background:#10141a}
+.lpt-table tr.lpt-sell td{background:var(--c-blue-bg7)}
 /* ── 내 일지(#journalView) ── */
 /* applyTabViewState가 style.display='block'을 넣으므로 flex gap 대신 형제 여백으로 간격을 둔다 */
 #journalView{background:var(--n-bg);color:var(--n-text);padding:32px var(--n-gutter) 48px}
@@ -786,10 +962,10 @@ details.jr-more>summary,details.rowmenu>summary{list-style:none;cursor:pointer}
 details.jr-more>summary::-webkit-details-marker,details.rowmenu>summary::-webkit-details-marker{display:none}
 details.jr-more>summary{width:44px;justify-content:center;padding:0}
 .jr-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:50;min-width:150px;display:flex;flex-direction:column;
-  background:var(--n-card);border:1px solid #232933;border-radius:10px;padding:6px;box-shadow:0 12px 32px rgba(0,0,0,.45)}
+  background:var(--n-card);border:1px solid var(--c-blue-bg2);border-radius:10px;padding:6px;box-shadow:0 12px 32px var(--c-gray-a1)}
 .jr-menu button{min-height:40px;text-align:left;background:none;border:0;border-radius:6px;padding:0 12px;color:var(--n-text);font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
-.jr-menu button:hover{background:#1b2029}
-.jr-menu button.danger{color:#f2848c}
+.jr-menu button:hover{background:var(--c-blue-bg1)}
+.jr-menu button.danger{color:var(--c-red-fg3)}
 .jr-menu-note{font-size:12px;color:var(--n-muted);padding:10px 12px}
 .jr-risk{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr 1.2fr;overflow:hidden}
 .jr-risk>div{padding:calc(18px * var(--n-k)) calc(22px * var(--n-k));display:flex;flex-direction:column;gap:calc(8px * var(--n-k));border-right:1px solid var(--n-line);min-width:0}
@@ -798,19 +974,19 @@ details.jr-more>summary{width:44px;justify-content:center;padding:0}
 .jr-risk .v{font-size:calc(22px * var(--n-k));font-weight:600}
 .jr-big{font-size:calc(26px * var(--n-k));font-weight:600}   /* R 누적 큰 숫자 */
 .jr-gate{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 18px;border-radius:12px;background:var(--n-card);border:1px solid var(--n-line)}
-.jr-gate-bad{background:#1d1417;border-color:#3a2226;color:#f2b8bd}
-.jr-gate-bad b{color:#ffd5d8}
-.jr-gate-neutral{background:#1c1a12;border-color:#3a3320}
+.jr-gate-bad{background:var(--c-red-bg5);border-color:var(--c-red-bg6);color:var(--c-red-fg8)}
+.jr-gate-bad b{color:var(--c-red-fg9)}
+.jr-gate-neutral{background:var(--c-amber-bg6);border-color:var(--c-amber-bg3)}
 .jr-grid{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(0,1fr);gap:24px;align-items:start}
 .jr-grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:start}
 .jr-records{overflow:visible}
 .jr-rec-h{display:flex;align-items:center;gap:12px 16px;flex-wrap:wrap;padding:18px 24px;border-bottom:1px solid var(--n-line)}
-.jr-seg{display:flex;background:#0f1318;border:1px solid #232933;border-radius:10px;padding:3px}
+.jr-seg{display:flex;background:var(--c-blue-bg3);border:1px solid var(--c-blue-bg2);border-radius:10px;padding:3px}
 .jr-seg-b{min-height:38px;padding:0 14px;border:0;border-radius:7px;background:none;color:var(--n-muted);font:inherit;font-size:13px;cursor:pointer}
-.jr-seg-b.on{background:#262c37;color:#fff;font-weight:600}
+.jr-seg-b.on{background:var(--c-blue-bg6);color:var(--c-gray-fg1);font-weight:600}
 .jr-pills{display:flex;gap:6px;flex-wrap:wrap}
 .jr-pill{min-height:32px;padding:0 12px;border-radius:16px;border:1px solid var(--n-line2);background:none;color:var(--n-sub);font:inherit;font-size:12px;cursor:pointer}
-.jr-pill.on{border-color:var(--n-accent);background:#2a2114;color:var(--n-accent);font-weight:600}
+.jr-pill.on{border-color:var(--n-accent);background:var(--c-orange-bg1);color:var(--n-accent);font-weight:600}
 .jr-records .jrnl-stats{padding:12px 24px 0}
 .jr-table-wrap{overflow:visible;position:relative}   /* .sr 절대배치가 스크롤 밖으로 새지 않게 */
 table.jr-table{width:100%;border-collapse:collapse;font-size:14px}
@@ -825,7 +1001,7 @@ table.jr-table tbody tr:nth-child(even) td{background:none}
 .jr-note{font-size:13px;color:var(--n-sub);max-width:220px}
 .jr-act{width:44px;text-align:right;padding-right:16px!important}
 details.rowmenu>summary{width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;color:var(--n-muted)}
-details.rowmenu>summary:hover{background:#1b2029}
+details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
 .jr-cats{padding:20px 0 6px}
 .jr-card-h{display:flex;justify-content:space-between;align-items:baseline;padding:0 22px 12px}
 .jr-cat-row{display:grid;grid-template-columns:1.1fr .5fr 1.3fr 1.3fr;align-items:center;gap:6px;padding:8px 22px;min-height:52px;border-bottom:1px solid var(--n-row);font-size:13px}
@@ -905,7 +1081,7 @@ details.rowmenu>summary:hover{background:#1b2029}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.303</span>
+      <span class="ver mono" id="verBadge">v5.304</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -1027,7 +1203,7 @@ details.rowmenu>summary:hover{background:#1b2029}
       style="flex:1;box-sizing:border-box;padding:10px 14px;border-radius:10px;
       background:var(--surface);border:1px solid var(--line);color:var(--text);font-size:14px;outline:none">
     <button id="diagBtn" title="입력한 종목이 왜 스캔 결과에 안 잡혔는지 자세히 진단"
-      style="padding:10px 18px;border-radius:10px;background:#1d6b3a;color:#fff;
+      style="padding:10px 18px;border-radius:10px;background:var(--c-green-bg2);color:var(--c-gray-fg1);
       border:none;font-size:14px;cursor:pointer;white-space:nowrap">🔬 진단</button>
   </div>
 </div>
@@ -1060,7 +1236,7 @@ details.rowmenu>summary:hover{background:#1b2029}
        종목리스트 기반, money_flow의 top100 sector_of 집계와 별개 계산.
        서사가 아니라 수치 기반 4단계 판정 + 근거 수치 동반이 목적. -->
   <div class="mf-theme-lifecycle">
-    <h3 style="margin:22px 0 8px;border-top:1px solid var(--line,#30363d);padding-top:18px">🧬 테마 라이프사이클 분석</h3>
+    <h3 style="margin:22px 0 8px;border-top:1px solid var(--line,var(--c-gray-bg9));padding-top:18px">🧬 테마 라이프사이클 분석</h3>
     <div class="mf-toolbar">
       <select id="tlThemeSel" onchange="loadThemeLifecycle(this.value)"><option value="">테마 선택…</option></select>
       <button id="tlRotationBtn" onclick="loadRotationMatrix()">🔀 자금이동 매트릭스(최근 20일)</button>
@@ -1244,7 +1420,7 @@ details.rowmenu>summary:hover{background:#1b2029}
       <div style="flex:1;position:relative">
         <label>종목명 또는 티커 *</label>
         <input id="mtaTicker" placeholder="예: 삼성전자, 005930, AAPL" oninput="mtaOnTickerChange()" onblur="setTimeout(mtaHideDropdown, 200)" autocomplete="off">
-        <div id="mtaDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:20;background:var(--surface);border:1px solid var(--line);border-radius:8px;margin-top:2px;max-height:220px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.3)"></div>
+        <div id="mtaDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:20;background:var(--surface);border:1px solid var(--line);border-radius:8px;margin-top:2px;max-height:220px;overflow-y:auto;box-shadow:0 4px 12px var(--c-gray-a7)"></div>
       </div>
       <div style="flex:1"><label>종목명</label><input id="mtaName" placeholder="자동 조회됨" readonly style="opacity:.75;cursor:not-allowed"></div>
     </div>
@@ -1357,11 +1533,11 @@ function udReliabilityWarn(s) {
   if (s.ud_reliable !== false) return '';
   if (s.top1_share != null && s.top1_share >= 0.40) {
     const pct = Math.round(s.top1_share * 100);
-    return ` <span style="color:#f87171;font-size:11px" title="상승거래량의 ${pct}%가 하루에 집중 — 이벤트성 가능">⚠️상위1일 ${pct}%</span>`;
+    return ` <span style="color:var(--c-red-fg2);font-size:11px" title="상승거래량의 ${pct}%가 하루에 집중 — 이벤트성 가능">⚠️상위1일 ${pct}%</span>`;
   }
   if (s.top3_share != null && s.top3_share >= 0.65) {
     const pct = Math.round(s.top3_share * 100);
-    return ` <span style="color:#f87171;font-size:11px" title="상승거래량의 ${pct}%가 상위 3일에 집중 — 이벤트성 가능">⚠️상위3일 ${pct}%</span>`;
+    return ` <span style="color:var(--c-red-fg2);font-size:11px" title="상승거래량의 ${pct}%가 상위 3일에 집중 — 이벤트성 가능">⚠️상위3일 ${pct}%</span>`;
   }
   return '';
 }
@@ -1403,13 +1579,13 @@ function sparkSVG(closes, ma20) {
   const hiIdx = closes.indexOf(Math.max(...closes));
   const zone = hiIdx < closes.length - 1
     ? `<rect x="${x(hiIdx)}" y="0" width="${x(closes.length - 1) - x(hiIdx)}" height="${H}"
-        fill="rgba(242,179,61,.07)"/>` : '';
+        style="fill:var(--c-orange-a10)"/>` : '';
   const last = closes.length - 1;
   return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
     ${zone}
-    <path d="${path(ma20)}" fill="none" stroke="#4D8DFF" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/>
-    <path d="${path(closes)}" fill="none" stroke="#E6ECF5" stroke-width="1.5"/>
-    <circle cx="${x(last)}" cy="${y(closes[last])}" r="3" fill="#F2B33D"/>
+    <path d="${path(ma20)}" fill="none" style="stroke:var(--down)" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/>
+    <path d="${path(closes)}" fill="none" style="stroke:var(--text)" stroke-width="1.5"/>
+    <circle cx="${x(last)}" cy="${y(closes[last])}" r="3" style="fill:var(--amber)"/>
   </svg>`;
 }
 
@@ -1446,10 +1622,10 @@ function scoreRing(score) {
 // 대부분 🔴로 뜨는 게 정상적인 사실 반영).
 // v5.45: 필터(riskTierFilter)와 배지가 같은 경계값을 쓰도록 단일 소스로 분리.
 const RISK_TIERS = [
-  { key: 'tight',  emoji: '🔵', label: '타이트', range: '≤5%',   max: 5,        color: '#7dd3fc', bg: '#0f2a3a', border: '#1d5a8c' },
-  { key: 'normal', emoji: '⚪', label: '보통',   range: '5~8%',  max: 8,        color: '#9ca3af', bg: '#26262e', border: '#3f3f4a' },
-  { key: 'wide',   emoji: '🟠', label: '넓음',   range: '8~12%', max: 12,       color: '#fbbf24', bg: '#2a1a0f', border: '#6b5518' },
-  { key: 'vwide',  emoji: '🔴', label: '매우넓음', range: '12%+', max: Infinity, color: '#f87171', bg: '#341418', border: '#6b2028' },
+  { key: 'tight',  emoji: '🔵', label: '타이트', range: '≤5%',   max: 5,        color: 'var(--c-cyan-fg1)', bg: 'var(--c-blue-bg12)', border: 'var(--c-blue-fg11)' },
+  { key: 'normal', emoji: '⚪', label: '보통',   range: '5~8%',  max: 8,        color: 'var(--c-gray-fg2)', bg: 'var(--c-gray-bg2)', border: 'var(--c-gray-bg3)' },
+  { key: 'wide',   emoji: '🟠', label: '넓음',   range: '8~12%', max: 12,       color: 'var(--c-amber-fg1)', bg: 'var(--c-orange-bg2)', border: 'var(--c-amber-bg1)' },
+  { key: 'vwide',  emoji: '🔴', label: '매우넓음', range: '12%+', max: Infinity, color: 'var(--c-red-fg2)', bg: 'var(--c-red-bg1)', border: 'var(--c-red-bg2)' },
 ];
 function riskTierOf(riskPct) {
   if (riskPct == null) return null;
@@ -1591,7 +1767,7 @@ function pivotHuggingDistAtr(close, pivot, atrPct) {
 function pivotHugBadgeHtml(close, pivot, atrPct) {
   const d = pivotHuggingDistAtr(close, pivot, atrPct);
   return d != null
-    ? `<div style="font-size:11px;color:#FF5A6E;font-weight:700;margin-top:2px">⛔ 피벗 밀착 (${d.toFixed(1)}ATR) — 즉시진입 금지 구간</div>`
+    ? `<div style="font-size:11px;color:var(--c-red-fg5);font-weight:700;margin-top:2px">⛔ 피벗 밀착 (${d.toFixed(1)}ATR) — 즉시진입 금지 구간</div>`
     : '';
 }
 
@@ -1778,7 +1954,7 @@ function riskPctMiniHtml(s) {
     ? s.risk_pct <= s.atr_pct * ATR_STOP_MULT
     : s.risk_pct <= (s.market === 'KR' ? 12 : 8);
   // v5.77: 채도 낮춘 파스텔톤(눈 피로 감소) — 기존 vivid var(--green)/#fbbf24 대체.
-  return `<span class="cc-risk mono" style="color:${ok ? '#8fd6ac' : '#f0c479'}">${s.risk_pct}%</span>`;
+  return `<span class="cc-risk mono" style="color:${ok ? 'var(--c-green-fg2)' : 'var(--c-orange-fg3)'}">${s.risk_pct}%</span>`;
 }
 function collapsedBadgeIconsHtml(s) {
   let out = '';
@@ -1831,7 +2007,7 @@ function collapsedRowHtml(s) {
 // 리스크 자리→인버스 5일 등락, 점수 자리→레버리지, 배지 자리→강도 신호등.
 // 스파크는 인버스 데이터에 원래 없어서(이전 버전부터) 2층에 안 넣음.
 function collapsedRowHtmlInverse(s) {
-  const scoreColor = s.inv_score >= 70 ? '#ff6b6b' : (s.inv_score >= 40 ? '#f2b33d' : '#7a8a7a');
+  const scoreColor = s.inv_score >= 70 ? 'var(--c-red-fg1)' : (s.inv_score >= 40 ? 'var(--amber)' : 'var(--c-gray-fg4)');
   const ret5 = s.ret5_pct;
   const strengthDot = s.strength === 'strong' ? '🔴' : s.strength === 'building' ? '🟡' : '🟢';
   return `<div class="card-collapsed">
@@ -1864,7 +2040,7 @@ function collapsedRowHtmlJongga(s) {
       <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
       <a class="cc-name-lg name-link" href="${tvUrl(s)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.name}</a>
       <span class="cc-mkt">KR</span>
-      ${s.outside_legacy_universe ? `<span class="merger-tag" style="background:rgba(242,179,61,.14);color:#f2b33d;border-color:rgba(242,179,61,.4)" title="거래대금 v2 순위 기준으로 새로 찾은 종목 — 기존 스캔 유니버스 밖이라 방금 개별 조회함(v5.214, 데이터 품질 확인용)">🆕 유니버스밖</span>` : ''}
+      ${s.outside_legacy_universe ? `<span class="merger-tag" style="background:var(--c-orange-a1);color:var(--amber);border-color:var(--c-orange-a2)" title="거래대금 v2 순위 기준으로 새로 찾은 종목 — 기존 스캔 유니버스 밖이라 방금 개별 조회함(v5.214, 데이터 품질 확인용)">🆕 유니버스밖</span>` : ''}
       <span class="cc-chevron">▸</span>
     </div>
     <div class="cc-row2">
@@ -1885,12 +2061,12 @@ function jonggaCard(s) {
       <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="즐겨찾기">${fav ? '★' : '☆'}</button>
       <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
       <div>
-        <div class="name">🌆 <a class="name-link" href="${tvUrl(s)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.name}</a><span class="mkt">${s.market}</span>${s.price_frozen ? ` <span class="merger-tag" title="가격고정(M&A/특수상황) 의심: ${(s.price_frozen_reasons||[]).join(', ')}">⚠️ 가격고정</span>` : ''}${s.outside_legacy_universe ? ` <span class="merger-tag" style="background:rgba(242,179,61,.14);color:#f2b33d;border-color:rgba(242,179,61,.4)" title="거래대금 v2 순위 기준으로 새로 찾은 종목 — 기존 스캔 유니버스(get_universe(&quot;kr&quot;)) 밖이라 방금 개별 조회함(v5.214, 데이터 품질 확인용 — 섹터 정보 등 일부 부가 필드가 다른 히트보다 검증 이력이 짧음)">🆕 유니버스 밖</span>` : ''}</div>
+        <div class="name">🌆 <a class="name-link" href="${tvUrl(s)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.name}</a><span class="mkt">${s.market}</span>${s.price_frozen ? ` <span class="merger-tag" title="가격고정(M&A/특수상황) 의심: ${(s.price_frozen_reasons||[]).join(', ')}">⚠️ 가격고정</span>` : ''}${s.outside_legacy_universe ? ` <span class="merger-tag" style="background:var(--c-orange-a1);color:var(--amber);border-color:var(--c-orange-a2)" title="거래대금 v2 순위 기준으로 새로 찾은 종목 — 기존 스캔 유니버스(get_universe(&quot;kr&quot;)) 밖이라 방금 개별 조회함(v5.214, 데이터 품질 확인용 — 섹터 정보 등 일부 부가 필드가 다른 히트보다 검증 이력이 짧음)">🆕 유니버스 밖</span>` : ''}</div>
         <div class="tick mono">${s.ticker ? `<a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a>` : ''}${s.sector && s.sector !== '기타' ? ` · ${s.sector}${s.sector_rank != null && s.sector_total != null ? ` ${s.sector_rank}/${s.sector_total}` : ''}${s.sector_rs_pct != null ? ` · 섹터RS ${s.sector_rs_pct}` : ''}` : ''}</div>
       </div>
       <div style="margin-left:auto;text-align:right">
         <div class="mono" style="font-size:11px;color:var(--muted)">거래대금</div>
-        <div class="mono" style="font-size:15px;font-weight:700;color:#fbbf24">${s.turnover_rank}위</div>
+        <div class="mono" style="font-size:15px;font-weight:700;color:var(--c-amber-fg1)">${s.turnover_rank}위</div>
       </div>
     </div>
     <div class="price-row mono">
@@ -2086,7 +2262,7 @@ function reignitionWatchSectionHtml() {
     }).join('');
 
     return `<div style="${expiringSoon ? 'opacity:.7' : ''}">
-      <div class="jongga-forward-sub" style="display:flex;justify-content:space-between;gap:8px;padding:3px 0${confirmed ? ';color:#93c5fd' : ''}">
+      <div class="jongga-forward-sub" style="display:flex;justify-content:space-between;gap:8px;padding:3px 0${confirmed ? ';color:var(--c-blue-fg5)' : ''}">
         <span>${confirmed ? '🔁' : '⏳'} <b>${nameLink}</b> <span style="opacity:.7">(${it.theme} D0 ${it.d0_date}, D+${it.days_since_d0})</span>${rsTag}${watchBtn}${olderToggle}</span>
         <span style="white-space:nowrap">${confirmed ? '확인진입' + rTag : `${expiringSoon ? '⏳ 만료임박 · ' : ''}창 ${it.window_days_left}일 남음`}${compTag}</span>
       </div>
@@ -2159,12 +2335,12 @@ function breakdownCard(s) {
       <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="즐겨찾기">${fav ? '★' : '☆'}</button>
       <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
       <div>
-        <div class="name">🩸 <a class="name-link" href="${tvUrl(s)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.name}</a>${s.triggered ? ' <span style="color:#ff6b6b;font-size:11px">이탈+거래량</span>' : ''}<span class="mkt">${s.market}</span></div>
+        <div class="name">🩸 <a class="name-link" href="${tvUrl(s)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.name}</a>${s.triggered ? ' <span style="color:var(--c-red-fg1);font-size:11px">이탈+거래량</span>' : ''}<span class="mkt">${s.market}</span></div>
         <div class="tick mono">${s.ticker ? `<a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a>` : ''}${s.sector && s.sector !== '기타' ? ` · ${s.sector}${s.sector_rank != null && s.sector_total != null ? ` ${s.sector_rank}/${s.sector_total}` : ''}${s.sector_rs_pct != null ? ` · 섹터RS ${s.sector_rs_pct}` : ''}` : ''}</div>
       </div>
       <div style="margin-left:auto;display:flex;flex-direction:column;align-items:center;gap:2px">
         ${scoreRing(s.score)}
-        <div class="mono" style="font-size:10px;color:#ff6b6b">숏</div>
+        <div class="mono" style="font-size:10px;color:var(--c-red-fg1)">숏</div>
       </div>
     </div>
     <div class="price-row mono">
@@ -2174,23 +2350,23 @@ function breakdownCard(s) {
     ${sparkSVG(s.spark, s.spark_ma20)}
     <div class="metrics" style="margin-top:10px">
       <div class="metric"><div class="k">지지선</div><div class="v mono">${fmtPrice(s.support, s.market)}</div></div>
-      <div class="metric"><div class="k">지지대비</div><div class="v mono" style="color:${s.near_pct<0?'#ff6b6b':'var(--muted)'}">${s.near_pct>0?'+':''}${s.near_pct}%</div></div>
+      <div class="metric"><div class="k">지지대비</div><div class="v mono" style="color:${s.near_pct<0?'var(--c-red-fg1)':'var(--muted)'}">${s.near_pct>0?'+':''}${s.near_pct}%</div></div>
       <div class="metric"><div class="k" title="지수 대비 초과성과 기준 백분위(종목RS-지수RS 순위) — MarketSmith 등 절대수익률 기준 RS와 값이 다를 수 있음">RS</div><div class="v mono">${s.rs}</div></div>
       <div class="metric"><div class="k">RSI</div><div class="v mono">${s.rsi}</div></div>
     </div>
     <div class="metrics" style="margin-top:6px">
       <div class="metric"><div class="k">숏 진입</div><div class="v mono">${fmtPrice(s.entry, s.market)}</div></div>
-      <div class="metric"><div class="k">손절(위)</div><div class="v mono" style="color:#ff6b6b">${fmtPrice(s.stop, s.market)}</div></div>
+      <div class="metric"><div class="k">손절(위)</div><div class="v mono" style="color:var(--c-red-fg1)">${fmtPrice(s.stop, s.market)}</div></div>
       <div class="metric"><div class="k">목표(아래)</div><div class="v mono" style="color:var(--green)">${fmtPrice(s.target, s.market)}</div></div>
       <div class="metric"><div class="k">손익비</div><div class="v mono">${s.rr != null ? s.rr + 'R' : '-'}</div></div>
     </div>
     <div style="margin-top:8px;display:flex;gap:4px;flex-wrap:wrap">
-      ${(s.reasons || []).map(r => `<span class="st-badge" style="background:#2a1a1a;color:#ff9b9b;font-size:10px">${r}</span>`).join('')}
+      ${(s.reasons || []).map(r => `<span class="st-badge" style="background:var(--c-red-bg7);color:var(--c-red-fg4);font-size:10px">${r}</span>`).join('')}
     </div>
-    ${s.oversold ? '<div class="surge-warn" style="background:rgba(242,179,61,.08);border-color:rgba(242,179,61,.3);margin-top:8px">⚠️ RSI ' + s.rsi + ' 과매도 — 단기 반등(숏 스퀴즈) 위험. 추격 숏 금지, 반등 후 진입.</div>' : ''}
+    ${s.oversold ? '<div class="surge-warn" style="background:var(--c-orange-a11);border-color:var(--c-orange-a12);margin-top:8px">⚠️ RSI ' + s.rsi + ' 과매도 — 단기 반등(숏 스퀴즈) 위험. 추격 숏 금지, 반등 후 진입.</div>' : ''}
     ${krWarn ? '<div class="surge-warn" style="margin-top:8px">⚠️ 한국 종목 — 개인 공매도 제약. 인버스 ETF나 관찰용으로 활용.</div>' : ''}
-    <div class="surge-warn" style="background:rgba(255,107,107,.06);border-color:rgba(255,107,107,.25);margin-top:8px">🩸 숏은 손실 무한·숏스퀴즈 위험. 손절(위쪽 저항) 칼같이, 소액만. 미너비니式 본래 현금 우선.</div>
-    ${s.ticker ? `<button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button><button class="journal-btn" style="margin-left:6px;background:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'};border-color:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'}" onclick="quickWatch(this,'${s.ticker}')" ${isPendingWatch(s.ticker) ? 'disabled' : ''} title="원클릭 봇 감시(대기) 등록 — 피벗·손절 자동 입력. 돌파·리테스트 시 텔레그램 알림. (일지의 '관찰' 카테고리와 다름: 관찰=이평 접근 알림용)">${isPendingWatch(s.ticker) ? '✓ 감시중' : '⚡ 감시'}</button>` : ''}
+    <div class="surge-warn" style="background:var(--c-red-a2);border-color:var(--c-red-a1);margin-top:8px">🩸 숏은 손실 무한·숏스퀴즈 위험. 손절(위쪽 저항) 칼같이, 소액만. 미너비니式 본래 현금 우선.</div>
+    ${s.ticker ? `<button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button><button class="journal-btn" style="margin-left:6px;background:${isPendingWatch(s.ticker) ? 'var(--c-green-bg1)' : 'var(--c-green-bg2)'};border-color:${isPendingWatch(s.ticker) ? 'var(--c-green-bg1)' : 'var(--c-green-bg2)'}" onclick="quickWatch(this,'${s.ticker}')" ${isPendingWatch(s.ticker) ? 'disabled' : ''} title="원클릭 봇 감시(대기) 등록 — 피벗·손절 자동 입력. 돌파·리테스트 시 텔레그램 알림. (일지의 '관찰' 카테고리와 다름: 관찰=이평 접근 알림용)">${isPendingWatch(s.ticker) ? '✓ 감시중' : '⚡ 감시'}</button>` : ''}
     </div>
   </div>`;
 }
@@ -2221,9 +2397,9 @@ function searchResultCard(s) {
   const chgSign = s.change_pct >= 0 ? '+' : '';
   const hl = s['수평저항'] || {};
   const resList = (hl['저항'] || []).map(r =>
-    `<span style="color:#f87171;font-size:12px;margin-right:10px">${fmtPrice(r.price, s.market)} (${r.touches}회, +${r.dist_pct}%)</span>`).join('');
+    `<span style="color:var(--c-red-fg2);font-size:12px;margin-right:10px">${fmtPrice(r.price, s.market)} (${r.touches}회, +${r.dist_pct}%)</span>`).join('');
   const supList = (hl['지지'] || []).map(r =>
-    `<span style="color:#4ade80;font-size:12px;margin-right:10px">${fmtPrice(r.price, s.market)} (${r.touches}회, ${r.dist_pct}%)</span>`).join('');
+    `<span style="color:var(--c-green-fg1);font-size:12px;margin-right:10px">${fmtPrice(r.price, s.market)} (${r.touches}회, ${r.dist_pct}%)</span>`).join('');
   const hasHypo = s.hypothetical_entry && s.pivot != null;
   return `<div class="card${fav ? ' fav' : ''} expanded">
     <div class="card-expanded">
@@ -2233,7 +2409,7 @@ function searchResultCard(s) {
       <div>
         <div class="name">
           <a class="name-link" href="${tvUrl(s)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.name}</a>
-          <span class="climax-tag" style="background:#152535;color:#7fb8e0;border:1px solid #2d5a8c">🔍 검색 결과 — 현재 시그널 없음</span>
+          <span class="climax-tag" style="background:var(--c-blue-bg5);color:var(--c-blue-fg1);border:1px solid var(--c-blue-fg2)">🔍 검색 결과 — 현재 시그널 없음</span>
         </div>
         <div class="tick mono">${s.ticker ? `<a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a>` : ''}</div>
       </div>
@@ -2256,7 +2432,7 @@ function searchResultCard(s) {
     </div>
     ${hasHypo ? `
     <div style="border-top:1px solid var(--line);padding-top:8px;margin-top:8px">
-      <div style="font-size:13px;font-weight:600;color:#fbbf24;margin-bottom:4px" title="실제 게이트 통과가 아니라 '이 종목이 뜨려면 얼마가 돼야 하는가'를 보여주는 참고 계산입니다 — 매수 신호가 아닙니다.">🎯 돌파 시 참고 수치 (가정 — 매수 신호 아님)</div>
+      <div style="font-size:13px;font-weight:600;color:var(--c-amber-fg1);margin-bottom:4px" title="실제 게이트 통과가 아니라 '이 종목이 뜨려면 얼마가 돼야 하는가'를 보여주는 참고 계산입니다 — 매수 신호가 아닙니다.">🎯 돌파 시 참고 수치 (가정 — 매수 신호 아님)</div>
       <div class="metrics mono">
         <div class="metric"><div class="k">피벗(참고저항)</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
         <div class="metric"><div class="k">가정 진입가</div><div class="v">${fmtPrice(s.pivot, s.market)}</div></div>
@@ -2268,11 +2444,11 @@ function searchResultCard(s) {
       </div>
     </div>` : `<div style="font-size:12px;color:var(--muted);margin-top:8px">참고할 만한 상단 저항이 없어 돌파 시 참고 수치를 계산할 수 없어요.</div>`}
     <div style="border-top:1px solid var(--line);padding-top:8px;margin-top:8px">
-      <div style="font-size:13px;font-weight:600;color:#60a5fa;margin-bottom:4px">📊 수평 매물대 (참고용)</div>
+      <div style="font-size:13px;font-weight:600;color:var(--c-blue-fg6);margin-bottom:4px">📊 수평 매물대 (참고용)</div>
       <div style="margin-bottom:3px">저항: ${resList || '<span style="color:var(--muted);font-size:12px">없음</span>'}</div>
       <div>지지: ${supList || '<span style="color:var(--muted);font-size:12px">없음</span>'}</div>
     </div>
-    ${s.ticker ? `<button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button><button class="journal-btn" style="margin-left:6px;background:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'};border-color:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'}" onclick="quickWatch(this,'${s.ticker}')" ${isPendingWatch(s.ticker) ? 'disabled' : ''} title="원클릭 봇 감시 등록 — 참고 저항선을 기본값으로 제안">${isPendingWatch(s.ticker) ? '✓ 감시중' : '⚡ 감시'}</button>` : ''}
+    ${s.ticker ? `<button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button><button class="journal-btn" style="margin-left:6px;background:${isPendingWatch(s.ticker) ? 'var(--c-green-bg1)' : 'var(--c-green-bg2)'};border-color:${isPendingWatch(s.ticker) ? 'var(--c-green-bg1)' : 'var(--c-green-bg2)'}" onclick="quickWatch(this,'${s.ticker}')" ${isPendingWatch(s.ticker) ? 'disabled' : ''} title="원클릭 봇 감시 등록 — 참고 저항선을 기본값으로 제안">${isPendingWatch(s.ticker) ? '✓ 감시중' : '⚡ 감시'}</button>` : ''}
     </div>
   </div>`;
 }
@@ -2291,7 +2467,7 @@ function card(s) {
       <button class="fav-btn${fav ? ' on' : ''}" data-ticker="${s.ticker}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기 (최상단 고정)'}">${fav ? '★' : '☆'}</button>
       <button class="hide-btn" data-ticker="${s.ticker}" data-name="${s.name}" title="숨기기 (90일)">✕</button>
       <div>
-        <div class="name"><a class="name-link" href="${tvUrl(s)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.name}</a>${s.alert ? ` <span class="alert-tag" title="시장경보">⚠️ ${s.alert}</span>` : ''}${s.climax ? ` <span class="climax-tag ${s.climax_level}" title="미너비니 클라이맥스/과열 신호: ${(s.climax_reasons||[]).join(', ')}. 매수보다 매도·경계 구간일 수 있음.">${s.climax_level === 'danger' ? '🛑' : '🔆'} 과열</span>` : ''}${(() => { const lq = liquidityCheck(s); return lq ? ` <span class="pmat ${lq.cls === 'bad' ? 'wait' : 'ok'}" style="${lq.cls === 'bad' ? 'background:#341418;color:#f87171;border:1px solid #6b2028' : 'background:#152535;color:#7fb8e0;border:1px dashed #2d5a8c'}" title="${lq.tip}">${lq.label}</span>` : ''; })()}${s.grade && s.grade !== '?' ? ` <span class="gbadge g${s.grade}" title="트렌드 템플릿 ${s.tt_pass}/8 통과${(s.tt_fails && s.tt_fails.length) ? ` · 미충족: ${s.tt_fails.join(', ')}` : ' · 전 조건 충족'}. 참고용 — 판정 아님: 8조건 중 7개가 이미 각 탭 게이트와 중복(90%+ 통과, 0비트)이고, 등급별 실측 EV가 성과를 못 가름(눌림목은 A등급이 오히려 최저). docs/ud_volume_ratio_investigation.md">${s.grade}급(참고)</span>` : ''}${s.mode === 'pattern' ? (s.pat_ready ? ` <span class="pmat ok" title="패턴 성립 요건 전부 충족 — 기간·거래량 고갈 OK. 피벗 돌파(거래량 150%+)만 남음">✅ 요건충족</span>` : ` <span class="pmat wait" title="패턴 형성 중 — 미충족: ${(s.pat_missing || []).join(' · ')}. 요건 채우기 전 돌파 추격은 실패 확률 높음 (특히 치솟은깃발)">⏳ 미완성</span>`) : ''}${(s.late_flags && s.late_flags.length) ? ` <span class="climax-tag ${s.late_level}" title="후기 스테이지/과확장 (v4.48): ${s.late_flags.join(', ')}${s.ext200_pct ? ` · 200일선 이격 +${s.ext200_pct}%` : ''}. 큰 시세 이후의 베이스일수록 실패 확률이 높음 — 사이즈 축소 또는 관망 권장.">${s.late_level === 'danger' ? '🛑' : '🏔'} 후기</span>` : ''}${s.earnings_badge ? ` <span class="climax-tag" style="background:#0f2a1a;color:#34d399;border:1px solid #1d6b3a" title="미너비니 CAN SLIM 실적 기준(Phase 1, 근사치): 3년 연간 EPS 연속증가 + 최근분기 EPS YoY ${s.eps_yoy_pct != null ? s.eps_yoy_pct + '%' : '?'}(25%↑) + 매출 YoY ${s.revenue_yoy_pct != null ? s.revenue_yoy_pct + '%' : '?'}(증가) 전부 충족.">💰 실적우수</span>` : ''}${s.price_frozen ? ` <span class="merger-tag" title="가격고정(M&A/특수상황) 의심: ${(s.price_frozen_reasons||[]).join(', ')}. 인수가 부근에 가격이 고정돼 상방은 막히고 하방은 딜 무산 시 급락하는 비대칭 리스크. 추세매매 부적합 — 차트의 깔끔한 횡보가 강세 신호가 아님. 기본적으로 목록에서 숨겨지고 탭 하단 '펼치기'로만 보여요(v5.90).">⚠️ 가격고정</span>` : ''}${s.base_badge ? ` <span class="climax-tag ${s.base_badge_lv === 'good' ? '' : (s.base_badge_lv === 'bad' ? 'danger' : '')}" style="${s.base_badge_lv === 'good' ? 'background:#12351f;color:#4ade80;border:1px solid #1d6b3a' : (s.base_badge_lv === 'bad' ? 'background:#341418;color:#f87171;border:1px solid #6b2028' : (s.base_badge_lv === 'neutral' ? 'background:#26262e;color:#9ca3af;border:1px solid #3f3f4a' : 'background:#33270f;color:#fbbf24;border:1px solid #6b5518'))}" title="${s.base_discontinuity ? '⚠️ 데이터 불연속: 최근 ±25%+ 가격 갭 감지 — 스핀오프/합병/재상장/액면변경 의심. 티커는 같아도 갭 이전은 다른 회사일 수 있어 RS·베이스·이평이 오염됨. 점수·등급 신뢰 불가. 반드시 공시 직접 확인.' : '베이스 품질 (오닐/미너비니): 길이 ' + (s.base_length_wk ?? '?') + '주 · 깊이 ' + (s.base_depth_pct ?? '?') + '%' + (s.base_vcp ? ' · VCP수축✓' : '') + (s.base_vol_dry ? ' · 거래량건조✓' : '') + '. 5주+ 탄탄한 베이스일수록 돌파 성공률 높음. 며칠짜리 얕은 조정은 베이스 아님.'}">${s.base_discontinuity ? '⚠️' : (s.base_badge_lv === 'good' ? '🧱' : (s.base_badge_lv === 'bad' ? '⛔' : (s.base_badge_lv === 'neutral' ? '📊' : '📏')))} ${s.base_badge}</span>` : ''}${(() => {
+        <div class="name"><a class="name-link" href="${tvUrl(s)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.name}</a>${s.alert ? ` <span class="alert-tag" title="시장경보">⚠️ ${s.alert}</span>` : ''}${s.climax ? ` <span class="climax-tag ${s.climax_level}" title="미너비니 클라이맥스/과열 신호: ${(s.climax_reasons||[]).join(', ')}. 매수보다 매도·경계 구간일 수 있음.">${s.climax_level === 'danger' ? '🛑' : '🔆'} 과열</span>` : ''}${(() => { const lq = liquidityCheck(s); return lq ? ` <span class="pmat ${lq.cls === 'bad' ? 'wait' : 'ok'}" style="${lq.cls === 'bad' ? 'background:var(--c-red-bg1);color:var(--c-red-fg2);border:1px solid var(--c-red-bg2)' : 'background:var(--c-blue-bg5);color:var(--c-blue-fg1);border:1px dashed var(--c-blue-fg2)'}" title="${lq.tip}">${lq.label}</span>` : ''; })()}${s.grade && s.grade !== '?' ? ` <span class="gbadge g${s.grade}" title="트렌드 템플릿 ${s.tt_pass}/8 통과${(s.tt_fails && s.tt_fails.length) ? ` · 미충족: ${s.tt_fails.join(', ')}` : ' · 전 조건 충족'}. 참고용 — 판정 아님: 8조건 중 7개가 이미 각 탭 게이트와 중복(90%+ 통과, 0비트)이고, 등급별 실측 EV가 성과를 못 가름(눌림목은 A등급이 오히려 최저). docs/ud_volume_ratio_investigation.md">${s.grade}급(참고)</span>` : ''}${s.mode === 'pattern' ? (s.pat_ready ? ` <span class="pmat ok" title="패턴 성립 요건 전부 충족 — 기간·거래량 고갈 OK. 피벗 돌파(거래량 150%+)만 남음">✅ 요건충족</span>` : ` <span class="pmat wait" title="패턴 형성 중 — 미충족: ${(s.pat_missing || []).join(' · ')}. 요건 채우기 전 돌파 추격은 실패 확률 높음 (특히 치솟은깃발)">⏳ 미완성</span>`) : ''}${(s.late_flags && s.late_flags.length) ? ` <span class="climax-tag ${s.late_level}" title="후기 스테이지/과확장 (v4.48): ${s.late_flags.join(', ')}${s.ext200_pct ? ` · 200일선 이격 +${s.ext200_pct}%` : ''}. 큰 시세 이후의 베이스일수록 실패 확률이 높음 — 사이즈 축소 또는 관망 권장.">${s.late_level === 'danger' ? '🛑' : '🏔'} 후기</span>` : ''}${s.earnings_badge ? ` <span class="climax-tag" style="background:var(--c-green-bg3);color:var(--c-green-fg4);border:1px solid var(--c-green-bg2)" title="미너비니 CAN SLIM 실적 기준(Phase 1, 근사치): 3년 연간 EPS 연속증가 + 최근분기 EPS YoY ${s.eps_yoy_pct != null ? s.eps_yoy_pct + '%' : '?'}(25%↑) + 매출 YoY ${s.revenue_yoy_pct != null ? s.revenue_yoy_pct + '%' : '?'}(증가) 전부 충족.">💰 실적우수</span>` : ''}${s.price_frozen ? ` <span class="merger-tag" title="가격고정(M&A/특수상황) 의심: ${(s.price_frozen_reasons||[]).join(', ')}. 인수가 부근에 가격이 고정돼 상방은 막히고 하방은 딜 무산 시 급락하는 비대칭 리스크. 추세매매 부적합 — 차트의 깔끔한 횡보가 강세 신호가 아님. 기본적으로 목록에서 숨겨지고 탭 하단 '펼치기'로만 보여요(v5.90).">⚠️ 가격고정</span>` : ''}${s.base_badge ? ` <span class="climax-tag ${s.base_badge_lv === 'good' ? '' : (s.base_badge_lv === 'bad' ? 'danger' : '')}" style="${s.base_badge_lv === 'good' ? 'background:var(--c-green-bg1);color:var(--c-green-fg1);border:1px solid var(--c-green-bg2)' : (s.base_badge_lv === 'bad' ? 'background:var(--c-red-bg1);color:var(--c-red-fg2);border:1px solid var(--c-red-bg2)' : (s.base_badge_lv === 'neutral' ? 'background:var(--c-gray-bg2);color:var(--c-gray-fg2);border:1px solid var(--c-gray-bg3)' : 'background:var(--c-amber-bg2);color:var(--c-amber-fg1);border:1px solid var(--c-amber-bg1)'))}" title="${s.base_discontinuity ? '⚠️ 데이터 불연속: 최근 ±25%+ 가격 갭 감지 — 스핀오프/합병/재상장/액면변경 의심. 티커는 같아도 갭 이전은 다른 회사일 수 있어 RS·베이스·이평이 오염됨. 점수·등급 신뢰 불가. 반드시 공시 직접 확인.' : '베이스 품질 (오닐/미너비니): 길이 ' + (s.base_length_wk ?? '?') + '주 · 깊이 ' + (s.base_depth_pct ?? '?') + '%' + (s.base_vcp ? ' · VCP수축✓' : '') + (s.base_vol_dry ? ' · 거래량건조✓' : '') + '. 5주+ 탄탄한 베이스일수록 돌파 성공률 높음. 며칠짜리 얕은 조정은 베이스 아님.'}">${s.base_discontinuity ? '⚠️' : (s.base_badge_lv === 'good' ? '🧱' : (s.base_badge_lv === 'bad' ? '⛔' : (s.base_badge_lv === 'neutral' ? '📊' : '📏')))} ${s.base_badge}</span>` : ''}${(() => {
           // v5.42: ATR상대(stop_wide) 배지를 절대값 4단계 배지로 교체 —
           // 4개 게이트 탭에서 stop_wide가 구조적 사백지(dead)가 된 문제 대응.
           return riskTierBadge(s.risk_pct);
@@ -2302,7 +2478,7 @@ function card(s) {
           const g = gateSug && (s.market === 'KR' ? gateSug.gate_kr : gateSug.gate_us) || (gateSug && gateSug.suggest);
           if (!g || g === 'confirmed') return '';   // 강세장이면 배지 없음
           if (s.bear_ok) {
-            return ` <span class="climax-tag" style="background:#0f2a1a;color:#34d399;border:1px solid #1d6b3a" title="약세장 적격: 탄탄한 베이스 + RS90+ + 손절폭 적정 — 3조건 전부 충족. ${g==='correction'?'🔴조정':'🟡압박'} 국면에서 그나마 살아남을 셋업. 그래도 사이즈는 게이트 규칙(1.5R 이하)대로.">💎 약세장적격</span>`;
+            return ` <span class="climax-tag" style="background:var(--c-green-bg3);color:var(--c-green-fg4);border:1px solid var(--c-green-bg2)" title="약세장 적격: 탄탄한 베이스 + RS90+ + 손절폭 적정 — 3조건 전부 충족. ${g==='correction'?'🔴조정':'🟡압박'} 국면에서 그나마 살아남을 셋업. 그래도 사이즈는 게이트 규칙(1.5R 이하)대로.">💎 약세장적격</span>`;
           } else {
             // 부적격: 뭐가 빠졌는지 표시
             const miss = [];
@@ -2310,7 +2486,7 @@ function card(s) {
             if (!r.base) miss.push('베이스');
             if (!r.rs90) miss.push('RS90');
             if (!r.risk_tight) miss.push('손절폭');
-            return ` <span class="climax-tag danger" style="background:#2a1a0f;color:#fbbf24;border:1px solid #6b5518" title="약세장 부적격 — 미충족: ${miss.join(', ')}. ${g==='correction'?'🔴조정':'🟡압박'} 국면에선 이 3개(탄탄한베이스·RS90+·손절폭좁음)를 다 갖춘 것만 진입 권장. 하나라도 빠지면 관망.">△ 약세부적격</span>`;
+            return ` <span class="climax-tag danger" style="background:var(--c-orange-bg2);color:var(--c-amber-fg1);border:1px solid var(--c-amber-bg1)" title="약세장 부적격 — 미충족: ${miss.join(', ')}. ${g==='correction'?'🔴조정':'🟡압박'} 국면에선 이 3개(탄탄한베이스·RS90+·손절폭좁음)를 다 갖춘 것만 진입 권장. 하나라도 빠지면 관망.">△ 약세부적격</span>`;
           }
         })()}<span class="mkt">${s.market}</span></div>
         <div class="tick mono">${s.ticker ? `<a href="${tvUrl(s)}" target="_blank" rel="noopener" class="tv-link" title="트레이딩뷰 차트 열기" onclick="event.stopPropagation()">${s.ticker} 📈</a>` : ''}${s.sector && s.sector !== '기타' ? ` · ${s.sector}${s.sector_rank != null && s.sector_total != null ? ` ${s.sector_rank}/${s.sector_total}` : ''}${s.sector_rs_pct != null ? ` · 섹터RS ${s.sector_rs_pct}` : ''}` : ''}</div>
@@ -2345,7 +2521,7 @@ function card(s) {
       <div class="metric"><div class="k">손익비 <span style="font-size:9px;opacity:.6">(목표 ${s.target_basis ?? '-'})</span></div>${fmtRR(s.rr)}</div>
       <div class="metric"><div class="k">ATR</div><div class="v" title="일간 변동성(ATR/현재가). 손절폭 넓음 판정 기준(ATR×1.5)의 근거값.">${s.atr_pct != null ? s.atr_pct + '%' : '-'}</div></div>
     </div>
-    <div class="surge-warn" style="background:rgba(255,107,107,.06);border-color:rgba(255,107,107,.25);margin-top:8px">⚠️ 진입 신호 아님 — ${patternWarningText(s.pattern)} 후보 발굴 참고용으로만.</div>` : s.mode === 'surge' ? `
+    <div class="surge-warn" style="background:var(--c-red-a2);border-color:var(--c-red-a1);margin-top:8px">⚠️ 진입 신호 아님 — ${patternWarningText(s.pattern)} 후보 발굴 참고용으로만.</div>` : s.mode === 'surge' ? `
     <div class="metrics mono">
       <div class="metric"><div class="k">당일</div><div class="v" style="color:var(--px-up)">+${s.change_pct}%</div></div>
       <div class="metric"><div class="k">거래량</div><div class="v">${s.vol_mult}×</div></div>
@@ -2404,7 +2580,7 @@ function card(s) {
       <div class="metric"><div class="k">담을곳 <span style="font-size:9px;opacity:.6" title="참고용 — 진입 기준 아님(실측: 담을곳 근접 여부로 성과 구분 안 됨)">(참고)</span></div><div class="v" style="opacity:.6">${fmtPrice(s.buy_zone, s.market)}</div></div>
       <div class="metric"><div class="k">RSI</div><div class="v">${s.rsi}</div></div>
     </div>
-    <div class="surge-warn" style="background:rgba(255,107,107,.06);border-color:rgba(255,107,107,.25);margin-top:8px">⚠️ 슈퍼대장은 되돌림을 기다리지 않고 즉시 진입하는 탭입니다. buy_zone 대기 방식은 검증 실패했습니다(되돌림 없이 가는 종목이 오히려 더 강함). 대신 손절폭이 median 10%로 다른 탭(눌림목 3.3%)보다 넓으니 포지션 크기를 줄이세요.</div>` : s.mode === 'stage2' ? `
+    <div class="surge-warn" style="background:var(--c-red-a2);border-color:var(--c-red-a1);margin-top:8px">⚠️ 슈퍼대장은 되돌림을 기다리지 않고 즉시 진입하는 탭입니다. buy_zone 대기 방식은 검증 실패했습니다(되돌림 없이 가는 종목이 오히려 더 강함). 대신 손절폭이 median 10%로 다른 탭(눌림목 3.3%)보다 넓으니 포지션 크기를 줄이세요.</div>` : s.mode === 'stage2' ? `
     <div class="metrics mono">
       <div class="metric"><div class="k">RS(3·6·12M)</div><div class="v" style="color:var(--rs)">${s.rs ?? '-'}</div></div>
       <div class="metric"><div class="k">고점까지</div><div class="v">-${s.dist_from_high_pct}%</div></div>
@@ -2417,7 +2593,7 @@ function card(s) {
       <div class="metric"><div class="k">200MA</div><div class="v">${fmtPrice(s.ma200, s.market)}</div></div>
       <div class="metric"><div class="k">MA수렴폭</div><div class="v" style="color:${s.ma_converge ? 'var(--green)' : 'inherit'}">${s.ma_spread_pct}%</div></div>
     </div>
-    <div class="surge-warn" style="background:rgba(255,107,107,.06);border-color:rgba(255,107,107,.25);margin-top:8px">⚠️ 진입 신호 아님 — 유동성 필터 적용 후에도 무작위 대조군 대비 상승 우위는 미미(+2.3%p)하고 하락 위험은 오히려 더 큼(-4.2%p). 후보 발굴 참고용으로만.</div>` : s.mode === 'ibd9' ? `
+    <div class="surge-warn" style="background:var(--c-red-a2);border-color:var(--c-red-a1);margin-top:8px">⚠️ 진입 신호 아님 — 유동성 필터 적용 후에도 무작위 대조군 대비 상승 우위는 미미(+2.3%p)하고 하락 위험은 오히려 더 큼(-4.2%p). 후보 발굴 참고용으로만.</div>` : s.mode === 'ibd9' ? `
     <div class="metrics mono">
       <div class="metric"><div class="k">3개월 수익률</div><div class="v" style="color:var(--px-up)">+${s.ret_3m_pct}%</div></div>
       <div class="metric"><div class="k">21일 ATR</div><div class="v">${s.atr21_pct}%</div></div>
@@ -2504,14 +2680,14 @@ function card(s) {
       ${s.rs_mom >= 10 ? '<span class="badge on">RS 개선↗</span>' : ''}
     </div>` : s.mode === 'stage2' ? `
     <div class="badges">
-      <span class="badge on" style="${s.tier === 'A' ? 'background:#12351f;color:#4ade80;border:1px solid #1d6b3a' : 'background:#33270f;color:#fbbf24;border:1px solid #6b5518'}" title="${s.tier === 'A' ? 'A티어: 52주 고점 대비 -10% 이내' : 'B티어: 52주 고점 대비 -10%~-25%'}">${s.tier}티어</span>
+      <span class="badge on" style="${s.tier === 'A' ? 'background:var(--c-green-bg1);color:var(--c-green-fg1);border:1px solid var(--c-green-bg2)' : 'background:var(--c-amber-bg2);color:var(--c-amber-fg1);border:1px solid var(--c-amber-bg1)'}" title="${s.tier === 'A' ? 'A티어: 52주 고점 대비 -10% 이내' : 'B티어: 52주 고점 대비 -10%~-25%'}">${s.tier}티어</span>
       <span class="badge on">Stage2 정배열</span>
       <span class="badge on">거래량 수축</span>
       <span class="badge on">MA 수렴</span>
     </div>
-    <div class="surge-warn" style="background:rgba(255,107,107,.06);border-color:rgba(255,107,107,.25);margin-top:8px">⚠️ 대조군 대비 약한 우위(+9pp), 진입 신호로는 미검증 — 유동성 매칭 대조군 재측정에서 상승 우위는 확인됐지만(5개 시드 평균 +9.02pp, 전부 양수) 하락위험 차이는 시드마다 부호가 흔들려(-3.92~+3.59pp) 안정적이지 않습니다. 후보 발굴 참고용으로만 쓰세요.</div>` : s.mode === 'ibd9' ? `
+    <div class="surge-warn" style="background:var(--c-red-a2);border-color:var(--c-red-a1);margin-top:8px">⚠️ 대조군 대비 약한 우위(+9pp), 진입 신호로는 미검증 — 유동성 매칭 대조군 재측정에서 상승 우위는 확인됐지만(5개 시드 평균 +9.02pp, 전부 양수) 하락위험 차이는 시드마다 부호가 흔들려(-3.92~+3.59pp) 안정적이지 않습니다. 후보 발굴 참고용으로만 쓰세요.</div>` : s.mode === 'ibd9' ? `
     <div class="badges">
-      <span class="badge on" style="${s.ad_grade === 'A' ? 'background:#12351f;color:#4ade80;border:1px solid #1d6b3a' : 'background:#152535;color:#7fb8e0;border:1px solid #2d5a8c'}" title="U/D Volume Ratio ${s.ud_ratio} 기반 근사 등급 — IBD 원본 A/D Rating 알고리즘과 다름">A/D ${s.ad_grade}</span>
+      <span class="badge on" style="${s.ad_grade === 'A' ? 'background:var(--c-green-bg1);color:var(--c-green-fg1);border:1px solid var(--c-green-bg2)' : 'background:var(--c-blue-bg5);color:var(--c-blue-fg1);border:1px solid var(--c-blue-fg2)'}" title="U/D Volume Ratio ${s.ud_ratio} 기반 근사 등급 — IBD 원본 A/D Rating 알고리즘과 다름">A/D ${s.ad_grade}</span>
       <span class="badge on">9조건 통과</span>
     </div>` : s.mode === 'earnings' ? `
     <div class="badges">
@@ -2564,7 +2740,7 @@ function card(s) {
       </div>`;
     })() : ''}
     ${s.ticker ? `
-    <button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button>${s.mode === 'leader' ? `<button class="journal-btn" style="margin-left:6px;background:${isLeaderConversionWatch(s.ticker) ? '#12351f' : '#1a2a3f'};border-color:${isLeaderConversionWatch(s.ticker) ? '#12351f' : '#1a2a3f'};color:${isLeaderConversionWatch(s.ticker) ? 'inherit' : '#7fb8ff'}" onclick="watchLeaderConversion(this,'${s.ticker}')" ${isLeaderConversionWatch(s.ticker) ? 'disabled' : ''} title="눌림목 전환 관찰 등록 — 손절 없음, 봇 알림 없음. 대장관찰 히트의 74%가 60봉 내 눌림목 탭에 전환(중앙값 6봉). 눌림목 탭을 열 때마다 자동으로 전환 여부를 확인해요.">${isLeaderConversionWatch(s.ticker) ? '✓ 관찰중' : '👁 눌림목 전환 관찰'}</button>` : `<button class="journal-btn" style="margin-left:6px;background:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'};border-color:${isPendingWatch(s.ticker) ? '#12351f' : '#1d6b3a'}" onclick="quickWatch(this,'${s.ticker}')" ${isPendingWatch(s.ticker) ? 'disabled' : ''} title="원클릭 봇 감시 등록">${isPendingWatch(s.ticker) ? '✓ 감시중' : '⚡ 감시'}</button>`}` : ''}
+    <button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button>${s.mode === 'leader' ? `<button class="journal-btn" style="margin-left:6px;background:${isLeaderConversionWatch(s.ticker) ? 'var(--c-green-bg1)' : 'var(--c-blue-bg8)'};border-color:${isLeaderConversionWatch(s.ticker) ? 'var(--c-green-bg1)' : 'var(--c-blue-bg8)'};color:${isLeaderConversionWatch(s.ticker) ? 'inherit' : 'var(--c-blue-fg12)'}" onclick="watchLeaderConversion(this,'${s.ticker}')" ${isLeaderConversionWatch(s.ticker) ? 'disabled' : ''} title="눌림목 전환 관찰 등록 — 손절 없음, 봇 알림 없음. 대장관찰 히트의 74%가 60봉 내 눌림목 탭에 전환(중앙값 6봉). 눌림목 탭을 열 때마다 자동으로 전환 여부를 확인해요.">${isLeaderConversionWatch(s.ticker) ? '✓ 관찰중' : '👁 눌림목 전환 관찰'}</button>` : `<button class="journal-btn" style="margin-left:6px;background:${isPendingWatch(s.ticker) ? 'var(--c-green-bg1)' : 'var(--c-green-bg2)'};border-color:${isPendingWatch(s.ticker) ? 'var(--c-green-bg1)' : 'var(--c-green-bg2)'}" onclick="quickWatch(this,'${s.ticker}')" ${isPendingWatch(s.ticker) ? 'disabled' : ''} title="원클릭 봇 감시 등록">${isPendingWatch(s.ticker) ? '✓ 감시중' : '⚡ 감시'}</button>`}` : ''}
     </div>
   </div>`;
 }
@@ -2827,7 +3003,7 @@ function hideFilterButtonsIfNotApplicable() {
 // tm 없음은 전부 빈 문자열(배지 없음).
 function _krUniverseBadgeHtml(tm) {
   if (!tm || tm.kr_universe_source !== 'static_fallback') return '';
-  return `<span style="color:#FF6B6B" title="KR 종목 리스트를 실시간으로 못 받아와(naver 응답 이상 등) 고정 목록만으로 스캔했어요 — KR 결과가 전체 시장을 다 훑은 게 아닐 수 있어요.">⚠️ KR 유니버스 축소 (동적 수집 0건, 정적 목록만 사용)</span>`;
+  return `<span style="color:var(--c-red-fg1)" title="KR 종목 리스트를 실시간으로 못 받아와(naver 응답 이상 등) 고정 목록만으로 스캔했어요 — KR 결과가 전체 시장을 다 훑은 게 아닐 수 있어요.">⚠️ KR 유니버스 축소 (동적 수집 0건, 정적 목록만 사용)</span>`;
 }
 // v5.251(사용자 지시 — 시총 필터 fail-open 가시화, 위 v5.246 배지와 같은
 // 방식): tm.kr_mcap_filter_source==='fail_open'일 때만 경고 배지 —
@@ -2843,12 +3019,12 @@ function _krMcapFilterBadgeHtml(tm, plain) {
   if (src === 'fail_open') {
     const t = '시총 목록을 못 받아와 KR 시총 1000억 미만 소형주 제외 필터가 꺼진 채 스캔했어요 — 평소엔 안 보이는 소형주가 섞여 있을 수 있어요.';
     return plain ? `<span class="st-dot st-bad" title="${t}">시총 필터 미적용 (KR 1000억 미만 포함)</span>`
-      : `<span style="color:#FF6B6B" title="${t}">⚠️ 시총 필터 미적용 (KR 1000억 미만 포함)</span>`;
+      : `<span style="color:var(--c-red-fg1)" title="${t}">⚠️ 시총 필터 미적용 (KR 1000억 미만 포함)</span>`;
   }
   if (src === 'stale_disk') {
     const t = '이번 슬롯 시총 목록을 아직 못 받아, 직전에 성공한 목록으로 필터를 적용했어요 — 필터는 켜져 있고 목록만 조금 낡았습니다(재배포 직후 등).';
     return plain ? `<span class="st-dot st-warn" title="${t}">시총 목록 낡음 (직전 목록으로 필터 적용)</span>`
-      : `<span style="color:#f2b33d" title="${t}">⚠️ 시총 목록 낡음 (직전 목록으로 필터 적용)</span>`;
+      : `<span style="color:var(--amber)" title="${t}">⚠️ 시총 목록 낡음 (직전 목록으로 필터 적용)</span>`;
   }
   return '';
 }
@@ -2857,7 +3033,7 @@ function _krMcapFilterBadgeHtml(tm, plain) {
 // 'mobile_api'(정상)/'unchecked'(조회 대상 없음)/null/tm 없음은 빈 문자열.
 function _krEarningsBadgeHtml(tm) {
   if (!tm || tm.kr_earnings_source !== 'failed') return '';
-  return `<span style="color:#FF6B6B" title="KR 실적(EPS·매출) 데이터를 못 받아왔어요 — 💰실적우수 배지가 KR 종목에 안 붙고, 실적 탭 KR 결과가 비고, 섹터 대장 EPS 판정이 '판정 불가'로 표시됩니다.">⚠️ KR 실적 조회 실패</span>`;
+  return `<span style="color:var(--c-red-fg1)" title="KR 실적(EPS·매출) 데이터를 못 받아왔어요 — 💰실적우수 배지가 KR 종목에 안 붙고, 실적 탭 KR 결과가 비고, 섹터 대장 EPS 판정이 '판정 불가'로 표시됩니다.">⚠️ KR 실적 조회 실패</span>`;
 }
 // v5.252(사용자 지시 — 실적 탭 KR 판정불가 건수): KR 히트 0건이 "조건 통과
 // 종목 없음"인지 "조회 자체가 죽음"인지 구분되게. 전부 실패면 경고색.
@@ -2866,7 +3042,7 @@ function _krEarningsUnknownHtml(diag) {
   const n = diag.kr_earnings_unknown || 0;
   if (!n) return '';
   const all = n >= diag.kr_earnings_checked;
-  return `<span style="color:${all ? '#FF6B6B' : 'var(--muted)'}" title="KR 종목의 실적 데이터를 못 받아와 판정하지 못한 건수입니다. 판정불가는 '조건 미달'이 아니라 '확인 못 함'이라 이 탭 결과에서 빠집니다.">${all ? '⚠️ ' : ''}KR 실적 판정불가 ${n}/${diag.kr_earnings_checked}</span>`;
+  return `<span style="color:${all ? 'var(--c-red-fg1)' : 'var(--muted)'}" title="KR 종목의 실적 데이터를 못 받아와 판정하지 못한 건수입니다. 판정불가는 '조건 미달'이 아니라 '확인 못 함'이라 이 탭 결과에서 빠집니다.">${all ? '⚠️ ' : ''}KR 실적 판정불가 ${n}/${diag.kr_earnings_checked}</span>`;
 }
 // v5.294(사용자 지시): 헤더 띠 오른쪽 스캔 메타 — "스캔 09-29 18:39 KST · 3,241 / 3,266종목".
 // /api/scan 응답(generated_at "YYYY-MM-DD HH:MM:SS" KST, fetched/scanned)을
@@ -2930,8 +3106,8 @@ async function load(refresh = false) {
     status.innerHTML = `<span><b>${data.fetched ?? data.scanned}</b>/${data.scanned}개 종목 스캔</span>
       <span>${(typeof MODE_TAB_LABEL !== 'undefined' && MODE_TAB_LABEL[mode]) || modeTab(mode) || '스캔'} 후보 <b>${data.hits.length}</b>개</span>
       <span>스캔실행 ${data.generated_at} KST${data.cached ? ' (캐시)' : ''}${_tmStr}</span>
-      ${data.partial ? `<span style="color:#f2b33d" title="실적 조회가 시간 제한(45초)을 넘어 일부 종목만 확인했어요. 잠시 후 다시 스캔하면 캐시가 쌓여 더 빨라져요.">⏳ 일부만 확인</span>` : ''}
-      ${data.warn_count ? `<span style="color:#FF6B6B">⚠️ 경보/과대리스크 ${data.warn_count}</span>` : ''}
+      ${data.partial ? `<span style="color:var(--amber)" title="실적 조회가 시간 제한(45초)을 넘어 일부 종목만 확인했어요. 잠시 후 다시 스캔하면 캐시가 쌓여 더 빨라져요.">⏳ 일부만 확인</span>` : ''}
+      ${data.warn_count ? `<span style="color:var(--c-red-fg1)">⚠️ 경보/과대리스크 ${data.warn_count}</span>` : ''}
       ${_krUniverseBadgeHtml(_tm)}
       ${_krMcapFilterBadgeHtml(_tm)}
       ${_krEarningsBadgeHtml(_tm)}
@@ -3245,7 +3421,7 @@ function _abcMaPct(v) {
 }
 
 // 더양봉맨식 장기 추세 전환선 = 핫핑크(사용자 지시 v5.268).
-const ABC_MA_COLOR = '#FF4FA3';
+const ABC_MA_COLOR = 'var(--c-violet-fg4)';
 function _abcMaLabel() { return (_abcData && _abcData.ma_label) || 'MA600'; }
 // v5.272: 게이트선(MA600)은 후보/탈락만 가르고, 단계는 MA200이 정한다.
 function _abcStageLabel() {
@@ -3257,8 +3433,8 @@ function _abcStageLabel() {
 // 없어** 그 통과를 신뢰할 수 없는 상태. A급(초록)도 B급(노랑)도 아닌 "아직 모른다"라
 // 점선 테두리 + 흐린 초록으로 둔다. 색 테이블에 없으면 회색으로 떨어져 C급과
 // 구분이 안 된다.
-const _ABC_GRADE_COLOR = { 'A급': '#4ADE80', 'A급 보류': '#7FB88A',
-                           'B급': '#FACC15', 'C급': 'var(--muted)' };
+const _ABC_GRADE_COLOR = { 'A급': 'var(--c-green-fg1)', 'A급 보류': 'var(--c-green-fg5)',
+                           'B급': 'var(--c-amber-fg7)', 'C급': 'var(--muted)' };
 
 // 매출·EPS 한 칸. **"판정 불가"를 "미달"로 보이게 하면 안 된다** — naver 모바일이
 // 분기를 6개만 줘서 최근 4분기 YoY를 못 채우는 경우가 흔하고, 서버도 그럴 땐
@@ -3280,8 +3456,8 @@ function abcFinCell(h) {
 //   대형   = 거래대금이 상한 초과. A급을 B급으로 내리는 천장(미달이 아니다).
 function _abcBadges(h) {
   const b = [];
-  if (h.ma_inverted) b.push(`<span style="font-size:10px;color:#FF9F6B;border:1px solid #6b3f2a;border-radius:3px;padding:0 3px" title="MA200 < MA600 — 중기선이 장기선 아래입니다. 정보 표시일 뿐 등급에는 영향이 없습니다(v5.272).">장기&gt;중기 역전</span>`);
-  if (h.turnover_large) b.push(`<span style="font-size:10px;color:#9FB7FF;border:1px solid #2a3f6b;border-radius:3px;padding:0 3px" title="거래대금이 상한을 넘었습니다 — 소형 성장주 셋업이라는 전제상 A급 대신 B급">대형</span>`);
+  if (h.ma_inverted) b.push(`<span style="font-size:10px;color:var(--c-orange-fg4);border:1px solid var(--c-orange-bg6);border-radius:3px;padding:0 3px" title="MA200 < MA600 — 중기선이 장기선 아래입니다. 정보 표시일 뿐 등급에는 영향이 없습니다(v5.272).">장기&gt;중기 역전</span>`);
+  if (h.turnover_large) b.push(`<span style="font-size:10px;color:var(--c-blue-fg13);border:1px solid var(--c-blue-bg13);border-radius:3px;padding:0 3px" title="거래대금이 상한을 넘었습니다 — 소형 성장주 셋업이라는 전제상 A급 대신 B급">대형</span>`);
   return b.length ? ' ' + b.join(' ') : '';
 }
 
@@ -3348,7 +3524,7 @@ function abcRowHtml(h) {
   const fails = (h.company_fails || []).join(' · ');
   return `<tr>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);white-space:nowrap">${name} ${star}${abcFlowHtml(h)}</td>
-    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;color:${gcol};font-size:11px${h.grade === 'A급 보류' ? ';border:1px dashed #7FB88A' : ''}"
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;color:${gcol};font-size:11px${h.grade === 'A급 보류' ? ';border:1px dashed var(--c-green-fg5)' : ''}"
         title="${gradeTitle(h, fails)}">${h.grade}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;font-size:11px">${stage}${_abcBadges(h)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;white-space:nowrap">${abcGateBreakHtml(h)}</td>
@@ -3392,7 +3568,7 @@ function setAbcStage(s) { abcStageFilter = s; renderAbcPage(); }
 function _abcFlowSourceHtml(fs) {
   if (!fs) return '';
   if (fs.source === 'failed') {
-    return `<div style="margin-bottom:8px;font-size:11px;color:#FF6B6B" title="naver 투자자별 매매동향을 한 건도 못 받았습니다. 벤더 개편일 수 있습니다.">⚠️ 기관·외국인 수급 조회 실패 (${fs.failed + fs.empty}건)</div>`;
+    return `<div style="margin-bottom:8px;font-size:11px;color:var(--c-red-fg1)" title="naver 투자자별 매매동향을 한 건도 못 받았습니다. 벤더 개편일 수 있습니다.">⚠️ 기관·외국인 수급 조회 실패 (${fs.failed + fs.empty}건)</div>`;
   }
   const parts = [];
   if (fs.capped) parts.push(`상한 초과 ${fs.capped}건 미조회`);
@@ -3409,7 +3585,7 @@ function _abcFlowSourceHtml(fs) {
 function _abcEarningsSourceHtml(es) {
   if (!es) return '';
   if (es.source === 'failed') {
-    return `<div style="margin-bottom:8px;font-size:11px;color:#FF6B6B" title="naver 모바일 실적 API를 한 건도 못 받았습니다. 벤더 개편일 수 있습니다.">⚠️ 실적: 전량 조회 실패 (${es.failed}건)</div>`;
+    return `<div style="margin-bottom:8px;font-size:11px;color:var(--c-red-fg1)" title="naver 모바일 실적 API를 한 건도 못 받았습니다. 벤더 개편일 수 있습니다.">⚠️ 실적: 전량 조회 실패 (${es.failed}건)</div>`;
   }
   const parts = [];
   if (es.capped) parts.push(`상한 초과 ${es.capped}건 미조회`);
@@ -3455,8 +3631,8 @@ function renderAbcPage() {
   const chips = `<div class="abc-chiprow">${gradeRow}</div><div class="abc-chiprow">${stageRow}</div>`;
 
   content.innerHTML = `
-    <div style="margin:0 0 10px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:#1a1410">
-      <div style="color:#FACC15;font-size:12px;font-weight:600">🔺 관심 신호. 진입 근거 없음 — 측정 전.</div>
+    <div style="margin:0 0 10px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--c-orange-bg7)">
+      <div style="color:var(--c-amber-fg7);font-size:12px;font-weight:600">🔺 관심 신호. 진입 근거 없음 — 측정 전.</div>
       <div style="color:var(--muted);font-size:11px;margin-top:3px">
         기준선 <span style="color:${ABC_MA_COLOR}">${_abcMaLabel()}</span>(더양봉맨식 장기 추세 전환선).
         숫자는 초기 임의값(2026-09-18) — 백테스트로 검증된 조건이 아닙니다.
@@ -3681,7 +3857,7 @@ async function loadInverse(refresh = false) {
   document.getElementById('diagBar').style.display = 'none';
   try {
     const data = await apiJson(`/api/inverse?market=all${refresh ? '&refresh=true' : ''}`);
-    const regimeColor = data.regime === 'bear' ? '#FF6B6B' : (data.regime === 'weakening' ? '#f2b33d' : '#5fd99a');
+    const regimeColor = data.regime === 'bear' ? 'var(--c-red-fg1)' : (data.regime === 'weakening' ? 'var(--amber)' : 'var(--c-green-fg7)');
     status.innerHTML = `<span style="color:${regimeColor};font-weight:600">${data.regime_txt}</span>
       <span>인버스 ${data.hits.length}개</span>
       <span>기준 ${data.generated_at} KST${data.cached ? ' (캐시)' : ''}</span>`;
@@ -3700,14 +3876,14 @@ function renderInverseCards(hits) {
   hits = hits.filter(h => !hiddenMap[(h.ticker || '').toUpperCase()]);  // v5.72: 표시 필터일 뿐
   if (!hits.length) { content.innerHTML = '<div class="empty">인버스 데이터가 없습니다.</div>'; return; }
   const strengthBadge = (s) => s === 'strong'
-    ? '<span class="st-badge" style="background:#3a2020;color:#ff6b6b">🔴 본격 하락장</span>'
+    ? '<span class="st-badge" style="background:var(--c-red-bg3);color:var(--c-red-fg1)">🔴 본격 하락장</span>'
     : s === 'building'
-    ? '<span class="st-badge" style="background:#3a3320;color:#f2b33d">🟡 하락 조짐</span>'
-    : '<span class="st-badge" style="background:#1e2a1e;color:#7a8a7a">🟢 부적합</span>';
+    ? '<span class="st-badge" style="background:var(--c-amber-bg3);color:var(--amber)">🟡 하락 조짐</span>'
+    : '<span class="st-badge" style="background:var(--c-gray-bg10);color:var(--c-gray-fg4)">🟢 부적합</span>';
   const cards = hits.map(s => {
-    const levBadge = s.leverage >= 2 ? `<span class="st-badge" style="background:#3a2020;color:#ff9b9b">${s.leverage}x 곱버스</span>` : '';
+    const levBadge = s.leverage >= 2 ? `<span class="st-badge" style="background:var(--c-red-bg3);color:var(--c-red-fg4)">${s.leverage}x 곱버스</span>` : '';
     // 강도 점수 색
-    const scoreColor = s.inv_score >= 70 ? '#ff6b6b' : (s.inv_score >= 40 ? '#f2b33d' : '#7a8a7a');
+    const scoreColor = s.inv_score >= 70 ? 'var(--c-red-fg1)' : (s.inv_score >= 40 ? 'var(--amber)' : 'var(--c-gray-fg4)');
     // 기초지수 5일 등락 (인버스가 왜 오르는지)
     const idx5 = s.index_5d_pct;
     const idx5Str = idx5 != null ? `${idx5>=0?'+':''}${idx5}%` : '–';
@@ -3733,7 +3909,7 @@ function renderInverseCards(hits) {
         <div class="metric"><div class="k">연속 상승</div><div class="v mono">${s.up_streak>0?s.up_streak+'일↑':'–'}</div></div>
         <div class="metric"><div class="k">RSI</div><div class="v mono">${s.rsi}</div></div>
       </div>
-      ${s.overheated ? '<div class="surge-warn" style="background:rgba(255,107,107,.08);border-color:rgba(255,107,107,.3)">⚠️ 인버스 과열(RSI '+s.rsi+') — 지수 과대낙폭 = 반등 시 인버스 급락 위험. 추격 금지.</div>' : ''}
+      ${s.overheated ? '<div class="surge-warn" style="background:var(--c-red-a11);border-color:var(--c-red-a12)">⚠️ 인버스 과열(RSI '+s.rsi+') — 지수 과대낙폭 = 반등 시 인버스 급락 위험. 추격 금지.</div>' : ''}
       <div style="font-size:11px;color:var(--muted);margin-top:8px">${s.strength_txt}${s.derived ? ' · 📐 1x 역산' : ''}</div>
       </div>
     </div>`;
@@ -3834,13 +4010,13 @@ function renderLookupCandidates(candidates, q) {
   const content = document.getElementById('content');
   const rows = candidates.map(c => `
     <div class="lookup-candidate" data-ticker="${c.ticker}"
-      style="padding:10px 12px;border-radius:8px;cursor:pointer;display:flex;justify-content:space-between;gap:10px;border:1px solid var(--border,#333)">
+      style="padding:10px 12px;border-radius:8px;cursor:pointer;display:flex;justify-content:space-between;gap:10px;border:1px solid var(--border,var(--c-gray-bg11))">
       <span>${c.name}</span><span style="color:var(--muted);font-size:11px">${c.ticker}</span>
     </div>`).join('');
   content.innerHTML = `
     <div style="max-width:520px;margin:0 auto">
-      <div style="background:#1a1a24;border:1px solid #2d6a8c;border-radius:12px;padding:16px">
-        <div style="font-size:12px;color:#9fd4ff;margin-bottom:10px">🔍 '${q}'에 해당하는 종목이 여러 개예요 — 하나를 골라주세요.</div>
+      <div style="background:var(--c-gray-bg12);border:1px solid var(--c-blue-fg14);border-radius:12px;padding:16px">
+        <div style="font-size:12px;color:var(--c-blue-fg7);margin-bottom:10px">🔍 '${q}'에 해당하는 종목이 여러 개예요 — 하나를 골라주세요.</div>
         <div style="display:flex;flex-direction:column;gap:6px">${rows}</div>
       </div>
     </div>`;
@@ -3916,7 +4092,7 @@ function renderSectors(summary) {
     const pct = maxCount > 0 ? Math.round(s.count / maxCount * 100) : 0;
     const on = sectorFilter === s.sector;
     return `<span class="schip${on ? ' on' : ''}" data-sec="${s.sector}"
-      style="background:linear-gradient(to right, rgba(245,196,81,.16) ${pct}%, var(--surface) ${pct}%)"
+      style="background:linear-gradient(to right, var(--c-amber-a12) ${pct}%, var(--surface) ${pct}%)"
       >${s.sector}<b>${s.count}</b></span>`;
   }).join('');
   const moreCount = summary.length - SECTOR_CHIP_TOP;
@@ -4473,9 +4649,9 @@ async function loadThemeLifecycle(theme) {
     }
 
     html += `<h3>최근 60거래일 시계열</h3>
-      <p class="mf-note">거래대금 점유율(초록)</p>${spark('turnover_share_pct', '#3fb950')}
-      <p class="mf-note">breadth(주황)</p>${spark('breadth_pct', '#f2b33d')}
-      <p class="mf-note">집중도 top3(파랑)</p>${spark('concentration_top3_pct', '#4D8DFF')}`;
+      <p class="mf-note">거래대금 점유율(초록)</p>${spark('turnover_share_pct', 'var(--c-green-fg8)')}
+      <p class="mf-note">breadth(주황)</p>${spark('breadth_pct', 'var(--amber)')}
+      <p class="mf-note">집중도 top3(파랑)</p>${spark('concentration_top3_pct', 'var(--down)')}`;
 
     // v5.124: 정적/거래대금/회전율 3종 서열 나란히 표시. D0/리더 판정은
     // 회전율(turnover_ratio) 기준(2fe72b8, 4개 실사이클 백테스트 3/4 정답)
@@ -4580,13 +4756,13 @@ function _surgeTodayRowHtml(it) {
   return `<div class="jongga-forward-sub" style="padding:6px 0;border-bottom:1px solid var(--line)">
     <div><b><a class="name-link" href="${tvUrl(it.ticker, 'kr')}" target="_blank" rel="noopener">${_escapeHtml(it.name)}</a></b>
       <span class="mkt">KR</span> · ${fmtPrice(it.close, 'KR')} ·
-      <span style="color:#4ade80;font-weight:700">${chgStr}</span> · 거래량 ${it.vol_mult}배
+      <span style="color:var(--c-green-fg1);font-weight:700">${chgStr}</span> · 거래량 ${it.vol_mult}배
     </div>
     <div style="opacity:.75;font-size:11px">${it.sector ? `${_escapeHtml(it.sector)} · ` : ''}RS ${rsStr} · ATR ${atrStr} · 200MA ${maStr}</div>
   </div>`;
 }
 function _surgeHistoryRowHtml(it) {
-  const chgColor = it.chg_since_pct == null ? 'var(--muted)' : (it.chg_since_pct >= 0 ? '#4ade80' : '#f87171');
+  const chgColor = it.chg_since_pct == null ? 'var(--muted)' : (it.chg_since_pct >= 0 ? 'var(--c-green-fg1)' : 'var(--c-red-fg2)');
   const chgStr = it.chg_since_pct != null ? `${it.chg_since_pct > 0 ? '+' : ''}${it.chg_since_pct}%` : '-';
   const offHighStr = it.off_high_pct != null ? `${it.off_high_pct}%` : '-';
   const currentStr = it.current_close != null ? fmtPrice(it.current_close, 'KR') : '-';
@@ -4856,7 +5032,7 @@ async function saveDailyNote(text, date, statusElId) {
     if (status) {
       const hhmm = kstStr(new Date(), 16).slice(11, 16);
       status.textContent = `✓ 저장됨 ${hhmm}`;
-      status.style.color = '#4ade80';
+      status.style.color = 'var(--c-green-fg1)';
       clearTimeout(status._clearTimer);
       status._clearTimer = setTimeout(() => { if (status) status.textContent = ''; }, 3000);
     }
@@ -4864,7 +5040,7 @@ async function saveDailyNote(text, date, statusElId) {
     if (status) {
       clearTimeout(status._clearTimer);
       status.textContent = '⚠️ 저장 실패';
-      status.style.color = '#f87171';
+      status.style.color = 'var(--c-red-fg2)';
     }
   }
 }
@@ -4884,7 +5060,7 @@ function loadCalSearchBox() {
   // 터치 기기용 "진단" 버튼은 유지(Enter가 없는 입력기 대비), "/" 단축키로 포커스.
   box.innerHTML = `<div>
     <label class="home-search">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8e97a6" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style="stroke:var(--n-muted)" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
       <span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">종목 검색</span>
       <input id="calSearchInput" type="text" placeholder="종목명 또는 코드 — Enter로 진단" autocomplete="off">
       <kbd>/</kbd>
@@ -4937,7 +5113,7 @@ async function calRunSearch() {
     const d = await apiJson('/api/lookup/' + encodeURIComponent(q));
     if (d.candidates && d.candidates.length) {
     _calSearchCandidates = d.candidates;
-      out.innerHTML = `<div style="font-size:12px;color:#9fd4ff;margin-bottom:6px">'${_escapeHtml(q)}'에 해당하는 종목이 여러 개예요 — 하나를 골라주세요.</div>` +
+      out.innerHTML = `<div style="font-size:12px;color:var(--c-blue-fg7);margin-bottom:6px">'${_escapeHtml(q)}'에 해당하는 종목이 여러 개예요 — 하나를 골라주세요.</div>` +
         d.candidates.slice(0, 12).map((c, i) =>
           `<div onclick="calPickCandidate(${i})" style="padding:8px 12px;cursor:pointer;display:flex;justify-content:space-between;gap:10px;border:1px solid var(--line);border-radius:8px;margin-bottom:4px;font-size:13px">
              <span>${_escapeHtml(c.name)}</span><span style="color:var(--muted);font-size:11px">${_escapeHtml(c.ticker)}</span>
@@ -4945,12 +5121,12 @@ async function calRunSearch() {
       return;
     }
     if (d.error) {
-      out.innerHTML = `<div style="color:#f87171;font-size:13px">${_escapeHtml(d.error)}</div>`;
+      out.innerHTML = `<div style="color:var(--c-red-fg2);font-size:13px">${_escapeHtml(d.error)}</div>`;
       return;
     }
     await calRunDiag(d.ticker);
   } catch (e) {
-    out.innerHTML = `<div style="color:#f87171;font-size:13px">조회 중 오류가 났어요.</div>`;
+    out.innerHTML = `<div style="color:var(--c-red-fg2);font-size:13px">조회 중 오류가 났어요.</div>`;
   }
 }
 function calPickCandidate(i) {
@@ -4987,11 +5163,11 @@ async function calRunDiag(ticker) {
   try {
     d = await apiJson('/api/debug/' + encodeURIComponent(ticker));
   } catch (e) {
-    out.innerHTML = '<div style="color:#f87171;font-size:13px">진단 실패' + _errNote(e) + '</div>';
+    out.innerHTML = '<div style="color:var(--c-red-fg2);font-size:13px">진단 실패' + _errNote(e) + '</div>';
     return;
   }
   if (d.error) {
-    out.innerHTML = `<div style="color:#f87171;font-size:13px">${_escapeHtml(d.error)} (${_escapeHtml(d.ticker || ticker)})</div>`;
+    out.innerHTML = `<div style="color:var(--c-red-fg2);font-size:13px">${_escapeHtml(d.error)} (${_escapeHtml(d.ticker || ticker)})</div>`;
     return;
   }
   const mkt = d.market;
@@ -5032,7 +5208,7 @@ async function calRunDiag(ticker) {
           : '상세 없음';
         const detailId = `calDiagDetail_${r.key}_${safeId}`;
         return `<div style="margin-bottom:4px">
-          <div style="cursor:pointer;font-size:13px;color:#4ade80" onclick="const e=document.getElementById('${detailId}');e.style.display=e.style.display==='none'?'':'none'">✅ ${r.label} 히트 <span style="color:var(--muted);font-size:11px">▾ 상세</span></div>
+          <div style="cursor:pointer;font-size:13px;color:var(--c-green-fg1)" onclick="const e=document.getElementById('${detailId}');e.style.display=e.style.display==='none'?'':'none'">✅ ${r.label} 히트 <span style="color:var(--muted);font-size:11px">▾ 상세</span></div>
           <div id="${detailId}" style="display:none;font-size:12px;color:var(--muted);padding:2px 0 2px 18px">${detail}</div>
         </div>`;
       }).join('');
@@ -5151,7 +5327,7 @@ function todayDecisionRiskBadge(item) {
   if (item.atr_pct != null && item.atr_pct >= 1) {
     const limit = Math.round(item.atr_pct * ATR_STOP_MULT * 10) / 10;
     const ok = riskPct <= limit;
-    const color = ok ? '#8fd6ac' : '#f0c479';
+    const color = ok ? 'var(--c-green-fg2)' : 'var(--c-orange-fg3)';
     const warnPrefix = ok ? '' : '⚠️';
     // v5.212(사용자 지시 — [3]): 시나리오 카드와 같은 배수 병기, item.atr_pct
     // 재사용(새 계산 없음).
@@ -5235,7 +5411,7 @@ function renderScenarioHtml(sc, market, domId, atrPct) {
   const star = n => sc.favored === n ? ' <span style="color:var(--green)">★ R유리</span>' : '';
   const hl = n => sc.highlight === n ? 'font-weight:700;color:var(--up)' : '';
   const riskWarnHtml = sc.risk_warning
-    ? `<div style="color:#ff6b6b;font-weight:700;margin:2px 0">⚠️ 두 시나리오 모두 리스크 과대 — 지금 자리 아님</div>` : '';
+    ? `<div style="color:var(--c-red-fg1);font-weight:700;margin:2px 0">⚠️ 두 시나리오 모두 리스크 과대 — 지금 자리 아님</div>` : '';
   // v5.200 [3]: pivot을 이미 돌파해 다음 저항(20일고가)으로 넘어간 경우
   // 조용히 숫자만 바뀌면 헷갈리므로 "(pivot 5,730 돌파 후 다음 저항)" 명시.
   const resistanceLabel = lv.resistance_broken_pivot != null
@@ -5256,7 +5432,7 @@ function renderScenarioHtml(sc, market, domId, atrPct) {
   // 탭×시장 조합 전부에서 손절 도달률이 높았음(정식 EV z검정 재현은
   // 아니라 게이트는 무변경, 표시 경고만).
   const noiseWarn = atrMult => (atrMult != null && atrMult < 1.0)
-    ? ` <span style="color:#ff6b6b;font-weight:700">⚠️ 노이즈 손절 — 도달률 높음</span>`
+    ? ` <span style="color:var(--c-red-fg1);font-weight:700">⚠️ 노이즈 손절 — 도달률 높음</span>`
     : '';
   // v5.210(사용자 지시 — [2]): ①은 "저항 돌파 시 진입"인데, 원래 pivot을
   // 이미 넘어서(resistance_broken_pivot) 다음 저항으로 넘어간 경우라면
@@ -5426,8 +5602,8 @@ function renderTodayDecisionHtml(td, sectorFlow, pipelineHealth) {
     if (ENTRY_METHOD_TEXT[item.entry_method]) chips.push(`<span class="chip accent">${ENTRY_METHOD_TEXT[item.entry_method]}</span>`);
     if (item.source === 'auto_watch') chips.push(`<span class="chip" title="시스템이 자동으로 등록·확인한 감시(5탭 히트 전부, 강한 셋업 여부는 별도 배지)">자동감시</span>`);
     if (item.source === 'pending_watch') chips.push(`<span class="chip" title="직접 등록한 감시">직접감시</span>`);
-    if (item.strong_setup) chips.push(`<span class="chip" style="color:#4fc3f7" title="강한 셋업 — RS 80+ & 손절폭 ATR×1.5 이하(2026-09-04 격자탐색+확인율 실측 근거), 진입 근거는 아니고 우선순위 참고만">강한셋업</span>`);
-    if (item.outside_legacy_universe) chips.push(`<span class="chip" style="color:#f2b33d" title="거래대금 v2 순위 기준으로 새로 찾은 종목 — 기존 스캔 유니버스 밖이라 방금 개별 조회함(v5.214, 데이터 품질 확인용)">유니버스밖</span>`);
+    if (item.strong_setup) chips.push(`<span class="chip" style="color:var(--c-cyan-fg2)" title="강한 셋업 — RS 80+ & 손절폭 ATR×1.5 이하(2026-09-04 격자탐색+확인율 실측 근거), 진입 근거는 아니고 우선순위 참고만">강한셋업</span>`);
+    if (item.outside_legacy_universe) chips.push(`<span class="chip" style="color:var(--amber)" title="거래대금 v2 순위 기준으로 새로 찾은 종목 — 기존 스캔 유니버스 밖이라 방금 개별 조회함(v5.214, 데이터 품질 확인용)">유니버스밖</span>`);
     // v5.221 [2]: 섹터 · 섹터내순위 · 섹터RS(+가속) — 있는 것만.
     const subParts = [mkt];
     if (item.sector) {
@@ -5566,7 +5742,7 @@ function renderTodayDecisionHtml(td, sectorFlow, pipelineHealth) {
       <div><b>${nameLink(item)}</b>${usTickerSuffix(item.ticker, mkt)} <span class="mkt">${mkt}</span></div>
       <div style="font-size:15px;font-weight:700;margin-top:4px;color:var(--muted)">${item.tab || ''} · 확인일 ${item.confirmed_at || '-'} · 종가 ${fmtPrice(item.close, mkt)}</div>
       <div style="font-size:11px;color:var(--muted);margin-top:2px">피벗(기준) ${fmtPrice(item.pivot, mkt)} · 손절(기준) ${fmtPrice(item.stop, mkt)}</div>
-      <div style="font-size:11px;color:#ffb27a;font-weight:700;margin-top:2px">${labelText}${checklistIcon}</div>
+      <div style="font-size:11px;color:var(--c-orange-fg1);font-weight:700;margin-top:2px">${labelText}${checklistIcon}</div>
       ${hugBadge}
       ${item.scenario ? renderScenarioHtml(item.scenario, mkt, 'sc_td_' + item.key, item.atr_pct) : ''}
       ${actions(item, false)}
@@ -5640,7 +5816,7 @@ function renderTodayDecisionHtml(td, sectorFlow, pipelineHealth) {
   const otherMarketSectionHtml = ['KR', 'US'].map(mkt => {
     const items = otherMarketByMkt[mkt];
     if (!items.length) return '';
-    return sectionHeader(`${mkt} 눌림목 후보 ${items.length}건 (${OTHER_MARKET_CLOSED_LABEL[mkt]} · 전일 종가 기준)`, '#8fb3ff')
+    return sectionHeader(`${mkt} 눌림목 후보 ${items.length}건 (${OTHER_MARKET_CLOSED_LABEL[mkt]} · 전일 종가 기준)`, 'var(--c-blue-fg3)')
       + items.map(it => renderImmediateCard(it, true)).join('');
   }).join('');
   const otherMarketCount = (td.immediate_other_market || []).length;
@@ -5652,10 +5828,10 @@ function renderTodayDecisionHtml(td, sectorFlow, pipelineHealth) {
     const candidateBodyHtml = _candidatesExpanded ? `
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,280px),1fr));gap:12px;margin-top:12px">
         ${otherMarketSectionHtml}
-        ${usPullbackDemoted.length ? sectionHeader(`눌림목 후보 ${usPullbackDemoted.length}건`, '#8fb3ff') + pullbackCandidatesHtml : ''}
-        ${interestHtml ? sectionHeader(`관심(확인됨) ${(td.interest || []).length}건`, '#8fb3ff') + interestHtml : ''}
-        ${crossedHtml ? sectionHeader(`이미 돌파(확인 필요) ${nearCrossed.length}건`, '#ffb27a') + crossedHtml : ''}
-        ${nearHtml ? sectionHeader(`근접 ${nearBelow.length}건`, '#ffd98a') + nearHtml : ''}
+        ${usPullbackDemoted.length ? sectionHeader(`눌림목 후보 ${usPullbackDemoted.length}건`, 'var(--c-blue-fg3)') + pullbackCandidatesHtml : ''}
+        ${interestHtml ? sectionHeader(`관심(확인됨) ${(td.interest || []).length}건`, 'var(--c-blue-fg3)') + interestHtml : ''}
+        ${crossedHtml ? sectionHeader(`이미 돌파(확인 필요) ${nearCrossed.length}건`, 'var(--c-orange-fg1)') + crossedHtml : ''}
+        ${nearHtml ? sectionHeader(`근접 ${nearBelow.length}건`, 'var(--c-amber-fg3)') + nearHtml : ''}
       </div>
       <!-- v5.235(사용자 지시 — B 근접 밴드 한계 표기): 스캔이 일봉(1일 1회)
            기준이라 장중 급등(갭업 등)으로 근접 구간(0~2%)을 건너뛰고
@@ -6023,7 +6199,7 @@ function renderPositions(data) {
   const staleWarn = !syncEnabled
     ? `<span class="badge" style="opacity:.6" title="자동 동기화가 꺼져있어 이 스냅샷 이후로는 안 갱신돼요 — 마지막 스냅샷 시점 그대로">🔕 이후 동기화 없음</span>`
     : data.stale
-      ? `<span class="badge" style="background:#3a2a2a;color:#ff9b9b" title="24시간 이상 동기화가 안 됐어요 — 맥이 꺼져있었거나 launchd가 안 돌았을 수 있어요">⚠️ 스냅샷 오래됨</span>` : '';
+      ? `<span class="badge" style="background:var(--c-gray-bg4);color:var(--c-red-fg4)" title="24시간 이상 동기화가 안 됐어요 — 맥이 꺼져있었거나 launchd가 안 돌았을 수 있어요">⚠️ 스냅샷 오래됨</span>` : '';
 
   const s = data.summary || {};
   const curRow = (label, obj, colorize) => {
@@ -6061,11 +6237,11 @@ function posCard(p) {
   const pnlCol = (p.pnl_pct || 0) > 0 ? 'var(--px-up)' : (p.pnl_pct || 0) < 0 ? 'var(--px-down)' : 'inherit';
   const marketFlag = p.market === 'KR' ? '🇰🇷' : '🇺🇸';
   const tabBadges = (p.hit_tabs || []).map(m =>
-    `<span class="badge" style="background:#1e3a2a;color:var(--green)" title="지금 스캔에서 이 탭 조건을 통과 중">${modeTab(m)}</span>`).join(' ');
+    `<span class="badge" style="background:var(--c-green-bg4);color:var(--green)" title="지금 스캔에서 이 탭 조건을 통과 중">${modeTab(m)}</span>`).join(' ');
   const rsBadge = p.rs != null
     ? `<span class="badge" title="${p.rs_approx ? '유니버스 캐시가 아직 안 따뜻해서 근사치(참고용)' : '실제 백분위 RS'}">RS ${p.rs}${p.rs_approx ? '≈' : ''}</span>` : '';
   const frozenBadge = p.price_frozen
-    ? `<span class="badge" style="background:#3a2a2a;color:#ff9b9b" title="${(p.price_frozen_reasons||[]).join(', ')}">🧊가격고정의심</span>` : '';
+    ? `<span class="badge" style="background:var(--c-gray-bg4);color:var(--c-red-fg4)" title="${(p.price_frozen_reasons||[]).join(', ')}">🧊가격고정의심</span>` : '';
   const unresolvedNote = p.unresolved
     ? `<div style="font-size:11px;color:var(--muted)">⚠️ 앱 유니버스 밖(또는 가격조회 실패) — RS·손절제안 등 스캐너 결합 정보 없음</div>` : '';
 
@@ -6112,7 +6288,7 @@ async function savePositionStop(ticker, value, inputEl) {
     });
     const j = await apiParse(res, { allow: [400] });   // 400 = {ok:false,error} 입력 오류 분기
     if (j.ok) {
-    inputEl.style.background = '#12351f';
+    inputEl.style.background = 'var(--c-green-bg1)';
       setTimeout(() => { inputEl.style.background = prevBg; }, 800);
       onEnterPositionsTab();   // 재계산된 R진행률·손절거리·요약을 반영
     } else {
@@ -6569,7 +6745,7 @@ function renderCalcLine(elId, entry, stop, market, gateOpts = {}) {
   const pv = pendingStock ? parseFloat(pendingStock.pivot) : null;
   if (elId === 'jmCalc' && pv && entry) {
     const chasePct = (entry / pv - 1) * 100;
-    if (chasePct > 2) chase = ` · <span style="color:#ff6b6b;font-weight:700">⚠️ 피벗 +${chasePct.toFixed(1)}% 추격 — 다음 기회 권장</span>`;
+    if (chasePct > 2) chase = ` · <span style="color:var(--c-red-fg1);font-weight:700">⚠️ 피벗 +${chasePct.toFixed(1)}% 추격 — 다음 기회 권장</span>`;
     else if (chasePct > 0.5) chase = ` · <span style="color:var(--amber)">피벗 +${chasePct.toFixed(1)}%</span>`;
   }
   const cut = c.reduced ? ` <span style="color:var(--amber)">⚠️ 연속 ${consecLosses()}패 → R 절반 축소</span>` : '';
@@ -6584,8 +6760,8 @@ function renderCalcLine(elId, entry, stop, market, gateOpts = {}) {
     // 사유(오픈리스크/서킷브레이커)만 참고 정보로 보여주고 강제 문구는 뺀다.
     const enforceNote = gateOpts.ignoreMarketGate
       ? ''
-      : `<br>→ 저장은 <b style="color:#ffd98a">관찰(대기)</b>로만 가능`;
-    gateLine = `<div style="margin-top:4px;color:#ff9b9b">${gate.reason}${enforceNote}</div>`;
+      : `<br>→ 저장은 <b style="color:var(--c-amber-fg3)">관찰(대기)</b>로만 가능`;
+    gateLine = `<div style="margin-top:4px;color:var(--c-red-fg4)">${gate.reason}${enforceNote}</div>`;
   }
   el.innerHTML =
     `1R = <b>${c.rKrw.toLocaleString()}원</b>${cut} · 리스크폭 ${c.riskPct}%${fx}${chase}<br>` +
@@ -6738,7 +6914,7 @@ function _showJournalConflictToast() {
     bar = document.createElement('div');
     bar.id = 'journalConflictBar';
     bar.setAttribute('role', 'status');
-    bar.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);max-width:min(92vw,560px);background:#1c1a12;border:1px solid #3a3320;color:#f2e2b3;padding:12px 16px;border-radius:12px;z-index:9999;font-size:13px;box-shadow:0 12px 32px rgba(0,0,0,.45)';
+    bar.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);max-width:min(92vw,560px);background:var(--c-amber-bg6);border:1px solid var(--c-amber-bg3);color:var(--c-amber-fg8);padding:12px 16px;border-radius:12px;z-index:9999;font-size:13px;box-shadow:0 12px 32px var(--c-gray-a1)';
     document.body.appendChild(bar);
   }
   bar.textContent = `다른 곳에서 먼저 바뀐 기록 ${names.length}건을 서버 최신본으로 바꿨어요(내 변경은 저장 안 됨): ${names.slice(0, 3).join(', ')}${names.length > 3 ? ' 외' : ''}`;
@@ -6787,7 +6963,7 @@ function showSaveError(err) {
   if (!bar) {
     bar = document.createElement('div');
     bar.id = 'saveErrorBar';
-    bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:var(--up);color:#fff;padding:10px;text-align:center;z-index:9999;font-size:13px';
+    bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:var(--up);color:var(--c-gray-fg1);padding:10px;text-align:center;z-index:9999;font-size:13px';
     bar.textContent = '일지 저장에 실패했어요. 네트워크 확인 후 다시 시도하세요. (화면 데이터는 유지됨)'
       + (err && err.message ? ' — ' + err.message : '');
     document.body.appendChild(bar);
@@ -6861,7 +7037,7 @@ function _lptFmt(v, mkt) {
 }
 function _lptPct(v) {
   if (v == null || isNaN(v)) return '<span class="n-sub">—</span>';
-  const col = v > 0 ? '#f2848c' : v < 0 ? '#6fa8ff' : 'var(--n-muted)';
+  const col = v > 0 ? 'var(--c-red-fg3)' : v < 0 ? 'var(--c-blue-fg4)' : 'var(--n-muted)';
   return `<span class="num" style="color:${col}">${v > 0 ? '+' : ''}${v.toFixed(2)}%</span>`;
 }
 function _lptCode(r) { return r.mkt === 'KR' ? String(r.code || '').split('.')[0] : r.code; }
@@ -7042,7 +7218,7 @@ function renderLowpointTrack() {
   const closedRows = closed.map(r => {
     const ret = lpReturnPct(Number(r.sellPrice), Number(r.buyPrice));
     const pnl = (Number(r.sellPrice) - Number(r.buyPrice)) * Number(r.qty);
-    const col = pnl > 0 ? '#f2848c' : pnl < 0 ? '#6fa8ff' : 'var(--n-muted)';
+    const col = pnl > 0 ? 'var(--c-red-fg3)' : pnl < 0 ? 'var(--c-blue-fg4)' : 'var(--n-muted)';
     return `<tr><td class="num">${r.sellDate}</td><td><span class="chip">${r.kind}</span></td>
       <td><b>${_escapeHtml(r.name || r.code)}</b><div class="jr-s num">${_escapeHtml(_lptCode(r))} · ${r.mkt}${r.partial ? ' · 분할' : ''}</div></td>
       <td class="num r">${_lptFmt(r.buyPrice, r.mkt)}</td><td class="num r">${_lptFmt(r.sellPrice, r.mkt)}</td><td class="num r">${r.qty}</td>
@@ -7052,7 +7228,7 @@ function renderLowpointTrack() {
   const months = lpMonthlySummary(closed);
   const monthRows = months.map(m => `<tr><td class="num">${m.month}</td><td>${m.mkt}</td><td class="num r">${m.n}</td>
       <td class="num r">${m.winRate}%</td><td class="r">${_lptPct(m.avgRet)}</td>
-      <td class="num r" style="color:${m.pnl > 0 ? '#f2848c' : m.pnl < 0 ? '#6fa8ff' : 'inherit'}">${m.pnl > 0 ? '+' : ''}${_lptFmt(m.pnl, m.mkt)}</td></tr>`).join('');
+      <td class="num r" style="color:${m.pnl > 0 ? 'var(--c-red-fg3)' : m.pnl < 0 ? 'var(--c-blue-fg4)' : 'inherit'}">${m.pnl > 0 ? '+' : ''}${_lptFmt(m.pnl, m.mkt)}</td></tr>`).join('');
   const settingsHtml = `<form class="lpt-form" onsubmit="event.preventDefault();lptSaveSettings(this)" style="margin-top:12px">
       <span class="n-sub">목표가 = 평단 × (1 + 목표%)</span>
       <label>단기 목표%<input name="t단기" inputmode="decimal" value="${tp['단기']}"></label>
@@ -7247,7 +7423,7 @@ function triggerInfoHtml(r) {
   const expired = bdays >= 3;    // 측정 방법론과 동일 N=3영업일
   const confirmed = isTriggerConfirmed(r);
   const statusHtml = confirmed
-    ? `<span style="color:#4ade80;font-weight:700">🟢 확인됨(거래량 동반 돌파)</span>`
+    ? `<span style="color:var(--c-green-fg1);font-weight:700">🟢 확인됨(거래량 동반 돌파)</span>`
     : expired
       ? `<span style="color:var(--muted)">⏳ 확인 기간 종료(3영업일)</span>`
       : eligible
@@ -7272,7 +7448,7 @@ function leaderWatchInfoHtml(r) {
   const expired = bdays >= LEADER_WATCH_EXPIRY_DAYS;
   const converted = !!r.leader_converted;
   const statusHtml = converted
-    ? `<span style="color:#4ade80;font-weight:700">🎯 눌림목 전환됨${r.leader_converted_date ? ` (${r.leader_converted_date})` : ''}</span>`
+    ? `<span style="color:var(--c-green-fg1);font-weight:700">🎯 눌림목 전환됨${r.leader_converted_date ? ` (${r.leader_converted_date})` : ''}</span>`
     : expired
       ? `<span style="color:var(--muted)">⏳ 관찰 기간 종료(${LEADER_WATCH_EXPIRY_DAYS}영업일)</span>`
       : `<span style="color:var(--amber)">전환 대기중 (D+${bdays})</span>`;
@@ -7321,9 +7497,9 @@ const _flashAlertLast = {};  // ticker -> 마지막 알림 시각(ms), 같은 �
 function showFlashBanner(msg) {
   const bar = document.createElement('div');
   bar.style.cssText = 'position:fixed;top:14px;left:50%;transform:translateX(-50%);'
-    + 'background:#3a2020;color:#ff9b9b;border:1px solid #ff6b6b;border-radius:10px;'
+    + 'background:var(--c-red-bg3);color:var(--c-red-fg4);border:1px solid var(--c-red-fg1);border-radius:10px;'
     + 'padding:10px 18px;font-size:13px;font-weight:600;z-index:9999;white-space:pre-line;'
-    + 'text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.35)';
+    + 'text-align:center;box-shadow:0 4px 16px var(--c-gray-a8)';
   bar.textContent = msg;
   document.body.appendChild(bar);
   setTimeout(() => bar.remove(), 12000);
@@ -7593,7 +7769,7 @@ function renderJCal(all) {
   const startDow = new Date(y, m, 1).getDay();                 // 0=일
   const daysInMonth = new Date(y, m + 1, 0).getDate();
   const todayStr = kstStr(now);
-  const shade = n => n >= 10 ? '#5a3d1c' : n >= 4 ? '#3f2d17' : n >= 1 ? '#2a2114' : '#171b22';
+  const shade = n => n >= 10 ? 'var(--c-orange-bg8)' : n >= 4 ? 'var(--c-orange-bg9)' : n >= 1 ? 'var(--c-orange-bg1)' : 'var(--c-blue-bg14)';
   let cells = '';
   for (let i = 0; i < startDow; i++) cells += '<div></div>';
   for (let d = 1; d <= daysInMonth; d++) {
@@ -7601,9 +7777,9 @@ function renderJCal(all) {
     const n = (byDay[ds] || []).length;
     const dow = (startDow + d - 1) % 7;
     const isToday = ds === todayStr, sel = ds === _jcalSel;
-    cells += `<button type="button" class="jcal-cell" style="background:${shade(n)};${isToday ? 'outline:1.5px solid var(--n-accent);' : ''}${sel ? 'box-shadow:inset 0 0 0 1.5px #fff;' : ''}"
+    cells += `<button type="button" class="jcal-cell" style="background:${shade(n)};${isToday ? 'outline:1.5px solid var(--n-accent);' : ''}${sel ? 'box-shadow:inset 0 0 0 1.5px var(--c-gray-fg1);' : ''}"
       ${n ? `onclick="jcalPick('${ds}')" aria-label="${ds} 기록 ${n}건"` : `disabled aria-label="${ds} 기록 없음"`}>
-      <span class="num" style="font-size:11px;color:${dow === 0 ? '#f2848c' : 'var(--n-muted)'}">${d}</span>
+      <span class="num" style="font-size:11px;color:${dow === 0 ? 'var(--c-red-fg3)' : 'var(--n-muted)'}">${d}</span>
       <span class="num" style="font-size:15px;font-weight:600">${n || ''}</span></button>`;
   }
   const selRows = _jcalSel && byDay[_jcalSel] && _jcalSel.startsWith(`${y}-${String(m + 1).padStart(2, '0')}`)
@@ -7655,7 +7831,7 @@ function renderRCurve(all) {
       <div style="display:flex;flex-direction:column;gap:2px"><span class="n-sub">최대 낙폭</span><span class="num jr-big" style="color:var(--px-down)">${mdd.toFixed(2)}R</span></div>
     </div>
     <svg width="100%" height="200" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="R 누적 곡선">
-      <line x1="0" y1="${zero.toFixed(1)}" x2="${W}" y2="${zero.toFixed(1)}" stroke="#2a303b" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>
+      <line x1="0" y1="${zero.toFixed(1)}" x2="${W}" y2="${zero.toFixed(1)}" style="stroke:var(--c-gray-bg13)" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>
       <polyline fill="none" stroke="var(--n-accent)" stroke-width="2.5" stroke-linejoin="round" vector-effect="non-scaling-stroke" points="${line}"/>
       ${dots}
     </svg>
@@ -7698,7 +7874,7 @@ async function _quickWatchRequest(s, btn, payload) {
     const j = await apiParse(res, { allow: [400, 409, 500] });
     if (j.ok) {
     btn.textContent = j.exists ? '✓ 감시중' : '✓ 등록됨';
-      btn.style.background = '#12351f';
+      btn.style.background = 'var(--c-green-bg1)';
       // v4.80: /api/watch/quick은 서버 일지에만 저장하고 클라이언트 journalCache는
       // 안 건드려서, 등록 직후 '내 일지' 탭으로 가면 옛 캐시가 그대로 보여
       // 방금 감시 등록한 종목이 안 보이던 문제. 서버에서 다시 읽어와 캐시 동기화.
@@ -7790,7 +7966,7 @@ async function watchLeaderConversion(btn, ticker) {
     const j = await apiParse(res, { allow: [400, 409, 500] });   // /api/watch/quick — 위와 같은 에러 JSON
     if (j.ok) {
     btn.textContent = j.exists ? '✓ 관찰중' : '✓ 등록됨';
-      btn.style.background = '#12351f';
+      btn.style.background = 'var(--c-green-bg1)';
       await loadJournalFromServer();
     } else {
       btn.textContent = '실패'; btn.disabled = false;
@@ -8811,7 +8987,7 @@ function renderJournal() {
         <div class="bar" style="height:4px"><div style="width:${_pct}%;height:4px;background:${_gaugeCol}"></div></div></div>
       <div><span class="k">주간 · 한도 −${rSettings.weekly_stop_r}R</span><span class="num v">${_rv(_p.week)}</span></div>
       <div><span class="k">월간 · 한도 −${rSettings.monthly_stop_r}R</span><span class="num v">${_rv(_p.month)}</span></div>
-      <div><span class="k">연속 손실</span><span class="v"><span class="num"${_consec >= 3 ? ' style="color:#e9c46a"' : ''}>${_consec}패</span>${_consec >= 3 ? ' <span style="font-size:12px;color:#e9c46a">R ½ 적용</span>' : ''}</span></div>
+      <div><span class="k">연속 손실</span><span class="v"><span class="num"${_consec >= 3 ? ' style="color:var(--c-amber-fg2)"' : ''}>${_consec}패</span>${_consec >= 3 ? ' <span style="font-size:12px;color:var(--c-amber-fg2)">R ½ 적용</span>' : ''}</span></div>
       <div><span class="k">투입 / 현금</span><span class="num v">${_fmtM(_invested)} <span style="color:var(--n-muted);font-size:16px">/ ${_fmtM(_cash)}</span></span>
         <span class="n-sub">${_investPct}%${_investedUnknown ? ` · 수량미기록 ${_investedUnknown}건 제외` : ''}</span></div>
     </section>` : '';
@@ -8851,7 +9027,7 @@ function renderJournal() {
   const catStatsHtml = `<section class="n-card jr-cats" aria-label="카테고리 성적">
       <div class="jr-card-h"><span class="n-h">카테고리 성적</span><span class="n-sub" style="font-size:11px">실체결 · 참고가 분리</span></div>
       <div class="jr-cat-row head"><span>카테고리</span><span class="r">종료</span><span class="r">실체결</span><span class="r">참고가</span></div>
-      ${catRow('추세추종', trend, `진입 ${trend.enteredCount} · 대기 ${trend.pendingCount}${impulse ? ` · <span style="color:#f2848c">충동 ${impulse}</span>` : ''}`)}
+      ${catRow('추세추종', trend, `진입 ${trend.enteredCount} · 대기 ${trend.pendingCount}${impulse ? ` · <span style="color:var(--c-red-fg3)">충동 ${impulse}</span>` : ''}`)}
       ${catRow('재량', discretion, `총 ${discretion.total}`)}
       ${catRow('단타', scalp, `총 ${scalp.total}`)}
       <div class="jr-cat-row"><span><b>관찰</b><br><span class="n-sub" style="font-size:11px">관찰중 ${watchNow}</span></span><span class="num r" style="color:var(--n-sub)">${watchEnded}</span><span class="r n-sub">통계 제외</span><span class="r"></span></div>
@@ -8995,7 +9171,7 @@ function viewRow(r) {
   const small = t => `<div class="jr-s">${t}</div>`;
   const pnlHtml =
     // v4.85: 부분익절 이력 — 있으면 항상 맨 위에 작게.
-    (r.partials && r.partials.length ? `<div class="jr-s" style="color:#f2b33d">${r.partials.map((p, i) => `${i + 1}차 ${p.pct}%@${p.r >= 0 ? '+' : ''}${p.r}R`).join(' · ')}</div>` : '') +
+    (r.partials && r.partials.length ? `<div class="jr-s" style="color:var(--amber)">${r.partials.map((p, i) => `${i + 1}차 ${p.pct}%@${p.r >= 0 ? '+' : ''}${p.r}R`).join(' · ')}</div>` : '') +
     (st === 'closed'
       // ②재설계: R은 손절 데이터 있을 때만(result_r), 손익%는 청산가만 있으면 항상.
       ? (() => {
@@ -9007,10 +9183,10 @@ function viewRow(r) {
           const col = mainVal > 0 ? 'var(--px-up)' : mainVal < 0 ? 'var(--px-down)' : 'inherit';
           return `<span class="num" style="color:${col};font-weight:600">${rStr || pctStr || '-'}</span>` +
             (rStr && pctStr ? small(pctStr) : (!rStr && !pctStr ? small('R 없음(손절 미기록)') : '')) +
-            (r.exit_reason === '충동' ? `<div class="jr-s" style="color:#f2848c;font-weight:600">규칙 외(충동)</div>` : r.closed_reason ? small(_escapeHtml(r.closed_reason)) : '');
+            (r.exit_reason === '충동' ? `<div class="jr-s" style="color:var(--c-red-fg3);font-weight:600">규칙 외(충동)</div>` : r.closed_reason ? small(_escapeHtml(r.closed_reason)) : '');
         })()
       : st === 'pending'
-          ? `<span style="color:#e9c46a;font-size:13px">피벗 대기</span>${small(r.last_price ? '현재 ' + fmtPx(r.last_price) : '미진입')}`
+          ? `<span style="color:var(--c-amber-fg2);font-size:13px">피벗 대기</span>${small(r.last_price ? '현재 ' + fmtPx(r.last_price) : '미진입')}`
       : st === 'missed'
           ? `<span class="n-sub" style="font-size:13px">무산</span>${r.closed_reason ? small(_escapeHtml(r.closed_reason)) : ''}`
       // v5.186: 관찰 종료(대기 만료) — 실패가 아니라 "10거래일 안에 확인이 안 됐을 뿐".
@@ -9032,11 +9208,11 @@ function viewRow(r) {
                   return `<span class="num" style="color:${col};font-weight:600">${liveR >= 0 ? '+' : ''}${liveR.toFixed(1)}R</span>`
                        + small(`D+${dheld} · 2R ${fmtPx(px2R)}${r.entry_source === 'toss' ? ' · 토스' : ''}`)
                        // v4.68: 장중 손절가 터치 — 종가 확정 전이라 경고만.
-                       + (r.stop_touched_intraday ? `<div class="jr-s" style="color:#f2848c;font-weight:600" title="장중 손절가를 스쳤지만 종가로만 손절을 확정합니다. 마감까지 지켜보세요.">장중 손절 터치</div>` : '')
+                       + (r.stop_touched_intraday ? `<div class="jr-s" style="color:var(--c-red-fg3);font-weight:600" title="장중 손절가를 스쳤지만 종가로만 손절을 확정합니다. 마감까지 지켜보세요.">장중 손절 터치</div>` : '')
                        // v4.95: 목표가 도달은 자동 종료 안 하고 알림만.
-                       + (r.target_reached ? `<div class="jr-s" style="color:#f2b33d;font-weight:600" title="목표가(2R) 도달 — 자동 종료되지 않습니다. 부분익절 또는 직접 종료 여부를 판단하세요.">목표가 도달</div>` : '');
+                       + (r.target_reached ? `<div class="jr-s" style="color:var(--amber);font-weight:600" title="목표가(2R) 도달 — 자동 종료되지 않습니다. 부분익절 또는 직접 종료 여부를 판단하세요.">목표가 도달</div>` : '');
                 })()
-              : `<span style="color:#e9c46a;font-size:13px" title="entry=${r.entry ?? '-'}는 참고가(${{auto_pivot:'피벗 자동기입',auto_close:'확인일 종가 자동기입'}[r.entry_source]||'미상'})라 R 계산에 안 씀">R 미산출</span><div><button type="button" class="n-link" onclick="editingId=${r.id};renderJournal()">체결가 입력</button></div>`)
+              : `<span style="color:var(--c-amber-fg2);font-size:13px" title="entry=${r.entry ?? '-'}는 참고가(${{auto_pivot:'피벗 자동기입',auto_close:'확인일 종가 자동기입'}[r.entry_source]||'미상'})라 R 계산에 안 씀">R 미산출</span><div><button type="button" class="n-link" onclick="editingId=${r.id};renderJournal()">체결가 입력</button></div>`)
           : `<span class="n-sub" style="font-size:13px">추적대기</span>${small(_trackingWaitNote(r))}`));
   const dim = st === 'missed' || broken ? 'opacity:.55' : st === 'closed' ? 'opacity:.85' : '';
   return `<tr class="jr-row${r.result_r === '' && st !== 'missed' && !broken ? ' open-pos' : ''}" style="${dim}">
@@ -9047,7 +9223,7 @@ function viewRow(r) {
       ${(noStatus || reachedBadge || brokenBadge) ? `<div class="jr-s" style="display:flex;gap:8px;flex-wrap:wrap">${noStatus}${reachedBadge}${brokenBadge}</div>` : ''}
       ${subInfo ? `<div class="jr-s" style="opacity:.8">${_escapeHtml(subInfo)}</div>` : ''}
     </td>
-    <td><span class="num"${broken ? ' style="color:#f2848c"' : ''}>${r.entry ?? '-'} → ${r.stop ?? '-'}</span>${entrySub.length ? `<div class="jr-s">${entrySub.join(' · ')}</div>` : ''}</td>
+    <td><span class="num"${broken ? ' style="color:var(--c-red-fg3)"' : ''}>${r.entry ?? '-'} → ${r.stop ?? '-'}</span>${entrySub.length ? `<div class="jr-s">${entrySub.join(' · ')}</div>` : ''}</td>
     <td>${pnlHtml}</td>
     <td class="jr-note"><div class="note-clamp" title="${(r.note || '').replace(/"/g, '&quot;')}${r.review ? ' / 복기: ' + r.review.replace(/"/g, '&quot;') : ''}">${r.note || ''}${r.review ? `<br><i style="color:var(--n-accent)">복기: ${r.review}</i>` : ''}</div></td>
     <td class="jr-act"><details class="rowmenu"><summary aria-label="행 메뉴"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></summary><div class="jr-menu" role="menu">${menu.join('')}</div></details></td>
@@ -9288,7 +9464,7 @@ const MY_TRACK_STATE_LABEL = {
   expiring: '만료 임박', waiting: '대기',
 };
 const MY_TRACK_STATE_COLOR = {
-  reached: '#63c89b', data_check: '#f2848c', approaching: '#e9c46a', expiring: '#ffb27a', waiting: 'var(--n-muted)',
+  reached: 'var(--n-good)', data_check: 'var(--c-red-fg3)', approaching: 'var(--c-amber-fg2)', expiring: 'var(--c-orange-fg1)', waiting: 'var(--n-muted)',
 };
 const MY_TRACK_STATE_PRIORITY = { reached: 0, data_check: 1, approaching: 2, expiring: 3, waiting: 4 };
 // v5.217(사용자 지시 — [B] 상단 스트립): "📌 도달 N" 요약용 — 활성(트리거
@@ -9626,7 +9802,7 @@ function _myTrackReignitionRowHtml(it) {
   const stateColor = reached ? MY_TRACK_STATE_COLOR.reached : MY_TRACK_STATE_COLOR.approaching;
   const stateLabel = reached ? MY_TRACK_STATE_LABEL.reached : MY_TRACK_STATE_LABEL.approaching;
   return `<div class="track-row" style="cursor:default">
-    <span class="nm"><span class="chip" style="color:#ff9b6b;margin-right:6px">재점화</span><a class="name-link" href="${tvUrl(it.ticker, 'kr')}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기">${_escapeHtml(it.name || it.ticker)}</a></span>
+    <span class="nm"><span class="chip" style="color:var(--c-orange-fg5);margin-right:6px">재점화</span><a class="name-link" href="${tvUrl(it.ticker, 'kr')}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기">${_escapeHtml(it.name || it.ticker)}</a></span>
     <span class="num r">${fmtPrice(close, 'KR')}</span>
     <span class="num r" style="color:var(--n-muted)" title="재점화 시스템이 계산한 buy-stop — 수정 불가">${fmtPrice(pivot, 'KR')} (시스템)</span>
     <span class="st st-dot" style="color:${stateColor}">${stateLabel}${reached ? '' : ` ${(pct * 100).toFixed(1)}%`}</span>
@@ -9779,7 +9955,7 @@ function renderWatchCleanupBar(all) {
   const n = all.filter(r => (r.status || 'watch') === 'watch' && (r.category || '') === '관찰'
     && watchStartDate(r) && businessDaysSince(watchStartDate(r)) >= watchExpiryDays(r) && !isWatchResolved(r)).length;
   if (!n) return '';
-  return `<div style="margin:6px 0"><button class="exp" style="background:#3a2a1a;border-color:#8c6d2d;color:#f2b33d" onclick="cleanupExpiredWatches()">확인/전환 기간 종료 관찰 일괄정리 (${n}건)</button></div>`;
+  return `<div style="margin:6px 0"><button class="exp" style="background:var(--c-orange-bg10);border-color:var(--c-amber-fg4);color:var(--amber)" onclick="cleanupExpiredWatches()">확인/전환 기간 종료 관찰 일괄정리 (${n}건)</button></div>`;
 }
 
 // v4.85: 부분익절 입력 행 — 청산비율(%)·청산가만 받는다. R은 진입가/손절로 자동계산.
@@ -9831,7 +10007,7 @@ function editRow(r) {
   // 등록일 기준 경과일을 기본값으로 채우되, 필요하면 여전히 수정 가능.
   const autoHeld = Math.floor((Date.now() - new Date(r.date)) / 86400000);
   const partialsSummary = (r.partials && r.partials.length)
-    ? `<div style="font-size:11px;color:#f2b33d;margin-bottom:6px">이미 청산: ${r.partials.map((p,i) => `${i+1}차 ${p.pct}%@${p.price}(${p.r>=0?'+':''}${p.r}R)`).join(' · ')} — 나머지 ${100 - r.partials.reduce((s,p)=>s+p.pct,0)}%에 대해 아래 청산가/R을 입력하세요.</div>`
+    ? `<div style="font-size:11px;color:var(--amber);margin-bottom:6px">이미 청산: ${r.partials.map((p,i) => `${i+1}차 ${p.pct}%@${p.price}(${p.r>=0?'+':''}${p.r}R)`).join(' · ')} — 나머지 ${100 - r.partials.reduce((s,p)=>s+p.pct,0)}%에 대해 아래 청산가/R을 입력하세요.</div>`
     : '';
   // v5.294: 6열 구조(표와 맞춤): 날짜 / 종목(+상태) / 진입·손절 / 결과R(청산가) / [상세입력 colspan 2]
   return `<tr class="editing">
@@ -10108,7 +10284,7 @@ function _historyPanelHtml(hist, market) {
        ${journalRows ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">저널</div>${journalRows}` : ''}`;
   return `
     <div style="border-top:1px solid var(--line);padding-top:8px;margin-top:8px">
-      <div style="font-size:13px;font-weight:600;color:#a78bfa;margin-bottom:4px">🕘 종목 히스토리${hist['요약'] ? ` — ${hist['요약']}` : ''}</div>
+      <div style="font-size:13px;font-weight:600;color:var(--c-violet-fg1);margin-bottom:4px">🕘 종목 히스토리${hist['요약'] ? ` — ${hist['요약']}` : ''}</div>
       ${body}
     </div>`;
 }
@@ -10122,15 +10298,15 @@ async function runDiag() {
   try {
     const d = await apiJson('/api/debug/' + encodeURIComponent(q));
     if (d.error) {
-      out.innerHTML = `<div style="color:#f87171;font-size:13px">${d.error} (${d.ticker || q})</div>`;
+      out.innerHTML = `<div style="color:var(--c-red-fg2);font-size:13px">${d.error} (${d.ticker || q})</div>`;
       return;
     }
     const modeNames = { pullback:'눌림목', turnaround:'추세전환', imminent:'돌파임박',
       breakout:'돌파', boxbreak:'박스돌파', leader:'대장관찰', super:'슈퍼대장', surge:'급등' };
     const modeChips = Object.entries(d.modes || {}).map(([k, v]) => {
       const pass = v === '통과';
-      const bg = pass ? '#12351f' : '#26262e';
-      const col = pass ? '#4ade80' : '#9ca3af';
+      const bg = pass ? 'var(--c-green-bg1)' : 'var(--c-gray-bg2)';
+      const col = pass ? 'var(--c-green-fg1)' : 'var(--c-gray-fg2)';
       const ic = pass ? '✅' : '✕';
       return `<span style="display:inline-block;padding:4px 10px;margin:2px;border-radius:8px;
         background:${bg};color:${col};font-size:12px">${ic} ${modeNames[k] || k}</span>`;
@@ -10149,19 +10325,19 @@ async function runDiag() {
         // v5.41: 눌림목은 게이트(피벗기준)≠카드(현재가기준)일 수 있어 둘 다 표시.
         // 돌파/박스돌파는 v5.41부터 카드 기준으로 통일돼 항상 같은 값(한 줄만 뜸).
         const riskHtml = (gateRisk != null && gateRisk !== cardRisk)
-          ? `<span style="color:#f87171"> · 게이트risk(피벗) ${gateRisk}%</span><span style="color:var(--muted)"> · 카드risk(현재가) ${cardRisk}%</span>`
+          ? `<span style="color:var(--c-red-fg2)"> · 게이트risk(피벗) ${gateRisk}%</span><span style="color:var(--muted)"> · 카드risk(현재가) ${cardRisk}%</span>`
           : (cardRisk != null ? `<span style="color:var(--muted)"> · risk ${cardRisk}%</span>` : '');
         return `<div style="font-size:13px;margin-bottom:3px">
-          <b>${label}</b>: <b style="color:#fbbf24">${fmtPrice(v['피벗'], d.market)}</b>
+          <b>${label}</b>: <b style="color:var(--c-amber-fg1)">${fmtPrice(v['피벗'], d.market)}</b>
           <span style="color:var(--muted)">(${v['종류'] || '-'})</span>
           ${v['near_pct'] != null ? `<span style="color:var(--muted)"> · near ${v['near_pct']}%</span>` : ''}
           ${riskHtml}
-          <span style="color:${passOk ? '#4ade80' : '#f87171'}"> · ${v['게이트결과']}</span>
+          <span style="color:${passOk ? 'var(--c-green-fg1)' : 'var(--c-red-fg2)'}"> · ${v['게이트결과']}</span>
         </div>`;
       }).join('');
       pivotHtml = `
         <div style="border-top:1px solid var(--line);padding-top:8px;margin-top:8px">
-          <div style="font-size:13px;font-weight:600;color:#fbbf24;margin-bottom:4px">🎯 실제 게이트 판정 피벗 (select_pivot — 이게 진짜 기준)</div>
+          <div style="font-size:13px;font-weight:600;color:var(--c-amber-fg1);margin-bottom:4px">🎯 실제 게이트 판정 피벗 (select_pivot — 이게 진짜 기준)</div>
           ${rows}
         </div>`;
     }
@@ -10169,11 +10345,11 @@ async function runDiag() {
     let hlHtml = '';
     const hl = d['수평저항'];
     if (hl && !hl.error) {
-      const resList = (hl['저항'] || []).map(r => `<span style="color:#f87171;font-size:12px;margin-right:10px">${r}</span>`).join('');
-      const supList = (hl['지지'] || []).map(s => `<span style="color:#4ade80;font-size:12px;margin-right:10px">${s}</span>`).join('');
+      const resList = (hl['저항'] || []).map(r => `<span style="color:var(--c-red-fg2);font-size:12px;margin-right:10px">${r}</span>`).join('');
+      const supList = (hl['지지'] || []).map(s => `<span style="color:var(--c-green-fg1);font-size:12px;margin-right:10px">${s}</span>`).join('');
       hlHtml = `
         <div style="border-top:1px solid var(--line);padding-top:8px;margin-top:8px">
-          <div style="font-size:13px;font-weight:600;color:#60a5fa;margin-bottom:4px">📊 수평 매물대 (참고용 — 게이트 기준 아님)</div>
+          <div style="font-size:13px;font-weight:600;color:var(--c-blue-fg6);margin-bottom:4px">📊 수평 매물대 (참고용 — 게이트 기준 아님)</div>
           ${hl['추천피벗'] ? `<div style="font-size:13px;margin-bottom:4px">참고 피벗: <b style="color:var(--muted)">${fmtPrice(hl['추천피벗'], d.market)}</b> <span style="color:var(--muted)">(${hl['피벗_터치횟수']}회 터치)</span></div>` : ''}
           <div style="margin-bottom:3px">저항: ${resList || '<span style="color:var(--muted);font-size:12px">없음</span>'}</div>
           <div>지지: ${supList || '<span style="color:var(--muted);font-size:12px">없음</span>'}</div>
@@ -10182,8 +10358,8 @@ async function runDiag() {
     // v5.61: RS가 근사치(유니버스 캐시 콜드)인지 정식 백분위인지 색으로 구분 —
     // 근사치를 정식값으로 오인해 "몇 점차 억울한 탈락" 식 오판을 막기 위함.
     const rsBadge = d.rs_percentile != null ? (d.rs_percentile_is_approx
-      ? `<span title="${d.rs_percentile_note || ''}" style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:6px;background:#3a2d12;color:#fbbf24;font-size:11px;font-weight:600;vertical-align:2px">RS ${d.rs_percentile} (근사)</span>`
-      : `<span title="${d.rs_percentile_note || ''}" style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:6px;background:#12351f;color:#4ade80;font-size:11px;font-weight:600;vertical-align:2px">RS ${d.rs_percentile} (정식)</span>`) : '';
+      ? `<span title="${d.rs_percentile_note || ''}" style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:6px;background:var(--c-amber-bg9);color:var(--c-amber-fg1);font-size:11px;font-weight:600;vertical-align:2px">RS ${d.rs_percentile} (근사)</span>`
+      : `<span title="${d.rs_percentile_note || ''}" style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:6px;background:var(--c-green-bg1);color:var(--c-green-fg1);font-size:11px;font-weight:600;vertical-align:2px">RS ${d.rs_percentile} (정식)</span>`) : '';
     const ind = d.indicators || {};
     const keyInd = [
       ['정배열', ind['정배열(20>60>200)'] ? '✅ 정배열' : '❌ 깨짐'],
@@ -10195,7 +10371,7 @@ async function runDiag() {
       <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px">
         <div style="font-size:15px;font-weight:700;margin-bottom:8px">${d.ticker} · ${fmtPrice(d.close, d.market)}${rsBadge}</div>
         <div style="margin-bottom:10px">${modeChips}</div>
-        <div style="font-size:13px;font-weight:600;color:#fbbf24;margin-bottom:4px">📋 핵심 사유</div>
+        <div style="font-size:13px;font-weight:600;color:var(--c-amber-fg1);margin-bottom:4px">📋 핵심 사유</div>
         <ul style="margin:0 0 10px;padding-left:18px">${reasons}</ul>
         ${pivotHtml}
         ${hlHtml}
@@ -10203,7 +10379,7 @@ async function runDiag() {
         <div style="border-top:1px solid var(--line);padding-top:8px">${keyInd}</div>
       </div>`;
   } catch (e) {
-    out.innerHTML = `<div style="color:#f87171;font-size:13px">진단 실패: ${e.message}</div>`;
+    out.innerHTML = `<div style="color:var(--c-red-fg2);font-size:13px">진단 실패: ${e.message}</div>`;
   }
 }
 document.getElementById('diagBtn').addEventListener('click', runDiag);

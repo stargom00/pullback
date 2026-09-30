@@ -96,7 +96,8 @@ def test_journal_btn_style_untouched():
 def test_selected_state_uses_on_class_with_same_colors():
     chip = code_only(_block("function _abcChip("))
     assert "' on'" in chip, "선택 상태 표시가 사라짐"
-    on = _css(".abc-chip.on{")
+    from test_helpers import resolve_colors
+    on = resolve_colors(_css(".abc-chip.on{"), HTML)   # v5.304: 색 토큰을 기본(다크) 값으로 풀어 비교
     for color in ("#1b2a3a", "#3b6ea5", "#cfe6ff"):
         assert color in on, f"선택 색 {color}가 바뀜 — 선택 상태 표시 불변 요구사항 위반"
 

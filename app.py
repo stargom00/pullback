@@ -5,6 +5,13 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.304 [라이트 테마 + 헤더 토글 — 사용자 지시, 서버 로직 변경 없음] [1단계 토큰 정리] static/index.html
+    의 하드코딩 색(hex·rgb/rgba 433곳, 177종)을 CSS 변수로 옮김. 기존 변수와 값이 하나로만 일치하면
+    재사용(--text·--amber·--down·--n-good·--n-muted), 나머지는 --c-{계열}-{역할}{번호}(계열=색상,
+    역할 bg 어두운 배경·fg 글자/선·a 반투명) 172개. 값은 옮기기 전과 같아 화면 변화 0(Playwright
+    재생 비교: 홈·US눌림목·일지 0px, ABC·저점은 원래 있던 데이터 순서 잡음과 같은 수준). SVG
+    fill/stroke 속성 5곳은 var()가 안 먹어 style로 옮김. 예외: <meta name="theme-color">(토글 때 JS가 갱신),
+    주석 속 색(문서).
 v5.303 [저점 탭 위치 — 사용자 지시] 더보기 → 헤더 오른쪽 작은 메뉴의 일지 옆(업종/테마 · 마감정리 ·
     일지 · 저점). data-mode 키·핸들러·저장 불변. 지수 패널 숨김 대상(IDXBAR_HIDDEN_MODES)에 추가.
 v5.302 [저점 매매 기록 탭 — 사용자 지시] 더보기 → "저점"(data-mode lowpoint_track). 홈
@@ -8419,7 +8426,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.303"
+VERSION = "v5.304"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

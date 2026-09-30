@@ -196,7 +196,8 @@ def test_pending_grade_has_its_own_colour():
     table = HTML[i:HTML.index(";", i)]
     for g in A.GRADES:
         assert f"'{g}'" in table, f"{g} 색이 없다 — 회색으로 떨어져 C급과 헷갈린다: {table}"
-    assert "'A급 보류': '#7FB88A'" in table
+    from test_helpers import resolve_colors
+    assert "'a급 보류': '#7fb88a'" in resolve_colors(table, HTML)   # v5.304: 토큰을 기본값으로 풀어 비교
 
 
 def test_pending_tooltip_explains_why_and_keeps_the_distinction():
