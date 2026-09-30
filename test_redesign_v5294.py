@@ -21,12 +21,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 TEXT = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
 
-# v5.293 시점의 data-mode 키 전부(git show v5.293:static/index.html 기준).
+# v5.293 시점의 data-mode 키 전부(git show v5.293:static/index.html 기준) + 이후 신설 키.
 EXISTING_MODES = {
     "calendar", "themes", "pullback", "abc", "jongga", "turnaround",
     "imminent", "boxbreak", "breakout", "surge_observe", "eod", "positions",
     "journal", "super", "leader", "sectors", "moneyflow", "inverse",
     "breakdown", "pattern", "stage2", "ibd9", "strong_pivot", "earnings", "surge",
+    "lowpoint_track",   # v5.302 신설(더보기 → 저점) — 새 키는 여기 명시적으로 추가해야 통과
 }
 
 

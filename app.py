@@ -5,6 +5,22 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.302 [저점 매매 기록 탭 — 사용자 지시] 더보기 → "저점"(data-mode lowpoint_track). 홈
+    저점종목 카드(후보)와 별개인 **내 매매 기록**. 저장은 일지와 분리된
+    /data/lowpoint_trades.json, v5.300 일지와 같은 레코드 단위 규칙: GET
+    /api/lowpoint/trades · PUT /api/lowpoint/trades/{id}(base_rev 불일치 409+서버본,
+    삭제된 id 409 gone) · DELETE {id}(lowpoint_trades_deletions.log). 전체 배열 쓰기 없음.
+    부분 종료(partial_of) 생성 시 수량 < 보유 수량을 서버가 검증. 목표%(단기 4·장기 100)는
+    /data/lowpoint_trade_settings.json(PUT /api/lowpoint/trade-settings). 백업: 일지의
+    날짜별 사본 함수를 _daily_backup으로 일반화해 lowpoint_trades_YYYYMMDD.json 14개(일지
+    동작 불변). 추매 평단·분할 종료·보유 정렬(단기 먼저·장기 아래, 그룹 안 종목명순,
+    "장기" 구분 줄)·월간 집계(매도월·KR/US)는 프론트 순수 함수. [현재가] 지시는 "네이버
+    모바일 현재가 경로"였지만 그 함수(naver_kr.fetch_live_price)는 v4.90 기록상 전일
+    종가를 주는 경로라 앱이 실가격 판단에 안 쓴다 — 앱의 실제 현재가 경로 POST /api/prices
+    (KR 네이버 siseJson 최신 봉·US yfinance fast_info, 일지 추적과 같은 경로)를 재사용,
+    보유 종목만·탭 진입/갱신 때만. 실패 종목은 "조회 실패". [종목 해석]
+    GET /api/lowpoint/resolve — 새 시세 조회 없이 저점 결과 → 스캐너 유니버스(같은
+    리졸버) → /data US 상장목록 순. 못 찾은 KR 6자리 코드는 시장을 사용자가 고른다.
 v5.301 [저점종목 서버 자동 실행 — 사용자 지시] 맥 수동 실행(→커밋→push)이라 잊기 쉬웠다.
     서버가 주봉은 매주 토요일 09:00 KST, 월봉은 매월 첫 토요일 09:20 KST에 직접 돌린다
     (_maybe_run_lowpoint, 스케줄러 4분 틱에서 백그라운드 create_task, 계산은 전용 1스레드
@@ -8401,7 +8417,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.301"
+VERSION = "v5.302"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -12737,6 +12753,7 @@ async def _scheduler_loop():
             _maybe_refresh_macro_calendar()   # v5.108: 캘린더 탭 매크로 일정, 주 1회
             await _maybe_run_weekly_money_flow()   # v5.147: 돈의흐름 주 1회 전환
             _journal_daily_backup()   # v5.300: 날짜별 일지 사본(그날 없을 때만)
+            _daily_backup(LP_TRADES_PATH, "lowpoint_trades", lock=_LP_TRADES_LOCK)   # v5.302
             asyncio.create_task(_maybe_run_lowpoint())   # v5.301: 저점종목 토요일 자동 실행(백그라운드)
         except Exception as e:
             print(f"[scheduler] loop error: {e}")
@@ -12804,6 +12821,7 @@ async def _start_scheduler():
         print("[memory-diag] tracemalloc 시작(frames=5) — MEMORY_DIAG=1", flush=True)
     try:
         _journal_daily_backup(force=True)   # v5.300: 서버 시작 직후 1회
+        _daily_backup(LP_TRADES_PATH, "lowpoint_trades", force=True, lock=_LP_TRADES_LOCK)   # v5.302
     except Exception as e:
         print(f"[journal-backup] 시작 백업 실패: {e}", flush=True)
     asyncio.create_task(_scheduler_loop())
@@ -19412,32 +19430,38 @@ def _journal_same(a: dict, b: dict) -> bool:
     return {k: v for k, v in a.items() if k not in ign} == {k: v for k, v in b.items() if k not in ign}
 
 
-def _journal_daily_backup(force: bool = False) -> str | None:
-    """/data(JOURNAL_PATH 폴더)에 날짜별 사본 journal_YYYYMMDD.json. 하루 1회(스케줄러) +
-    서버 시작 직후 1회(force=True, 그날 사본을 현재 파일로 갱신). 원자적(tmp→rename),
-    최근 JOURNAL_BACKUP_KEEP개만 보관(날짜 오래된 것부터 삭제). 반환: 쓴 경로 또는 None."""
+def _daily_backup(src_path: str, prefix: str, force: bool = False, lock=None) -> str | None:
+    """src_path 폴더에 날짜별 사본 {prefix}_YYYYMMDD.json. 하루 1회(스케줄러) + 서버 시작
+    직후 1회(force=True, 그날 사본을 현재 파일로 갱신). 원자적(tmp→rename), 최근
+    JOURNAL_BACKUP_KEEP개만 보관(날짜 오래된 것부터 삭제). 반환: 쓴 경로 또는 None.
+    v5.300 일지 백업을 일반화했다(v5.302 — 저점 매매기록도 같은 방식)."""
     import shutil, re as _re
-    d = os.path.dirname(JOURNAL_PATH)
-    if not os.path.exists(JOURNAL_PATH):
+    d = os.path.dirname(src_path)
+    if not os.path.exists(src_path):
         return None
     today = datetime.now(KST).strftime("%Y%m%d")
-    dst = os.path.join(d, f"journal_{today}.json")
+    dst = os.path.join(d, f"{prefix}_{today}.json")
     wrote = None
     if force or not os.path.exists(dst):
-        with _JOURNAL_LOCK:
+        with (lock or _threading.RLock()):
             tmp = dst + ".tmp"
-            shutil.copy2(JOURNAL_PATH, tmp)
+            shutil.copy2(src_path, tmp)
             os.replace(tmp, dst)
         wrote = dst
-        print(f"[journal-backup] {os.path.basename(dst)} 저장({'시작 직후' if force else '일일'})", flush=True)
-    backups = sorted(f for f in os.listdir(d) if _re.fullmatch(r"journal_\d{8}\.json", f))
+        print(f"[{prefix}-backup] {os.path.basename(dst)} 저장({'시작 직후' if force else '일일'})", flush=True)
+    backups = sorted(f for f in os.listdir(d) if _re.fullmatch(_re.escape(prefix) + r"_\d{8}\.json", f))
     for old in backups[:-JOURNAL_BACKUP_KEEP] if len(backups) > JOURNAL_BACKUP_KEEP else []:
         try:
             os.remove(os.path.join(d, old))
-            print(f"[journal-backup] 보관 {JOURNAL_BACKUP_KEEP}개 초과 — {old} 삭제", flush=True)
+            print(f"[{prefix}-backup] 보관 {JOURNAL_BACKUP_KEEP}개 초과 — {old} 삭제", flush=True)
         except OSError:
             pass
     return wrote
+
+
+def _journal_daily_backup(force: bool = False) -> str | None:
+    """일지 날짜별 사본 journal_YYYYMMDD.json(v5.300) — _daily_backup 공용 구현."""
+    return _daily_backup(JOURNAL_PATH, "journal", force, _JOURNAL_LOCK)
 
 
 @app.post("/api/journal")
@@ -19515,6 +19539,242 @@ async def journal_delete(rid: int, request: Request):
             print(f"[journal] 삭제 로그 기록 실패(삭제 자체는 완료): {e}", flush=True)
         print(f"[journal] 삭제 id={rid} {removed.get('ticker')} {removed.get('name')}", flush=True)
     return JSONResponse({"ok": True, "deleted": rid})
+
+
+# ══════════════════════════════════════════════════════════════════
+# v5.302(사용자 지시): 📉 저점 매매 기록 — 일지와 **분리된** 저장소(전략·필드가 다름).
+# v5.300 일지의 레코드 단위 저장 패턴을 그대로 따른다: GET 목록 / PUT {id}(base_rev,
+# 불일치 409 + 서버본, 삭제된 id 409 gone) / DELETE {id}(로그). 전체 배열 쓰기 경로 없음.
+# 레코드: {id, rev, kind(단기|장기), mkt(KR|US), code(티커 — KR은 005930.KS 형식, 표시는
+# 6자리), name, buyDate, buyPrice(평단), qty, sellDate?, sellPrice?, partial?, partial_of?}
+# 추매 합산·분할 종료 계산은 프론트 순수 함수(lpMergeBuy·lpSplitSell, node 테스트)가 하고
+# 서버는 레코드 단위 규칙만 강제한다 — 부분 종료(partial_of) 생성 시 수량이 보유 수량보다
+# 작은지 서버가 검증한다(보유 전량이면 부분이 아니라 보유 레코드 자체를 종료해야 함).
+# ══════════════════════════════════════════════════════════════════
+LP_TRADES_PATH = _resolve_persistent_path("lowpoint_trades.json")
+LP_TRADES_SETTINGS_PATH = _resolve_persistent_path("lowpoint_trade_settings.json")
+LP_TRADES_DELETE_LOG_PATH = os.path.join(os.path.dirname(LP_TRADES_PATH), "lowpoint_trades_deletions.log")
+LP_TRADES_DEFAULT_SETTINGS = {"target_pct": {"단기": 4.0, "장기": 100.0}}   # 사용자 지시 기본값
+_LP_TRADES_LOCK = _threading.RLock()
+
+
+def _lp_trades_load() -> list:
+    if not os.path.exists(LP_TRADES_PATH):
+        return []
+    with open(LP_TRADES_PATH, encoding="utf-8") as f:
+        data = _json.load(f)
+    if not isinstance(data, list):
+        raise ValueError("lowpoint_trades.json 최상위가 배열이 아님")
+    return data
+
+
+def _lp_trades_write(data: list):
+    """원자적(tmp→rename) + 1세대 .bak. 날짜별 사본은 _daily_backup(스케줄러·시작 시)."""
+    if os.path.exists(LP_TRADES_PATH):
+        try:
+            import shutil
+            shutil.copy2(LP_TRADES_PATH, LP_TRADES_PATH + ".bak")
+        except OSError:
+            pass
+    tmp = LP_TRADES_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        _json.dump(data, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, LP_TRADES_PATH)
+
+
+def _lp_num(v):
+    try:
+        x = float(v)
+        return x if x == x else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _lp_trade_invalid(rec: dict) -> "str | None":
+    """레코드 단위 규칙. 문제가 있으면 사유 문자열."""
+    if rec.get("kind") not in ("단기", "장기"):
+        return "kind는 단기|장기"
+    if rec.get("mkt") not in ("KR", "US"):
+        return "mkt는 KR|US"
+    if not str(rec.get("code") or "").strip():
+        return "code 필요"
+    if (_lp_num(rec.get("buyPrice")) or 0) <= 0:
+        return "buyPrice는 0보다 커야 함"
+    if (_lp_num(rec.get("qty")) or 0) <= 0:
+        return "qty는 0보다 커야 함"
+    if not rec.get("buyDate"):
+        return "buyDate 필요"
+    has_sd, has_sp = bool(rec.get("sellDate")), rec.get("sellPrice") not in (None, "")
+    if has_sd != has_sp:
+        return "종료는 sellDate와 sellPrice가 둘 다 필요"
+    if has_sp and (_lp_num(rec.get("sellPrice")) or 0) <= 0:
+        return "sellPrice는 0보다 커야 함"
+    if rec.get("partial_of") is not None and not has_sd:
+        return "부분 종료(partial_of) 레코드는 sellDate·sellPrice가 필요"
+    return None
+
+
+def _lp_trade_settings() -> dict:
+    out = _json.loads(_json.dumps(LP_TRADES_DEFAULT_SETTINGS))
+    try:
+        with open(LP_TRADES_SETTINGS_PATH, encoding="utf-8") as f:
+            saved = _json.load(f)
+        for k, v in ((saved or {}).get("target_pct") or {}).items():
+            if k in out["target_pct"] and _lp_num(v) is not None:
+                out["target_pct"][k] = _lp_num(v)
+    except (OSError, ValueError):
+        pass
+    return out
+
+
+@app.get("/api/lowpoint/trades")
+async def lp_trades_list():
+    try:
+        trades = _lp_trades_load()
+    except (OSError, ValueError) as e:
+        return JSONResponse({"ok": False, "error": f"저점 매매 기록 읽기 실패: {e}"}, status_code=500)
+    return JSONResponse(_clean_nan({"ok": True, "trades": trades, "settings": _lp_trade_settings()}))
+
+
+@app.put("/api/lowpoint/trades/{rid}")
+async def lp_trade_put(rid: int, request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "JSON 본문 필요"}, status_code=400)
+    rec = body.get("record") if isinstance(body, dict) else None
+    if not isinstance(rec, dict) or rec.get("id") != rid:
+        return JSONResponse({"ok": False, "error": "record.id가 경로 id와 같아야 함"}, status_code=400)
+    bad = _lp_trade_invalid(rec)
+    if bad:
+        return JSONResponse({"ok": False, "error": bad}, status_code=400)
+    base_rev = body.get("base_rev")
+    with _LP_TRADES_LOCK:
+        try:
+            trades = _lp_trades_load()
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
+        idx = next((i for i, r in enumerate(trades) if r.get("id") == rid), None)
+        if idx is None:
+            if base_rev not in (None, 0):
+                return JSONResponse({"ok": False, "code": "gone", "record": None,
+                                     "error": "서버에서 이미 삭제된 기록이에요"}, status_code=409)
+            po = rec.get("partial_of")
+            if po is not None:
+                hold = next((r for r in trades if r.get("id") == po), None)
+                if not hold or hold.get("sellDate"):
+                    return JSONResponse({"ok": False, "error": "분할 종료 대상 보유 기록이 없어요"}, status_code=400)
+                if hold.get("code") != rec.get("code") or hold.get("kind") != rec.get("kind"):
+                    return JSONResponse({"ok": False, "error": "분할 종료가 보유 기록과 종목·구분이 달라요"}, status_code=400)
+                if not (_lp_num(rec["qty"]) < (_lp_num(hold.get("qty")) or 0)):
+                    return JSONResponse({"ok": False, "error": "분할 종료 수량은 보유 수량보다 작아야 해요(전량이면 보유 기록을 종료)"},
+                                        status_code=400)
+            new = dict(rec)
+            new["rev"] = 1
+            new["updated_at"] = _now_iso()
+            trades.append(new)
+            _lp_trades_write(trades)
+            return JSONResponse(_clean_nan({"ok": True, "created": True, "record": new}))
+        srv = trades[idx]
+        if int(base_rev or 0) != int(srv.get("rev") or 0):
+            return JSONResponse(_clean_nan({"ok": False, "code": "conflict", "record": srv,
+                                            "error": "다른 곳에서 먼저 바뀐 기록이에요"}), status_code=409)
+        new = dict(rec)
+        new["rev"] = srv.get("rev")
+        new["updated_at"] = srv.get("updated_at")
+        if _journal_same(new, srv):
+            return JSONResponse(_clean_nan({"ok": True, "unchanged": True, "record": srv}))
+        _journal_bump(new)
+        trades[idx] = new
+        _lp_trades_write(trades)
+        return JSONResponse(_clean_nan({"ok": True, "record": new}))
+
+
+@app.delete("/api/lowpoint/trades/{rid}")
+async def lp_trade_delete(rid: int, request: Request):
+    with _LP_TRADES_LOCK:
+        try:
+            trades = _lp_trades_load()
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
+        idx = next((i for i, r in enumerate(trades) if r.get("id") == rid), None)
+        if idx is None:
+            return JSONResponse({"ok": True, "already_gone": True})
+        removed = trades.pop(idx)
+        _lp_trades_write(trades)
+        entry = {"ts": _now_iso(), "id": rid,
+                 "client": (request.client.host if request.client else None),
+                 "user_agent": request.headers.get("user-agent"), "record": removed}
+        try:
+            with open(LP_TRADES_DELETE_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(_json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError as e:
+            print(f"[lowpoint-trades] 삭제 로그 기록 실패(삭제 자체는 완료): {e}", flush=True)
+    return JSONResponse({"ok": True, "deleted": rid})
+
+
+@app.put("/api/lowpoint/trade-settings")
+async def lp_trade_settings_put(request: Request):
+    """목표% 설정(단기·장기) — 작은 설정 dict 하나라 레코드 단위 규칙 대상 아님."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "JSON 본문 필요"}, status_code=400)
+    tp = (body or {}).get("target_pct") if isinstance(body, dict) else None
+    if not isinstance(tp, dict):
+        return JSONResponse({"ok": False, "error": "target_pct 필요"}, status_code=400)
+    cur = _lp_trade_settings()
+    for k in ("단기", "장기"):
+        if k in tp:
+            v = _lp_num(tp[k])
+            if v is None or v <= 0 or v > 10000:
+                return JSONResponse({"ok": False, "error": f"{k} 목표%는 0보다 큰 숫자"}, status_code=400)
+            cur["target_pct"][k] = v
+    _save_json_atomic(LP_TRADES_SETTINGS_PATH, cur)
+    return JSONResponse({"ok": True, "settings": cur})
+
+
+@app.get("/api/lowpoint/resolve/{query}")
+async def lp_resolve(query: str):
+    """저점 매매 기록 추가용 종목 해석 — **새 시세 조회 없이** 이미 있는 목록에서만 찾는다.
+    순서: ① 저점 스크린 결과(/data 우선·레포 폴백, 매매 대상이 대개 여기서 나온다)
+    ② 스캐너 유니버스(universe.resolve_name_to_ticker — /api/lookup과 같은 리졸버)
+    ③ /data의 US 상장목록 캐시(us_listings.json, 저점 서버 실행이 만든 것).
+    못 찾으면 ok:false — KR 6자리면 프론트가 시장(코스피/코스닥)을 직접 고르게 한다."""
+    import re as _re
+    from universe import resolve_name_to_ticker
+    q = (query or "").strip()
+    if not q:
+        return JSONResponse({"ok": False, "reason": "empty"})
+    qu = q.upper()
+    rows = []
+    for src in (_lowpoint_read(LOWPOINT_DATA_PATH) or {}, _lowpoint_read(LOWPOINT_LATEST_PATH) or {}):
+        for tf in LOWPOINT_TFS:
+            rows += [r for r in ((src.get(tf) or {}).get("rows") or []) if isinstance(r, dict)]
+    for r in rows:
+        code = str(r.get("code") or "")
+        if qu in (code.upper(), code.split(".")[0].upper()) or q == str(r.get("name") or ""):
+            return JSONResponse({"ok": True, "ticker": code, "name": r.get("name") or code,
+                                 "mkt": "US" if r.get("market") == "US" else "KR", "source": "lowpoint"})
+    uni = get_universe(None)
+    res = resolve_name_to_ticker(q, uni)
+    if res.get("ticker"):
+        t = res["ticker"]
+        return JSONResponse({"ok": True, "ticker": t, "name": uni.get(t, t),
+                             "mkt": "KR" if t.endswith((".KS", ".KQ")) else "US", "source": "universe"})
+    if res.get("candidates"):
+        return JSONResponse({"ok": False, "candidates": res["candidates"][:10], "reason": "ambiguous"})
+    try:
+        with open(LOWPOINT_US_LISTINGS_PATH, encoding="utf-8") as f:
+            listing = _json.load(f)
+        for row in listing.get("rows") or []:
+            if str(row.get("symbol") or "").upper() == qu:
+                return JSONResponse({"ok": True, "ticker": qu, "name": row.get("name") or qu,
+                                     "mkt": "US", "source": "us_listings"})
+    except (OSError, ValueError):
+        pass
+    return JSONResponse({"ok": False, "reason": "not_found", "query": q,
+                         "kr_code": bool(_re.fullmatch(r"\d{5}[0-9A-Z]", qu))})
 
 
 @app.post("/api/prices")

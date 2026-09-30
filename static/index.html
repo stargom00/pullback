@@ -760,6 +760,18 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
   .track-row .act{grid-column:2/4;text-align:right}
   .track-exp{padding:10px 16px}
 }
+/* ── v5.302 저점 매매(#lowpointTrackView) — 일지 카드·표 스타일 재사용 ── */
+#lowpointTrackView{background:var(--n-bg);color:var(--n-text);padding:32px var(--n-gutter) 48px}
+#lowpointTrackView>*+*{margin-top:20px}
+.lpt-form{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:flex-end}
+.lpt-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--n-muted)}
+.lpt-form input,.lpt-form select{min-height:40px;background:#0f1318;border:1px solid var(--n-line2);border-radius:8px;color:var(--n-text);padding:0 10px;font:inherit;font-size:14px;min-width:0}
+.lpt-form input[name=buyPrice],.lpt-form input[name=qty],.lpt-form input[name=sellPrice]{width:110px}
+.lpt-table td.r,.lpt-table th.r{text-align:right}
+.lpt-table tr.lpt-hit td{background:rgba(232,162,92,.10)}
+.lpt-table tr.lpt-sep td{padding:6px 12px 6px 24px;border-bottom:1px solid var(--n-line2)}
+.lpt-table tr.lpt-sep span{font-size:11px;color:var(--n-muted);letter-spacing:.4px}
+.lpt-table tr.lpt-sell td{background:#10141a}
 /* ── 내 일지(#journalView) ── */
 /* applyTabViewState가 style.display='block'을 넣으므로 flex gap 대신 형제 여백으로 간격을 둔다 */
 #journalView{background:var(--n-bg);color:var(--n-text);padding:32px var(--n-gutter) 48px}
@@ -831,6 +843,7 @@ details.rowmenu>summary:hover{background:#1b2029}
 #journalView .sigval{background:none;border:0;padding:0;margin:0}
 @media (max-width:899px){
   #journalView{padding:16px 16px 32px}
+  #lowpointTrackView{padding:16px 16px 32px}
   #journalView>*+*{margin-top:16px}
   .jr-title h2{font-size:20px}
   .jr-risk{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -892,7 +905,7 @@ details.rowmenu>summary:hover{background:#1b2029}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.301</span>
+      <span class="ver mono" id="verBadge">v5.302</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -935,6 +948,8 @@ details.rowmenu>summary:hover{background:#1b2029}
            "급등 스캔"(surge, analyze_surge 게이트)과 다른 기능이다. -->
       <button class="tab" data-mode="surge_observe" title="당일 +15%↑ & 거래량 20일평균 10배↑ KR — 판정/EV/진입가 없음, 순수 관찰(2주 실험)">급등<span class="exp-tag">2주 실험</span></button>
       <button class="tab" data-mode="positions">포지션</button>
+      <!-- v5.302: 저점종목 내 매매 기록(홈 저점종목 카드 = 후보와 별개) -->
+      <button class="tab" data-mode="lowpoint_track" title="저점종목 매매 기록 — 현재가·수익률·목표가, 일지와 별도 저장">저점</button>
     </div>
     <div class="more-sec">
       <div class="more-h">실험</div>
@@ -1028,6 +1043,7 @@ details.rowmenu>summary:hover{background:#1b2029}
   <div id="diagResult" style="margin-top:12px"></div>
 </div>
 <div class="jrnl-wrap" id="journalView" style="display:none"></div>
+<div class="jrnl-wrap lpt" id="lowpointTrackView" style="display:none"></div>
 
 <!-- v5.89: 💰 돈의 흐름 탭 — 기존 /moneyflow 페이지 뷰를 탭 컨텐츠로 재사용.
      KR/US 전환은 헤더의 기존 시장 필터(전체/한국/미국)와 연동, 별도 KR/US
@@ -6266,13 +6282,15 @@ function applyTabViewState() {
   const isPositions = mode === 'positions';
   const isCalendar = mode === 'calendar';
   const isSurgeObserve = mode === 'surge_observe';
-  const isCustomView = isJournal || isMoneyflow || isPositions || isCalendar || isSurgeObserve;
+  const isLpTrack = mode === 'lowpoint_track';   // v5.302
+  const isCustomView = isJournal || isMoneyflow || isPositions || isCalendar || isSurgeObserve || isLpTrack;
   document.getElementById('content').style.display = isCustomView ? 'none' : '';
   document.getElementById('journalView').style.display = isJournal ? 'block' : 'none';
   document.getElementById('moneyflowView').style.display = isMoneyflow ? 'block' : 'none';
   document.getElementById('positionsView').style.display = isPositions ? 'block' : 'none';
   document.getElementById('calendarView').style.display = isCalendar ? 'block' : 'none';
   document.getElementById('surgeObserveView').style.display = isSurgeObserve ? 'block' : 'none';
+  document.getElementById('lowpointTrackView').style.display = isLpTrack ? 'block' : 'none';
   document.getElementById('searchBar').style.display = isCustomView ? 'none' : '';
   document.getElementById('diagBar').style.display = isCustomView ? 'none' : '';
   document.getElementById('patternSubTabs').style.display = (mode === 'pattern') ? 'flex' : 'none';
@@ -6290,6 +6308,7 @@ function applyTabViewState() {
   else if (isPositions) { onEnterPositionsTab(); }
   else if (isCalendar) { onEnterCalendarTab(); }
   else if (isSurgeObserve) { onEnterSurgeObserveTab(); }
+  else if (isLpTrack) { onEnterLowpointTrackTab(); }
   else { load(); }
 }
 document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click', () => {
@@ -6774,6 +6793,288 @@ function showSaveError(err) {
     document.body.appendChild(bar);
     setTimeout(() => bar.remove(), 6000);
   }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// v5.302(사용자 지시): "저점" 탭 — 저점종목 **내 매매 기록**(홈 저점종목 카드 = 후보와 별개).
+// 저장은 일지와 분리(/data/lowpoint_trades.json), v5.300 일지와 같은 레코드 단위 규칙:
+// PUT /api/lowpoint/trades/{id}(base_rev, 409면 서버본으로 다시 불러와 알림) · DELETE {id}.
+// 추매 평단·분할 종료·보유 정렬·월간 집계는 아래 순수 함수(node 테스트 대상).
+// 현재가는 앱의 현재가 경로 POST /api/prices를 그대로 쓴다(KR 네이버 siseJson 최신 봉,
+// US yfinance fast_info — 일지 추적과 같은 경로). 보유 종목만, 탭 진입·갱신 때만 조회.
+// ══════════════════════════════════════════════════════════════════
+const LPT_KINDS = ['단기', '장기'];
+function lpMergeBuy(hold, buy) {
+  const hq = Number(hold.qty), bq = Number(buy.qty);
+  const avg = (Number(hold.buyPrice) * hq + Number(buy.buyPrice) * bq) / (hq + bq);
+  return { ...hold, buyPrice: Math.round(avg * 10000) / 10000, qty: hq + bq,
+           buyDate: [hold.buyDate, buy.buyDate].filter(Boolean).sort()[0] };
+}
+// 종료: 보유 전량이면 보유 레코드 자체를 종료, 일부면 판 만큼 새 종료 레코드(partial) + 잔여.
+function lpSplitSell(hold, sell, newId) {
+  const q = Number(sell.qty), have = Number(hold.qty);
+  if (!(q > 0)) throw new Error('매도 수량은 0보다 커야 해요');
+  if (q > have) throw new Error(`보유 ${have}주보다 많이 팔 수 없어요`);
+  if (!(Number(sell.sellPrice) > 0) || !sell.sellDate) throw new Error('매도일·매도가를 입력하세요');
+  if (q === have) {
+    return { close: { ...hold, sellDate: sell.sellDate, sellPrice: Number(sell.sellPrice) }, remain: null, full: true };
+  }
+  const { rev, updated_at, ...base } = hold;
+  return {
+    close: { ...base, id: newId, qty: q, sellDate: sell.sellDate, sellPrice: Number(sell.sellPrice),
+             partial: true, partial_of: hold.id },
+    remain: { ...hold, qty: have - q },
+    full: false,
+  };
+}
+// 보유 정렬: 단기 전체 먼저, 장기는 항상 그 아래. 그룹 안은 종목명순(사용자 지시).
+function lpSortHoldings(list) {
+  const rank = k => (k === '단기' ? 0 : 1);
+  return [...list].sort((a, b) => rank(a.kind) - rank(b.kind)
+    || String(a.name || a.code || '').localeCompare(String(b.name || b.code || ''), 'ko'));
+}
+function lpReturnPct(cur, avg) { return (cur != null && avg > 0) ? (cur - avg) / avg * 100 : null; }
+function lpTargetPrice(avg, pct) { return Number(avg) * (1 + Number(pct) / 100); }
+// 월간 요약: 매도월(sellDate) 기준, KR/US 분리. 수익금 = (매도가-평단)×수량(통화 그대로).
+function lpMonthlySummary(closed) {
+  const g = {};
+  for (const r of closed) {
+    if (!r.sellDate) continue;
+    const key = r.sellDate.slice(0, 7) + '|' + r.mkt;
+    const x = g[key] || (g[key] = { month: r.sellDate.slice(0, 7), mkt: r.mkt, n: 0, wins: 0, retSum: 0, pnl: 0 });
+    const ret = lpReturnPct(Number(r.sellPrice), Number(r.buyPrice));
+    x.n += 1; x.retSum += ret; x.pnl += (Number(r.sellPrice) - Number(r.buyPrice)) * Number(r.qty);
+    if (Number(r.sellPrice) > Number(r.buyPrice)) x.wins += 1;
+  }
+  return Object.values(g).map(x => ({ month: x.month, mkt: x.mkt, n: x.n, wins: x.wins,
+      winRate: Math.round(x.wins / x.n * 1000) / 10, avgRet: Math.round(x.retSum / x.n * 100) / 100,
+      pnl: Math.round(x.pnl * 100) / 100 }))
+    .sort((a, b) => b.month.localeCompare(a.month) || a.mkt.localeCompare(b.mkt));
+}
+
+let _lpt = { trades: [], settings: { target_pct: { '단기': 4, '장기': 100 } }, prices: {}, priced: false,
+             error: null, selling: null, pendingKr: null, busy: false };
+function _lptFmt(v, mkt) {
+  if (v == null || isNaN(v)) return '—';
+  return mkt === 'US' ? '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                      : Math.round(Number(v)).toLocaleString('ko-KR') + '원';
+}
+function _lptPct(v) {
+  if (v == null || isNaN(v)) return '<span class="n-sub">—</span>';
+  const col = v > 0 ? '#f2848c' : v < 0 ? '#6fa8ff' : 'var(--n-muted)';
+  return `<span class="num" style="color:${col}">${v > 0 ? '+' : ''}${v.toFixed(2)}%</span>`;
+}
+function _lptCode(r) { return r.mkt === 'KR' ? String(r.code || '').split('.')[0] : r.code; }
+async function _lptLoad() {
+  const d = await apiJson('/api/lowpoint/trades');
+  _lpt.trades = d.trades || [];
+  _lpt.settings = d.settings || _lpt.settings;
+}
+async function _lptPrices() {
+  const open = _lpt.trades.filter(r => !r.sellDate);
+  const tickers = [...new Set(open.map(r => r.code))];
+  _lpt.prices = {}; _lpt.priced = false;
+  if (!tickers.length) { _lpt.priced = true; return; }
+  try {
+    const j = await apiJson('/api/prices', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickers }) });
+    _lpt.prices = (j && j.prices) || {};
+  } catch (e) {
+    _lpt.priceError = e.message;   // 화면에 원인 표시(조회 실패 종목은 "조회 실패")
+  }
+  _lpt.priced = true;
+}
+async function onEnterLowpointTrackTab() {
+  const wrap = document.getElementById('lowpointTrackView');
+  wrap.innerHTML = '<div class="loading"><div class="spinner"></div>불러오는 중…</div>';
+  _lpt.error = null; _lpt.priceError = null;
+  try { await _lptLoad(); } catch (e) { _lpt.error = e; }
+  renderLowpointTrack();
+  if (!_lpt.error) { await _lptPrices(); renderLowpointTrack(); }
+}
+// 레코드 한 건 저장. 409(다른 곳에서 먼저 바뀜/삭제됨)면 서버 목록을 다시 불러오고 알린다.
+async function _lptPut(rec, baseRev) {
+  const res = await fetch('/api/lowpoint/trades/' + encodeURIComponent(rec.id), {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ record: rec, base_rev: baseRev == null ? null : baseRev }) });
+  const d = await apiParse(res, { allow: [409] });
+  if (res.status === 409) {
+    await _lptLoad();
+    throw new Error('다른 곳에서 먼저 바뀐 기록이라 저장하지 않았어요 — 최신 목록으로 다시 불렀어요');
+  }
+  return d.record;
+}
+async function _lptRun(fn) {
+  if (_lpt.busy) return;
+  _lpt.busy = true;
+  try { await fn(); }
+  catch (e) { alert('저장 실패 — ' + e.message); try { await _lptLoad(); } catch (_) {} }
+  finally { _lpt.busy = false; renderLowpointTrack(); _lptPrices().then(renderLowpointTrack); }
+}
+async function lptAdd(form) {
+  const f = new FormData(form);
+  const kind = f.get('kind'), q = String(f.get('q') || '').trim();
+  const buy = { buyDate: f.get('buyDate'), buyPrice: Number(f.get('buyPrice')), qty: Number(f.get('qty')) };
+  if (!q || !buy.buyDate || !(buy.buyPrice > 0) || !(buy.qty > 0)) { alert('종목·매수일·매수가·수량을 입력하세요'); return; }
+  await _lptRun(async () => {
+    let t;
+    const krMarket = f.get('krMarket');
+    if (_lpt.pendingKr && krMarket) {
+      // 해석이 안 된 KR 6자리 코드 — 사용자가 고른 시장으로 접미사를 붙인다(추측하지 않음)
+      t = { ok: true, ticker: _lpt.pendingKr.code + (krMarket === 'KOSPI' ? '.KS' : '.KQ'),
+            name: String(f.get('krName') || '').trim() || _lpt.pendingKr.code, mkt: 'KR' };
+    } else {
+      t = await apiJson('/api/lowpoint/resolve/' + encodeURIComponent(q));
+    }
+    if (!t.ok) {
+      if (t.candidates) throw new Error('여러 종목이 해당돼요: ' + t.candidates.map(c => c.name + '(' + c.ticker + ')').join(', '));
+      if (t.kr_code) { _lpt.pendingKr = { code: q.toUpperCase() }; return; }   // 시장 선택 칸을 띄운다
+      throw new Error(`'${q}' 종목을 찾지 못했어요(저점 후보·스캐너 유니버스·미국 상장목록에 없음)`);
+    }
+    _lpt.pendingKr = null;
+    const hold = _lpt.trades.find(r => !r.sellDate && r.code === t.ticker && r.kind === kind);
+    if (hold) {
+      await _lptPut(lpMergeBuy(hold, buy), hold.rev);          // 추매 → 평단·수량 합침
+    } else {
+      await _lptPut({ id: Date.now(), kind, mkt: t.mkt, code: t.ticker, name: t.name, ...buy }, null);
+    }
+    form.reset();
+    await _lptLoad();
+  });
+}
+function lptStartSell(id) { _lpt.selling = id; renderLowpointTrack(); }
+async function lptConfirmSell(form, id) {
+  const f = new FormData(form);
+  const hold = _lpt.trades.find(r => r.id === id);
+  if (!hold) return;
+  let split;
+  try { split = lpSplitSell(hold, { sellDate: f.get('sellDate'), sellPrice: f.get('sellPrice'), qty: Number(f.get('qty')) }, Date.now()); }
+  catch (e) { alert(e.message); return; }
+  await _lptRun(async () => {
+    if (split.full) {
+      await _lptPut(split.close, hold.rev);
+    } else {
+      // 판 만큼 종료 레코드 먼저(서버가 수량 < 보유 검증) → 잔여 보유 수량 감소(base_rev)
+      await _lptPut(split.close, null);
+      await _lptPut(split.remain, hold.rev);
+    }
+    _lpt.selling = null;
+    await _lptLoad();
+  });
+}
+async function lptDelete(id) {
+  const r = _lpt.trades.find(x => x.id === id);
+  if (!r || !confirm(`${r.name} 기록을 삭제할까요? (서버 삭제 로그에 남아요)`)) return;
+  await _lptRun(async () => {
+    await apiJson('/api/lowpoint/trades/' + encodeURIComponent(id), { method: 'DELETE' });
+    await _lptLoad();
+  });
+}
+async function lptSaveSettings(form) {
+  const f = new FormData(form);
+  await _lptRun(async () => {
+    const d = await apiJson('/api/lowpoint/trade-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_pct: { '단기': Number(f.get('t단기')), '장기': Number(f.get('t장기')) } }) });
+    _lpt.settings = d.settings;
+  });
+}
+function renderLowpointTrack() {
+  const wrap = document.getElementById('lowpointTrackView');
+  if (!wrap || wrap.style.display === 'none') return;
+  const head = `<div class="jr-title"><h2>저점 매매</h2><span class="n-sub" style="font-size:13px">저점종목 매매 기록 · 일지와 별도 저장</span>
+    <span class="jr-title-sp"></span><button type="button" class="n-btn" onclick="_lptPrices().then(renderLowpointTrack)">현재가 갱신</button></div>`;
+  if (_lpt.error) {
+    wrap.innerHTML = head + `<section class="n-card jr-gate jr-gate-bad" role="alert" style="display:block;padding:18px 20px">
+      <div style="font-size:15px;font-weight:600">기록을 불러오지 못했어요</div><div class="n-sub" style="margin-top:6px">${_escapeHtml(_lpt.error.message)}</div>
+      <div style="margin-top:12px"><button type="button" class="n-btn" onclick="onEnterLowpointTrackTab()">다시 시도</button></div></section>`;
+    return;
+  }
+  const tp = _lpt.settings.target_pct || {};
+  const today = kstStr();
+  const kr = _lpt.pendingKr;
+  const addHtml = `<section class="n-card" style="padding:18px 22px">
+    <form class="lpt-form" onsubmit="event.preventDefault();lptAdd(this)">
+      <label>구분<select name="kind">${LPT_KINDS.map(k => `<option>${k}</option>`).join('')}</select></label>
+      <label style="flex:1 1 180px">종목<input name="q" placeholder="종목명 또는 코드" value="${kr ? _escapeHtml(kr.code) : ''}" required></label>
+      ${kr ? `<label>시장<select name="krMarket" required><option value="">선택</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select></label>
+              <label>종목명<input name="krName" placeholder="직접 입력"></label>` : ''}
+      <label>매수일<input type="date" name="buyDate" value="${today}" required></label>
+      <label>매수가<input name="buyPrice" inputmode="decimal" required></label>
+      <label>수량<input name="qty" inputmode="decimal" required></label>
+      <button type="submit" class="n-btn primary">기록 추가</button>
+    </form>
+    ${kr ? `<div class="n-sub" style="margin-top:8px">'${_escapeHtml(kr.code)}'는 목록에 없는 KR 코드예요 — 시장을 골라 주세요(추측해서 붙이지 않아요).</div>` : ''}
+    <div class="n-sub" style="margin-top:8px">같은 종목·구분의 보유가 있으면 추매로 합쳐 평단·수량을 다시 계산해요.</div>
+  </section>`;
+  const open = lpSortHoldings(_lpt.trades.filter(r => !r.sellDate));
+  let prevKind = null;
+  const holdRows = open.map(r => {
+    const sep = (prevKind === '단기' && r.kind === '장기')
+      ? `<tr class="lpt-sep"><td colspan="8"><span>장기</span></td></tr>` : '';
+    prevKind = r.kind;
+    const cur = _lpt.prices[r.code];
+    const curCell = !_lpt.priced ? '<span class="n-sub">조회 중…</span>'
+      : (cur == null ? `<span class="st-dot st-bad" title="${_escapeHtml(_lpt.priceError || '현재가 응답에 이 종목이 없어요')}">조회 실패</span>` : `<span class="num">${_lptFmt(cur, r.mkt)}</span>`);
+    const target = lpTargetPrice(r.buyPrice, tp[r.kind] || 0);
+    const hit = cur != null && cur >= target;
+    const sellForm = _lpt.selling === r.id ? `<tr class="lpt-sell"><td colspan="8">
+        <form class="lpt-form" onsubmit="event.preventDefault();lptConfirmSell(this, ${r.id})">
+          <label>매도일<input type="date" name="sellDate" value="${today}" required></label>
+          <label>매도가<input name="sellPrice" inputmode="decimal" value="${cur != null ? cur : ''}" required></label>
+          <label>수량<input name="qty" inputmode="decimal" value="${r.qty}" required></label>
+          <button type="submit" class="n-btn primary">종료 확정</button>
+          <button type="button" class="n-btn" onclick="_lpt.selling=null;renderLowpointTrack()">취소</button>
+          <span class="n-sub">보유 ${r.qty}주보다 적게 팔면 판 만큼만 종료 기록으로 나뉘어요</span>
+        </form></td></tr>` : '';
+    return `${sep}<tr class="${hit ? 'lpt-hit' : ''}">
+      <td><span class="chip">${r.kind}</span></td>
+      <td><b>${_escapeHtml(r.name || r.code)}</b><div class="jr-s num">${_escapeHtml(_lptCode(r))} · ${r.mkt}</div></td>
+      <td class="num r">${_lptFmt(r.buyPrice, r.mkt)}</td>
+      <td class="num r">${r.qty}</td>
+      <td class="r">${curCell}</td>
+      <td class="r">${_lptPct(lpReturnPct(cur, Number(r.buyPrice)))}</td>
+      <td class="num r">${_lptFmt(target, r.mkt)}${hit ? '<div class="jr-s st-accent">목표 도달</div>' : ''}</td>
+      <td class="r" style="white-space:nowrap"><button type="button" class="n-btn sm" onclick="lptStartSell(${r.id})">종료</button>
+        <button type="button" class="n-btn sm" onclick="lptDelete(${r.id})">삭제</button></td>
+    </tr>${sellForm}`;
+  }).join('');
+  const closed = _lpt.trades.filter(r => r.sellDate).sort((a, b) => b.sellDate.localeCompare(a.sellDate));
+  const closedRows = closed.map(r => {
+    const ret = lpReturnPct(Number(r.sellPrice), Number(r.buyPrice));
+    const pnl = (Number(r.sellPrice) - Number(r.buyPrice)) * Number(r.qty);
+    const col = pnl > 0 ? '#f2848c' : pnl < 0 ? '#6fa8ff' : 'var(--n-muted)';
+    return `<tr><td class="num">${r.sellDate}</td><td><span class="chip">${r.kind}</span></td>
+      <td><b>${_escapeHtml(r.name || r.code)}</b><div class="jr-s num">${_escapeHtml(_lptCode(r))} · ${r.mkt}${r.partial ? ' · 분할' : ''}</div></td>
+      <td class="num r">${_lptFmt(r.buyPrice, r.mkt)}</td><td class="num r">${_lptFmt(r.sellPrice, r.mkt)}</td><td class="num r">${r.qty}</td>
+      <td class="r">${_lptPct(ret)}</td><td class="num r" style="color:${col}">${pnl > 0 ? '+' : ''}${_lptFmt(pnl, r.mkt)}</td>
+      <td class="r"><button type="button" class="n-btn sm" onclick="lptDelete(${r.id})">삭제</button></td></tr>`;
+  }).join('');
+  const months = lpMonthlySummary(closed);
+  const monthRows = months.map(m => `<tr><td class="num">${m.month}</td><td>${m.mkt}</td><td class="num r">${m.n}</td>
+      <td class="num r">${m.winRate}%</td><td class="r">${_lptPct(m.avgRet)}</td>
+      <td class="num r" style="color:${m.pnl > 0 ? '#f2848c' : m.pnl < 0 ? '#6fa8ff' : 'inherit'}">${m.pnl > 0 ? '+' : ''}${_lptFmt(m.pnl, m.mkt)}</td></tr>`).join('');
+  const settingsHtml = `<form class="lpt-form" onsubmit="event.preventDefault();lptSaveSettings(this)" style="margin-top:12px">
+      <span class="n-sub">목표가 = 평단 × (1 + 목표%)</span>
+      <label>단기 목표%<input name="t단기" inputmode="decimal" value="${tp['단기']}"></label>
+      <label>장기 목표%<input name="t장기" inputmode="decimal" value="${tp['장기']}"></label>
+      <button type="submit" class="n-btn sm">목표% 저장</button></form>`;
+  wrap.innerHTML = `${head}${addHtml}
+    <section class="n-card" style="padding:18px 22px">
+      <div class="jr-card-h" style="padding:0 0 10px"><span class="n-h">보유</span><span class="n-sub">${open.length}건${_lpt.priceError ? ' · 현재가 조회 실패: ' + _escapeHtml(_lpt.priceError) : ''}</span></div>
+      <div class="jr-table-wrap"><table class="jr-table lpt-table"><thead><tr><th>구분</th><th>종목</th><th class="r">평단</th><th class="r">수량</th><th class="r">현재가</th><th class="r">수익률</th><th class="r">목표가</th><th></th></tr></thead>
+      <tbody>${holdRows || '<tr><td colspan="8" class="n-sub" style="padding:18px;text-align:center">보유 기록 없음</td></tr>'}</tbody></table></div>
+      ${settingsHtml}
+    </section>
+    <section class="n-card" style="padding:18px 22px">
+      <div class="jr-card-h" style="padding:0 0 10px"><span class="n-h">종료</span><span class="n-sub">${closed.length}건 · 매도일순</span></div>
+      <div class="jr-table-wrap"><table class="jr-table lpt-table"><thead><tr><th>매도일</th><th>구분</th><th>종목</th><th class="r">평단</th><th class="r">매도가</th><th class="r">수량</th><th class="r">수익률</th><th class="r">수익금</th><th></th></tr></thead>
+      <tbody>${closedRows || '<tr><td colspan="9" class="n-sub" style="padding:18px;text-align:center">종료 기록 없음</td></tr>'}</tbody></table></div>
+    </section>
+    <section class="n-card" style="padding:18px 22px">
+      <div class="jr-card-h" style="padding:0 0 10px"><span class="n-h">월간 요약</span><span class="n-sub">매도월 기준 · KR/US 분리</span></div>
+      <div class="jr-table-wrap"><table class="jr-table lpt-table"><thead><tr><th>월</th><th>시장</th><th class="r">건수</th><th class="r">승률</th><th class="r">평균 수익률</th><th class="r">수익금</th></tr></thead>
+      <tbody>${monthRows || '<tr><td colspan="6" class="n-sub" style="padding:18px;text-align:center">아직 없음</td></tr>'}</tbody></table></div>
+    </section>`;
 }
 
 // 앱 시작 시 서버에서 일지 로드 + 구 localStorage 데이터 마이그레이션

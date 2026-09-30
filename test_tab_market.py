@@ -63,7 +63,7 @@ def _modes_in(elem_id: str) -> list:
 # 메인: 홈 · US눌림목 · ABC · 추세전환 · 더보기▾ / 오른쪽: 업종/테마 · 마감정리 · 일지
 EXPECTED_MAIN = ["calendar", "pullback", "abc", "turnaround"]
 EXPECTED_UTIL = ["themes", "eod", "journal"]
-EXPECTED_MORE_TABS = ["jongga", "imminent", "boxbreak", "breakout", "surge_observe", "positions"]
+EXPECTED_MORE_TABS = ["jongga", "imminent", "boxbreak", "breakout", "surge_observe", "positions", "lowpoint_track"]
 
 
 def test_main_tab_order():
