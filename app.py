@@ -5,6 +5,17 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.305 [시선 둘 곳 — 사용자 지시 "강조색(앰버)은 행동·현재 위치에만, 의미색은 상태에만, 장식용 색 금지"]
+    static/index.html만. 새 토큰(두 테마 같은 키): --n-primary-bg/-hover/-fg · --n-hit-tint · --n-rs-hi-bg/-fg ·
+    --n-good-tint · --n-card-hover-line · --n-card-shadow. 즉시 행동 종목명(.nm)은 이미 본문 14px보다 큰 20px라
+    유지. ① 헤더: "다시 스캔" = 유일한 주 버튼(앰버 채움+흰 글자 —
+    #d98b3a 위 흰 글자는 2.6:1이라 채움을 라이트 #a66520·다크 #ac6218까지 진하게, 4.6:1), 활성 탭 = 굵게+앰버
+    밑줄 3px(상자 제거), 앱 이름 앞 앰버 사각 점. ② 시장 타일 왼쪽 4px 상태 띠(.st-* 상태색 재사용). ③ 오늘 할 일:
+    왼쪽 앰버 4px 띠 + 라벨 13px 굵게. ④ 내 추적 도달 행·저점 보유 목표 도달 행 = 옅은 초록 틴트(저점은 기존 주황
+    틴트 대체 — 저점 틴트는 jr-table의 짝수 행 초기화 규칙(tbody tr:nth-child(even) td{background:none})에 선택자
+    우선순위에서 져서 v5.302부터 짝수 행에서 안 보였다 → table.jr-table.lpt-table tbody tr.lpt-hit td로 올림). ⑤ 스캔 카드: RS≥95 진한 초록 칩(rsHiClass, 표시 전용), hover 그림자+테두리 진하게, 스파크라인
+    선 굵기를 화면 px로 고정(작은 카드에서 축소돼 회색처럼 보이던 것 — 색은 원래 잉크 --text). ⑥ 섹터 가속 1위만
+    굵게 + 상승이면 등락 칩. ⑦ 종가베팅 실전 진행바 6→8px.
 v5.304 [라이트 테마 + 헤더 토글 — 사용자 지시, 서버 로직 변경 없음] [1단계 토큰 정리] static/index.html
     의 하드코딩 색(hex·rgb/rgba 433곳, 177종)을 CSS 변수로 옮김. 기존 변수와 값이 하나로만 일치하면
     재사용(--text·--amber·--down·--n-good·--n-muted), 나머지는 --c-{계열}-{역할}{번호}(계열=색상,
@@ -8439,7 +8450,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.304"
+VERSION = "v5.305"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

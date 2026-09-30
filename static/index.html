@@ -66,6 +66,12 @@ if ('serviceWorker' in navigator) {
 <style>
 :root[data-theme="dark"]{
   color-scheme:dark;
+  /* v5.305(사용자 지시 "시선 둘 곳") 강조 토큰 — 앰버=행동·현재 위치, 의미색=상태만 */
+  --n-primary-bg:#ac6218; --n-primary-bg-hover:#95541a; --n-primary-fg:#ffffff;
+  --n-hit-tint:rgba(99,200,155,0.08);
+  --n-rs-hi-bg:#1d6b3a; --n-rs-hi-fg:#ffffff;
+  --n-good-tint:rgba(99,200,155,0.14);
+  --n-card-hover-line:#5d6372; --n-card-shadow:rgba(0,0,0,0.35);
   --fade-floor:0;   /* v5.304: opacity 흐림의 하한 — 다크는 원래 흐림 그대로 */
   --bg:#0C111B; --surface:#141C2B; --surface2:#1A2436; --line:#233047;
   --text:#E6ECF5; --muted:#8A97AC; --dim:#5A6578;
@@ -261,6 +267,12 @@ if ('serviceWorker' in navigator) {
    다크 블록과 키 집합이 같아야 한다(test_theme_tokens.py가 강제). */
 :root,:root[data-theme="light"]{
   color-scheme:light;
+  /* v5.305 강조 토큰(키는 다크와 같다). 주 버튼 채움은 흰 글자 4.5:1 때문에 #d98b3a보다 진한 #a66520 */
+  --n-primary-bg:#a66520; --n-primary-bg-hover:#8f561a; --n-primary-fg:#ffffff;
+  --n-hit-tint:#eef5f1;
+  --n-rs-hi-bg:#197649; --n-rs-hi-fg:#ffffff;
+  --n-good-tint:#e3f1e9;
+  --n-card-hover-line:#b3bac5; --n-card-shadow:rgba(16,24,40,0.08);
   --fade-floor:1;   /* 라이트는 흐림 끔 — 보조색(#606773)이 이미 4.9:1이라 opacity를 곱하면 4.5:1 미달. 구분은 보조색이 맡는다 */
   --bg:#ffffff;
   --surface:#fafafa;
@@ -829,7 +841,7 @@ tr.editing{background:var(--c-orange-a6)}
    결과 — 우선순위6"). 카드 배지(👑 아이콘)는 소속 여부 정보로만 유지. */
 .card{background:var(--surface);border:1px solid var(--c-gray-bg5);border-radius:12px;
   padding:16px;display:flex;flex-direction:column;gap:12px}
-.card:hover{border-color:var(--c-gray-bg6)}
+.card:hover{border-color:var(--n-card-hover-line);box-shadow:0 2px 10px var(--n-card-shadow)}   /* v5.305 */
 .card.fired{border-color:var(--c-orange-a7)}
 .card.fav{border-color:var(--c-amber-a8);box-shadow:0 0 0 1px var(--c-amber-a9)}
 .fav-btn{background:none;border:none;cursor:pointer;font-size:20px;line-height:1;
@@ -878,6 +890,8 @@ tr.editing{background:var(--c-orange-a6)}
 .cc-label{font-size:9.5px;color:var(--muted);font-weight:500}
 .cc-rs,.cc-risk,.cc-score{font-variant-numeric:tabular-nums;flex-shrink:0;text-align:right}
 .cc-rs{font-size:12px;width:24px}
+/* v5.305: RS 95 이상 = 진한 초록 칩 */
+.cc-rs.rs-hi{width:auto;min-width:24px;padding:0 4px;border-radius:4px;background:var(--n-rs-hi-bg);color:var(--n-rs-hi-fg);font-weight:700;text-align:center}
 .cc-entry{font-size:11px;flex-shrink:0;width:14px;text-align:center;line-height:1}
 .cc-risk{font-size:12px;width:42px}
 .cc-score{font-size:12.5px;font-weight:700;width:26px;margin-left:auto}
@@ -1027,7 +1041,9 @@ tr.editing{background:var(--c-orange-a6)}
 header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1px solid var(--n-line)}
 .hdr-row{display:flex;align-items:center;gap:20px;min-height:64px;padding:0 var(--n-gutter)}
 .hdr-brand{display:flex;align-items:baseline;gap:8px;flex-shrink:0}
-.hdr-title{font-size:17px;font-weight:700;letter-spacing:-.2px;color:var(--n-text)}
+.hdr-title{font-size:17px;font-weight:700;letter-spacing:-.2px;color:var(--n-text);display:inline-flex;align-items:center;gap:8px}
+/* v5.305: 앱 이름 앞 앰버 사각 점(현재 위치 표시와 같은 앰버) */
+.hdr-title::before{content:"";width:8px;height:8px;border-radius:2px;background:var(--n-accent);flex-shrink:0}
 .hdr-brand .ver{font-size:11px;color:var(--n-muted);border:0;padding:0}
 .hdr-guide{font-size:12px;color:var(--n-muted);text-decoration:none}
 .hdr-guide:hover{color:var(--n-accent-fg)}
@@ -1036,7 +1052,8 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .hdr .tab{min-height:44px;border-radius:8px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
 .hdr-main .tab{padding:10px 14px;font-size:14px;color:var(--n-sub)}
 .hdr-util .tab{padding:10px 12px;font-size:13px;color:var(--n-muted)}
-.hdr-main .tab.active,.hdr-util .tab.active,.hdr-more.has-active{background:var(--c-blue-bg1);color:var(--c-gray-fg1);font-weight:600}
+/* v5.305: 활성 탭 = 굵은 글자 + 앰버 밑줄 3px(상자 대신) */
+.hdr-main .tab.active,.hdr-util .tab.active,.hdr-more.has-active{background:none;color:var(--n-text);font-weight:700;box-shadow:inset 0 -3px 0 var(--n-accent);border-radius:8px 8px 0 0}
 .hdr-sep{width:1px;height:20px;background:var(--c-gray-bg7);flex-shrink:0}
 .hdr-right{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0}
 .tab-filters{display:flex;align-items:center;gap:4px;flex-wrap:wrap;padding:8px var(--n-gutter) 0}
@@ -1046,8 +1063,10 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .hdr .hdr-seg{background:var(--c-blue-bg4);border:1px solid var(--c-blue-bg2);border-radius:9px;padding:2px}
 .hdr-seg .tab{padding:0 14px;font-size:13px;color:var(--n-muted);border-radius:7px;min-height:40px}
 .hdr-seg .tab.active{background:var(--c-blue-bg6);color:var(--c-gray-fg1);font-weight:600}
-.hdr .refresh{height:44px;padding:0 16px;border-radius:9px;border:1px solid var(--n-line2);background:var(--c-blue-bg4);
-  color:var(--n-text);font-size:13px;display:inline-flex;align-items:center;gap:8px}
+.hdr .refresh{height:44px;padding:0 16px;border-radius:9px;border:1px solid var(--n-primary-bg);background:var(--n-primary-bg);
+  color:var(--n-primary-fg);font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:8px}
+/* v5.305: "다시 스캔" = 화면의 유일한 주 버튼(앰버 채움 + 흰 글자) */
+.hdr .refresh:hover{background:var(--n-primary-bg-hover);border-color:var(--n-primary-bg-hover)}
 .more-panel{position:absolute;top:calc(100% - 8px);left:0;z-index:120;display:flex;gap:16px;flex-wrap:wrap;
   background:var(--n-card);border:1px solid var(--c-blue-bg2);border-radius:12px;padding:10px;
   box-shadow:0 12px 32px var(--c-gray-a1)}
@@ -1088,6 +1107,9 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .tile{background:var(--n-card);border:1px solid var(--n-line);border-radius:14px;padding:calc(18px * var(--n-k)) calc(20px * var(--n-k));
   display:flex;flex-direction:column;gap:calc(10px * var(--n-k));min-width:0}
 .tile-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+/* v5.305: 상태 점을 타일 왼쪽 4px 세로 띠로 승격 — 색은 .st-* 상태색과 같은 토큰 */
+.tile.lv-good{box-shadow:inset 4px 0 0 var(--n-good)} .tile.lv-neutral{box-shadow:inset 4px 0 0 var(--c-amber-fg2)}
+.tile.lv-bad{box-shadow:inset 4px 0 0 var(--c-red-fg3)} .tile.lv-unknown{box-shadow:inset 4px 0 0 var(--n-muted)}
 .tile-name{font-size:13px;color:var(--n-sub);text-decoration:none}
 .tile-name:hover{color:var(--n-text)}
 .tile-val{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
@@ -1107,7 +1129,9 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .home-warn{display:flex;flex-wrap:wrap;gap:6px 16px;padding:12px 16px;border-radius:12px;background:var(--c-orange-bg4);border:1px solid var(--c-orange-bg5);font-size:13px}
 .todo{background:var(--c-amber-bg7);border:1px solid var(--c-orange-a8);border-radius:16px;padding:calc(24px * var(--n-k)) calc(28px * var(--n-k));display:flex;flex-direction:column;gap:calc(20px * var(--n-k))}
 .todo-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.todo-h .t{font-size:12px;font-weight:600;color:var(--n-accent-fg);letter-spacing:.4px}
+/* v5.305: 왼쪽 앰버 4px 띠 + 라벨 앰버 굵게(틴트 배경 유지) */
+.todo{border-left:4px solid var(--n-accent)}
+.todo-h .t{font-size:13px;font-weight:700;color:var(--n-accent-fg);letter-spacing:.4px}
 .todo-item{display:flex;flex-direction:column;gap:calc(14px * var(--n-k))}
 .todo-item+.todo-item{border-top:1px solid var(--c-amber-bg5);padding-top:calc(20px * var(--n-k))}
 .todo-top{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
@@ -1139,8 +1163,11 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .side-card{padding:20px 22px;display:flex;flex-direction:column;gap:12px}
 .bar{height:6px;border-radius:3px;background:var(--c-blue-bg2);overflow:hidden}
 .bar>div{height:6px;background:var(--n-accent)}
+.bar.jf,.bar.jf>div{height:8px;border-radius:4px}   /* v5.305: 종가베팅 실전 진행바 6→8px */
 .sec-row{display:flex;flex-direction:column;gap:4px}
 .sec-row .a{display:flex;justify-content:space-between;gap:8px;font-size:14px}
+/* v5.305: 1위 섹터만 등락 칩(옅은 초록 배경) */
+.sec-row.top .a .num.pos{background:var(--n-good-tint);border-radius:5px;padding:1px 6px}
 .sec-row .b{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--n-muted)}
 .sec-row .b>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lp-chips{display:flex;flex-wrap:wrap;gap:6px}
@@ -1185,7 +1212,9 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .lpt-form input,.lpt-form select{min-height:40px;background:var(--c-blue-bg3);border:1px solid var(--n-line2);border-radius:8px;color:var(--n-text);padding:0 10px;font:inherit;font-size:14px;min-width:0}
 .lpt-form input[name=buyPrice],.lpt-form input[name=qty],.lpt-form input[name=sellPrice]{width:110px}
 .lpt-table td.r,.lpt-table th.r{text-align:right}
-.lpt-table tr.lpt-hit td{background:var(--c-orange-a9)}
+/* v5.305: 목표·트리거 도달 행 = 아주 옅은 초록(--n-hit-tint, 글자 대비 4.5:1 유지) */
+table.jr-table.lpt-table tbody tr.lpt-hit td{background:var(--n-hit-tint)}   /* jr-table의 짝수 행 background:none(tbody tr:nth-child(even) td)보다 우선해야 한다 — v5.302 주황 틴트가 짝수 행에서 안 보이던 원인 */
+.track-row.hit{background:var(--n-hit-tint)}
 .lpt-table tr.lpt-sep td{padding:6px 12px 6px 24px;border-bottom:1px solid var(--n-line2)}
 .lpt-table tr.lpt-sep span{font-size:11px;color:var(--n-muted);letter-spacing:.4px}
 .lpt-table tr.lpt-sell td{background:var(--c-blue-bg7)}
@@ -1322,7 +1351,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.304</span>
+      <span class="ver mono" id="verBadge">v5.305</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -1828,7 +1857,7 @@ function sparkSVG(closes, ma20) {
   return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
     ${zone}
     <path d="${path(ma20)}" fill="none" style="stroke:var(--down)" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/>
-    <path d="${path(closes)}" fill="none" style="stroke:var(--text)" stroke-width="1.5"/>
+    <path d="${path(closes)}" fill="none" style="stroke:var(--text)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
     <circle cx="${x(last)}" cy="${y(closes[last])}" r="3" style="fill:var(--amber)"/>
   </svg>`;
 }
@@ -2159,6 +2188,8 @@ function entrySignalNoteHtml(s, sig) {
 // 토글(펼침 상태는 저장 안 함, 재렌더마다 항상 접힘부터 시작). card()/
 // breakdownCard()가 공용으로 쓰고, 인버스는 필드가 아예 달라 별도
 // collapsedRowHtmlInverse()를 씀.
+// v5.305: RS 95 이상이면 진한 초록 칩(표시 전용 — 판정·정렬 불변)
+function rsHiClass(rs) { return (typeof rs === 'number' && rs >= 95) ? ' rs-hi' : ''; }
 function miniSparkHtml(s) {
   if (!s.spark || !s.spark.length) return '<span class="cc-spark"></span>';
   return `<span class="cc-spark">${sparkSVG(s.spark, s.spark_ma20 || [])}</span>`;
@@ -2239,7 +2270,7 @@ function collapsedRowHtml(s) {
     </div>
     <div class="cc-row2">
       ${miniSparkHtml(s)}
-      <span class="cc-field"><span class="cc-label">RS</span><span class="cc-rs mono" title="RS">${s.rs != null ? s.rs : '-'}</span></span>
+      <span class="cc-field"><span class="cc-label">RS</span><span class="cc-rs mono${rsHiClass(s.rs)}" title="RS">${s.rs != null ? s.rs : '-'}</span></span>
       <span class="cc-entry" title="${esig.title}">${esig.icon}</span>
       <span class="cc-field"><span class="cc-label">리스크</span>${riskPctMiniHtml(s)}</span>
       <span class="cc-score cc-score-muted mono" title="점수 — ${SCORE_NOTE}">${s.score != null ? Math.round(s.score) : '-'}</span>
@@ -6267,7 +6298,7 @@ function renderHomeTiles() {
     }
     const stale = idxStaleInfo(ix);
     const staleHtml = stale ? ` · <span class="st-warn">마지막 봉 ${stale.lb.slice(5)} (${stale.days}일 전)</span>` : '';
-    return `<div class="tile" title="${nm} 게이트: ${(g.html || '').replace(/"/g, '&quot;')}">
+    return `<div class="tile lv-${g.lv in _N_LV_CLASS ? g.lv : 'unknown'}" title="${nm} 게이트: ${(g.html || '').replace(/"/g, '&quot;')}">
       <div class="tile-top">${_nIdxName(nm)}<span class="st-dot ${_N_LV_CLASS[g.lv]}">${g.short}</span></div>
       <div class="tile-val"><span class="num v">${_nIdxVal(ix && ix.value)}</span>${_nPct(ix ? ix.change_pct : null)}</div>
       <div class="tile-foot">${foot.join(' · ') || '&nbsp;'}${staleHtml}</div>
@@ -6288,7 +6319,7 @@ function renderHomeTiles() {
     return `<div class="tile-row"><span class="k">${nm}</span><span class="num">${_nIdxVal(ix && ix.value)} ${_nPct(ix ? ix.change_pct : null)}</span></div>`;
   };
   box.innerHTML = idxTile('코스피') + idxTile('코스닥') + idxTile('나스닥') + `
-    <div class="tile" style="gap:8px" title="${gateTitle}">
+    <div class="tile lv-${combLv in _N_LV_CLASS ? combLv : 'unknown'}" style="gap:8px" title="${gateTitle}">
       <div class="tile-top"><span class="tile-name">시장 게이트</span><span class="st-dot ${_N_LV_CLASS[combLv]}">${combTxt}</span></div>
       ${miniRow('S&P500')}${miniRow('닛케이')}${miniRow('비트코인')}
     </div>`;
@@ -6316,7 +6347,7 @@ function renderJonggaForwardCard(fwd) {
   }
   return `<section class="n-card side-card" aria-label="종가베팅 실전">
     <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="n-sub" style="font-size:13px">종가베팅 실전 기록</span><span class="num" style="font-size:15px;font-weight:600">${n} / 30</span></div>
-    <div class="bar"><div style="width:${pct}%"></div></div>
+    <div class="bar jf"><div style="width:${pct}%"></div></div>
     <span class="n-sub">${foot}</span>
   </section>`;
 }
@@ -6324,8 +6355,8 @@ function renderJonggaForwardCard(fwd) {
 // 오른쪽 2: 섹터 가속 상위 3 — sector_flow.accel_kr/us(서버가 이미 가속 순으로
 // 정렬해 보낸 목록, 새 계산 없음). 시장 필터가 '전체'면 KR·US 각 3개.
 function renderSectorAccelCard(sf) {
-  const block = (rows, mk) => (rows || []).slice(0, 3).map(r => `<div class="sec-row">
-      <div class="a"><span style="font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_escapeHtml(r.sector || '')}">${_escapeHtml(r.sector || '')}</span>${r.ret20 != null ? `<span class="num" style="color:${r.ret20 > 0 ? 'var(--px-up)' : r.ret20 < 0 ? 'var(--px-down)' : 'var(--n-muted)'}" title="20일 등락">${r.ret20 > 0 ? '+' : ''}${r.ret20}%</span>` : ''}</div>
+  const block = (rows, mk) => (rows || []).slice(0, 3).map((r, i) => `<div class="sec-row${i === 0 ? ' top' : ''}">
+      <div class="a"><span style="font-weight:${i === 0 ? 700 : 500};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_escapeHtml(r.sector || '')}">${_escapeHtml(r.sector || '')}</span>${r.ret20 != null ? `<span class="num${r.ret20 > 0 ? ' pos' : ''}" style="color:${r.ret20 > 0 ? 'var(--px-up)' : r.ret20 < 0 ? 'var(--px-down)' : 'var(--n-muted)'}" title="20일 등락">${r.ret20 > 0 ? '+' : ''}${r.ret20}%</span>` : ''}</div>
       <div class="b"><span>${_sectorLeaderCompactHtml(r.leaders, mk, _SECTOR_LEADER_PLAIN_MARKS)}</span><span class="num" title="섹터 RS 백분위 60일→20일">RS ${r.rs_pct}→${r.rs20_pct}</span></div>
     </div>`).join('');
   let body = '';
@@ -10118,7 +10149,7 @@ function renderMyTrackBoard() {
         <button type="button" class="n-btn sm" onclick="myTrackOpenJournal(${r.id})">+ 일지</button>
       </div>
     </div>`;
-    return `<div class="track-row" role="button" tabindex="0" aria-controls="mytrack_exp_${r.id}" onclick="toggleMyTrackExpand(${r.id})" onkeydown="if(event.target===this&&(event.key==='Enter'||event.key===' ')){event.preventDefault();toggleMyTrackExpand(${r.id})}">
+    return `<div class="track-row${st.state === 'reached' ? ' hit' : ''}" role="button" tabindex="0" aria-controls="mytrack_exp_${r.id}" onclick="toggleMyTrackExpand(${r.id})" onkeydown="if(event.target===this&&(event.key==='Enter'||event.key===' ')){event.preventDefault();toggleMyTrackExpand(${r.id})}">
       ${nameCell(r, mkt)}
       <span class="num r">${priceStr}</span>
       <span class="r">${_myTrackTriggerInputHtml(r)}</span>
