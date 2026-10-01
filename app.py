@@ -5,6 +5,27 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.309 [저점종목 — US 데이터 준비 선체크, 사용자 지시] 2026-10-01 10:48 KST 월봉 실행에서
+    US 15종목이 "정지추정"으로 탈락했고 그 안에 **SITC·ADEA·HUBB·SHEL·UA·WLY 같은 대형주**가
+    있었다 — 거래정지가 아니라 야후가 09-30 일봉을 아직 안 올린 것이었다(12:02 실행 4종목,
+    13:00 0종목). 월말·주말 직후 실행은 종목별 봉 도착 시차로 **비재현적**이고, 그 사실이
+    "정지추정 제외"로 조용히 묻혔다. KR엔 확정 시각 규칙(`KR_CLOSE_CONFIRMED_HM`)이 있는데
+    US엔 없던 구멍이다.
+    [선체크] US 파트 **시작 전에** 초유동 기준 3종목(AAPL·MSFT·NVDA, 사용자 지정)의 최신
+    일봉이 목표 거래일에 도달했는지 확인한다(`lowpoint.check_us_data_ready`). 미달이면
+    `DataNotReady`로 이번 시도를 중단해 유니버스·일봉 5,618종목 조회를 아예 시작하지 않는다.
+    목표 거래일은 봉 라벨 이하의 마지막 US 거래일이고, 휴장일 판정은 **app.py의
+    `is_trading_day`를 주입**해서 쓴다(lowpoint.py에 휴장일 목록 사본을 만들지 않는다 —
+    주입이 없는 CLI 경로는 주말만 보는 폴백, 그 한계를 테스트로 고정).
+    [재시도] 새 대기시간·임계값을 만들지 않았다 — 기존 `LOWPOINT_RETRY_MIN`(60분)·
+    `LOWPOINT_MAX_ATTEMPTS`(3)·v5.308의 KR 장중 차단을 그대로 탄다.
+    [상태 구분] 실패 사유를 상태 파일·로그에 `data_not_ready`로 따로 기록한다(그 외는
+    `failed`) — "데이터 미도착으로 건너뜀"과 "진짜 실패/재시도 소진"을 사후에 가릴 수 있게.
+    로그 문구도 "데이터 미도착"/"실패"로 갈라진다.
+    [변경 없음] "정지추정" 제외 로직은 **그대로 둔다**(사용자 지시) — 선체크를 통과한
+    실행에서는 그 판정이 원래 의미(실제 거래정지·상폐)를 유지한다. KR 파트도 그대로.
+    [테스트] 16건 신설(목표 거래일 계산·선체크 4경계·US 경로 결합·KR 비호출·정지추정 로직
+    불변·상태 구분·재시도 규칙·상수 인벤토리). 사보타주 3종 전부 FAIL 확인 후 원복.
 v5.308 [운영 메모리 — 사용자 지시] 2026-10-01 홈 "불러오기 실패" 조사 결과 두 결함을 고쳤다.
     조사 수치: `/api/apiguard/status` 5회 중 1회 무응답(25s 타임아웃)·1회 14.4s, 나머지 0.5s —
     **재시작 루프는 아니고**(version v5.307 일관, `GET /` 302 0.54s) 간헐 스톨. RSS는
@@ -8491,7 +8512,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.308"
+VERSION = "v5.309"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -17741,14 +17762,32 @@ def _lowpoint_job_blocking(tf: str, now: "datetime") -> dict:
         refresh = (datetime.now(fetched_at.tzinfo) - fetched_at) > timedelta(days=LOWPOINT_US_LISTINGS_MAX_AGE_DAYS)
     except Exception:
         refresh = True   # 없거나 깨졌으면 새로 받는다
+    # v5.309: 휴장일 판정을 **app.py의 is_trading_day 그대로 주입**한다 — lowpoint.py에
+    # 휴장일 목록 사본을 만들지 않기 위해(US 데이터 준비 선체크가 목표 거래일을 계산할 때 쓴다).
     results, labels = lp.screen_all(tf, now, refresh_universe=refresh,
-                                    us_listings_path=LOWPOINT_US_LISTINGS_PATH)
+                                    us_listings_path=LOWPOINT_US_LISTINGS_PATH,
+                                    is_trading_day=is_trading_day)
     entry = lp.publish_entry(results, tf, labels, harness.run_stamp())
     lp.write_publish(tf, entry, path=LOWPOINT_DATA_PATH)   # tmp → os.replace(원자적)
     return {"bar_date": entry["bar_date"], "rows": len(entry["rows"]),
             "listings_refreshed": refresh,
             "counts": {m: {"universe": c["universe"], "fetched": c["fetched"], "failed": c["failed"]}
                        for m, c in entry["excluded_counts"].items()}}
+
+
+def _lowpoint_data_not_ready_error():
+    """lowpoint.DataNotReady 클래스. 기동 시점에 lowpoint를 import하지 않으려고(무거움)
+    예외 처리 시점에만 가져온다 — import 실패 시엔 어떤 예외도 매칭되지 않는 더미를 돌려준다."""
+    try:
+        screens = os.path.join(os.path.dirname(__file__), "scripts", "screens")
+        if screens not in sys.path:
+            sys.path.insert(0, screens)
+        import lowpoint as lp
+        return lp.DataNotReady
+    except Exception:
+        class _Never(Exception):
+            pass
+        return _Never
 
 
 async def _maybe_run_lowpoint(now: "datetime | None" = None, *, _job=None) -> "dict | None":
@@ -17782,10 +17821,17 @@ async def _maybe_run_lowpoint(now: "datetime | None" = None, *, _job=None) -> "d
             print(f"[lowpoint] {tf} 자동 실행 완료 — 기준봉 {summary.get('bar_date')} · 신호 {summary.get('rows')}건 "
                   f"· {time.time() - t0:.0f}s · rss {rss0} → {_rss_mb()}MB · {summary.get('counts')}", flush=True)
         except Exception as e:
-            rec.update(status="failed", finished_at=datetime.now(KST).isoformat(),
+            # v5.309: **데이터 미도착과 그 외 실패를 구분**해 상태 파일에 남긴다 —
+            # "정지추정 오탈락으로 결과가 이상한 실행"과 "재시도 소진"을 사후에 가릴 수 있게.
+            # 재시도 규칙은 동일하다(_lowpoint_due는 status != "ok"를 모두 재시도 대상으로 본다)
+            # — 새 대기시간을 만들지 않는다(사용자 지시).
+            data_not_ready = isinstance(e, _lowpoint_data_not_ready_error())
+            rec.update(status="data_not_ready" if data_not_ready else "failed",
+                       finished_at=datetime.now(KST).isoformat(),
                        error=f"{type(e).__name__}: {e}"[:300])
-            print(f"[lowpoint] {tf} 자동 실행 실패(이전 결과 유지) — {rec['error']} · {time.time() - t0:.0f}s "
-                  f"· rss {rss0} → {_rss_mb()}MB", flush=True)
+            label = "데이터 미도착" if data_not_ready else "실패"
+            print(f"[lowpoint] {tf} 자동 실행 {label}(이전 결과 유지) — {rec['error']} · "
+                  f"{time.time() - t0:.0f}s · rss {rss0} → {_rss_mb()}MB", flush=True)
         finally:
             _lowpoint_running = False
             state[tf] = rec

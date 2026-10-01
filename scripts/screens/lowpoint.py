@@ -36,7 +36,7 @@ import sys
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -93,6 +93,59 @@ KR_DAYS = {"week": 1900, "month": 3700}
 US_PERIOD = {"week": "5y", "month": "10y"}
 
 RULE = {"week": "W-FRI", "month": "ME"}
+
+# v5.309(사용자 지시) — **US 데이터 준비 선체크.**
+# 2026-10-01 10:48 KST 월봉 실행에서 US 15종목이 "정지추정"으로 탈락했는데, 그 안에
+# SITC·ADEA·HUBB·SHEL·UA·WLY 같은 **대형주**가 들어 있었다. 거래정지가 아니라 야후가
+# 09-30 일봉을 아직 안 올린 것이었다(12:02 실행에선 4종목, 13시엔 0종목). 즉 월말·주말
+# 직후 실행은 종목별 봉 도착 시차 때문에 **비재현적**이고, 그 결과가 조용히 "정지추정
+# 제외"로 기록된다. KR에는 확정 시각 규칙이 있는데(KR_CLOSE_CONFIRMED_HM) US엔 없었다.
+# 그래서 US 파트를 시작하기 전에 **초유동 기준 종목 3개**의 최신 일봉이 목표 거래일에
+# 도달했는지 보고, 미달이면 이번 시도를 실패시킨다(DataNotReady) — 호출부(app.py
+# _maybe_run_lowpoint)가 기존 재시도 규칙(60분 간격·최대 3회·KR 장중 차단)을 그대로 쓴다.
+# 새 대기시간·임계값을 만들지 않는다(사용자 지시).
+# 기준 종목은 사용자가 지정: AAPL·MSFT·NVDA(미국 최대 거래량 종목이라 데이터가 늦게
+# 올라올 이유가 없다 — 이 셋이 비어 있으면 시장 전체가 아직 안 온 것이다).
+US_DATA_CHECK_TICKERS = ("AAPL", "MSFT", "NVDA")
+
+
+class DataNotReady(RuntimeError):
+    """US 일봉이 목표 거래일까지 도착하지 않았다 — 이번 시도를 포기하고 재시도 대상."""
+
+
+def expected_us_session(label, is_trading_day=None) -> "date":
+    """봉 라벨(주봉=금요일 / 월봉=말일) 이하의 **마지막 US 거래일**.
+    `is_trading_day(market, YYYY-MM-DD)`를 받으면 공휴일까지 반영한다 — app.py의 것을
+    그대로 주입받아 쓴다(휴장일 목록 사본을 만들지 않는다). 없으면 주말만 걸러낸다
+    (CLI 로컬 실행용 폴백 — 월말이 공휴일인 드문 경우만 보수적으로 어긋난다)."""
+    d = label.date() if hasattr(label, "date") else label
+    for _ in range(10):
+        ok = is_trading_day("us", d.isoformat()) if is_trading_day else d.weekday() < 5
+        if ok:
+            return d
+        d -= timedelta(days=1)
+    return d
+
+
+def check_us_data_ready(tf: str, label, is_trading_day=None) -> dict:
+    """기준 3종목의 최신 일봉 날짜가 목표 거래일에 도달했는지 확인.
+    미달이면 DataNotReady를 올린다. 반환: {expected, seen: {티커: 날짜}}."""
+    import harness
+    target = expected_us_session(label, is_trading_day)
+    got = harness._fetch_us_batch(list(US_DATA_CHECK_TICKERS), period="1mo")
+    seen, behind = {}, []
+    for t in US_DATA_CHECK_TICKERS:
+        df = got.get(t)
+        last = None if df is None or df.empty else df.index[-1].date()
+        seen[t] = str(last) if last else None
+        if last is None or last < target:
+            behind.append(f"{t}={seen[t]}")
+    if behind:
+        raise DataNotReady(
+            f"US 일봉 미도착 — 목표 거래일 {target}, 기준 종목 {', '.join(behind)} "
+            f"(tf={tf}, 라벨 {getattr(label, 'date', lambda: label)()})")
+    return {"expected": str(target), "seen": seen}
+
 
 KIND_CORPLIST_URL = "https://kind.krx.co.kr/corpgeneral/corpList.do"
 KIND_ADMIN_URL = "https://kind.krx.co.kr/investwarn/adminissue.do"
@@ -344,7 +397,7 @@ def clock_of(market: str) -> str:
 
 def screen_market(market: str, tf: str, now: datetime, refresh_universe: bool = False,
                   min_price: float | None = None, min_avg_volume: float | None = None,
-                  us_listings_path: str | None = None) -> dict:
+                  us_listings_path: str | None = None, is_trading_day=None) -> dict:
     """market: 'kospi' | 'kosdaq' | 'us'.
     min_price·min_avg_volume은 **US 전용 옵션 필터**로 기본은 None(끔) — 임계값을
     임의로 정하지 않는다(사용자 지시). 켜면 몇 건이 빠졌는지 결과에 남는다."""
@@ -355,7 +408,11 @@ def screen_market(market: str, tf: str, now: datetime, refresh_universe: bool = 
         uni, meta = kr_universe(market)
         data, failed = fetch_kr(list(uni), tf)
     else:
-        uni, meta = us_universe(refresh=refresh_universe, path=us_listings_path)
+        # v5.309: 유니버스·일봉을 받기 **전에** 데이터 도착부터 확인(위 docstring)
+        meta["data_ready"] = check_us_data_ready(tf, last_closed_label(tf, "us", now),
+                                                is_trading_day=is_trading_day)
+        uni, uni_meta = us_universe(refresh=refresh_universe, path=us_listings_path)
+        meta.update(uni_meta)
         data, failed, extra = fetch_us(list(uni), tf)
         if min_price is not None or min_avg_volume is not None:
             for t in list(data):
@@ -395,13 +452,14 @@ ALL_MARKETS = ["kospi", "kosdaq", "us"]
 
 
 def screen_all(tf: str, now: datetime, markets: list | None = None, refresh_universe: bool = False,
-               us_listings_path: str | None = None) -> tuple[list, dict]:
+               us_listings_path: str | None = None, is_trading_day=None) -> tuple[list, dict]:
     """KOSPI·KOSDAQ·US를 한 번에 — CLI `--market all`과 **같은 경로**(v5.301, 서버 자동
     실행이 이 함수를 그대로 부른다). 반환: (screen_market 결과 목록, {market: 0봉 라벨})."""
     markets = markets or ALL_MARKETS
     labels = {m: last_closed_label(tf, clock_of(m), now) for m in markets}
     results = [screen_market(m, tf, now, refresh_universe=refresh_universe,
-                             us_listings_path=us_listings_path) for m in markets]
+                             us_listings_path=us_listings_path,
+                             is_trading_day=is_trading_day) for m in markets]
     return results, labels
 
 
