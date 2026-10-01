@@ -140,8 +140,10 @@ def _fn(name):
 def _js(expr):
     if not shutil.which("node"):
         pytest.skip("node 미설치")
+    # v5.311: lpMonthlySummary가 공용 가드 lpRealizedPnl(값 누락 레코드 제외)을 쓴다 —
+    # 추출 목록에 없으면 ReferenceError로 즉시 드러난다(실제로 그렇게 잡혔다).
     src = "\n".join(_fn(n) for n in ("lpMergeBuy", "lpSplitSell", "lpSortHoldings", "lpReturnPct",
-                                     "lpTargetPrice", "lpMonthlySummary"))
+                                     "lpTargetPrice", "lpRealizedPnl", "lpMonthlySummary"))
     p = subprocess.run(["node", "-e", src + f"\nconsole.log(JSON.stringify({expr}));"],
                        capture_output=True, text=True, timeout=20)
     assert p.returncode == 0, p.stderr
@@ -180,6 +182,7 @@ def test_monthly_summary_by_sell_month_and_market():
     assert [(x["month"], x["mkt"]) for x in r] == [("2026-09", "KR"), ("2026-09", "US"), ("2026-08", "KR")]
     kr9 = r[0]
     assert kr9["n"] == 2 and kr9["wins"] == 1 and kr9["winRate"] == 50 and kr9["avgRet"] == 0 and kr9["pnl"] == 0
+    assert all(x["skipped"] == 0 for x in r), "정상 레코드인데 값 누락으로 빠진 게 있다"
     assert r[1]["pnl"] == 10 and r[1]["avgRet"] == 20
 
 
