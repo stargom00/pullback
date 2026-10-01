@@ -122,7 +122,9 @@ def test_route_only_fetches_strong_and_wall(monkeypatch):
     교체했다 — 그 회귀를 여기서 잡는다."""
     src = Path(app.__file__).read_text(encoding="utf-8")
     i = src.index('@app.get("/api/abc")')
-    body = src[i:src.index('@app.get("/api/debug/memory")')]
+    # v5.308: 경계 마커로 쓰던 /api/debug/memory 라우트가 삭제됐다(1회성 진단 종료).
+    # 특정 라우트 이름에 의존하지 않도록 **다음 @app. 데코레이터**까지로 경계를 잡는다.
+    body = src[i:src.index("\n@app.", i + 1)]
     assert 'startswith(("C1", "C2"))' not in body, "구 접두어 비교가 남아 있다(0건이 된다)"
     assert "_FLOW_STAGES = {abc_screener.STAGE_STRONG, abc_screener.STAGE_WALL}" in body
     assert 'r["c_stage"] in _FLOW_STAGES' in body

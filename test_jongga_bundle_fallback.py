@@ -179,10 +179,5 @@ def test_summary_log_reports_sources(store, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "번들 1" in out and "직접조회 1" in out, out
 
-
-def test_memory_endpoint_skips_object_walk_by_default():
-    import asyncio
-    r = asyncio.run(app.debug_memory())
-    assert "skipped" in r["live_dataframes"]
-    r2 = asyncio.run(app.debug_memory(objects=1))
-    assert "count" in r2["live_dataframes"]
+# v5.308: test_memory_endpoint_skips_object_walk_by_default 제거 — 검사 대상이던
+# GET /api/debug/memory(1회성 메모리 진단)가 삭제됐다.

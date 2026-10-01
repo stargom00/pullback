@@ -119,7 +119,9 @@ def test_reason_is_carried_to_the_client():
     """이유가 응답에 없으면 화면에서 '왜 통과했는지' 알 수 없다."""
     src = Path(app.__file__).read_text(encoding="utf-8")
     i = src.index('@app.get("/api/abc")')
-    body = src[i:src.index('@app.get("/api/debug/memory")')]
+    # v5.308: 경계 마커로 쓰던 /api/debug/memory 라우트가 삭제됐다(1회성 진단 종료).
+    # 특정 라우트 이름에 의존하지 않도록 **다음 @app. 데코레이터**까지로 경계를 잡는다.
+    body = src[i:src.index("\n@app.", i + 1)]
     assert '"fin_reason": f["reason"]' in body
     assert '"rev_yoy_of"' in body
 
@@ -219,5 +221,7 @@ def test_config_is_exposed_for_the_ui():
     i = src.index('@app.get("/api/abc")')
     # 고정 길이로 자르면 라우트가 길어질 때 조용히 검사 범위를 벗어난다
     # (v5.271에서 실제로 그랬다) — 다음 라우트까지로 경계를 잡는다.
-    body = src[i:src.index('@app.get("/api/debug/memory")')]
+    # v5.308: 경계 마커로 쓰던 /api/debug/memory 라우트가 삭제됐다(1회성 진단 종료).
+    # 특정 라우트 이름에 의존하지 않도록 **다음 @app. 데코레이터**까지로 경계를 잡는다.
+    body = src[i:src.index("\n@app.", i + 1)]
     assert '"config": abc_screener.ABC_CONFIG' in body

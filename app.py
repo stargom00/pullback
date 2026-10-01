@@ -5,6 +5,42 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.308 [운영 메모리 — 사용자 지시] 2026-10-01 홈 "불러오기 실패" 조사 결과 두 결함을 고쳤다.
+    조사 수치: `/api/apiguard/status` 5회 중 1회 무응답(25s 타임아웃)·1회 14.4s, 나머지 0.5s —
+    **재시작 루프는 아니고**(version v5.307 일관, `GET /` 302 0.54s) 간헐 스톨. RSS는
+    1,009 → 1,180 → 1,250 → **1,273MB**로 10분간 +263MB 증가, 추적 캐시 합계는 ~100MB뿐.
+    월봉 실행 단독 피크 RSS **399MB**(로컬 `/usr/bin/time -l`, all markets 1,095초) —
+    평시 660~800MB와 합산하면 1,059~1,199MB로 1GB 한도 초과 구간과 일치.
+    [1] **1회성 메모리 진단 제거**(v5.265의 약속 이행). `MEMORY_DIAG` 환경변수·기동 시
+    `tracemalloc.start(5)`·`GET /api/debug/memory`·`_deep_size()`·`_BOT_READ_EXACT_PATHS`
+    항목을 전부 삭제(144행). 운영에서 상시 켜져 있었고 호출당 **37~50초**가 걸렸다.
+    `_rss_mb()`는 남긴다 — 저점 자동 실행 로그가 피크 RSS를 찍는 데 쓴다(사용자 지시 "실행
+    로그에 피크 RSS 기록 유지"). 다시 진단이 필요하면 이 커밋을 참조해 브랜치로 되살릴 것.
+    **Railway Variables의 MEMORY_DIAG는 사용자가 직접 지운다**(코드만으로는 변수가 남음 —
+    다만 코드에서 읽는 곳이 없어 남아 있어도 무해).
+    [2] **저점 재시도는 KR 장외에서만**(`_lowpoint_retry_blocked`, `LOWPOINT_RETRY_BLOCK_HM`
+    = 09:00~15:40 KST). 기존 구조는 월봉 08:00 실패 시 60분 간격 재시도가 **09:00·10:00
+    장중**으로 들어왔다 — v5.307이 슬롯을 09:20→08:00으로 옮긴 이유(장 시작 스캔과 메모리
+    경합)를 재시도가 그대로 되돌리고 있었다. 15:40 = 정규장 15:30 + 여유 10분(사용자 지시).
+    공휴일·주말은 `is_trading_day("kr")` 재사용으로 창 자체가 없다(새 휴장일 로직 없음).
+    **첫 시도는 게이트를 타지 않는다** — 예약 시각(토 09:00 / 1일 08:00)은 둘 다 장외다.
+    [3] **월봉 fetch 창 축소(10년→5년)는 시도 후 되돌렸다 — 결과가 달라졌다.**
+    같은 기준봉(2026-09-30)으로 축소 전후를 돌린 결과 **hit 8건 → 7건, 공통 2건뿐**:
+    KR 3건(008040.KS·160550.KQ·016670.KQ) 소멸, US 5건(CMRC·CUVL·MQ·QTRX·SITC) 신규,
+    둘 다 잡힌 TEAD도 RSI[2] 30.14 → 30.02로 이동. 원인은 Wilder RSI가
+    `ewm(adjust=False)`라 첫 봉 초기값 영향이 **(13/14)^n으로만 감쇠**하는 것 —
+    월봉 120봉(10년) ≈0.02% vs 60봉(5년) ≈1.3%. 저점 조건은 RSI 30 경계 판정이고 실제
+    히트가 28.9~31.0에 몰려 있어 그 차이가 hit/miss를 뒤집는다(번인부족 제외 수는 거의
+    동일 — 표본이 아니라 **값 자체**의 차이). "다르면 원인 보고 후 중단" 지시에 따라
+    창은 10년 유지. 부수 함의: `MIN_BARS["month"]=36`은 번인 충분 보장이 아니다(잔존
+    영향 ≈7%) — 창을 건드리려면 같은 기준봉 재현 비교가 선행 조건이다.
+    메모리 완화는 창 축소가 아닌 다른 수단(배치·동시성 축소 등)으로 다룬다.
+    [4] 삭제에 딸린 정리: `test_memory_diag.py` 파일 제거, `test_jongga_bundle_fallback.py`의
+    메모리 엔드포인트 테스트 제거. `test_abc_route.py`·`test_investor_flow_route.py`가
+    `/api/debug/memory`를 **라우트 본문 경계 마커**로 쓰고 있었다 — 특정 라우트 이름 대신
+    "다음 `@app.` 데코레이터"까지로 바꿔 같은 종류의 삭제에 다시 깨지지 않게 했다.
+    [테스트] 29건 신설. 사보타주 3종(재시도 게이트 호출 제거 / 게이트 상수 무력화 /
+    월봉 창 2y로 축소) 전부 FAIL 확인 후 원복.
 v5.307 [저점 월봉 슬롯 1일 09:20 → 1일 08:00 KST — 사용자 지시 "v5.306 월봉 슬롯(1일 09:20 KST)이 KR 장 시작
     직후라 장 시작 스캔과 메모리 경합. 월봉 확정은 늦어도 1일 06:00 KST(US 겨울 마감)라 08:00 KST면 두 시장
     확정 후 + KR 개장 전"] LOWPOINT_SCHEDULE_HM["month"]만 (9,20)→(8,0) — 따라잡기 창(슬롯 +48시간)도
@@ -8284,12 +8320,6 @@ _BOT_READ_EXACT_PATHS = {
     # stock-alert 쪽에 이 경로를 폴링하는 코드가 추가돼야 실제 발송이 된다 —
     # 여기서는 데이터(pending_alert)만 열어둠.
     "/api/apiguard/status",
-    # v5.265(사용자 지시 — 1회성 메모리 진단): OOM 의심(컨테이너 시작 직후
-    # 900MB / 1GB 축 90%, 09-17 자동 재배포) 원인을 프로덕션 프로세스에서
-    # 직접 재기 위한 읽기 전용 엔드포인트. **MEMORY_DIAG=1일 때만 의미 있는
-    # 값을 준다**(그 외엔 enabled=false만 반환). 진단이 끝나면 환경변수와
-    # 함께 이 경로도 제거할 것 — 1회성이다.
-    "/api/debug/memory",
     # v5.269(사용자 지시): 포워드 검증 두 경로를 토큰 읽기로 개방.
     # 세션 쿠키 없이 상태를 확인하려다 401에 막혀 매번 사람 손을 빌려야 했다
     # (2026-09-19 09-18 백필 확인). **둘 다 GET·읽기 전용**임을 본문에서 확인
@@ -8461,7 +8491,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.307"
+VERSION = "v5.308"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -12369,7 +12399,7 @@ def _release_memory_blocking(tag: str) -> None:
     # v5.282(사용자 지시): RSS를 **3점** 찍는다 — 정리 전 / gc 후 / trim 후.
     # 예전 로그는 "gc N개"뿐이라 **실제로 메모리가 돌아왔는지** 알 수 없었고,
     # 특히 `malloc_trim`이 Linux에서 진짜 잡히는지 판단할 근거가 없었다.
-    # 소스는 `_rss_mb()` — `/api/debug/memory`와 동일해 memory_probe 기록과
+    # 소스는 `_rss_mb()` — 저점 자동 실행 로그가 쓰는 것과 같은 함수(v5.308에서
     # 그대로 대조된다. **동작은 안 바꾼다**(측정만 추가).
     rss_a = _rss_mb()
     freed = gc.collect()
@@ -12804,13 +12834,6 @@ async def _scheduler_loop():
         await asyncio.sleep(240)  # 4분
 
 
-# v5.265(사용자 지시 — 1회성 메모리 진단): tracemalloc은 할당마다 프레임을
-# 기록해 **상시 켜면 오버헤드가 크다**(공식 문서 기준 실행시간 2배 내외).
-# 그래서 환경변수 MEMORY_DIAG=1일 때만 켠다 — Railway Variables에 넣고 배포,
-# 30분쯤 뒤 /api/debug/memory로 찍고, 결과를 얻으면 변수와 이 코드를 함께 제거.
-MEMORY_DIAG = os.environ.get("MEMORY_DIAG") == "1"
-
-
 def _log_startup_disk_state():
     """기동 시 1회 — 시총 허용목록 복원 결과와 /data에 남아 있는 디스크
     캐시 파일 목록을 각각 한 줄로 남긴다(v5.285, 계측 전용).
@@ -12857,12 +12880,6 @@ def _log_startup_disk_state():
 @app.on_event("startup")
 async def _start_scheduler():
     _log_startup_disk_state()
-    if MEMORY_DIAG:
-        import tracemalloc
-        # frames=5: 할당처를 호출 스택 5단계까지 — 1이면 pandas 내부만 찍혀
-        # "누가 불렀는지"가 안 보인다. 더 키우면 메모리·속도 부담이 커진다.
-        tracemalloc.start(5)
-        print("[memory-diag] tracemalloc 시작(frames=5) — MEMORY_DIAG=1", flush=True)
     try:
         _journal_daily_backup(force=True)   # v5.300: 서버 시작 직후 1회
         _daily_backup(LP_TRADES_PATH, "lowpoint_trades", force=True, lock=_LP_TRADES_LOCK)   # v5.302
@@ -13392,76 +13409,10 @@ async def unhide_ticker(ticker: str):
     return JSONResponse({"ok": True})
 
 
-# ══════════════════════════════════════════════════════════════════════
-# v5.265(사용자 지시): 1회성 메모리 진단 — OOM 원인 규명용
-# ══════════════════════════════════════════════════════════════════════
-# 배경: Railway Metrics에서 컨테이너 시작 직후 900MB, 1GB 축 상시 90%,
-# 09-17 03:0x 자동 재배포(= git push 아님, OOM 유력). 로컬 실측으로는
-# DataFrame 전체가 KR+US 3,605종목 기준 **약 47MB**(종목당 13.3KB, 이미
-# float32)라 900MB가 설명되지 않는다 — 나머지 850MB가 무엇인지 **그 프로세스
-# 안에서** 재야 한다.
-# 진단이 끝나면 이 블록과 MEMORY_DIAG 환경변수를 함께 제거할 것.
-
-def _deep_size(obj, _seen=None, _depth=0, _budget=None):
-    """재귀 크기 추정. **DataFrame/Series는 memory_usage(deep=True)로 정확히**
-    재고(그 안을 getsizeof로 훑으면 느리고 부정확), 나머지는 컨테이너만 따라간다.
-
-    _budget: 방문 객체 수 상한 — 캐시가 수만 개 노드면 이 함수 자체가 느려져
-    요청이 타임아웃된다. 상한에 걸리면 그때까지의 합을 돌려주고 truncated를 표시.
-    """
-    import sys as _s
-    import pandas as pd            # app.py는 모듈 레벨에 pandas를 안 들인다
-    if _seen is None:
-        _seen = set()
-    if _budget is None:
-        _budget = [200000]
-    oid = id(obj)
-    if oid in _seen or _budget[0] <= 0:
-        return 0
-    _seen.add(oid)
-    _budget[0] -= 1
-    try:
-        # ⚠️ getsizeof(df)를 더하면 **이중 계산**이다 — 현재 pandas의
-        # getsizeof는 내부 블록 데이터를 이미 포함한다(실측: 500행 5열 float64에서
-        # getsizeof 24,032 vs memory_usage 24,000). 작성 중 이걸 더해 캐시가
-        # 정확히 2배로 보고됐고, 그걸 "객체 오버헤드"로 오독할 뻔했다.
-        if isinstance(obj, pd.DataFrame):
-            return int(obj.memory_usage(deep=True).sum())
-        if isinstance(obj, pd.Series):
-            return int(obj.memory_usage(deep=True))
-        size = _s.getsizeof(obj)
-    except Exception:
-        # 크기를 못 재면 **0으로 뭉개지 말 것** — 합계가 조용히 축소돼
-        # "캐시가 안 크다"는 잘못된 결론이 나온다(작성 중 실제로 겪음:
-        # pandas 미import → NameError → 전부 0.0MB로 보고됨).
-        return -1
-    if _depth > 12:
-        return size
-    try:
-        # 하위 노드가 측정 실패(-1)면 **그 사실을 위로 전파**한다. 그냥 더하면
-        # 음수가 상위 합계에 묻혀 "측정됐다"로 보인다(작성 중 실제로 그랬다).
-        failed = False
-        if isinstance(obj, dict):
-            for k, v in list(obj.items())[:50000]:
-                for part in (_deep_size(k, _seen, _depth + 1, _budget),
-                             _deep_size(v, _seen, _depth + 1, _budget)):
-                    if part < 0:
-                        failed = True
-                    else:
-                        size += part
-        elif isinstance(obj, (list, tuple, set, frozenset)):
-            for v in list(obj)[:50000]:
-                part = _deep_size(v, _seen, _depth + 1, _budget)
-                if part < 0:
-                    failed = True
-                else:
-                    size += part
-        if failed:
-            return -size if size else -1
-    except Exception:
-        return -size if size else -1
-    return size
-
+# v5.308: 1회성 메모리 진단(v5.265의 tracemalloc·_deep_size·/api/debug/memory)을 **제거**했다
+# — 주석의 "진단이 끝나면 함께 제거" 약속 이행(2026-10-01 운영 조사에서 RSS 1,009→1,273MB,
+# 호출당 37~50초를 확인한 뒤 종료). 아래 _rss_mb()만 남긴다 — 저점종목 자동 실행 로그가
+# 피크 RSS를 찍는 데 쓴다(_maybe_run_lowpoint). 다시 재려면 이 커밋을 참조해 브랜치로 되살릴 것.
 
 def _rss_mb() -> float | None:
     """컨테이너 실제 사용량. Railway는 리눅스라 /proc/self/status가 1순위 —
@@ -13777,79 +13728,6 @@ async def api_abc():
             "flags_loaded": len(flags),
             "asof": datetime.fromtimestamp(ts, KST).strftime("%Y-%m-%d %H:%M") if ts else "",
             "config": abc_screener.ABC_CONFIG, "version": VERSION}
-
-
-@app.get("/api/debug/memory")
-async def debug_memory(top: int = 20, objects: int = 0):
-    """메모리 진단(1회성). MEMORY_DIAG=1일 때만 tracemalloc 결과가 채워진다.
-    인증은 API_READ_TOKEN(X-Api-Read-Token) — _BOT_READ_EXACT_PATHS에 등록."""
-    import gc
-    import pandas as pd
-    import sys as _s
-
-    out = {"enabled": MEMORY_DIAG, "rss_mb": _rss_mb(),
-           "gc_count": list(gc.get_count()),
-           "gc_threshold": list(gc.get_threshold())}
-
-    # 전역 캐시별 크기 — 무엇이 메모리를 잡고 있는지가 핵심 질문이다
-    caches = {}
-    for name in ("_data_cache", "_cache", "_indices_cache", "_sectors_cache",
-                 "_signal_snapshots", "_paper_track", "_mcap_allowed_cache",
-                 "_index_last_good", "_us_industry_cache_data"):
-        obj = globals().get(name)
-        if obj is None:
-            continue
-        try:
-            raw = _deep_size(obj)
-            caches[name] = {"mb": round(abs(raw) / 1024 / 1024, 2),
-                            "len": len(obj) if hasattr(obj, "__len__") else None}
-            if raw < 0:
-                caches[name]["partial"] = True   # 일부 노드 측정 실패 — 과소집계
-        except Exception as e:
-            caches[name] = {"error": f"{type(e).__name__}: {e}"}
-    out["caches"] = caches
-
-    # 살아있는 DataFrame — 번들 밖에 새어 나온 사본이 있는지.
-    # v5.266(사용자 지시): **기본 응답에서 제외**한다. gc.get_objects()가 전체 힙을
-    # 훑고 DataFrame마다 memory_usage(deep=True)를 부르는데, 메모리가 클수록
-    # 느려져 **정작 필요한 순간에 못 찍는다** — 실측 27.9초(1,465MB일 때)라
-    # 25초 타임아웃에 3연속 실패했고, 그걸 앱 장애로 오인할 뻔했다.
-    # 필요할 때만 ?objects=1.
-    if objects:
-        try:
-            dfs = [o for o in gc.get_objects() if isinstance(o, pd.DataFrame)]
-            out["live_dataframes"] = {
-                "count": len(dfs),
-                "total_mb": round(sum(int(d.memory_usage(deep=True).sum())
-                                      for d in dfs[:20000]) / 1024 / 1024, 2),
-            }
-        except Exception as e:
-            out["live_dataframes"] = {"error": f"{type(e).__name__}: {e}"}
-    else:
-        out["live_dataframes"] = {"skipped": "느려서 기본 제외 — ?objects=1로 요청"}
-
-    if MEMORY_DIAG:
-        try:
-            import tracemalloc
-            cur, peak = tracemalloc.get_traced_memory()
-            out["tracemalloc"] = {
-                "current_mb": round(cur / 1024 / 1024, 2),
-                "peak_mb": round(peak / 1024 / 1024, 2),
-                "top": [],
-            }
-            for st in tracemalloc.take_snapshot().statistics("lineno")[:max(1, top)]:
-                fr = st.traceback[0]
-                out["tracemalloc"]["top"].append({
-                    "where": f"{fr.filename.split('/')[-1]}:{fr.lineno}",
-                    "mb": round(st.size / 1024 / 1024, 2),
-                    "count": st.count,
-                })
-        except Exception as e:
-            out["tracemalloc"] = {"error": f"{type(e).__name__}: {e}"}
-    else:
-        out["hint"] = ("tracemalloc 미작동 — Railway Variables에 MEMORY_DIAG=1을 "
-                       "넣고 재배포한 뒤 30분쯤 지나 다시 호출할 것")
-    return out
 
 
 @app.get("/api/debugraw/{ticker}")
@@ -17753,6 +17631,14 @@ LOWPOINT_STATE_PATH = _resolve_persistent_path("lowpoint_run_state.json")
 LOWPOINT_US_LISTINGS_PATH = _resolve_persistent_path("us_listings.json")
 LOWPOINT_SCHEDULE_HM = {"week": (9, 0), "month": (8, 0)}   # KST, 사용자 지시(월봉 v5.307: 1일 09:20 → 08:00)
 LOWPOINT_RETRY_MIN = 60          # 실패 후 재시도 간격(분) — AI 판단 어림값
+# v5.308(사용자 지시) — **재시도는 KR 장외에서만.** 예약 시각(주봉 토 09:00 / 월봉 1일 08:00)은
+# 둘 다 KR 장외라 첫 시도는 영향이 없지만, 재시도는 60분 간격이라 08:00 실패 → 09:00·10:00이
+# 되어 **장중으로 들어온다** — v5.307이 월봉 슬롯을 09:20→08:00으로 옮긴 이유(장 시작 스캔과
+# 메모리 경합)를 재시도가 그대로 되돌리는 구조였다(2026-10-01 운영 스톨 조사: RSS 1,009→
+# 1,273MB, 월봉 실행 피크 실측 +399MB). 이 창에 재시도 시각이 걸리면 창이 끝난 뒤로 미룬다.
+# 15:40 = 정규장 마감 15:30 + 여유 10분(사용자 지시 값). 공휴일·주말은 창 자체가 없다
+# (is_trading_day("kr") 재사용 — 새 휴장일 로직 만들지 않는다).
+LOWPOINT_RETRY_BLOCK_HM = (9 * 60, 15 * 60 + 40)
 LOWPOINT_MAX_ATTEMPTS = 3        # 한 기준봉당 최대 시도 — AI 판단 어림값(무한 재시도 방지)
 LOWPOINT_RUNNING_STALE_MIN = 120  # "running"으로 남은 기록을 죽은 실행으로 볼 시간(분)
 LOWPOINT_US_LISTINGS_MAX_AGE_DAYS = 7   # US 상장목록 캐시 주 1회 갱신(사용자 지시)
@@ -17800,6 +17686,18 @@ def _lowpoint_save_state(state: dict):
     _save_json_atomic(LOWPOINT_STATE_PATH, state)
 
 
+def _lowpoint_retry_blocked(now: "datetime") -> bool:
+    """재시도를 막아야 하는 시각인가 — KR 정규장 시간대(09:00~15:40 KST, 거래일만).
+    순수 판정(테스트 대상). 예약 시각 자체(첫 시도)는 이 함수를 통과하지 않는다 —
+    호출부가 재시도 경로에서만 부른다(LOWPOINT_RETRY_BLOCK_HM 주석 참고)."""
+    now_k = now.astimezone(KST)
+    if not is_trading_day("kr", now_k):
+        return False
+    hm = now_k.hour * 60 + now_k.minute
+    lo, hi = LOWPOINT_RETRY_BLOCK_HM
+    return lo <= hm < hi
+
+
 def _lowpoint_due(tf: str, now: "datetime", state: dict) -> "str | None":
     """지금 돌려야 하면 목표 기준봉 라벨, 아니면 None. 순수 함수(테스트 대상).
     같은 라벨을 이미 성공했으면 None, 실패했으면 LOWPOINT_RETRY_MIN 뒤 최대
@@ -17824,6 +17722,8 @@ def _lowpoint_due(tf: str, now: "datetime", state: dict) -> "str | None":
         return None
     if last and (now - last) < timedelta(minutes=LOWPOINT_RETRY_MIN):
         return None
+    if _lowpoint_retry_blocked(now):
+        return None           # 장중 — 창이 끝난 뒤(15:40~)로 미룬다
     return target
 
 
