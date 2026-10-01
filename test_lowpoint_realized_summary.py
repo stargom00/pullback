@@ -189,10 +189,20 @@ def test_other_lowpoint_ui_untouched():
     assert "function lpMonthlySummary(" in src
 
 
-def test_version_badge_bumped():
+def _app_version() -> str:
+    """app.py의 VERSION 리터럴 — 배지와 **대조**한다. 버전 문자열을 테스트에
+    하드코딩하면 다음 버전마다 이 테스트가 깨진다(2026-10-02 v5.312에서 실제로 깨졌다)."""
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py"),
+               encoding="utf-8").read()
+    m = re.search(r'^VERSION = "(v[\d.]+)"', src, re.M)
+    assert m, "app.py VERSION을 못 찾음"
+    return m.group(1)
+
+
+def test_version_badge_matches_app_version():
     src = open(IDX, encoding="utf-8").read()
     m = re.search(r'id="verBadge"[^>]*>(v[\d.]+)<', src)
-    assert m and m.group(1) == "v5.311"
+    assert m and m.group(1) == _app_version()
 
 
 def test_invalid_records_are_counted_not_hidden():
