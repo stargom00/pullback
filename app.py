@@ -5,6 +5,35 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.310 [저점 매매 기록 — 목록 밖 종목 저장, 사용자 지시] "더본코리아"를 저점 탭에 기록하려니
+    "종목을 찾지 못했어요(저점 후보·스캐너 유니버스·미국 상장목록에 없음)"로 막혔다.
+    [원인 확정] 이름 매칭 버그가 아니라 **목록 미포함**이다. 475560(KOSPI, 2024-11 상장)은
+    ① 저점 후보에 없고(히트가 아니니 당연) ② 스캐너 KR 유니버스에도 없다 —
+    `universe.load_kr_dynamic()`이 **거래대금 상위 1,500**(`KR_TOP_N`)만 담고 이 종목의 일
+    거래대금이 1~3억(거래량 7,570~19,987주 × 14,300원)이라 순위 밖이다. 시총·상장일 필터가
+    아니다. ③ us_listings는 US 전용이라 무관. (사용자가 **이름**을 입력했기 때문에 기존
+    `kr_code` 분기의 시장 선택 칸도 안 떴다 — 코드로 넣었으면 수동 선택은 가능했다.)
+    [수정] `/api/lowpoint/resolve`에 **원천 직접 조회 폴백**을 추가. 세 목록에서 못 찾을 때
+    ⓐ KR 6자리면 `naver_kr.fetch_basic()`(신설)으로 실재·이름·시장을 확인해 저장,
+    ⓑ US 티커 형식이면 `_us_ticker_name()`이 일봉으로 실재를 확인해 저장,
+    ⓒ 둘 다 실패하면 기존 실패 응답 + `hint`("6자리 코드(KR) 또는 티커(US)로 입력하면
+    목록에 없어도 조회합니다")를 돌려주고 프론트가 그 문구를 덧붙여 보여준다.
+    **이름 입력은 그대로 목록 매칭만** — 이름→코드 추측은 하지 않는다(사용자 지시).
+    [시장 판정] `naver_kr.fetch_basic()`은 모바일 `basic` API의 `sosok`을 쓴다
+    (**"0"=KOSPI, "1"=KOSDAQ** — 005930/016670/262840/475560 4건으로 실측 확인,
+    자동완성 API typeCode와도 일치). 없는 코드는 HTTP 409. `to_code()`가 접미사를
+    검증하지 않아 일봉만으로는 .KS/.KQ를 가릴 수 없어서 필요한 판정이고, `sosok`이
+    비면 자동완성 typeCode로 2차 확인한 뒤 **그래도 모르면 추측하지 않고 실패**시킨다.
+    [현재가] 폴백 종목도 `/api/prices`가 그대로 갱신한다 — KR은 `naver_kr.fetch_history`,
+    US는 yfinance로 티커만 보고 조회하므로 유니버스 의존이 없다(테스트로 고정).
+    [테스트] 19건 신설. 사보타주 3종(KR 폴백 분기 제거 / sosok 무시하고 항상 .KS /
+    이름 입력에도 폴백) 전부 FAIL 확인 후 원복. 새 대기시간·임계값 추가 없음.
+    **사보타주 1차 시도에서 ①이 통과했다 — 테스트 결함이었다.** 475560 테스트가
+    `resolve` 결과가 not_found면 `pytest.skip("네트워크")`로 빠지게 돼 있어서, 폴백을
+    지워도 같은 not_found가 나와 skip으로 삼켜졌다. skip 판단을 **원천
+    (`naver_kr.fetch_basic`) 직접 호출**로 옮겨, 원천이 되는데 resolve가 못 찾으면
+    FAIL이 되게 고쳤다(CLAUDE.md "사보타주가 통과하면 테스트를 먼저 의심" 사례 추가 —
+    외부 의존 테스트의 skip 조건을 검사 대상 코드의 출력으로 정하면 탐지력이 사라진다).
 v5.309 [저점종목 — US 데이터 준비 선체크, 사용자 지시] 2026-10-01 10:48 KST 월봉 실행에서
     US 15종목이 "정지추정"으로 탈락했고 그 안에 **SITC·ADEA·HUBB·SHEL·UA·WLY 같은 대형주**가
     있었다 — 거래정지가 아니라 야후가 09-30 일봉을 아직 안 올린 것이었다(12:02 실행 4종목,
@@ -8512,7 +8541,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.309"
+VERSION = "v5.310"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -19724,6 +19753,25 @@ async def lp_trade_settings_put(request: Request):
     return JSONResponse({"ok": True, "settings": cur})
 
 
+def _us_ticker_name(ticker: str) -> str | None:
+    """US 티커 실재 확인 + 표시용 이름(v5.310 저점 기록 폴백).
+    일봉이 실제로 오는지로 실재를 판정한다 — info/fast_info는 없는 티커에도
+    빈 dict를 주는 경우가 있어 "존재한다"의 근거로 약하다. 이름은 못 구하면
+    티커를 그대로 쓴다(저장을 막지 않는다)."""
+    try:
+        df = yf.Ticker(ticker).history(period="5d", interval="1d")
+        if df is None or df.empty:
+            return None
+        try:
+            info = yf.Ticker(ticker).info or {}
+            nm = info.get("shortName") or info.get("longName")
+        except Exception:
+            nm = None
+        return nm or ticker
+    except Exception:
+        return None
+
+
 @app.get("/api/lowpoint/resolve/{query}")
 async def lp_resolve(query: str):
     """저점 매매 기록 추가용 종목 해석 — **새 시세 조회 없이** 이미 있는 목록에서만 찾는다.
@@ -19763,8 +19811,27 @@ async def lp_resolve(query: str):
                                      "mkt": "US", "source": "us_listings"})
     except (OSError, ValueError):
         pass
+    # v5.310(사용자 지시) — **목록 폴백: 직접 조회.** 저점 탭은 "사용자가 실제 매매한
+    # 종목"을 기록하는 곳이라 스캐너 유니버스 포함 여부와 무관해야 한다. 그런데 KR
+    # 유니버스는 **거래대금 상위 1,500**(universe.KR_TOP_N)만 담아서 실매매 종목이 빠진다
+    # — 2026-10-01 더본코리아(475560, KOSPI, 2024-11 상장)가 일 거래대금 1~3억으로 밖에
+    # 있었다. 그래서 세 목록에서 못 찾으면 **코드/티커 형식일 때만** 원천에 직접 물어본다.
+    # 이름 입력은 그대로 목록 매칭만 — 이름→코드 추측은 하지 않는다(사용자 지시).
+    kr_code = bool(_re.fullmatch(r"\d{5}[0-9A-Z]", qu))
+    if kr_code:
+        basic = naver_kr.fetch_basic(qu)
+        if basic:
+            return JSONResponse({"ok": True, "ticker": basic["code"] + basic["suffix"],
+                                 "name": basic["name"], "mkt": "KR", "source": "naver",
+                                 "market_name": basic["market"], "halted": basic["halted"]})
+    elif _re.fullmatch(r"[A-Z][A-Z.\-]{0,6}", qu):
+        name = await asyncio.get_event_loop().run_in_executor(_executor, _us_ticker_name, qu)
+        if name:
+            return JSONResponse({"ok": True, "ticker": qu, "name": name,
+                                 "mkt": "US", "source": "yahoo"})
     return JSONResponse({"ok": False, "reason": "not_found", "query": q,
-                         "kr_code": bool(_re.fullmatch(r"\d{5}[0-9A-Z]", qu))})
+                         "kr_code": kr_code,
+                         "hint": "6자리 코드(KR) 또는 티커(US)로 입력하면 목록에 없어도 조회합니다"})
 
 
 @app.post("/api/prices")

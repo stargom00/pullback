@@ -1351,7 +1351,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.309</span>
+      <span class="ver mono" id="verBadge">v5.310</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -7380,7 +7380,9 @@ async function lptAdd(form) {
     if (!t.ok) {
       if (t.candidates) throw new Error('여러 종목이 해당돼요: ' + t.candidates.map(c => c.name + '(' + c.ticker + ')').join(', '));
       if (t.kr_code) { _lpt.pendingKr = { code: q.toUpperCase() }; return; }   // 시장 선택 칸을 띄운다
-      throw new Error(`'${q}' 종목을 찾지 못했어요(저점 후보·스캐너 유니버스·미국 상장목록에 없음)`);
+      // v5.310: 서버가 보내는 hint(코드/티커로 넣으면 목록 밖도 조회된다)를 덧붙인다
+      throw new Error(`'${q}' 종목을 찾지 못했어요(저점 후보·스캐너 유니버스·미국 상장목록에 없음)`
+        + (t.hint ? ' — ' + t.hint : ''));
     }
     _lpt.pendingKr = null;
     const hold = _lpt.trades.find(r => !r.sellDate && r.code === t.ticker && r.kind === kind);

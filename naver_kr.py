@@ -192,6 +192,60 @@ def fetch_live_price(ticker: str) -> float | None:
         return None
 
 
+def fetch_basic(code: str) -> dict | None:
+    """6자리 코드로 **종목 실재 여부·이름·시장**을 확인한다(v5.310).
+    반환: {"code", "name", "suffix"(".KS"/".KQ"), "market"("KOSPI"/"KOSDAQ"),
+           "close", "halted"} 또는 None(없는 코드/조회 실패).
+
+    쓰는 곳: 저점 매매 기록(`/api/lowpoint/resolve`)의 폴백 — 스캐너 유니버스는
+    **거래대금 상위 1,500**만 담아서 실매매 종목이 빠질 수 있다(2026-10-01 더본코리아
+    475560 사례: 일 거래대금 1~3억으로 상위 1,500 밖).
+
+    [시장 판정] `sosok` 필드: **"0"=KOSPI, "1"=KOSDAQ** — 2026-10-01 실측으로 확인
+    (005930 삼성전자→0, 016670 디모아→1, 262840 아이퀘스트→1, 475560 더본코리아→0,
+    각각 `ac.stock.naver.com` 자동완성의 typeCode와도 일치). 없는 코드(999999)는
+    HTTP **409**가 온다. `to_code()`가 접미사를 검증하지 않아(CLAUDE.md 참고)
+    일봉 조회만으로는 .KS/.KQ를 가릴 수 없어서 이 필드가 필요하다.
+    `sosok`이 비거나 0/1이 아니면 자동완성 API의 typeCode로 한 번 더 확인한다."""
+    code = to_code(code)
+    if not code:
+        return None
+    try:
+        resp = requests.get(f"https://m.stock.naver.com/api/stock/{code}/basic",
+                            headers=_HEADERS, timeout=_TIMEOUT)
+        if resp.status_code != 200:
+            return None                      # 409 = 없는 코드
+        data = resp.json()
+    except (requests.RequestException, ValueError):
+        return None
+    if not isinstance(data, dict) or not data.get("stockName"):
+        return None
+    suffix = {"0": ".KS", "1": ".KQ"}.get(str(data.get("sosok") or "").strip())
+    if suffix is None:
+        suffix = _market_suffix_from_autocomplete(code)
+    if suffix is None:
+        return None                          # 시장을 확정 못 하면 추측하지 않는다
+    return {"code": code, "name": data["stockName"], "suffix": suffix,
+            "market": "KOSPI" if suffix == ".KS" else "KOSDAQ",
+            "close": _to_num(data.get("closePrice")),
+            "halted": (data.get("tradeStopType") or {}).get("name") not in (None, "TRADING")}
+
+
+def _market_suffix_from_autocomplete(code: str) -> str | None:
+    """`sosok`이 없을 때의 2차 소스 — 자동완성 API의 typeCode(KOSPI/KOSDAQ)."""
+    try:
+        resp = requests.get("https://ac.stock.naver.com/ac",
+                            params={"q": code, "target": "stock"},
+                            headers=_HEADERS, timeout=_TIMEOUT)
+        resp.raise_for_status()
+        for item in resp.json().get("items") or []:
+            if str(item.get("code") or "") == code:
+                return {"KOSPI": ".KS", "KOSDAQ": ".KQ"}.get(str(item.get("typeCode") or "").upper())
+    except (requests.RequestException, ValueError):
+        return None
+    return None
+
+
 def _to_num(v) -> float | None:
     if v is None:
         return None
