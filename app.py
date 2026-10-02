@@ -5,6 +5,33 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.314 [신규상장 탭 — 사용자 지시 "매월 말 장 마감 후, KR·US 전 상장종목 중 상장 13~20개월차 종목을 보고
+    싶다(신규상장 베이스 탐색). 유니버스 컷 무관하게 전 목록 대상"] [스크린] 신설 scripts/screens/newlisting.py.
+    개월수 = 기준월 − 상장월(월 산술, 기준일=월말 → 상장일의 일(day) 무관), 13 ≤ 개월수 ≤ 20 포함(13·20은
+    사용자 지정값). KR = KIND 상장법인 목록 공개 다운로드(KOSPI·KOSDAQ 2요청 — 저점 스크린의 URL·파서·보드
+    정의를 import, 사본 없음; 상장일은 현재 시장 기준이라 이전상장은 이전일). US = 저점용 보통주 목록 전 종목
+    × yahoo 차트 메타 firstTradeDate(IPO일 근사치 — 결과 파일에 명기). 첫 거래일은 불변이라 심볼별 캐시
+    (/data 우선 · 레포 data/us_first_trade_dates.json 시드) — 다음 달부터는 새 심볼만 묻는다. 종가는 통과
+    종목만 저점의 fetch_kr/fetch_us로. [yahoo 429 — 실측으로 구조 결정] 로컬 첫 실행에서 yfinance(get_history_metadata)를 동시 10개로
+    몰아 약 3,000건 뒤 YFRateLimitError(일시 429)가 났고, 예전 코드가 이를 "없음"과 섞어 2,548건이 조용히
+    빠졌다. 쿠키 없는 차트 API 직접 호출로 바꿔 봤으나 그 경로는 같은 IP에서 8시간 넘게 차단됐고
+    (같은 시각 yfinance 세션은 정상) → yfinance로 되돌리고, 429·전송 오류(RATE_LIMITED)를 "없는 종목"
+    (NOT_FOUND)과 분리해 1건이라도 있으면 받은 만큼 캐시에 저장한 뒤 RateLimited로 **실패**시킨다(조용한
+    누락 금지). 서버는 기존 재시도 규칙(60분·최대 3회·KR 장중 차단)을 그대로 타고 매 시도가 캐시 덕에
+    나머지만 묻는다 — 새 대기시간 0건. 레포 시드(data/us_first_trade_dates.json, 5,616종목)가 완성돼
+    있어 서버 첫 실행은 새 심볼만 묻는다(운영 IP가 수천 건을 묻다 throttle되는 일 방지).
+    [스케줄] 저점 러너의 세 번째 작업(LOWPOINT_JOBS) — 월봉 슬롯(매월 1일 08:00 KST)·라벨을 그대로 쓰고
+    (LOWPOINT_SLOT_TF), 저점 월봉이 같은 기준봉에서 끝난 뒤(성공 또는 시도 소진)에만 due. 한 틱에 작업 하나,
+    단일 워커 executor라 동시 실행 없음. US 데이터 준비 선체크(v5.309) 상속, 실패 상태는 같은
+    lowpoint_run_state.json의 "newlisting" 칸(data_not_ready 구분 포함). [탭] 더보기 → "신규상장":
+    GET /api/newlisting(/data 우선 · 레포 data/newlisting_latest.json 폴백), KR/US 섹션(시장 버튼 반영),
+    종목명 → 기존 tvUrl, 코드·상장일·개월수·종가(날짜), 개월수 오름차순, 기준일·정의·소스 한계 표기,
+    서버 실행 실패 시 이전 결과 + 실패 표시. [첫 검색] 로컬 기준일 2026-09-30 실행 결과를 레포에 포함.
+    [상장 후 하락률 — 추가 지시] 하락률 = (기준일 종가 − 첫 거래일 종가)/첫 거래일 종가 — **첫 거래일 '종가'
+    기준, 공모가 아님**(탭·결과 파일 drawdown_definition에 명시). 결과 종목만 이미 받던 fetch_kr(naver 일봉)·
+    fetch_us(yahoo) 시계열의 첫 봉·기준일 이하 마지막 봉에서 뽑는다(추가 요청 0, 전수 조회 없음, 둘 다
+    수정주가). 첫 봉이 상장일보다 늦게 시작한 건수는 counts.first_bar_after_listed로 드러낸다. 탭: 하락률
+    컬럼(기존 수익률 색) · 칩 전체/−50% 이상/−70% 이상(건수, 경계 포함) · 헤더 클릭 정렬. 429 재개·캐시 불변.
 v5.313 [저점 탭 업비트 코인 기록 — 사용자 지시 "저점 탭에 업비트 코인 매매도 기록하고 싶다"]
     [입력] "KRW-BTC"처럼 업비트 마켓코드 그대로(KRW- 접두사)만 코인으로 본다 — 접두사 없는
     입력은 기존 KR/US 경로 그대로(미국 티커와 충돌 방지). `/api/lowpoint/resolve`가 이 형식이면
@@ -8600,7 +8627,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.313"
+VERSION = "v5.314"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -17756,6 +17783,17 @@ LOWPOINT_US_LISTINGS_MAX_AGE_DAYS = 7   # US 상장목록 캐시 주 1회 갱신
 # 따라잡아 운영에서 즉시 돌아 버린다(사용자 지시 "운영 강제 실행 금지 — 토요일 자연 실행"과
 # 충돌, 2026-09-30 로컬 확인). 48시간 = 토 09:00 → 월 09:00 — AI 판단 어림값.
 LOWPOINT_CATCHUP_HOURS = 48
+# v5.314(사용자 지시) 신규상장 스크린(상장 13~20개월차) — **저점 러너에 세 번째 작업으로** 얹는다.
+# "매월 1일, 저점 월봉 실행 완료 후 이어서(동시 실행 금지 — 같은 러너 큐에서 순차). 재시도·KR 장중
+# 차단·US 데이터 선체크 등 기존 규칙 전부 상속, 새 대기시간·임계값 0건". 그래서 예약 시각은 월봉
+# 슬롯을 그대로 쓰고(LOWPOINT_SLOT_TF), 월봉이 그 기준봉에서 끝난 뒤(성공 또는 시도 소진)에만
+# due가 된다(_lowpoint_due). 실행 상태는 같은 lowpoint_run_state.json의 "newlisting" 칸.
+LOWPOINT_JOBS = ("week", "month", "newlisting")
+LOWPOINT_SLOT_TF = {"week": "week", "month": "month", "newlisting": "month"}
+NEWLISTING_DATA_PATH = _resolve_persistent_path("newlisting_latest.json")
+NEWLISTING_LATEST_PATH = os.path.join(os.path.dirname(__file__), "data", "newlisting_latest.json")
+US_FIRST_TRADE_PATH = _resolve_persistent_path("us_first_trade_dates.json")
+US_FIRST_TRADE_SEED_PATH = os.path.join(os.path.dirname(__file__), "data", "us_first_trade_dates.json")
 _lowpoint_running = False
 _LOWPOINT_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lowpoint")
 
@@ -17767,6 +17805,7 @@ def _lowpoint_last_slot(tf: str, now: "datetime") -> "tuple[datetime, str]":
     라벨(전월 말일)은 옛 기준과 같으므로 상태 파일의 target 비교가 기준 변경 뒤에도 그대로
     맞는다 — 1일에 성공한 달은 같은 달 첫 토요일에 다시 돌지 않는다."""
     now_k = now.astimezone(KST)
+    tf = LOWPOINT_SLOT_TF.get(tf, tf)   # v5.314: 신규상장은 월봉 슬롯·라벨을 그대로 쓴다
     hh, mm = LOWPOINT_SCHEDULE_HM[tf]
     if tf == "week":
         d = now_k.date() - timedelta(days=(now_k.weekday() - 5) % 7)   # 이번 주(또는 오늘) 토요일
@@ -17807,6 +17846,15 @@ def _lowpoint_retry_blocked(now: "datetime") -> bool:
     return lo <= hm < hi
 
 
+def _lowpoint_month_finished(state: dict, target: str) -> bool:
+    """저점 월봉이 target 기준봉에서 **끝났는가** — 성공했거나 시도를 다 써서 더 돌 일이 없다.
+    재시도 대기 중(실패·시도 남음)이나 실행 중이면 False — 그 사이에 신규상장이 끼어들지 않는다."""
+    m = state.get("month") or {}
+    if m.get("target") != target or m.get("status") == "running":
+        return False
+    return m.get("status") == "ok" or int(m.get("attempts") or 0) >= LOWPOINT_MAX_ATTEMPTS
+
+
 def _lowpoint_due(tf: str, now: "datetime", state: dict) -> "str | None":
     """지금 돌려야 하면 목표 기준봉 라벨, 아니면 None. 순수 함수(테스트 대상).
     같은 라벨을 이미 성공했으면 None, 실패했으면 LOWPOINT_RETRY_MIN 뒤 최대
@@ -17815,6 +17863,8 @@ def _lowpoint_due(tf: str, now: "datetime", state: dict) -> "str | None":
     slot, target = _lowpoint_last_slot(tf, now)
     if now - slot > timedelta(hours=LOWPOINT_CATCHUP_HOURS):
         return None   # 슬롯이 너무 지났다 — 다음 예약 시각을 기다린다
+    if tf == "newlisting" and not _lowpoint_month_finished(state, target):
+        return None   # v5.314: 저점 월봉이 이 기준봉에서 끝난 뒤에만(순차)
     st = state.get(tf) or {}
     if st.get("target") != target:
         return target
@@ -17863,6 +17913,23 @@ def _lowpoint_job_blocking(tf: str, now: "datetime") -> dict:
                        for m, c in entry["excluded_counts"].items()}}
 
 
+def _newlisting_job_blocking(tf: str, now: "datetime") -> dict:
+    """v5.314 신규상장 — 스레드풀(저점과 같은 단일 워커)에서 돈다. scripts/screens/newlisting.py
+    build/write_publish를 그대로 부른다(조건 사본 없음). 기준일 = 월봉 라벨(전월 말일).
+    US 첫 거래일 캐시는 /data 우선 · 레포 시드 폴백, 쓰기는 /data만."""
+    screens = os.path.join(os.path.dirname(__file__), "scripts", "screens")
+    if screens not in sys.path:
+        sys.path.insert(0, screens)
+    import newlisting as nl
+    from datetime import date as _date
+    ref = _date.fromisoformat(_lowpoint_last_slot("newlisting", now)[1])
+    entry = nl.build(ref, us_listings_path=LOWPOINT_US_LISTINGS_PATH,
+                     cache_paths=[US_FIRST_TRADE_PATH, US_FIRST_TRADE_SEED_PATH],
+                     cache_write_path=US_FIRST_TRADE_PATH, is_trading_day=is_trading_day)
+    nl.write_publish(entry, path=NEWLISTING_DATA_PATH)
+    return {"bar_date": entry["ref_date"], "rows": len(entry["rows"]), "counts": entry["counts"]}
+
+
 def _lowpoint_data_not_ready_error():
     """lowpoint.DataNotReady 클래스. 기동 시점에 lowpoint를 import하지 않으려고(무거움)
     예외 처리 시점에만 가져온다 — import 실패 시엔 어떤 예외도 매칭되지 않는 더미를 돌려준다."""
@@ -17886,7 +17953,7 @@ async def _maybe_run_lowpoint(now: "datetime | None" = None, *, _job=None) -> "d
         return None
     now = now or datetime.now(KST)
     state = _lowpoint_load_state()
-    for tf in ("week", "month"):
+    for tf in LOWPOINT_JOBS:
         target = _lowpoint_due(tf, now, state)
         if not target:
             continue
@@ -17903,7 +17970,8 @@ async def _maybe_run_lowpoint(now: "datetime | None" = None, *, _job=None) -> "d
               f"· rss {rss0}MB", flush=True)
         try:
             loop = asyncio.get_event_loop()
-            summary = await loop.run_in_executor(_LOWPOINT_EXECUTOR, _job or _lowpoint_job_blocking, tf, now)
+            job = _job or (_newlisting_job_blocking if tf == "newlisting" else _lowpoint_job_blocking)
+            summary = await loop.run_in_executor(_LOWPOINT_EXECUTOR, job, tf, now)
             rec.update(status="ok", finished_at=datetime.now(KST).isoformat(), summary=summary,
                        last_ok_at=datetime.now(KST).isoformat(), error=None)
             print(f"[lowpoint] {tf} 자동 실행 완료 — 기준봉 {summary.get('bar_date')} · 신호 {summary.get('rows')}건 "
@@ -17927,6 +17995,27 @@ async def _maybe_run_lowpoint(now: "datetime | None" = None, *, _job=None) -> "d
             await _release_memory(f"lowpoint {tf}")
         return rec
     return None
+
+
+def _newlisting_view() -> dict:
+    """v5.314 신규상장 탭 페이로드. **/data(서버 월 1회 실행 결과) 우선, 없으면 레포
+    data/newlisting_latest.json 폴백**(저점 카드와 같은 패턴 — 첫 배포 직후에도 로컬 첫 검색
+    결과가 보인다). 서버 실행이 실패 상태면 refresh_failed를 붙여 이전 결과와 함께 알린다."""
+    data = _lowpoint_read(globals().get("NEWLISTING_DATA_PATH"))
+    repo = _lowpoint_read(globals().get("NEWLISTING_LATEST_PATH"))
+    src, entry = ("data", data) if isinstance(data, dict) else ("repo", repo)
+    st = _lowpoint_load_state().get("newlisting") or {}
+    failed = ({"at": st.get("finished_at"), "error": st.get("error"), "target": st.get("target"),
+               "status": st.get("status")}
+              if st.get("status") in ("failed", "data_not_ready") else None)
+    if not isinstance(entry, dict):
+        return {"ok": True, "missing": True, "refresh_failed": failed}
+    return {"ok": True, **entry, "source": src, "refresh_failed": failed}
+
+
+@app.get("/api/newlisting")
+async def newlisting_get():
+    return JSONResponse(_clean_nan(_newlisting_view()))
 
 
 # ── 📉 저점종목(주간·월간 RSI 하향돌파) — 표시 전용 ─────────────────────

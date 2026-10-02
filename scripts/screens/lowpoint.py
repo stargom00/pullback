@@ -338,7 +338,12 @@ def us_universe(refresh: bool = False, path: str | None = None) -> tuple[dict, d
 
 # ── 데이터 ─────────────────────────────────────────────────────────────
 
-def fetch_kr(tickers: list, tf: str, concurrency: int = 10) -> tuple[dict, list]:
+# 원천 조회 동시성 — fetch_kr 기본값을 이름으로 뺀 것(값 불변). v5.314 신규상장 스크린이
+# yahoo 메타 조회에 같은 값을 재사용한다(새 임계값 금지 — 사용자 지시).
+FETCH_CONCURRENCY = 10
+
+
+def fetch_kr(tickers: list, tf: str, concurrency: int = FETCH_CONCURRENCY) -> tuple[dict, list]:
     import naver_kr
     data, failed = {}, []
 

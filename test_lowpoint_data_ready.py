@@ -198,4 +198,9 @@ def test_no_new_wait_constants_introduced():
         "LOWPOINT_RUNNING_STALE_MIN", "LOWPOINT_US_LISTINGS_MAX_AGE_DAYS",
         "LOWPOINT_CATCHUP_HOURS", "LOWPOINT_RETRY_BLOCK_HM",
         "LOWPOINT_LATEST_PATH", "LOWPOINT_TFS",   # v5.293 표시용(레포 폴백 경로·tf 목록)
+        # v5.314 신규상장을 같은 러너에 얹으며 생긴 **작업 목록·슬롯 매핑** — 시간·임계값이 아니다
+        # (신규상장은 월봉 슬롯·재시도 상수를 그대로 쓴다)
+        "LOWPOINT_JOBS", "LOWPOINT_SLOT_TF",
     }, f"저점 상수 집합이 바뀌었다: {sorted(names)}"
+    assert src.count("LOWPOINT_SLOT_TF = {") == 1 and \
+        'LOWPOINT_SLOT_TF = {"week": "week", "month": "month", "newlisting": "month"}' in src

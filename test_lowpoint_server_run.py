@@ -183,11 +183,13 @@ def test_month_runs_on_the_1st_through_runner(paths):
     assert asyncio.run(app._maybe_run_lowpoint(_k("2026-10-01 07:59"), _job=job)) is None   # 슬롯 전
     rec = asyncio.run(app._maybe_run_lowpoint(_k("2026-10-01 08:04"), _job=job))
     assert ran == ["month"] and rec["target"] == "2026-09-30" and rec["status"] == "ok"
-    assert asyncio.run(app._maybe_run_lowpoint(_k("2026-10-01 08:08"), _job=job)) is None
-    # 첫 토요일: 주봉(토 09:00)은 정상 실행, 월봉은 재실행 없음
+    # v5.314: 다음 틱엔 월봉 뒤 순차로 신규상장(같은 러너·같은 기준봉), 그다음 틱엔 할 일 없음
+    assert asyncio.run(app._maybe_run_lowpoint(_k("2026-10-01 08:08"), _job=job))["target"] == "2026-09-30"
+    assert asyncio.run(app._maybe_run_lowpoint(_k("2026-10-01 08:12"), _job=job)) is None
+    # 첫 토요일: 주봉(토 09:00)은 정상 실행, 월봉·신규상장은 재실행 없음
     assert asyncio.run(app._maybe_run_lowpoint(_k("2026-10-03 09:20"), _job=job))["target"] == "2026-10-02"
     assert asyncio.run(app._maybe_run_lowpoint(_k("2026-10-03 09:24"), _job=job)) is None
-    assert ran == ["month", "week"]
+    assert ran == ["month", "newlisting", "week"]
 
 
 def test_failure_keeps_previous_result_and_flags_card(paths):
