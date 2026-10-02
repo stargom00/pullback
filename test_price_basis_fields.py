@@ -1,6 +1,10 @@
 """서버 is_live/market_open_now 계산(_price_basis_fields) 테스트 (v5.234,
 사용자 지시).
 
+[v5.316] 이 필드를 쓰던 프론트(홈 "오늘 할 일" 카드의 priceBasisNoteText)와 그 테스트
+(test_price_basis_note.py)는 홈 카드와 함께 제거됐다. 서버 계산(today_decision)은 API에 그대로
+남아 있어 이 서버 테스트는 유지한다.
+
 배경: v5.233에서 프론트 문구 판정(priceBasisNoteText)을 가짜 데이터
 (KR×US · 장중×장전×장중-stale)로 테스트했는데, 그 테스트는 "서버가
 is_live=False·market_open_now=True 조합을 실제로 만들어낼 수 있다"는

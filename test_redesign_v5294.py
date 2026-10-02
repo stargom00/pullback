@@ -112,12 +112,12 @@ def test_no_emoji_in_visible_header_text():
 
 
 # ── 2단계: 홈 ──────────────────────────────────────────────────────
-def test_jongga_sell_rule_matches_app():
-    """홈 '오늘 할 일' 매도 칸 문구는 app.py JONGGA_SELL_RULE의 사본 — 어긋나면 FAIL."""
+def test_jongga_sell_rule_copy_removed_with_home_todo():
+    """v5.316: 홈 '오늘 할 일'이 제거되며 그 매도 칸용 사본(const JONGGA_SELL_RULE)도 지웠다.
+    사본이 다시 생기면 app.py와 어긋날 수 있으니 없어야 한다(서버 상수는 그대로)."""
     app_src = (ROOT / "app.py").read_text(encoding="utf-8")
-    m = re.search(r'^JONGGA_SELL_RULE = "([^"]+)"', app_src, re.M)
-    assert m
-    assert f"const JONGGA_SELL_RULE = '{m.group(1)}';" in TEXT
+    assert re.search(r'^JONGGA_SELL_RULE = "([^"]+)"', app_src, re.M)
+    assert "const JONGGA_SELL_RULE" not in TEXT and "JONGGA_SELL_CELL" not in TEXT
 
 
 def test_home_removed_blocks_are_gone():
@@ -131,11 +131,11 @@ def test_home_removed_blocks_are_gone():
 def test_home_column_order():
     fn = TEXT[TEXT.index("function renderCalendar(data) {"):]
     fn = fn[:fn.index("\n}\n")]
-    assert "docTop.innerHTML = `${warnHtml}${td.immediateHtml}${td.candidateHtml}${myTrackBoardHtml}`;" in fn
+    # v5.316(사용자 지시): 오늘 할 일·후보 제거, 저점종목은 왼쪽 맨 위(경고 다음)로 이동
+    assert "docTop.innerHTML = `${warnHtml}${renderLowpointHtml(data.lowpoint)}${myTrackBoardHtml}`;" in fn
     side = fn[fn.index("docSide.innerHTML ="):]
-    order = [side.index(x) for x in ("renderJonggaForwardCard", "renderSectorAccelCard",
-                                     "renderLowpointHtml", "renderUpcomingCard")]
-    assert order == sorted(order)
+    order = [side.index(x) for x in ("renderJonggaForwardCard", "renderSectorAccelCard", "renderUpcomingCard")]
+    assert order == sorted(order) and "renderLowpointHtml" not in side
 
 
 # ── 3단계: 내 일지 ─────────────────────────────────────────────────
@@ -213,11 +213,11 @@ def _css_rule(sel: str) -> str:
 def test_number_tiles_scaled_through_one_variable():
     assert "--n-k:.85;" in TEXT
     # (선택자, v5.294 기존 px) — 큰 숫자가 기존값 × --n-k로 계산되는가
-    for sel, px in ((".tile-val .v", 26), (".jr-risk .v", 22), (".jr-big", 26),
-                    (".todo-name .nm", 24), (".todo-cells .v", 20)):
+    # v5.316: 홈 "오늘 할 일"(.todo*) 카드 제거 — 남은 숫자 타일만 검사
+    for sel, px in ((".tile-val .v", 26), (".jr-risk .v", 22), (".jr-big", 26)):
         rule = _css_rule(sel)
         assert f"font-size:calc({px}px * var(--n-k))" in rule, (sel, rule)
-    for sel in (".tile", ".jr-risk>div", ".todo", ".todo-cells>div"):
+    for sel in (".tile", ".jr-risk>div"):
         assert "var(--n-k)" in _css_rule(sel), sel
     # R 누적 큰 숫자가 인라인 고정 px로 남아 있지 않다
     assert "font-size:26px;font-weight:600" not in TEXT
@@ -259,8 +259,8 @@ def test_us_ticker_suffix_runs():
     assert out.returncode == 0, out.stderr
     got = _j.loads(out.stdout)
     assert "BNS" in got["us"] and got["kr"] == ""
-    # 홈 세 곳(오늘 할 일·후보 카드·내 추적)이 실제로 부른다
-    assert TEXT.count("usTickerSuffix(") >= 5
+    # v5.316: 홈 오늘 할 일·후보 카드가 제거돼 이제 내 추적만 부른다(정의 1 + 호출 1)
+    assert TEXT.count("usTickerSuffix(") == 2 and "usTickerSuffix(" in _fn("renderMyTrackBoard")
 
 
 def test_us_universe_has_no_bare_numeric_codes():

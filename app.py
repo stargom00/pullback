@@ -5,6 +5,17 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.316 [홈 재배치 — 사용자 지시 "오늘할일 카드는 1% ATR 종목만 떠서 안 보게 됨 — 후보 카드와 함께 홈에서
+    제거. 저점종목 카드는 그 위 자리(홈 상단)로 이동"] static/index.html만(서버 today_decision·/api/calendar
+    불변). 공유 여부를 먼저 확인해 홈에서만 쓰던 코드를 지웠다: renderTodayDecisionHtml(즉시행동·후보 카드),
+    todayDecisionRiskBadge/_tdBadgeStats, priceBasisNoteText, reignitionChecklistTooltip, TODAY_DECISION_INFO(+ICON),
+    후보 접기 상태, _todayDecisionMap·decisionOpenJournal/QuickWatch·_decisionHitShape, 종가베팅 시각 사본
+    상수 3개, 오늘 할 일 수량 헬퍼 calcSharesGateCap, .todo*·.cand* CSS. 공유라 남긴 것: renderScenarioHtml
+    (일지·내 추적), scenarioMemoText(일지 모달), GATE_LABEL(시장 타일), ATR_STOP_MULT(스캔 카드).
+    홈 왼쪽 = 경고 → 저점종목 → 내 추적, 오른쪽 = 종가베팅 실전 → 섹터 가속 → 다가오는 일정(저점 카드 내용·동작
+    불변). 테스트: test_price_basis_note.py(지운 프론트 함수 전용) 삭제 — 서버 짝 test_price_basis_fields.py는
+    유지. 문구·개수를 고정하던 기존 테스트 3곳(TODAY_DECISION_INFO·JONGGA_SELL_RULE 사본·.todo 크기·usTickerSuffix
+    호출 수)을 제거 사실에 맞게 갱신.
 v5.315 [신규상장 탭 개선 — 사용자 지시 "더보기 안에 있어 접근 불편 — 밖으로" · "보려는 건 고점에서 반토막
     이상 난 종목뿐"] ① 탭을 더보기에서 꺼내 메인 줄 추세전환 옆에 둔다(키 newlisting 그대로, 더보기에선 제거).
     ② 하락률 = (기준일 종가 − 상장 후 최고 종가)/최고 종가 — 기준을 첫 거래일 종가에서 신고가로 교체.
@@ -8641,7 +8652,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.315"
+VERSION = "v5.316"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

@@ -118,11 +118,10 @@ def test_no_0157_citation_left_in_today_decision(mocked_env, monkeypatch):
 
 def test_frontend_texts_reflect_withdrawal():
     text = INDEX_PATH.read_text(encoding="utf-8")
-    m = re.search(r"const TODAY_DECISION_INFO =(.*?);\n", text, re.S)
-    assert m, "TODAY_DECISION_INFO를 못 찾음"
-    info = m.group(1)
-    assert "검증 진입 2종" in info and "검증 진입 3종" not in info
-    assert "돌파임박 KR — 종가 확인 후 종가 진입" not in info
+    # v5.316: 홈 "오늘 할 일"이 제거되며 그 안내문(TODAY_DECISION_INFO)도 사라졌다 — 철회 문구가
+    # 다른 곳에 사본으로 되살아나지 않았는지만 본다(배너 검사는 그대로).
+    assert "TODAY_DECISION_INFO" not in text
+    assert "돌파임박 KR — 종가 확인 후 종가 진입" not in text
     b = re.search(r'<div[^>]*id="confirmEntryBanner"[^>]*>(.*?)</div>', text, re.S)
     assert b, "confirmEntryBanner를 못 찾음"
     assert "만 한계적으로 유효" not in b.group(1)

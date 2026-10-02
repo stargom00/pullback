@@ -93,7 +93,8 @@ def test_text_opacity_goes_through_fade_floor():
            for m in re.finditer(r"opacity:\s*0?\.\d+", TEXT) if not any(a <= m.start() < b for a, b in spans)]
     allowed = [s for s in raw if ":disabled{" in s or ".hide-btn{" in s]
     assert len(raw) == len(allowed) == 3, raw
-    assert TEXT.count("var(--fade-floor))") >= 75
+    # v5.316: 홈 "오늘 할 일"·"후보" 카드 제거로 그 안의 2곳이 함께 사라져 75 → 73
+    assert TEXT.count("var(--fade-floor))") >= 73
 
 
 def test_no_color_token_defined_outside_theme_blocks():
