@@ -7,10 +7,11 @@
  "months_definition": "개월수 = (기준월 − 상장월), 기준일은 월말 — 상장일의 일(day)은 무관. 13 ≤ 개월수 ≤ 20 포함.",
  "kr_date_caveat": "KR 상장일 = KIND 상장법인 목록의 상장일(현재 시장 기준). 코넥스→코스닥·코스닥→코스피 이전상장은 이전일이 상장일이다.",
  "us_date_caveat": "US 상장일 = yahoo firstTradeDate(첫 거래일). IPO일의 근사치 — 티커 변경·재상장·SPAC 합병 상장은 실제 IPO일과 다를 수 있다.",
- "drawdown_definition": "하락률 = (기준일 종가 − 첫 거래일 종가) / 첫 거래일 종가 × 100. **첫 거래일 '종가' 기준 — 공모가가 아니다.** 첫 거래일 종가 = 결과 종목 일봉의 첫 봉(KR naver·US yahoo, 둘 다 수정주가), 기준일 종가 = 기준일 이하 마지막 봉. 첫 봉 날짜가 상장일과 다르면 표에 따로 표시한다 — KR 이전상장은 첫 봉이 이전 시장(코넥스 등) 거래일이고, US 큰 하락은 역분할이 수정주가에 반영된 값이다.",
+ "drawdown_definition": "하락률 = (기준일 종가 − 상장 후 최고 종가) / 상장 후 최고 종가 × 100. **상장 후 최고 종가(신고가) 기준 — 공모가·첫 거래일 종가가 아니다.** 최고 종가 = 결과 종목 일봉의 첫 봉부터 기준일까지 종가의 최댓값(KR naver·US yahoo, 둘 다 수정주가), 기준일 종가 = 기준일 이하 마지막 봉. 첫 봉 날짜가 상장일과 다르면 표에 따로 표시한다 — KR 이전상장은 첫 봉이 이전 시장(코넥스 등) 거래일이라 **최고 종가에 코넥스 시절이 섞일 수 있다.** US 큰 하락은 역분할이 수정주가에 반영된 값이다.",
+ "surge_definition": "급등 전력 제외: 기준일까지의 일봉에서 어느 날 t든 close[t] / min(close[t−365일..t]) ≥ 5(배)인 날이 하루라도 있으면 목록에서 뺀다(창은 과거 방향 — t 이후의 저점은 t의 판정에 안 들어간다). 결과 파일에는 남기고 surge_excluded로 표시한다.",
  "run_stamp": {
-  "run_at_local": "2026-10-03 07:08:21 ",
-  "run_at_kst": "2026-10-03 03:08:21 KST",
+  "run_at_local": "2026-10-03 08:42:18 ",
+  "run_at_kst": "2026-10-03 04:42:18 KST",
   "local_tz_utc_offset_hours": 13.0
  },
  "counts": {
@@ -29,6 +30,10 @@
   },
   "no_close": 0,
   "no_drawdown": 1,
+  "excluded_surge": {
+   "kr": 8,
+   "us": 59
+  },
   "first_bar_after_listed": 1,
   "first_bar_before_listed": 2
  },
@@ -37,7 +42,7 @@
   "THRMV"
  ],
  "kr_date_unparsed": [],
- "elapsed_seconds": 32.6,
+ "elapsed_seconds": 33.3,
  "rows": [
   {
    "market": "KOSPI",
@@ -51,7 +56,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 92400.0,
    "first_close_date": "2025-08-01",
-   "drawdown_pct": -50.54
+   "peak_close": 108700.0,
+   "peak_close_date": "2025-08-07",
+   "surge_max_ratio": 1.8492,
+   "surge_date": "2026-03-09",
+   "drawdown_pct": -57.96,
+   "surge_excluded": false
   },
   {
    "market": "KOSPI",
@@ -65,7 +75,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 92400.0,
    "first_close_date": "2025-08-01",
-   "drawdown_pct": -50.54
+   "peak_close": 108700.0,
+   "peak_close_date": "2025-08-07",
+   "surge_max_ratio": 1.8492,
+   "surge_date": "2026-03-09",
+   "drawdown_pct": -57.96,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -73,13 +88,18 @@
    "name": "Avidia Bancorp, Inc. Common Stock",
    "listed": "2025-08-01",
    "months": 13,
-   "close": 22.07,
+   "close": 22.13,
    "close_date": "2026-10-02",
    "ref_close": 21.6,
    "ref_close_date": "2026-09-30",
    "first_close": 14.5241,
    "first_close_date": "2025-08-01",
-   "drawdown_pct": 48.72
+   "peak_close": 22.59,
+   "peak_close_date": "2026-09-18",
+   "surge_max_ratio": 1.5846,
+   "surge_date": "2026-09-18",
+   "drawdown_pct": -4.38,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -93,7 +113,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.97,
    "first_close_date": "2025-08-01",
-   "drawdown_pct": 3.96
+   "peak_close": 10.42,
+   "peak_close_date": "2026-06-02",
+   "surge_max_ratio": 1.0472,
+   "surge_date": "2026-06-02",
+   "drawdown_pct": -0.53,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -107,7 +132,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.95,
    "first_close_date": "2025-08-04",
-   "drawdown_pct": 5.53
+   "peak_close": 11.055,
+   "peak_close_date": "2026-07-09",
+   "surge_max_ratio": 1.1111,
+   "surge_date": "2026-07-09",
+   "drawdown_pct": -5.02,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -115,13 +145,18 @@
    "name": "Rubico Inc. - Common Stock",
    "listed": "2025-08-04",
    "months": 13,
-   "close": 1.0507,
+   "close": 1.085,
    "close_date": "2026-10-02",
    "ref_close": 1.07,
    "ref_close_date": "2026-09-30",
    "first_close": 199218.75,
    "first_close_date": "2025-08-04",
-   "drawdown_pct": -100.0
+   "peak_close": 242578.125,
+   "peak_close_date": "2025-08-05",
+   "surge_max_ratio": 1.6503,
+   "surge_date": "2025-11-25",
+   "drawdown_pct": -100.0,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -135,7 +170,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 1985.0,
    "first_close_date": "2025-08-06",
-   "drawdown_pct": -1.06
+   "peak_close": 2035.0,
+   "peak_close_date": "2026-02-25",
+   "surge_max_ratio": 1.0356,
+   "surge_date": "2026-09-23",
+   "drawdown_pct": -3.49,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -149,7 +189,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 4.44,
    "first_close_date": "2025-08-06",
-   "drawdown_pct": -57.43
+   "peak_close": 4.44,
+   "peak_close_date": "2025-08-06",
+   "surge_max_ratio": 2.4876,
+   "surge_date": "2026-05-14",
+   "drawdown_pct": -57.43,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -163,7 +208,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 31050.0,
    "first_close_date": "2025-08-07",
-   "drawdown_pct": -32.37
+   "peak_close": 49700.0,
+   "peak_close_date": "2025-12-03",
+   "surge_max_ratio": 2.8207,
+   "surge_date": "2025-12-03",
+   "drawdown_pct": -57.75,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -177,7 +227,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.005,
    "first_close_date": "2025-08-07",
-   "drawdown_pct": 12.94
+   "peak_close": 15.1,
+   "peak_close_date": "2026-06-15",
+   "surge_max_ratio": 1.51,
+   "surge_date": "2026-06-15",
+   "drawdown_pct": -25.17,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -185,13 +240,18 @@
    "name": "Firefly Aerospace Inc. - Common Stock",
    "listed": "2025-08-07",
    "months": 13,
-   "close": 23.73,
+   "close": 23.52,
    "close_date": "2026-10-02",
    "ref_close": 23.15,
    "ref_close_date": "2026-09-30",
    "first_close": 60.35,
    "first_close_date": "2025-08-07",
-   "drawdown_pct": -61.64
+   "peak_close": 60.35,
+   "peak_close_date": "2025-08-07",
+   "surge_max_ratio": 3.5048,
+   "surge_date": "2026-05-26",
+   "drawdown_pct": -61.64,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -199,13 +259,18 @@
    "name": "WhiteFiber, Inc. - Ordinary Shares",
    "listed": "2025-08-07",
    "months": 13,
-   "close": 17.91,
+   "close": 18.03,
    "close_date": "2026-10-02",
    "ref_close": 18.01,
    "ref_close_date": "2026-09-30",
    "first_close": 16.22,
    "first_close_date": "2025-08-07",
-   "drawdown_pct": 11.04
+   "peak_close": 44.77,
+   "peak_close_date": "2026-06-22",
+   "surge_max_ratio": 4.1531,
+   "surge_date": "2026-06-22",
+   "drawdown_pct": -59.77,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -213,13 +278,18 @@
    "name": "DarkIris Inc. - Class A Ordinary Shares",
    "listed": "2025-08-08",
    "months": 13,
-   "close": 1.4,
+   "close": 1.3904,
    "close_date": "2026-10-02",
    "ref_close": 1.57,
    "ref_close_date": "2026-09-30",
    "first_close": 5.48,
    "first_close_date": "2025-08-08",
-   "drawdown_pct": -71.35
+   "peak_close": 11.6,
+   "peak_close_date": "2025-09-26",
+   "surge_max_ratio": 21.5986,
+   "surge_date": "2026-05-28",
+   "drawdown_pct": -86.47,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -233,7 +303,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 4.88,
    "first_close_date": "2025-08-08",
-   "drawdown_pct": 207.79
+   "peak_close": 16.98,
+   "peak_close_date": "2025-09-30",
+   "surge_max_ratio": 3.5747,
+   "surge_date": "2025-09-30",
+   "drawdown_pct": -11.54,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -241,13 +316,18 @@
    "name": "Polibeli Group Ltd - Class A Ordinary Shares",
    "listed": "2025-08-08",
    "months": 13,
-   "close": 5.66,
+   "close": 5.65,
    "close_date": "2026-10-02",
    "ref_close": 5.57,
    "ref_close_date": "2026-09-30",
    "first_close": 10.73,
    "first_close_date": "2025-08-08",
-   "drawdown_pct": -48.09
+   "peak_close": 11.75,
+   "peak_close_date": "2025-11-25",
+   "surge_max_ratio": 2.0555,
+   "surge_date": "2026-07-06",
+   "drawdown_pct": -52.6,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -255,13 +335,18 @@
    "name": "Heartflow, Inc. - Common Stock",
    "listed": "2025-08-11",
    "months": 13,
-   "close": 49.39,
+   "close": 49.32,
    "close_date": "2026-10-02",
    "ref_close": 49.75,
    "ref_close_date": "2026-09-30",
    "first_close": 29.99,
    "first_close_date": "2025-08-11",
-   "drawdown_pct": 65.89
+   "peak_close": 50.75,
+   "peak_close_date": "2026-09-18",
+   "surge_max_ratio": 2.4768,
+   "surge_date": "2026-09-18",
+   "drawdown_pct": -1.97,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -275,7 +360,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 4.06,
    "first_close_date": "2025-08-12",
-   "drawdown_pct": 66.5
+   "peak_close": 6.76,
+   "peak_close_date": "2025-12-04",
+   "surge_max_ratio": 6.5,
+   "surge_date": "2025-12-04",
+   "drawdown_pct": 0.0,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -283,13 +373,18 @@
    "name": "Bullish Ordinary Shares",
    "listed": "2025-08-13",
    "months": 13,
-   "close": 34.42,
+   "close": 34.135,
    "close_date": "2026-10-02",
    "ref_close": 34.89,
    "ref_close_date": "2026-09-30",
    "first_close": 68.0,
    "first_close_date": "2025-08-13",
-   "drawdown_pct": -48.69
+   "peak_close": 74.63,
+   "peak_close_date": "2025-08-14",
+   "surge_max_ratio": 1.8678,
+   "surge_date": "2026-09-22",
+   "drawdown_pct": -53.25,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -297,13 +392,18 @@
    "name": "Nasus Pharma Ltd. Ordinary Shares",
    "listed": "2025-08-13",
    "months": 13,
-   "close": 3.895,
+   "close": 4.0349,
    "close_date": "2026-10-02",
    "ref_close": 3.69,
    "ref_close_date": "2026-09-30",
    "first_close": 8.25,
    "first_close_date": "2025-08-13",
-   "drawdown_pct": -55.27
+   "peak_close": 9.15,
+   "peak_close_date": "2025-12-31",
+   "surge_max_ratio": 2.0398,
+   "surge_date": "2026-08-25",
+   "drawdown_pct": -59.67,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -317,7 +417,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 1984.0,
    "first_close_date": "2025-08-14",
-   "drawdown_pct": 1.31
+   "peak_close": 2110.0,
+   "peak_close_date": "2026-02-13",
+   "surge_max_ratio": 1.0635,
+   "surge_date": "2026-02-13",
+   "drawdown_pct": -4.74,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -331,7 +436,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 31283.0,
    "first_close_date": "2025-08-14",
-   "drawdown_pct": 13.32
+   "peak_close": 118800.0,
+   "peak_close_date": "2026-03-13",
+   "surge_max_ratio": 3.7976,
+   "surge_date": "2026-03-13",
+   "drawdown_pct": -70.16,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -339,13 +449,18 @@
    "name": "BUUU Group Limited - Class A Ordinary Share",
    "listed": "2025-08-14",
    "months": 13,
-   "close": 39.2,
+   "close": 39.0,
    "close_date": "2026-10-02",
    "ref_close": 39.75,
    "ref_close_date": "2026-09-30",
    "first_close": 4.0,
    "first_close_date": "2025-08-14",
-   "drawdown_pct": 893.75
+   "peak_close": 48.19,
+   "peak_close_date": "2026-09-22",
+   "surge_max_ratio": 7.7125,
+   "surge_date": "2026-08-12",
+   "drawdown_pct": -17.51,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -353,13 +468,18 @@
    "name": "Miami International Holdings, Inc. Common Stock",
    "listed": "2025-08-14",
    "months": 13,
-   "close": 33.65,
+   "close": 33.0,
    "close_date": "2026-10-02",
    "ref_close": 33.5,
    "ref_close_date": "2026-09-30",
    "first_close": 30.74,
    "first_close_date": "2025-08-14",
-   "drawdown_pct": 8.98
+   "peak_close": 56.84,
+   "peak_close_date": "2026-05-14",
+   "surge_max_ratio": 1.8491,
+   "surge_date": "2026-05-14",
+   "drawdown_pct": -41.06,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -373,7 +493,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 2.9,
    "first_close_date": "2025-08-14",
-   "drawdown_pct": 4.14
+   "peak_close": 9.12,
+   "peak_close_date": "2025-10-21",
+   "surge_max_ratio": 4.8,
+   "surge_date": "2025-10-21",
+   "drawdown_pct": -66.89,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -387,7 +512,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.99,
    "first_close_date": "2025-08-15",
-   "drawdown_pct": 3.92
+   "peak_close": 10.39,
+   "peak_close_date": "2026-09-21",
+   "surge_max_ratio": 1.0442,
+   "surge_date": "2026-09-21",
+   "drawdown_pct": -0.08,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -401,7 +531,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.96,
    "first_close_date": "2025-08-15",
-   "drawdown_pct": 3.92
+   "peak_close": 10.35,
+   "peak_close_date": "2026-09-30",
+   "surge_max_ratio": 1.0413,
+   "surge_date": "2026-09-03",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -415,7 +550,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.97,
    "first_close_date": "2025-08-15",
-   "drawdown_pct": 4.01
+   "peak_close": 10.37,
+   "peak_close_date": "2026-09-30",
+   "surge_max_ratio": 1.0412,
+   "surge_date": "2026-09-30",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -429,7 +569,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 16640.0,
    "first_close_date": "2025-08-18",
-   "drawdown_pct": -57.03
+   "peak_close": 21550.0,
+   "peak_close_date": "2025-09-15",
+   "surge_max_ratio": 1.6227,
+   "surge_date": "2025-09-15",
+   "drawdown_pct": -66.82,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -443,7 +588,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.95,
    "first_close_date": "2025-08-18",
-   "drawdown_pct": 3.72
+   "peak_close": 10.36,
+   "peak_close_date": "2026-08-20",
+   "surge_max_ratio": 1.0381,
+   "surge_date": "2026-08-20",
+   "drawdown_pct": -0.39,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -457,7 +607,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 45000.0,
    "first_close_date": "2025-08-19",
-   "drawdown_pct": -48.56
+   "peak_close": 51800.0,
+   "peak_close_date": "2025-08-29",
+   "surge_max_ratio": 1.7801,
+   "surge_date": "2026-04-23",
+   "drawdown_pct": -55.31,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -465,13 +620,18 @@
    "name": "Yimutian Inc. - American Depositary Shares; each representing 25 Class A ordinary shares",
    "listed": "2025-08-19",
    "months": 13,
-   "close": 1.13,
+   "close": 1.093,
    "close_date": "2026-10-02",
    "ref_close": 1.25,
    "ref_close_date": "2026-09-30",
    "first_close": 672.0,
    "first_close_date": "2025-08-19",
-   "drawdown_pct": -99.81
+   "peak_close": 672.0,
+   "peak_close_date": "2025-08-19",
+   "surge_max_ratio": 1.9535,
+   "surge_date": "2026-01-12",
+   "drawdown_pct": -99.81,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -485,7 +645,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 5920.0,
    "first_close_date": "2025-08-20",
-   "drawdown_pct": 96.62
+   "peak_close": 24000.0,
+   "peak_close_date": "2026-01-30",
+   "surge_max_ratio": 5.492,
+   "surge_date": "2026-01-30",
+   "drawdown_pct": -51.5,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -493,13 +658,18 @@
    "name": "Exascale Labs Holdings Inc. - Class A Common Stock",
    "listed": "2025-08-20",
    "months": 13,
-   "close": 1.41,
+   "close": 1.391,
    "close_date": "2026-10-02",
    "ref_close": 1.85,
    "ref_close_date": "2026-09-30",
    "first_close": 9.92,
    "first_close_date": "2025-08-20",
-   "drawdown_pct": -81.35
+   "peak_close": 10.99,
+   "peak_close_date": "2026-06-01",
+   "surge_max_ratio": 1.4567,
+   "surge_date": "2026-08-13",
+   "drawdown_pct": -83.17,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -513,7 +683,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 21700.0,
    "first_close_date": "2025-08-21",
-   "drawdown_pct": -59.08
+   "peak_close": 22700.0,
+   "peak_close_date": "2025-09-30",
+   "surge_max_ratio": 1.4477,
+   "surge_date": "2025-09-30",
+   "drawdown_pct": -60.88,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -527,7 +702,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 1977.0,
    "first_close_date": "2025-08-21",
-   "drawdown_pct": 0.81
+   "peak_close": 2100.0,
+   "peak_close_date": "2026-02-26",
+   "surge_max_ratio": 1.0622,
+   "surge_date": "2026-02-26",
+   "drawdown_pct": -5.1,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -541,7 +721,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.12,
    "first_close_date": "2025-08-21",
-   "drawdown_pct": 1.78
+   "peak_close": 10.62,
+   "peak_close_date": "2025-10-28",
+   "surge_max_ratio": 1.0515,
+   "surge_date": "2025-10-28",
+   "drawdown_pct": -3.01,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -549,13 +734,18 @@
    "name": "Elite Express Holding Inc. - Class A Common Stock",
    "listed": "2025-08-21",
    "months": 13,
-   "close": 1.7,
+   "close": 1.685,
    "close_date": "2026-10-02",
    "ref_close": 1.79,
    "ref_close_date": "2026-09-30",
    "first_close": 3.5,
    "first_close_date": "2025-08-21",
-   "drawdown_pct": -48.86
+   "peak_close": 3.5,
+   "peak_close_date": "2025-08-21",
+   "surge_max_ratio": 6.1176,
+   "surge_date": "2026-09-18",
+   "drawdown_pct": -48.86,
+   "surge_excluded": true
   },
   {
    "market": "KOSDAQ",
@@ -569,7 +759,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 13930.0,
    "first_close_date": "2025-08-22",
-   "drawdown_pct": -52.91
+   "peak_close": 13930.0,
+   "peak_close_date": "2025-08-22",
+   "surge_max_ratio": 1.7318,
+   "surge_date": "2026-08-21",
+   "drawdown_pct": -52.91,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -583,7 +778,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.14,
    "first_close_date": "2025-08-22",
-   "drawdown_pct": 1.58
+   "peak_close": 10.4,
+   "peak_close_date": "2025-10-28",
+   "surge_max_ratio": 1.0317,
+   "surge_date": "2025-10-28",
+   "drawdown_pct": -0.96,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -591,13 +791,18 @@
    "name": "EQV Ventures Acquisition Corp. II Class A Ordinary Shares",
    "listed": "2025-08-22",
    "months": 13,
-   "close": 10.32,
+   "close": 10.31,
    "close_date": "2026-10-02",
    "ref_close": 10.32,
    "ref_close_date": "2026-09-30",
    "first_close": 9.95,
    "first_close_date": "2025-08-22",
-   "drawdown_pct": 3.72
+   "peak_close": 10.32,
+   "peak_close_date": "2026-09-28",
+   "surge_max_ratio": 1.0393,
+   "surge_date": "2026-09-10",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -611,7 +816,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.93,
    "first_close_date": "2025-08-22",
-   "drawdown_pct": 4.03
+   "peak_close": 10.33,
+   "peak_close_date": "2026-09-30",
+   "surge_max_ratio": 1.0403,
+   "surge_date": "2026-09-30",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -625,7 +835,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 11260.0,
    "first_close_date": "2025-08-25",
-   "drawdown_pct": 37.74
+   "peak_close": 64000.0,
+   "peak_close_date": "2026-02-06",
+   "surge_max_ratio": 7.7016,
+   "surge_date": "2026-02-06",
+   "drawdown_pct": -75.77,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -639,7 +854,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 80.4,
    "first_close_date": "2025-08-26",
-   "drawdown_pct": -93.74
+   "peak_close": 183.2,
+   "peak_close_date": "2025-09-16",
+   "surge_max_ratio": 2.2786,
+   "surge_date": "2025-09-16",
+   "drawdown_pct": -97.25,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -647,13 +867,18 @@
    "name": "YD Bio Limited - Ordinary Shares",
    "listed": "2025-08-26",
    "months": 13,
-   "close": 7.855,
+   "close": 8.22,
    "close_date": "2026-10-02",
    "ref_close": 7.42,
    "ref_close_date": "2026-09-30",
    "first_close": 13.36,
    "first_close_date": "2025-08-26",
-   "drawdown_pct": -44.46
+   "peak_close": 23.11,
+   "peak_close_date": "2025-09-12",
+   "surge_max_ratio": 4.3604,
+   "surge_date": "2025-09-12",
+   "drawdown_pct": -67.89,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -661,13 +886,18 @@
    "name": "TryHard Holdings Limited - Ordinary Shares",
    "listed": "2025-08-27",
    "months": 13,
-   "close": 1.575,
+   "close": 1.545,
    "close_date": "2026-10-02",
    "ref_close": 1.51,
    "ref_close_date": "2026-09-30",
    "first_close": 241.9,
    "first_close_date": "2025-08-27",
-   "drawdown_pct": -99.38
+   "peak_close": 550.5,
+   "peak_close_date": "2026-01-13",
+   "surge_max_ratio": 12.0989,
+   "surge_date": "2026-01-13",
+   "drawdown_pct": -99.73,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -675,13 +905,18 @@
    "name": "Eastern International Ltd. - Ordinary Shares",
    "listed": "2025-08-28",
    "months": 13,
-   "close": 0.5,
+   "close": 0.5001,
    "close_date": "2026-10-02",
    "ref_close": 0.509,
    "ref_close_date": "2026-09-30",
    "first_close": 2.96,
    "first_close_date": "2025-08-28",
-   "drawdown_pct": -82.8
+   "peak_close": 2.97,
+   "peak_close_date": "2025-10-13",
+   "surge_max_ratio": 1.5231,
+   "surge_date": "2025-10-13",
+   "drawdown_pct": -82.86,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -689,13 +924,18 @@
    "name": "The GrowHub Limited - Class A Ordinary Shares",
    "listed": "2025-08-28",
    "months": 13,
-   "close": 0.785,
+   "close": 0.789,
    "close_date": "2026-10-02",
    "ref_close": 0.766,
    "ref_close_date": "2026-09-30",
    "first_close": 3.38,
    "first_close_date": "2025-08-28",
-   "drawdown_pct": -77.34
+   "peak_close": 3.61,
+   "peak_close_date": "2025-09-02",
+   "surge_max_ratio": 5.5678,
+   "surge_date": "2026-07-16",
+   "drawdown_pct": -78.78,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -703,13 +943,18 @@
    "name": "Picard Medical, Inc. Common Stock",
    "listed": "2025-08-29",
    "months": 13,
-   "close": 4.7939,
+   "close": 5.8199,
    "close_date": "2026-10-02",
    "ref_close": 4.2,
    "ref_close_date": "2026-09-30",
    "first_close": 229.5,
    "first_close_date": "2025-08-29",
-   "drawdown_pct": -98.17
+   "peak_close": 660.0,
+   "peak_close_date": "2025-10-23",
+   "surge_max_ratio": 3.2343,
+   "surge_date": "2026-08-26",
+   "drawdown_pct": -99.36,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -723,7 +968,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 4.6,
    "first_close_date": "2025-07-01",
-   "drawdown_pct": -76.28
+   "peak_close": 6.088,
+   "peak_close_date": "2025-07-15",
+   "surge_max_ratio": 2.3861,
+   "surge_date": "2025-12-31",
+   "drawdown_pct": -82.08,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -737,7 +987,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 11.068,
    "first_close_date": "2025-07-02",
-   "drawdown_pct": -4.41
+   "peak_close": 15.5465,
+   "peak_close_date": "2026-02-20",
+   "surge_max_ratio": 1.6959,
+   "surge_date": "2026-02-20",
+   "drawdown_pct": -31.95,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -745,13 +1000,18 @@
    "name": "CapsoVision, Inc. - Common Stock",
    "listed": "2025-07-02",
    "months": 14,
-   "close": 6.19,
+   "close": 6.16,
    "close_date": "2026-10-02",
    "ref_close": 6.46,
    "ref_close_date": "2026-09-30",
    "first_close": 3.5,
    "first_close_date": "2025-07-02",
-   "drawdown_pct": 84.57
+   "peak_close": 14.42,
+   "peak_close_date": "2025-12-11",
+   "surge_max_ratio": 4.12,
+   "surge_date": "2025-12-11",
+   "drawdown_pct": -55.2,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -760,12 +1020,17 @@
    "listed": "2025-07-02",
    "months": 14,
    "close": 10.4,
-   "close_date": "2026-10-01",
+   "close_date": "2026-10-02",
    "ref_close": 10.4,
    "ref_close_date": "2026-09-30",
    "first_close": 9.965,
    "first_close_date": "2025-07-02",
-   "drawdown_pct": 4.37
+   "peak_close": 10.4,
+   "peak_close_date": "2026-08-11",
+   "surge_max_ratio": 1.04,
+   "surge_date": "2026-08-11",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -779,7 +1044,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 1986.0,
    "first_close_date": "2025-07-04",
-   "drawdown_pct": 0.35
+   "peak_close": 2050.0,
+   "peak_close_date": "2026-02-25",
+   "surge_max_ratio": 1.0322,
+   "surge_date": "2026-02-25",
+   "drawdown_pct": -2.78,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -793,7 +1063,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 38400.0,
    "first_close_date": "2025-07-04",
-   "drawdown_pct": -82.53
+   "peak_close": 45100.0,
+   "peak_close_date": "2025-07-11",
+   "surge_max_ratio": 2.1292,
+   "surge_date": "2026-08-12",
+   "drawdown_pct": -85.12,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -807,7 +1082,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 7960.0,
    "first_close_date": "2025-07-07",
-   "drawdown_pct": -53.14
+   "peak_close": 13550.0,
+   "peak_close_date": "2025-07-14",
+   "surge_max_ratio": 1.7023,
+   "surge_date": "2025-07-14",
+   "drawdown_pct": -72.47,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -821,7 +1101,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 3.69,
    "first_close_date": "2025-07-07",
-   "drawdown_pct": 252.3
+   "peak_close": 13.63,
+   "peak_close_date": "2025-11-12",
+   "surge_max_ratio": 6.9188,
+   "surge_date": "2025-11-12",
+   "drawdown_pct": -4.62,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -835,7 +1120,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.29,
    "first_close_date": "2025-07-07",
-   "drawdown_pct": 1.26
+   "peak_close": 10.42,
+   "peak_close_date": "2026-09-30",
+   "surge_max_ratio": 1.0317,
+   "surge_date": "2026-09-30",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -849,7 +1139,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 3.52,
    "first_close_date": "2025-07-08",
-   "drawdown_pct": -46.31
+   "peak_close": 157.89,
+   "peak_close_date": "2026-01-15",
+   "surge_max_ratio": 51.9375,
+   "surge_date": "2026-01-15",
+   "drawdown_pct": -98.8,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -857,13 +1152,18 @@
    "name": "Masonglory Limited - Class A Ordinary Shares",
    "listed": "2025-07-08",
    "months": 14,
-   "close": 4.21,
+   "close": 4.415,
    "close_date": "2026-10-02",
    "ref_close": 5.66,
    "ref_close_date": "2026-09-30",
    "first_close": 34.16,
    "first_close_date": "2025-07-08",
-   "drawdown_pct": -83.43
+   "peak_close": 164.16,
+   "peak_close_date": "2025-10-01",
+   "surge_max_ratio": 6.5895,
+   "surge_date": "2026-01-27",
+   "drawdown_pct": -96.55,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -871,13 +1171,18 @@
    "name": "Ten-League International Holdings Limited - Ordinary Shares",
    "listed": "2025-07-08",
    "months": 14,
-   "close": 5.76,
+   "close": 5.62,
    "close_date": "2026-10-02",
    "ref_close": 5.7,
    "ref_close_date": "2026-09-30",
    "first_close": 37.3,
    "first_close_date": "2025-07-08",
-   "drawdown_pct": -84.72
+   "peak_close": 66.0,
+   "peak_close_date": "2025-07-23",
+   "surge_max_ratio": 2.5214,
+   "surge_date": "2026-09-16",
+   "drawdown_pct": -91.36,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -891,7 +1196,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 12640.0,
    "first_close_date": "2025-07-09",
-   "drawdown_pct": -69.98
+   "peak_close": 13990.0,
+   "peak_close_date": "2025-07-14",
+   "surge_max_ratio": 1.4539,
+   "surge_date": "2026-08-11",
+   "drawdown_pct": -72.87,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -899,13 +1209,18 @@
    "name": "Delixy Holdings Limited - Class A Ordinary Shares",
    "listed": "2025-07-09",
    "months": 14,
-   "close": 2.01,
+   "close": 2.03,
    "close_date": "2026-10-02",
    "ref_close": 2.19,
    "ref_close_date": "2026-09-30",
    "first_close": 4.95,
    "first_close_date": "2025-07-09",
-   "drawdown_pct": -55.76
+   "peak_close": 6.72,
+   "peak_close_date": "2025-09-29",
+   "surge_max_ratio": 6.9714,
+   "surge_date": "2026-09-28",
+   "drawdown_pct": -67.41,
+   "surge_excluded": true
   },
   {
    "market": "KOSPI",
@@ -919,7 +1234,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 4520.0,
    "first_close_date": "2025-07-10",
-   "drawdown_pct": -17.04
+   "peak_close": 4750.0,
+   "peak_close_date": "2025-12-05",
+   "surge_max_ratio": 1.1445,
+   "surge_date": "2026-09-01",
+   "drawdown_pct": -21.05,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -927,13 +1247,18 @@
    "name": "Youlife Group Inc. - American Depositary Shares",
    "listed": "2025-07-10",
    "months": 14,
-   "close": 0.3959,
+   "close": 0.396,
    "close_date": "2026-10-02",
    "ref_close": 0.423,
    "ref_close_date": "2026-09-30",
    "first_close": 5.0,
    "first_close_date": "2025-07-10",
-   "drawdown_pct": -91.54
+   "peak_close": 5.0,
+   "peak_close_date": "2025-07-10",
+   "surge_max_ratio": 3.0564,
+   "surge_date": "2026-06-09",
+   "drawdown_pct": -91.54,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -947,7 +1272,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 4.0,
    "first_close_date": "2025-07-11",
-   "drawdown_pct": 8.0
+   "peak_close": 6.16,
+   "peak_close_date": "2026-06-15",
+   "surge_max_ratio": 2.0065,
+   "surge_date": "2026-06-15",
+   "drawdown_pct": -29.87,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -955,13 +1285,18 @@
    "name": "Liberty Capital Corporation - Series A GCI Group Common Stock",
    "listed": "2025-07-11",
    "months": 14,
-   "close": 23.32,
+   "close": 23.195,
    "close_date": "2026-10-02",
    "ref_close": 23.12,
    "ref_close_date": "2026-09-30",
    "first_close": 32.5,
    "first_close_date": "2025-07-11",
-   "drawdown_pct": -28.86
+   "peak_close": 40.23,
+   "peak_close_date": "2026-02-10",
+   "surge_max_ratio": 1.3288,
+   "surge_date": "2026-08-14",
+   "drawdown_pct": -42.53,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -969,13 +1304,18 @@
    "name": "Liberty Capital Corporation - Series C GCI Group Common Stock",
    "listed": "2025-07-11",
    "months": 14,
-   "close": 23.445,
+   "close": 23.34,
    "close_date": "2026-10-02",
    "ref_close": 23.2,
    "ref_close_date": "2026-09-30",
    "first_close": 31.1,
    "first_close_date": "2025-07-11",
-   "drawdown_pct": -25.4
+   "peak_close": 40.04,
+   "peak_close_date": "2026-02-20",
+   "surge_max_ratio": 1.3444,
+   "surge_date": "2026-08-14",
+   "drawdown_pct": -42.06,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -989,7 +1329,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.96,
    "first_close_date": "2025-07-11",
-   "drawdown_pct": 4.47
+   "peak_close": 10.405,
+   "peak_close_date": "2026-09-29",
+   "surge_max_ratio": 1.0384,
+   "surge_date": "2026-09-29",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1003,7 +1348,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.44,
    "first_close_date": "2025-07-11",
-   "drawdown_pct": -0.29
+   "peak_close": 10.482,
+   "peak_close_date": "2025-07-24",
+   "surge_max_ratio": 1.0301,
+   "surge_date": "2025-10-01",
+   "drawdown_pct": -0.69,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1011,13 +1361,18 @@
    "name": "Profusa, Inc. - Common Stock",
    "listed": "2025-07-11",
    "months": 14,
-   "close": 1.695,
+   "close": 1.6999,
    "close_date": "2026-10-02",
    "ref_close": 1.98,
    "ref_close_date": "2026-09-30",
    "first_close": 18750.0,
    "first_close_date": "2025-07-11",
-   "drawdown_pct": -99.99
+   "peak_close": 18750.0,
+   "peak_close_date": "2025-07-11",
+   "surge_max_ratio": 7.6333,
+   "surge_date": "2026-08-18",
+   "drawdown_pct": -99.99,
+   "surge_excluded": true
   },
   {
    "market": "KOSDAQ",
@@ -1031,7 +1386,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 30850.0,
    "first_close_date": "2025-07-15",
-   "drawdown_pct": -79.32
+   "peak_close": 30850.0,
+   "peak_close_date": "2025-07-15",
+   "surge_max_ratio": 2.032,
+   "surge_date": "2026-01-08",
+   "drawdown_pct": -79.32,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1039,13 +1399,18 @@
    "name": "VisionWave Holdings, Inc. - Common Stock",
    "listed": "2025-07-15",
    "months": 14,
-   "close": 4.4782,
+   "close": 4.48,
    "close_date": "2026-10-02",
    "ref_close": 4.42,
    "ref_close_date": "2026-09-30",
    "first_close": 65.4,
    "first_close_date": "2025-07-15",
-   "drawdown_pct": -93.24
+   "peak_close": 283.6,
+   "peak_close_date": "2026-01-12",
+   "surge_max_ratio": 19.4164,
+   "surge_date": "2026-09-17",
+   "drawdown_pct": -98.44,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -1053,13 +1418,18 @@
    "name": "Aura Minerals Inc. - Common Shares",
    "listed": "2025-07-16",
    "months": 14,
-   "close": 82.42,
+   "close": 82.03,
    "close_date": "2026-10-02",
    "ref_close": 78.68,
    "ref_close_date": "2026-09-30",
    "first_close": 23.3204,
    "first_close_date": "2025-07-16",
-   "drawdown_pct": 237.39
+   "peak_close": 107.0243,
+   "peak_close_date": "2026-04-17",
+   "surge_max_ratio": 4.7358,
+   "surge_date": "2026-04-17",
+   "drawdown_pct": -26.48,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1067,13 +1437,18 @@
    "name": "K-Tech Solutions Company Limited - Class A Ordinary Shares",
    "listed": "2025-07-16",
    "months": 14,
-   "close": 1.066,
+   "close": 1.0804,
    "close_date": "2026-10-02",
    "ref_close": 1.18,
    "ref_close_date": "2026-09-30",
    "first_close": 4.95,
    "first_close_date": "2025-07-16",
-   "drawdown_pct": -76.16
+   "peak_close": 4.95,
+   "peak_close_date": "2025-07-16",
+   "surge_max_ratio": 4.6778,
+   "surge_date": "2026-04-23",
+   "drawdown_pct": -76.16,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1087,7 +1462,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 3.81,
    "first_close_date": "2025-07-16",
-   "drawdown_pct": 2524.93
+   "peak_close": 142.2,
+   "peak_close_date": "2026-05-13",
+   "surge_max_ratio": 62.3684,
+   "surge_date": "2026-05-13",
+   "drawdown_pct": -29.67,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -1101,7 +1481,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 3.52,
    "first_close_date": "2025-07-17",
-   "drawdown_pct": 6.53
+   "peak_close": 3.75,
+   "peak_close_date": "2025-10-20",
+   "surge_max_ratio": 2.3437,
+   "surge_date": "2025-10-20",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1109,13 +1494,18 @@
    "name": "Ping An Biomedical Co., Ltd. - Class A Ordinary Shares",
    "listed": "2025-07-18",
    "months": 14,
-   "close": 0.1255,
+   "close": 0.1248,
    "close_date": "2026-10-02",
    "ref_close": 0.124,
    "ref_close_date": "2026-09-30",
    "first_close": 3.3,
    "first_close_date": "2025-07-18",
-   "drawdown_pct": -96.24
+   "peak_close": 3.3,
+   "peak_close_date": "2025-07-18",
+   "surge_max_ratio": 1.5484,
+   "surge_date": "2026-06-10",
+   "drawdown_pct": -96.24,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1129,7 +1519,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.02,
    "first_close_date": "2025-07-21",
-   "drawdown_pct": 4.39
+   "peak_close": 10.46,
+   "peak_close_date": "2026-09-29",
+   "surge_max_ratio": 1.044,
+   "surge_date": "2026-09-02",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1143,7 +1538,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.02,
    "first_close_date": "2025-07-21",
-   "drawdown_pct": 6.23
+   "peak_close": 10.644,
+   "peak_close_date": "2026-09-30",
+   "surge_max_ratio": 1.0581,
+   "surge_date": "2026-09-30",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -1157,7 +1557,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 1987.0,
    "first_close_date": "2025-07-22",
-   "drawdown_pct": 0.5
+   "peak_close": 2115.0,
+   "peak_close_date": "2026-02-26",
+   "surge_max_ratio": 1.0644,
+   "surge_date": "2026-02-26",
+   "drawdown_pct": -5.58,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -1171,7 +1576,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 2600.0,
    "first_close_date": "2025-07-22",
-   "drawdown_pct": -23.42
+   "peak_close": 2600.0,
+   "peak_close_date": "2025-07-22",
+   "surge_max_ratio": 1.0479,
+   "surge_date": "2026-09-30",
+   "drawdown_pct": -23.42,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1185,7 +1595,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.1,
    "first_close_date": "2025-07-22",
-   "drawdown_pct": 3.27
+   "peak_close": 10.49,
+   "peak_close_date": "2026-09-03",
+   "surge_max_ratio": 1.0366,
+   "surge_date": "2026-09-03",
+   "drawdown_pct": -0.57,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -1199,7 +1614,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 44350.0,
    "first_close_date": "2025-07-23",
-   "drawdown_pct": -45.89
+   "peak_close": 44350.0,
+   "peak_close_date": "2025-07-23",
+   "surge_max_ratio": 1.9845,
+   "surge_date": "2026-09-29",
+   "drawdown_pct": -45.89,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1207,13 +1627,18 @@
    "name": "Carlsmed, Inc. - Common Stock",
    "listed": "2025-07-23",
    "months": 14,
-   "close": 14.23,
+   "close": 14.32,
    "close_date": "2026-10-02",
    "ref_close": 14.07,
    "ref_close_date": "2026-09-30",
    "first_close": 14.5,
    "first_close_date": "2025-07-23",
-   "drawdown_pct": -2.97
+   "peak_close": 16.99,
+   "peak_close_date": "2025-12-03",
+   "surge_max_ratio": 1.9117,
+   "surge_date": "2026-08-28",
+   "drawdown_pct": -17.19,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1221,13 +1646,18 @@
    "name": "Cre8 Enterprise Limited - Class A Ordinary Shares",
    "listed": "2025-07-23",
    "months": 14,
-   "close": 2.7,
+   "close": 2.6658,
    "close_date": "2026-10-02",
    "ref_close": 2.61,
    "ref_close_date": "2026-09-30",
    "first_close": 52.8,
    "first_close_date": "2025-07-23",
-   "drawdown_pct": -95.06
+   "peak_close": 87.48,
+   "peak_close_date": "2025-08-11",
+   "surge_max_ratio": 3.1972,
+   "surge_date": "2026-08-26",
+   "drawdown_pct": -97.02,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1235,13 +1665,18 @@
    "name": "NIQ Global Intelligence plc Ordinary Shares",
    "listed": "2025-07-23",
    "months": 14,
-   "close": 16.705,
+   "close": 16.7,
    "close_date": "2026-10-02",
    "ref_close": 17.01,
    "ref_close_date": "2026-09-30",
    "first_close": 19.01,
    "first_close_date": "2025-07-23",
-   "drawdown_pct": -10.52
+   "peak_close": 19.74,
+   "peak_close_date": "2025-07-24",
+   "surge_max_ratio": 2.4141,
+   "surge_date": "2026-08-25",
+   "drawdown_pct": -13.83,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1249,13 +1684,18 @@
    "name": "Dreamland Limited - Class A Ordinary Shares",
    "listed": "2025-07-23",
    "months": 14,
-   "close": 2.1745,
+   "close": 2.1301,
    "close_date": "2026-10-02",
    "ref_close": 2.29,
    "ref_close_date": "2026-09-30",
    "first_close": 547.5,
    "first_close_date": "2025-07-23",
-   "drawdown_pct": -99.58
+   "peak_close": 908.75,
+   "peak_close_date": "2025-10-07",
+   "surge_max_ratio": 40.4386,
+   "surge_date": "2026-05-13",
+   "drawdown_pct": -99.75,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -1263,13 +1703,18 @@
    "name": "Accelerant Holdings Class A Common Shares",
    "listed": "2025-07-24",
    "months": 14,
-   "close": 19.7301,
+   "close": 19.735,
    "close_date": "2026-10-02",
    "ref_close": 19.73,
    "ref_close_date": "2026-09-30",
    "first_close": 26.5,
    "first_close_date": "2025-07-24",
-   "drawdown_pct": -25.55
+   "peak_close": 30.05,
+   "peak_close_date": "2025-08-22",
+   "surge_max_ratio": 2.1239,
+   "surge_date": "2026-09-04",
+   "drawdown_pct": -34.34,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1277,13 +1722,18 @@
    "name": "Linkhome Holdings Inc. - Common stock",
    "listed": "2025-07-24",
    "months": 14,
-   "close": 1.01,
+   "close": 1.08,
    "close_date": "2026-10-02",
    "ref_close": 1.01,
    "ref_close_date": "2026-09-30",
    "first_close": 5.63,
    "first_close_date": "2025-07-24",
-   "drawdown_pct": -82.06
+   "peak_close": 15.59,
+   "peak_close_date": "2025-12-03",
+   "surge_max_ratio": 4.2089,
+   "surge_date": "2026-07-01",
+   "drawdown_pct": -93.52,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1291,13 +1741,18 @@
    "name": "McGraw Hill, Inc. Common Stock",
    "listed": "2025-07-24",
    "months": 14,
-   "close": 12.86,
+   "close": 12.71,
    "close_date": "2026-10-02",
    "ref_close": 13.11,
    "ref_close_date": "2026-09-30",
    "first_close": 17.0,
    "first_close_date": "2025-07-24",
-   "drawdown_pct": -22.88
+   "peak_close": 17.99,
+   "peak_close_date": "2025-11-25",
+   "surge_max_ratio": 1.655,
+   "surge_date": "2025-11-25",
+   "drawdown_pct": -27.13,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -1311,7 +1766,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 20300.0,
    "first_close_date": "2025-07-25",
-   "drawdown_pct": -63.0
+   "peak_close": 36700.0,
+   "peak_close_date": "2026-02-02",
+   "surge_max_ratio": 3.5631,
+   "surge_date": "2026-02-02",
+   "drawdown_pct": -79.54,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1325,7 +1785,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.95,
    "first_close_date": "2025-07-25",
-   "drawdown_pct": 5.03
+   "peak_close": 10.45,
+   "peak_close_date": "2026-09-28",
+   "surge_max_ratio": 1.0471,
+   "surge_date": "2026-09-28",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1339,7 +1804,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.775,
    "first_close_date": "2025-07-25",
-   "drawdown_pct": -3.94
+   "peak_close": 11.4,
+   "peak_close_date": "2025-08-28",
+   "surge_max_ratio": 1.0962,
+   "surge_date": "2025-08-28",
+   "drawdown_pct": -9.21,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -1353,7 +1823,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 16660.0,
    "first_close_date": "2025-07-28",
-   "drawdown_pct": -42.08
+   "peak_close": 28600.0,
+   "peak_close_date": "2026-02-26",
+   "surge_max_ratio": 2.6239,
+   "surge_date": "2026-02-26",
+   "drawdown_pct": -66.26,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -1367,7 +1842,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 17550.0,
    "first_close_date": "2025-07-29",
-   "drawdown_pct": 193.45
+   "peak_close": 111800.0,
+   "peak_close_date": "2025-12-29",
+   "surge_max_ratio": 8.1014,
+   "surge_date": "2025-12-29",
+   "drawdown_pct": -53.94,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -1375,13 +1855,18 @@
    "name": "Ambiq Micro, Inc. Common Stock",
    "listed": "2025-07-30",
    "months": 14,
-   "close": 69.5,
+   "close": 69.0,
    "close_date": "2026-10-02",
    "ref_close": 68.17,
    "ref_close_date": "2026-09-30",
    "first_close": 38.53,
    "first_close_date": "2025-07-30",
-   "drawdown_pct": 76.93
+   "peak_close": 90.48,
+   "peak_close_date": "2026-06-18",
+   "surge_max_ratio": 3.9754,
+   "surge_date": "2026-06-18",
+   "drawdown_pct": -24.66,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1389,13 +1874,18 @@
    "name": "Indigo Acquisition Corp. - Ordinary Shares",
    "listed": "2025-07-30",
    "months": 14,
-   "close": 10.35,
+   "close": 10.39,
    "close_date": "2026-10-02",
    "ref_close": 10.38,
    "ref_close_date": "2026-09-30",
    "first_close": 9.92,
    "first_close_date": "2025-07-30",
-   "drawdown_pct": 4.64
+   "peak_close": 10.39,
+   "peak_close_date": "2026-09-21",
+   "surge_max_ratio": 1.0432,
+   "surge_date": "2026-09-21",
+   "drawdown_pct": -0.1,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1403,13 +1893,18 @@
    "name": "J-Star Holding Co., Ltd. - Class A Ordinary Shares",
    "listed": "2025-07-30",
    "months": 14,
-   "close": 1.4401,
+   "close": 1.441,
    "close_date": "2026-10-02",
    "ref_close": 1.41,
    "ref_close_date": "2026-09-30",
    "first_close": 20.4,
    "first_close_date": "2025-07-30",
-   "drawdown_pct": -93.09
+   "peak_close": 28.7,
+   "peak_close_date": "2025-08-20",
+   "surge_max_ratio": 7.7593,
+   "surge_date": "2026-05-14",
+   "drawdown_pct": -95.09,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -1418,12 +1913,17 @@
    "listed": "2025-07-31",
    "months": 14,
    "close": 10.38,
-   "close_date": "2026-10-01",
+   "close_date": "2026-10-02",
    "ref_close": 10.38,
    "ref_close_date": "2026-09-30",
    "first_close": 9.979,
    "first_close_date": "2025-07-31",
-   "drawdown_pct": 4.02
+   "peak_close": 10.38,
+   "peak_close_date": "2026-02-09",
+   "surge_max_ratio": 1.0443,
+   "surge_date": "2026-02-09",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1431,13 +1931,18 @@
    "name": "Figma, Inc. Class A Common Stock",
    "listed": "2025-07-31",
    "months": 14,
-   "close": 21.2822,
+   "close": 21.34,
    "close_date": "2026-10-02",
    "ref_close": 21.02,
    "ref_close_date": "2026-09-30",
    "first_close": 115.5,
    "first_close_date": "2025-07-31",
-   "drawdown_pct": -81.8
+   "peak_close": 122.0,
+   "peak_close_date": "2025-08-01",
+   "surge_max_ratio": 1.8183,
+   "surge_date": "2026-08-27",
+   "drawdown_pct": -82.77,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1445,13 +1950,18 @@
    "name": "Shoulder Innovations, Inc. Common Stock",
    "listed": "2025-07-31",
    "months": 14,
-   "close": 18.95,
+   "close": 19.17,
    "close_date": "2026-10-02",
    "ref_close": 18.9,
    "ref_close_date": "2026-09-30",
    "first_close": 15.05,
    "first_close_date": "2025-07-31",
-   "drawdown_pct": 25.58
+   "peak_close": 24.25,
+   "peak_close_date": "2026-07-28",
+   "surge_max_ratio": 2.2025,
+   "surge_date": "2026-07-28",
+   "drawdown_pct": -22.06,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -1465,7 +1975,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9660.0,
    "first_close_date": "2025-06-02",
-   "drawdown_pct": -54.55
+   "peak_close": 9660.0,
+   "peak_close_date": "2025-06-02",
+   "surge_max_ratio": 1.7045,
+   "surge_date": "2026-05-04",
+   "drawdown_pct": -54.55,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1473,13 +1988,18 @@
    "name": "Copley Acquisition Corp Ordinary Shares",
    "listed": "2025-06-02",
    "months": 15,
-   "close": 10.58,
+   "close": 10.585,
    "close_date": "2026-10-02",
    "ref_close": 10.58,
    "ref_close_date": "2026-09-30",
    "first_close": 10.0,
    "first_close_date": "2025-06-02",
-   "drawdown_pct": 5.8
+   "peak_close": 10.58,
+   "peak_close_date": "2026-09-30",
+   "surge_max_ratio": 1.0481,
+   "surge_date": "2026-09-09",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1487,13 +2007,18 @@
    "name": "Digital Asset Acquisition Corp. - Class A Ordinary shares",
    "listed": "2025-06-02",
    "months": 15,
-   "close": 10.47,
-   "close_date": "2026-10-01",
+   "close": 10.46,
+   "close_date": "2026-10-02",
    "ref_close": 10.48,
    "ref_close_date": "2026-09-30",
    "first_close": 10.4,
    "first_close_date": "2025-06-02",
-   "drawdown_pct": 0.77
+   "peak_close": 10.96,
+   "peak_close_date": "2025-06-24",
+   "surge_max_ratio": 1.521,
+   "surge_date": "2026-09-30",
+   "drawdown_pct": -4.38,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1501,13 +2026,18 @@
    "name": "IQM Quantum Computers Oyj - American Depositary Shares",
    "listed": "2025-06-02",
    "months": 15,
-   "close": 10.05,
+   "close": 10.3,
    "close_date": "2026-10-02",
    "ref_close": 10.37,
    "ref_close_date": "2026-09-30",
    "first_close": 10.05,
    "first_close_date": "2025-06-02",
-   "drawdown_pct": 3.18
+   "peak_close": 13.91,
+   "peak_close_date": "2026-07-06",
+   "surge_max_ratio": 1.4459,
+   "surge_date": "2026-07-06",
+   "drawdown_pct": -25.45,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1521,7 +2051,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.01,
    "first_close_date": "2025-06-02",
-   "drawdown_pct": 5.19
+   "peak_close": 10.53,
+   "peak_close_date": "2026-09-29",
+   "surge_max_ratio": 1.042,
+   "surge_date": "2026-06-01",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1535,7 +2070,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.89,
    "first_close_date": "2025-06-03",
-   "drawdown_pct": -53.99
+   "peak_close": 12.47,
+   "peak_close_date": "2025-06-24",
+   "surge_max_ratio": 6.0241,
+   "surge_date": "2026-01-16",
+   "drawdown_pct": -59.82,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -1549,7 +2089,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.06,
    "first_close_date": "2025-06-04",
-   "drawdown_pct": 4.87
+   "peak_close": 10.56,
+   "peak_close_date": "2026-09-10",
+   "surge_max_ratio": 1.0409,
+   "surge_date": "2026-09-10",
+   "drawdown_pct": -0.09,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1557,13 +2102,18 @@
    "name": "BitMine Immersion Technologies, Inc. Common Stock",
    "listed": "2025-06-05",
    "months": 15,
-   "close": 26.34,
+   "close": 26.3,
    "close_date": "2026-10-02",
    "ref_close": 26.43,
    "ref_close_date": "2026-09-30",
    "first_close": 7.7477,
    "first_close_date": "2025-06-05",
-   "drawdown_pct": 241.13
+   "peak_close": 134.9604,
+   "peak_close_date": "2025-07-03",
+   "surge_max_ratio": 31.653,
+   "surge_date": "2025-07-03",
+   "drawdown_pct": -80.42,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -1571,13 +2121,18 @@
    "name": "Circle Internet Group, Inc. Class A Common Stock",
    "listed": "2025-06-05",
    "months": 15,
-   "close": 80.91,
+   "close": 80.6,
    "close_date": "2026-10-02",
    "ref_close": 82.17,
    "ref_close_date": "2026-09-30",
    "first_close": 83.23,
    "first_close_date": "2025-06-05",
-   "drawdown_pct": -1.27
+   "peak_close": 263.45,
+   "peak_close_date": "2025-06-23",
+   "surge_max_ratio": 3.1653,
+   "surge_date": "2025-06-23",
+   "drawdown_pct": -68.81,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1591,7 +2146,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.3,
    "first_close_date": "2025-06-05",
-   "drawdown_pct": 1.65
+   "peak_close": 10.71,
+   "peak_close_date": "2025-06-23",
+   "surge_max_ratio": 1.0444,
+   "surge_date": "2025-06-23",
+   "drawdown_pct": -2.24,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1599,13 +2159,18 @@
    "name": "The Generation Essentials Group Class A Ordinary Shares",
    "listed": "2025-06-05",
    "months": 15,
-   "close": 1.1509,
+   "close": 1.13,
    "close_date": "2026-10-02",
    "ref_close": 1.55,
    "ref_close_date": "2026-09-30",
    "first_close": 10.04,
    "first_close_date": "2025-06-05",
-   "drawdown_pct": -84.56
+   "peak_close": 12.05,
+   "peak_close_date": "2025-06-09",
+   "surge_max_ratio": 2.3265,
+   "surge_date": "2025-11-03",
+   "drawdown_pct": -87.14,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1613,13 +2178,18 @@
    "name": "Namib Minerals - Ordinary Shares",
    "listed": "2025-06-06",
    "months": 15,
-   "close": 1.27,
+   "close": 1.265,
    "close_date": "2026-10-02",
    "ref_close": 0.958,
    "ref_close_date": "2026-09-30",
    "first_close": 31.22,
    "first_close_date": "2025-06-06",
-   "drawdown_pct": -96.93
+   "peak_close": 31.22,
+   "peak_close_date": "2025-06-06",
+   "surge_max_ratio": 6.9565,
+   "surge_date": "2026-01-28",
+   "drawdown_pct": -96.93,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -1627,13 +2197,18 @@
    "name": "Omada Health, Inc. - Common Stock",
    "listed": "2025-06-06",
    "months": 15,
-   "close": 20.735,
+   "close": 20.665,
    "close_date": "2026-10-02",
    "ref_close": 20.81,
    "ref_close_date": "2026-09-30",
    "first_close": 23.0,
    "first_close_date": "2025-06-06",
-   "drawdown_pct": -9.52
+   "peak_close": 26.78,
+   "peak_close_date": "2025-10-28",
+   "surge_max_ratio": 2.2843,
+   "surge_date": "2026-08-10",
+   "drawdown_pct": -22.29,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1647,7 +2222,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 924.0,
    "first_close_date": "2025-06-09",
-   "drawdown_pct": -99.61
+   "peak_close": 1668.0,
+   "peak_close_date": "2025-06-25",
+   "surge_max_ratio": 3.6759,
+   "surge_date": "2026-06-30",
+   "drawdown_pct": -99.78,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1661,7 +2241,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 11.36,
    "first_close_date": "2025-06-09",
-   "drawdown_pct": -8.01
+   "peak_close": 12.5,
+   "peak_close_date": "2025-07-18",
+   "surge_max_ratio": 1.1171,
+   "surge_date": "2025-07-18",
+   "drawdown_pct": -16.4,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1669,13 +2254,18 @@
    "name": "Silvia, Inc. - Common Stock",
    "listed": "2025-06-09",
    "months": 15,
-   "close": 4.35,
+   "close": 4.27,
    "close_date": "2026-10-02",
    "ref_close": 3.875,
    "ref_close_date": "2026-09-30",
    "first_close": 10.14,
    "first_close_date": "2025-06-09",
-   "drawdown_pct": -61.79
+   "peak_close": 15.76,
+   "peak_close_date": "2025-06-20",
+   "surge_max_ratio": 3.2817,
+   "surge_date": "2026-09-22",
+   "drawdown_pct": -75.41,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -1689,7 +2279,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 26250.0,
    "first_close_date": "2025-06-10",
-   "drawdown_pct": 2.29
+   "peak_close": 87200.0,
+   "peak_close_date": "2026-02-19",
+   "surge_max_ratio": 5.1415,
+   "surge_date": "2026-02-19",
+   "drawdown_pct": -69.21,
+   "surge_excluded": true
   },
   {
    "market": "KOSDAQ",
@@ -1703,7 +2298,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 11100.0,
    "first_close_date": "2025-06-11",
-   "drawdown_pct": -21.62
+   "peak_close": 11100.0,
+   "peak_close_date": "2025-06-11",
+   "surge_max_ratio": 2.0186,
+   "surge_date": "2026-09-30",
+   "drawdown_pct": -21.62,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1711,13 +2311,18 @@
    "name": "Ategrity Specialty Insurance Company Holdings Common Stock",
    "listed": "2025-06-11",
    "months": 15,
-   "close": 26.4576,
+   "close": 26.35,
    "close_date": "2026-10-02",
    "ref_close": 25.55,
    "ref_close_date": "2026-09-30",
    "first_close": 24.68,
    "first_close_date": "2025-06-11",
-   "drawdown_pct": 3.53
+   "peak_close": 28.66,
+   "peak_close_date": "2026-09-15",
+   "surge_max_ratio": 1.7497,
+   "surge_date": "2026-09-15",
+   "drawdown_pct": -10.85,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1725,13 +2330,18 @@
    "name": "Vantage Corp Class A Ordinary Shares",
    "listed": "2025-06-11",
    "months": 15,
-   "close": 0.6206,
+   "close": 0.6104,
    "close_date": "2026-10-02",
    "ref_close": 0.628,
    "ref_close_date": "2026-09-30",
    "first_close": 4.0,
    "first_close_date": "2025-06-11",
-   "drawdown_pct": -84.3
+   "peak_close": 7.65,
+   "peak_close_date": "2025-10-07",
+   "surge_max_ratio": 2.0132,
+   "surge_date": "2025-10-07",
+   "drawdown_pct": -91.79,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1739,13 +2349,18 @@
    "name": "Voyager Technologies, Inc. Class A Common Stock",
    "listed": "2025-06-11",
    "months": 15,
-   "close": 30.93,
+   "close": 30.725,
    "close_date": "2026-10-02",
    "ref_close": 30.25,
    "ref_close_date": "2026-09-30",
    "first_close": 56.48,
    "first_close_date": "2025-06-11",
-   "drawdown_pct": -46.44
+   "peak_close": 56.48,
+   "peak_close_date": "2025-06-11",
+   "surge_max_ratio": 2.8777,
+   "surge_date": "2026-05-28",
+   "drawdown_pct": -46.44,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1759,7 +2374,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.035,
    "first_close_date": "2025-06-12",
-   "drawdown_pct": 6.53
+   "peak_close": 10.7,
+   "peak_close_date": "2026-09-14",
+   "surge_max_ratio": 1.0615,
+   "surge_date": "2026-09-14",
+   "drawdown_pct": -0.09,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1767,13 +2387,18 @@
    "name": "Chime Financial, Inc. - Class A Common Stock",
    "listed": "2025-06-12",
    "months": 15,
-   "close": 27.47,
+   "close": 27.135,
    "close_date": "2026-10-02",
    "ref_close": 26.64,
    "ref_close_date": "2026-09-30",
    "first_close": 37.11,
    "first_close_date": "2025-06-12",
-   "drawdown_pct": -28.21
+   "peak_close": 37.11,
+   "peak_close_date": "2025-06-12",
+   "surge_max_ratio": 2.1016,
+   "surge_date": "2026-09-09",
+   "drawdown_pct": -28.21,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1781,13 +2406,18 @@
    "name": "Blue Owl Technology Finance Corp. Common Stock",
    "listed": "2025-06-12",
    "months": 15,
-   "close": 9.625,
+   "close": 9.58,
    "close_date": "2026-10-02",
    "ref_close": 9.81,
    "ref_close_date": "2026-09-30",
-   "first_close": 13.7101,
+   "first_close": 13.71,
    "first_close_date": "2025-06-12",
-   "drawdown_pct": -28.45
+   "peak_close": 13.71,
+   "peak_close_date": "2025-06-12",
+   "surge_max_ratio": 1.1884,
+   "surge_date": "2026-08-11",
+   "drawdown_pct": -28.45,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1795,13 +2425,18 @@
    "name": "AIRO Group Holdings, Inc. - Common Stock",
    "listed": "2025-06-13",
    "months": 15,
-   "close": 6.59,
+   "close": 6.57,
    "close_date": "2026-10-02",
    "ref_close": 6.61,
    "ref_close_date": "2026-09-30",
    "first_close": 24.0,
    "first_close_date": "2025-06-13",
-   "drawdown_pct": -72.46
+   "peak_close": 31.0,
+   "peak_close_date": "2025-06-16",
+   "surge_max_ratio": 1.8308,
+   "surge_date": "2026-08-13",
+   "drawdown_pct": -78.68,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1809,13 +2444,18 @@
    "name": "JBS N.V. Class A Common Shares",
    "listed": "2025-06-13",
    "months": 15,
-   "close": 11.5985,
+   "close": 11.7299,
    "close_date": "2026-10-02",
    "ref_close": 11.29,
    "ref_close_date": "2026-09-30",
    "first_close": 12.8411,
    "first_close_date": "2025-06-13",
-   "drawdown_pct": -12.08
+   "peak_close": 17.0535,
+   "peak_close_date": "2026-04-09",
+   "surge_max_ratio": 1.4701,
+   "surge_date": "2026-04-09",
+   "drawdown_pct": -33.8,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1823,13 +2463,18 @@
    "name": "New Providence Acquisition Corp. III - Ordinary Shares",
    "listed": "2025-06-16",
    "months": 15,
-   "close": 10.5,
+   "close": 10.54,
    "close_date": "2026-10-02",
    "ref_close": 10.53,
    "ref_close_date": "2026-09-30",
    "first_close": 10.4,
    "first_close_date": "2025-06-16",
-   "drawdown_pct": 1.25
+   "peak_close": 10.53,
+   "peak_close_date": "2026-09-29",
+   "surge_max_ratio": 1.0396,
+   "surge_date": "2026-08-13",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1837,13 +2482,18 @@
    "name": "Air Water Ventures Limited - Ordinary Shares",
    "listed": "2025-06-16",
    "months": 15,
-   "close": 1.765,
+   "close": 1.84,
    "close_date": "2026-10-02",
    "ref_close": 1.7,
    "ref_close_date": "2026-09-30",
    "first_close": 10.305,
    "first_close_date": "2025-06-16",
-   "drawdown_pct": -83.5
+   "peak_close": 10.505,
+   "peak_close_date": "2026-07-27",
+   "surge_max_ratio": 1.2861,
+   "surge_date": "2026-08-11",
+   "drawdown_pct": -83.82,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -1857,7 +2507,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 6380.0,
    "first_close_date": "2025-06-17",
-   "drawdown_pct": -80.25
+   "peak_close": 6550.0,
+   "peak_close_date": "2025-07-21",
+   "surge_max_ratio": 1.3948,
+   "surge_date": "2026-08-04",
+   "drawdown_pct": -80.76,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1865,13 +2520,18 @@
    "name": "Jyong Biotech Ltd. - Ordinary shares",
    "listed": "2025-06-17",
    "months": 15,
-   "close": 2.13,
+   "close": 2.1101,
    "close_date": "2026-10-02",
    "ref_close": 2.05,
    "ref_close_date": "2026-09-30",
    "first_close": 10.11,
    "first_close_date": "2025-06-17",
-   "drawdown_pct": -79.72
+   "peak_close": 65.62,
+   "peak_close_date": "2025-09-19",
+   "surge_max_ratio": 8.7261,
+   "surge_date": "2025-09-19",
+   "drawdown_pct": -96.88,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -1879,13 +2539,18 @@
    "name": "Caris Life Sciences, Inc. - Common Stock",
    "listed": "2025-06-18",
    "months": 15,
-   "close": 28.245,
+   "close": 28.27,
    "close_date": "2026-10-02",
    "ref_close": 30.63,
    "ref_close_date": "2026-09-30",
    "first_close": 28.0,
    "first_close_date": "2025-06-18",
-   "drawdown_pct": 9.39
+   "peak_close": 39.3,
+   "peak_close_date": "2025-08-22",
+   "surge_max_ratio": 2.2179,
+   "surge_date": "2026-09-24",
+   "drawdown_pct": -22.06,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1893,13 +2558,18 @@
    "name": "Enigmatig Limited Class A Ordinary Shares",
    "listed": "2025-06-18",
    "months": 15,
-   "close": 5.1105,
+   "close": 5.1983,
    "close_date": "2026-10-02",
    "ref_close": 5.07,
    "ref_close_date": "2026-09-30",
    "first_close": 6.53,
    "first_close_date": "2025-06-18",
-   "drawdown_pct": -22.36
+   "peak_close": 10.85,
+   "peak_close_date": "2026-06-04",
+   "surge_max_ratio": 3.6409,
+   "surge_date": "2026-06-04",
+   "drawdown_pct": -53.27,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1907,13 +2577,18 @@
    "name": "Slide Insurance Holdings, Inc. - Common Stock",
    "listed": "2025-06-18",
    "months": 15,
-   "close": 23.64,
+   "close": 23.42,
    "close_date": "2026-10-02",
    "ref_close": 22.31,
    "ref_close_date": "2026-09-30",
    "first_close": 20.1843,
    "first_close_date": "2025-06-18",
-   "drawdown_pct": 10.53
+   "peak_close": 26.48,
+   "peak_close_date": "2026-09-15",
+   "surge_max_ratio": 2.0853,
+   "surge_date": "2026-09-15",
+   "drawdown_pct": -15.75,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1927,7 +2602,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.99,
    "first_close_date": "2025-06-20",
-   "drawdown_pct": 4.6
+   "peak_close": 10.5,
+   "peak_close_date": "2026-09-11",
+   "surge_max_ratio": 1.0469,
+   "surge_date": "2026-09-08",
+   "drawdown_pct": -0.48,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1941,7 +2621,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.2,
    "first_close_date": "2025-06-20",
-   "drawdown_pct": 2.25
+   "peak_close": 10.6,
+   "peak_close_date": "2025-10-24",
+   "surge_max_ratio": 1.0495,
+   "surge_date": "2025-10-24",
+   "drawdown_pct": -1.6,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1949,13 +2634,18 @@
    "name": "Amrize Ltd Ordinary Shares",
    "listed": "2025-06-23",
    "months": 15,
-   "close": 37.475,
+   "close": 37.375,
    "close_date": "2026-10-02",
    "ref_close": 37.39,
    "ref_close_date": "2026-09-30",
    "first_close": 51.3549,
    "first_close_date": "2025-06-23",
-   "drawdown_pct": -27.19
+   "peak_close": 65.0555,
+   "peak_close_date": "2026-02-24",
+   "surge_max_ratio": 1.4118,
+   "surge_date": "2026-02-24",
+   "drawdown_pct": -42.53,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1969,7 +2659,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.98,
    "first_close_date": "2025-06-23",
-   "drawdown_pct": 4.21
+   "peak_close": 10.4,
+   "peak_close_date": "2026-09-23",
+   "surge_max_ratio": 1.0421,
+   "surge_date": "2026-09-10",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -1977,13 +2672,18 @@
    "name": "CID HoldCo, Inc. - Common Stock",
    "listed": "2025-06-23",
    "months": 15,
-   "close": 2.79,
+   "close": 2.8,
    "close_date": "2026-10-02",
    "ref_close": 2.68,
    "ref_close_date": "2026-09-30",
    "first_close": 912.5,
    "first_close_date": "2025-06-23",
-   "drawdown_pct": -99.71
+   "peak_close": 1015.25,
+   "peak_close_date": "2025-06-24",
+   "surge_max_ratio": 13.7143,
+   "surge_date": "2026-08-27",
+   "drawdown_pct": -99.74,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -1991,13 +2691,18 @@
    "name": "Gores Holdings X, Inc. - Class A ordinary shares",
    "listed": "2025-06-23",
    "months": 15,
-   "close": 10.49,
-   "close_date": "2026-10-01",
+   "close": 10.47,
+   "close_date": "2026-10-02",
    "ref_close": 10.49,
    "ref_close_date": "2026-09-30",
    "first_close": 10.26,
    "first_close_date": "2025-06-23",
-   "drawdown_pct": 2.24
+   "peak_close": 10.7,
+   "peak_close_date": "2026-08-11",
+   "surge_max_ratio": 1.0563,
+   "surge_date": "2026-08-11",
+   "drawdown_pct": -1.96,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2011,7 +2716,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.0,
    "first_close_date": "2025-06-23",
-   "drawdown_pct": 5.4
+   "peak_close": 10.56,
+   "peak_close_date": "2026-08-18",
+   "surge_max_ratio": 1.0518,
+   "surge_date": "2026-08-18",
+   "drawdown_pct": -0.19,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2020,12 +2730,17 @@
    "listed": "2025-06-23",
    "months": 15,
    "close": 10.44,
-   "close_date": "2026-10-01",
+   "close_date": "2026-10-02",
    "ref_close": 10.44,
    "ref_close_date": "2026-09-30",
    "first_close": 10.39,
    "first_close_date": "2025-06-23",
-   "drawdown_pct": 0.48
+   "peak_close": 10.5,
+   "peak_close_date": "2025-06-24",
+   "surge_max_ratio": 1.0326,
+   "surge_date": "2026-09-16",
+   "drawdown_pct": -0.57,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2033,13 +2748,18 @@
    "name": "Factorial Energy Inc. - Class A Common Stock",
    "listed": "2025-06-24",
    "months": 15,
-   "close": 6.1599,
+   "close": 6.115,
    "close_date": "2026-10-02",
    "ref_close": 6.34,
    "ref_close_date": "2026-09-30",
    "first_close": 10.01,
    "first_close_date": "2025-06-24",
-   "drawdown_pct": -36.66
+   "peak_close": 21.94,
+   "peak_close_date": "2026-06-10",
+   "surge_max_ratio": 2.2252,
+   "surge_date": "2026-06-10",
+   "drawdown_pct": -71.1,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2053,7 +2773,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 5.0,
    "first_close_date": "2025-06-24",
-   "drawdown_pct": -20.8
+   "peak_close": 5.598,
+   "peak_close_date": "2025-07-01",
+   "surge_max_ratio": 4.25,
+   "surge_date": "2026-06-05",
+   "drawdown_pct": -29.26,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2061,13 +2786,18 @@
    "name": "Armada Acquisition Corp. II - Class A Ordinary Shares",
    "listed": "2025-06-24",
    "months": 15,
-   "close": 40.9942,
+   "close": 38.735,
    "close_date": "2026-10-02",
    "ref_close": 16.4,
    "ref_close_date": "2026-09-30",
    "first_close": 10.04,
    "first_close_date": "2025-06-24",
-   "drawdown_pct": 63.35
+   "peak_close": 16.4,
+   "peak_close_date": "2026-09-30",
+   "surge_max_ratio": 1.6158,
+   "surge_date": "2026-09-30",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2075,13 +2805,18 @@
    "name": "Kandal M Venture Limited - Class A ordinary Shares",
    "listed": "2025-06-25",
    "months": 15,
-   "close": 0.1777,
+   "close": 0.1778,
    "close_date": "2026-10-02",
    "ref_close": 0.183,
    "ref_close_date": "2026-09-30",
    "first_close": 4.4,
    "first_close_date": "2025-06-25",
-   "drawdown_pct": -95.84
+   "peak_close": 15.48,
+   "peak_close_date": "2025-10-07",
+   "surge_max_ratio": 3.5182,
+   "surge_date": "2025-10-07",
+   "drawdown_pct": -98.82,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2089,13 +2824,18 @@
    "name": "Ralliant Corporation Common Stock",
    "listed": "2025-06-25",
    "months": 15,
-   "close": 73.735,
+   "close": 73.5,
    "close_date": "2026-10-02",
    "ref_close": 69.17,
    "ref_close_date": "2026-09-30",
    "first_close": 47.269,
    "first_close_date": "2025-06-25",
-   "drawdown_pct": 46.33
+   "peak_close": 73.572,
+   "peak_close_date": "2026-06-30",
+   "surge_max_ratio": 1.9217,
+   "surge_date": "2026-06-30",
+   "drawdown_pct": -5.98,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2109,7 +2849,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.5,
    "first_close_date": "2025-06-26",
-   "drawdown_pct": -27.24
+   "peak_close": 15.0,
+   "peak_close_date": "2026-05-15",
+   "surge_max_ratio": 1.4735,
+   "surge_date": "2026-05-15",
+   "drawdown_pct": -49.07,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2117,13 +2862,18 @@
    "name": "Blue Gold Limited - Class A ordinary shares",
    "listed": "2025-06-26",
    "months": 15,
-   "close": 0.1925,
+   "close": 0.1914,
    "close_date": "2026-10-02",
    "ref_close": 0.192,
    "ref_close_date": "2026-09-30",
    "first_close": 20.11,
    "first_close_date": "2025-06-26",
-   "drawdown_pct": -99.05
+   "peak_close": 133.0,
+   "peak_close_date": "2025-07-02",
+   "surge_max_ratio": 6.6136,
+   "surge_date": "2025-07-02",
+   "drawdown_pct": -99.86,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -2131,13 +2881,18 @@
    "name": "Jefferson Capital, Inc. - Common Stock",
    "listed": "2025-06-26",
    "months": 15,
-   "close": 19.495,
+   "close": 19.26,
    "close_date": "2026-10-02",
    "ref_close": 19.08,
    "ref_close_date": "2026-09-30",
    "first_close": 17.4376,
    "first_close_date": "2025-06-26",
-   "drawdown_pct": 9.42
+   "peak_close": 23.7416,
+   "peak_close_date": "2026-08-14",
+   "surge_max_ratio": 1.5464,
+   "surge_date": "2026-08-14",
+   "drawdown_pct": -19.63,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2145,13 +2900,18 @@
    "name": "Julong Holding Limited - Class A Ordinary Shares",
    "listed": "2025-06-26",
    "months": 15,
-   "close": 3.98,
+   "close": 3.945,
    "close_date": "2026-10-02",
    "ref_close": 3.7,
    "ref_close_date": "2026-09-30",
    "first_close": 4.23,
    "first_close_date": "2025-06-26",
-   "drawdown_pct": -12.53
+   "peak_close": 44.8,
+   "peak_close_date": "2026-06-05",
+   "surge_max_ratio": 14.6885,
+   "surge_date": "2026-06-05",
+   "drawdown_pct": -91.74,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -2159,13 +2919,18 @@
    "name": "Scage Future - American Depositary Shares",
    "listed": "2025-06-27",
    "months": 15,
-   "close": 0.216,
+   "close": 0.2166,
    "close_date": "2026-10-02",
    "ref_close": 0.224,
    "ref_close_date": "2026-09-30",
    "first_close": 15.01,
    "first_close_date": "2025-06-27",
-   "drawdown_pct": -98.51
+   "peak_close": 15.01,
+   "peak_close_date": "2025-06-27",
+   "surge_max_ratio": 2.9476,
+   "surge_date": "2026-06-05",
+   "drawdown_pct": -98.51,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2173,13 +2938,18 @@
    "name": "WW International, Inc.  - Common Stock",
    "listed": "2025-06-27",
    "months": 15,
-   "close": 15.05,
+   "close": 14.74,
    "close_date": "2026-10-02",
    "ref_close": 15.46,
    "ref_close_date": "2026-09-30",
    "first_close": 27.0,
    "first_close_date": "2025-06-27",
-   "drawdown_pct": -42.74
+   "peak_close": 44.89,
+   "peak_close_date": "2025-08-04",
+   "surge_max_ratio": 2.1469,
+   "surge_date": "2026-06-11",
+   "drawdown_pct": -65.56,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -2193,7 +2963,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 18500.0,
    "first_close_date": "2022-12-23",
-   "drawdown_pct": -70.05
+   "peak_close": 32550.0,
+   "peak_close_date": "2025-06-30",
+   "surge_max_ratio": 5.2975,
+   "surge_date": "2024-08-14",
+   "drawdown_pct": -82.98,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -2207,7 +2982,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.0,
    "first_close_date": "2025-06-30",
-   "drawdown_pct": 4.2
+   "peak_close": 10.42,
+   "peak_close_date": "2026-09-28",
+   "surge_max_ratio": 1.041,
+   "surge_date": "2026-09-28",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2215,13 +2995,18 @@
    "name": "Costamare Bulkers Holdings Limited Common Stock",
    "listed": "2025-05-01",
    "months": 16,
-   "close": 22.12,
+   "close": 22.275,
    "close_date": "2026-10-02",
    "ref_close": 21.82,
    "ref_close_date": "2026-09-30",
    "first_close": 13.5,
    "first_close_date": "2025-05-01",
-   "drawdown_pct": 61.63
+   "peak_close": 24.51,
+   "peak_close_date": "2026-09-11",
+   "surge_max_ratio": 2.2986,
+   "surge_date": "2026-02-19",
+   "drawdown_pct": -10.98,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2229,13 +3014,18 @@
    "name": "Liminatus Pharma, Inc. - Class A Common Stock",
    "listed": "2025-05-02",
    "months": 16,
-   "close": 3.875,
+   "close": 3.865,
    "close_date": "2026-10-02",
    "ref_close": 3.73,
    "ref_close_date": "2026-09-30",
    "first_close": 402.0,
    "first_close_date": "2025-05-02",
-   "drawdown_pct": -99.07
+   "peak_close": 1333.5,
+   "peak_close_date": "2025-06-24",
+   "surge_max_ratio": 5.8487,
+   "surge_date": "2025-06-24",
+   "drawdown_pct": -99.72,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -2243,13 +3033,18 @@
    "name": "Winchester Bancorp, Inc. - Common Stock",
    "listed": "2025-05-02",
    "months": 16,
-   "close": 12.95,
+   "close": 12.91,
    "close_date": "2026-10-02",
    "ref_close": 12.91,
    "ref_close_date": "2026-09-30",
    "first_close": 9.3,
    "first_close_date": "2025-05-02",
-   "drawdown_pct": 38.82
+   "peak_close": 13.265,
+   "peak_close_date": "2026-02-17",
+   "surge_max_ratio": 1.5143,
+   "surge_date": "2026-02-17",
+   "drawdown_pct": -2.68,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2257,13 +3052,18 @@
    "name": "Starz Entertainment Corp. - Common Shares",
    "listed": "2025-05-07",
    "months": 16,
-   "close": 23.215,
+   "close": 22.89,
    "close_date": "2026-10-02",
    "ref_close": 23.57,
    "ref_close_date": "2026-09-30",
    "first_close": 11.2,
    "first_close_date": "2025-05-07",
-   "drawdown_pct": 110.45
+   "peak_close": 30.21,
+   "peak_close_date": "2026-07-01",
+   "surge_max_ratio": 3.4925,
+   "surge_date": "2026-07-01",
+   "drawdown_pct": -21.98,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -2277,7 +3077,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 15400.0,
    "first_close_date": "2025-05-08",
-   "drawdown_pct": 0.84
+   "peak_close": 35150.0,
+   "peak_close_date": "2026-01-20",
+   "surge_max_ratio": 2.7101,
+   "surge_date": "2026-01-20",
+   "drawdown_pct": -55.82,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2285,13 +3090,18 @@
    "name": "American Integrity Insurance Group, Inc. Common Stock",
    "listed": "2025-05-08",
    "months": 16,
-   "close": 25.785,
+   "close": 26.02,
    "close_date": "2026-10-02",
    "ref_close": 24.99,
    "ref_close_date": "2026-09-30",
    "first_close": 16.0082,
    "first_close_date": "2025-05-08",
-   "drawdown_pct": 56.11
+   "peak_close": 26.77,
+   "peak_close_date": "2026-09-17",
+   "surge_max_ratio": 1.6369,
+   "surge_date": "2025-11-11",
+   "drawdown_pct": -6.65,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2299,13 +3109,18 @@
    "name": "CoastalSouth Bancshares, Inc. Common Stock",
    "listed": "2025-05-08",
    "months": 16,
-   "close": 26.81,
+   "close": 26.91,
    "close_date": "2026-10-02",
    "ref_close": 26.22,
    "ref_close_date": "2026-09-30",
    "first_close": 20.7793,
    "first_close_date": "2025-05-08",
-   "drawdown_pct": 26.18
+   "peak_close": 28.01,
+   "peak_close_date": "2026-08-13",
+   "surge_max_ratio": 1.4083,
+   "surge_date": "2026-08-07",
+   "drawdown_pct": -6.39,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -2319,7 +3134,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 35900.0,
    "first_close_date": "2025-05-09",
-   "drawdown_pct": -76.1
+   "peak_close": 35900.0,
+   "peak_close_date": "2025-05-09",
+   "surge_max_ratio": 1.5683,
+   "surge_date": "2026-09-22",
+   "drawdown_pct": -76.1,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -2333,7 +3153,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 32000.0,
    "first_close_date": "2025-05-09",
-   "drawdown_pct": -78.59
+   "peak_close": 48150.0,
+   "peak_close_date": "2025-05-21",
+   "surge_max_ratio": 1.5813,
+   "surge_date": "2025-05-21",
+   "drawdown_pct": -85.77,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2341,13 +3166,18 @@
    "name": "Apimeds Pharmaceuticals US, Inc. Common Stock",
    "listed": "2025-05-09",
    "months": 16,
-   "close": 3.6427,
+   "close": 3.255,
    "close_date": "2026-10-02",
    "ref_close": 5.0,
    "ref_close_date": "2026-09-30",
    "first_close": 22.0,
    "first_close_date": "2025-05-09",
-   "drawdown_pct": -77.27
+   "peak_close": 38.95,
+   "peak_close_date": "2025-11-17",
+   "surge_max_ratio": 4.5312,
+   "surge_date": "2026-09-25",
+   "drawdown_pct": -87.16,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -2361,7 +3191,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 14750.0,
    "first_close_date": "2025-05-12",
-   "drawdown_pct": 81.69
+   "peak_close": 147900.0,
+   "peak_close_date": "2026-04-01",
+   "surge_max_ratio": 10.7407,
+   "surge_date": "2026-04-01",
+   "drawdown_pct": -81.88,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -2375,7 +3210,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.0,
    "first_close_date": "2025-05-12",
-   "drawdown_pct": 5.7
+   "peak_close": 10.57,
+   "peak_close_date": "2026-09-25",
+   "surge_max_ratio": 1.0434,
+   "surge_date": "2026-09-25",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2389,7 +3229,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10.0,
    "first_close_date": "2025-05-12",
-   "drawdown_pct": 6.8
+   "peak_close": 10.69,
+   "peak_close_date": "2026-09-29",
+   "surge_max_ratio": 1.0565,
+   "surge_date": "2026-07-29",
+   "drawdown_pct": -0.09,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2397,13 +3242,18 @@
    "name": "Antalpha Platform Holding Company - Class A Ordinary Shares",
    "listed": "2025-05-13",
    "months": 16,
-   "close": 2.45,
+   "close": 2.32,
    "close_date": "2026-10-02",
    "ref_close": 2.62,
    "ref_close_date": "2026-09-30",
    "first_close": 12.8,
    "first_close_date": "2025-05-13",
-   "drawdown_pct": -79.53
+   "peak_close": 16.38,
+   "peak_close_date": "2025-05-14",
+   "surge_max_ratio": 1.6077,
+   "surge_date": "2026-04-16",
+   "drawdown_pct": -84.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2411,13 +3261,18 @@
    "name": "eToro Group Ltd. - Class A Common Shares",
    "listed": "2025-05-13",
    "months": 16,
-   "close": 25.3,
+   "close": 25.34,
    "close_date": "2026-10-02",
    "ref_close": 25.7,
    "ref_close_date": "2026-09-30",
    "first_close": 52.0,
    "first_close_date": "2025-05-13",
-   "drawdown_pct": -50.58
+   "peak_close": 75.97,
+   "peak_close_date": "2025-06-09",
+   "surge_max_ratio": 1.6955,
+   "surge_date": "2026-05-29",
+   "drawdown_pct": -66.17,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2425,13 +3280,18 @@
    "name": "OMS Energy Technologies Inc. - Ordinary Shares",
    "listed": "2025-05-13",
    "months": 16,
-   "close": 4.495,
+   "close": 4.39,
    "close_date": "2026-10-02",
    "ref_close": 4.59,
    "ref_close_date": "2026-09-30",
    "first_close": 7.51,
    "first_close_date": "2025-05-13",
-   "drawdown_pct": -38.88
+   "peak_close": 9.175,
+   "peak_close_date": "2025-05-28",
+   "surge_max_ratio": 2.0483,
+   "surge_date": "2025-10-29",
+   "drawdown_pct": -49.97,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2439,13 +3299,18 @@
    "name": "Nexus Advanced Technologies Inc. - Ordinary Shares",
    "listed": "2025-05-14",
    "months": 16,
-   "close": 0.8687,
+   "close": 0.876,
    "close_date": "2026-10-02",
    "ref_close": 0.968,
    "ref_close_date": "2026-09-30",
    "first_close": 78.0,
    "first_close_date": "2025-05-14",
-   "drawdown_pct": -98.76
+   "peak_close": 218.7,
+   "peak_close_date": "2025-06-10",
+   "surge_max_ratio": 4.6139,
+   "surge_date": "2025-06-10",
+   "drawdown_pct": -99.56,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -2459,7 +3324,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 6140.0,
    "first_close_date": "2025-05-15",
-   "drawdown_pct": -1.95
+   "peak_close": 9630.0,
+   "peak_close_date": "2026-05-21",
+   "surge_max_ratio": 3.1574,
+   "surge_date": "2026-05-21",
+   "drawdown_pct": -37.49,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2467,13 +3337,18 @@
    "name": "Arrive AI Inc. - Common Stock",
    "listed": "2025-05-15",
    "months": 16,
-   "close": 0.215,
+   "close": 0.2151,
    "close_date": "2026-10-02",
    "ref_close": 0.217,
    "ref_close_date": "2026-09-30",
    "first_close": 13.25,
    "first_close_date": "2025-05-15",
-   "drawdown_pct": -98.36
+   "peak_close": 13.25,
+   "peak_close_date": "2025-05-15",
+   "surge_max_ratio": 2.8448,
+   "surge_date": "2026-04-14",
+   "drawdown_pct": -98.36,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -2487,7 +3362,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 14020.0,
    "first_close_date": "2025-05-16",
-   "drawdown_pct": -64.48
+   "peak_close": 20600.0,
+   "peak_close_date": "2025-06-24",
+   "surge_max_ratio": 1.8778,
+   "surge_date": "2025-06-24",
+   "drawdown_pct": -75.83,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2495,13 +3375,18 @@
    "name": "Galaxy Digital Inc. - Class A common stock",
    "listed": "2025-05-16",
    "months": 16,
-   "close": 23.09,
+   "close": 23.05,
    "close_date": "2026-10-02",
    "ref_close": 22.74,
    "ref_close_date": "2026-09-30",
    "first_close": 22.8,
    "first_close_date": "2025-05-16",
-   "drawdown_pct": -0.26
+   "peak_close": 42.86,
+   "peak_close_date": "2025-10-21",
+   "surge_max_ratio": 2.3614,
+   "surge_date": "2025-10-21",
+   "drawdown_pct": -46.94,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2515,7 +3400,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.99,
    "first_close_date": "2025-05-16",
-   "drawdown_pct": 5.91
+   "peak_close": 11.65,
+   "peak_close_date": "2025-10-14",
+   "surge_max_ratio": 1.1673,
+   "surge_date": "2025-10-14",
+   "drawdown_pct": -9.18,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -2529,7 +3419,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 7215.0,
    "first_close_date": "2025-05-19",
-   "drawdown_pct": -53.85
+   "peak_close": 14796.0,
+   "peak_close_date": "2025-12-15",
+   "surge_max_ratio": 3.3881,
+   "surge_date": "2025-12-15",
+   "drawdown_pct": -77.49,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -2543,7 +3438,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 18380.0,
    "first_close_date": "2025-05-20",
-   "drawdown_pct": -38.36
+   "peak_close": 22450.0,
+   "peak_close_date": "2025-07-16",
+   "surge_max_ratio": 2.2423,
+   "surge_date": "2026-08-13",
+   "drawdown_pct": -49.53,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2551,13 +3451,18 @@
    "name": "OFA Group - Class A Ordinary Shares",
    "listed": "2025-05-21",
    "months": 16,
-   "close": 0.45,
+   "close": 0.4481,
    "close_date": "2026-10-02",
    "ref_close": 0.493,
    "ref_close_date": "2026-09-30",
    "first_close": 46.8,
    "first_close_date": "2025-05-21",
-   "drawdown_pct": -98.95
+   "peak_close": 52.6,
+   "peak_close_date": "2025-06-02",
+   "surge_max_ratio": 2.6774,
+   "surge_date": "2025-07-14",
+   "drawdown_pct": -99.06,
+   "surge_excluded": false
   },
   {
    "market": "KOSPI",
@@ -2571,7 +3476,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 110100.0,
    "first_close_date": "2025-05-22",
-   "drawdown_pct": 69.48
+   "peak_close": 265000.0,
+   "peak_close_date": "2026-07-29",
+   "surge_max_ratio": 2.3615,
+   "surge_date": "2026-05-14",
+   "drawdown_pct": -29.58,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2579,13 +3489,18 @@
    "name": "Hinge Health, Inc. Class A Common Stock",
    "listed": "2025-05-22",
    "months": 16,
-   "close": 97.61,
+   "close": 97.57,
    "close_date": "2026-10-02",
    "ref_close": 97.24,
    "ref_close_date": "2026-09-30",
    "first_close": 37.56,
    "first_close_date": "2025-05-22",
-   "drawdown_pct": 158.89
+   "peak_close": 97.24,
+   "peak_close_date": "2026-09-30",
+   "surge_max_ratio": 3.1197,
+   "surge_date": "2026-09-30",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2593,13 +3508,18 @@
    "name": "MNTN, Inc. Class A Common Stock",
    "listed": "2025-05-22",
    "months": 16,
-   "close": 9.93,
+   "close": 9.86,
    "close_date": "2026-10-02",
    "ref_close": 10.17,
    "ref_close_date": "2026-09-30",
    "first_close": 26.36,
    "first_close_date": "2025-05-22",
-   "drawdown_pct": -61.42
+   "peak_close": 31.47,
+   "peak_close_date": "2025-08-05",
+   "surge_max_ratio": 1.7301,
+   "surge_date": "2026-09-03",
+   "drawdown_pct": -67.68,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -2613,7 +3533,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 33200.0,
    "first_close_date": "2025-05-23",
-   "drawdown_pct": -47.32
+   "peak_close": 71000.0,
+   "peak_close_date": "2025-12-04",
+   "surge_max_ratio": 3.114,
+   "surge_date": "2025-12-04",
+   "drawdown_pct": -75.37,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2621,13 +3546,18 @@
    "name": "Soulpower Acquisition Corporation Class A Ordinary Shares",
    "listed": "2025-05-23",
    "months": 16,
-   "close": 10.485,
+   "close": 10.49,
    "close_date": "2026-10-02",
    "ref_close": 10.485,
    "ref_close_date": "2026-09-30",
    "first_close": 9.91,
    "first_close_date": "2025-05-23",
-   "drawdown_pct": 5.8
+   "peak_close": 10.485,
+   "peak_close_date": "2026-09-29",
+   "surge_max_ratio": 1.0439,
+   "surge_date": "2026-04-16",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2635,13 +3565,18 @@
    "name": "Sizzle Acquisition Corp. II - Class A ordinary shares",
    "listed": "2025-05-23",
    "months": 16,
-   "close": 10.485,
+   "close": 10.48,
    "close_date": "2026-10-02",
    "ref_close": 10.49,
    "ref_close_date": "2026-09-30",
    "first_close": 9.91,
    "first_close_date": "2025-05-23",
-   "drawdown_pct": 5.85
+   "peak_close": 10.5,
+   "peak_close_date": "2026-09-02",
+   "surge_max_ratio": 1.0439,
+   "surge_date": "2026-05-26",
+   "drawdown_pct": -0.1,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2655,7 +3590,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.99,
    "first_close_date": "2025-05-27",
-   "drawdown_pct": 10.11
+   "peak_close": 11.0,
+   "peak_close_date": "2026-09-14",
+   "surge_max_ratio": 1.087,
+   "surge_date": "2026-08-31",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -2669,7 +3609,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 2080.0,
    "first_close_date": "2025-05-29",
-   "drawdown_pct": -3.99
+   "peak_close": 2080.0,
+   "peak_close_date": "2025-05-29",
+   "surge_max_ratio": 1.0355,
+   "surge_date": "2025-12-08",
+   "drawdown_pct": -3.99,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2677,13 +3622,18 @@
    "name": "Energys Group Limited - Ordinary Shares",
    "listed": "2025-04-01",
    "months": 17,
-   "close": 3.04,
+   "close": 3.08,
    "close_date": "2026-10-02",
    "ref_close": 3.04,
    "ref_close_date": "2026-09-30",
    "first_close": 4.95,
    "first_close_date": "2025-04-01",
-   "drawdown_pct": -38.59
+   "peak_close": 12.22,
+   "peak_close_date": "2025-11-05",
+   "surge_max_ratio": 7.4969,
+   "surge_date": "2025-11-05",
+   "drawdown_pct": -75.12,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -2697,7 +3647,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 19.85,
    "first_close_date": "2025-04-01",
-   "drawdown_pct": -87.9
+   "peak_close": 19.85,
+   "peak_close_date": "2025-04-01",
+   "surge_max_ratio": 1.7837,
+   "surge_date": "2026-02-27",
+   "drawdown_pct": -87.9,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2711,7 +3666,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 42.9,
    "first_close_date": "2025-04-01",
-   "drawdown_pct": -91.17
+   "peak_close": 42.9,
+   "peak_close_date": "2025-04-01",
+   "surge_max_ratio": 2.8727,
+   "surge_date": "2026-08-11",
+   "drawdown_pct": -91.17,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2719,13 +3679,18 @@
    "name": "SmartStop Self Storage REIT, Inc. Common Stock",
    "listed": "2025-04-02",
    "months": 17,
-   "close": 32.24,
+   "close": 32.455,
    "close_date": "2026-10-02",
    "ref_close": 32.2,
    "ref_close_date": "2026-09-30",
    "first_close": 30.4715,
    "first_close_date": "2025-04-02",
-   "drawdown_pct": 5.67
+   "peak_close": 36.9663,
+   "peak_close_date": "2025-09-12",
+   "surge_max_ratio": 1.2726,
+   "surge_date": "2025-09-12",
+   "drawdown_pct": -12.89,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2733,13 +3698,18 @@
    "name": "AsiaStrategy - Ordinary Shares",
    "listed": "2025-04-02",
    "months": 17,
-   "close": 2.13,
+   "close": 2.2,
    "close_date": "2026-10-02",
    "ref_close": 2.301,
    "ref_close_date": "2026-09-30",
    "first_close": 3.83,
    "first_close_date": "2025-04-02",
-   "drawdown_pct": -39.92
+   "peak_close": 12.57,
+   "peak_close_date": "2025-05-28",
+   "surge_max_ratio": 5.9857,
+   "surge_date": "2025-05-28",
+   "drawdown_pct": -81.69,
+   "surge_excluded": true
   },
   {
    "market": "KOSDAQ",
@@ -2753,7 +3723,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 18050.0,
    "first_close_date": "2025-04-03",
-   "drawdown_pct": -18.78
+   "peak_close": 27400.0,
+   "peak_close_date": "2026-01-30",
+   "surge_max_ratio": 2.2757,
+   "surge_date": "2026-01-30",
+   "drawdown_pct": -46.5,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2761,13 +3736,18 @@
    "name": "Archimedes Tech SPAC Partners II Co. - Ordinary Shares",
    "listed": "2025-04-03",
    "months": 17,
-   "close": 10.68,
+   "close": 10.685,
    "close_date": "2026-10-02",
    "ref_close": 10.68,
    "ref_close_date": "2026-09-30",
    "first_close": 9.97,
    "first_close_date": "2025-04-03",
-   "drawdown_pct": 7.12
+   "peak_close": 11.38,
+   "peak_close_date": "2026-05-22",
+   "surge_max_ratio": 1.1301,
+   "surge_date": "2026-05-22",
+   "drawdown_pct": -6.15,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2775,13 +3755,18 @@
    "name": "Lianhe Sowell International Group Ltd - Class A Ordinary Shares",
    "listed": "2025-04-03",
    "months": 17,
-   "close": 0.4847,
+   "close": 0.478,
    "close_date": "2026-10-02",
    "ref_close": 0.512,
    "ref_close_date": "2026-09-30",
    "first_close": 68.64,
    "first_close_date": "2025-04-03",
-   "drawdown_pct": -99.25
+   "peak_close": 68.64,
+   "peak_close_date": "2025-04-03",
+   "surge_max_ratio": 4.6259,
+   "surge_date": "2026-07-06",
+   "drawdown_pct": -99.25,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -2795,7 +3780,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 8700.0,
    "first_close_date": "2023-08-30",
-   "drawdown_pct": 500.0
+   "peak_close": 169900.0,
+   "peak_close_date": "2026-03-10",
+   "surge_max_ratio": 14.8514,
+   "surge_date": "2026-03-10",
+   "drawdown_pct": -69.28,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -2809,7 +3799,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 3.54,
    "first_close_date": "2025-04-04",
-   "drawdown_pct": -31.92
+   "peak_close": 6.4,
+   "peak_close_date": "2025-04-09",
+   "surge_max_ratio": 2.0645,
+   "surge_date": "2025-04-09",
+   "drawdown_pct": -62.34,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2817,13 +3812,18 @@
    "name": "KIDZ AI Inc. - Class B Common Stock",
    "listed": "2025-04-07",
    "months": 17,
-   "close": 2.28,
+   "close": 2.2601,
    "close_date": "2026-10-02",
    "ref_close": 2.44,
    "ref_close_date": "2026-09-30",
    "first_close": 29400.0,
    "first_close_date": "2025-04-07",
-   "drawdown_pct": -99.99
+   "peak_close": 53850.0,
+   "peak_close_date": "2025-05-02",
+   "surge_max_ratio": 6.6481,
+   "surge_date": "2025-05-02",
+   "drawdown_pct": -100.0,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -2831,13 +3831,18 @@
    "name": "FatPipe, Inc. - common stock",
    "listed": "2025-04-08",
    "months": 17,
-   "close": 5.6261,
+   "close": 5.555,
    "close_date": "2026-10-02",
    "ref_close": 5.47,
    "ref_close_date": "2026-09-30",
    "first_close": 13.0,
    "first_close_date": "2025-04-08",
-   "drawdown_pct": -57.92
+   "peak_close": 13.0,
+   "peak_close_date": "2025-04-08",
+   "surge_max_ratio": 5.4897,
+   "surge_date": "2026-05-29",
+   "drawdown_pct": -57.92,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -2845,13 +3850,18 @@
    "name": "Ruanyun Edai Technology Inc. - Ordinary shares",
    "listed": "2025-04-08",
    "months": 17,
-   "close": 0.8474,
+   "close": 0.8649,
    "close_date": "2026-10-02",
    "ref_close": 0.8,
    "ref_close_date": "2026-09-30",
    "first_close": 4.51,
    "first_close_date": "2025-04-08",
-   "drawdown_pct": -82.26
+   "peak_close": 20.22,
+   "peak_close_date": "2025-07-11",
+   "surge_max_ratio": 4.7689,
+   "surge_date": "2025-07-11",
+   "drawdown_pct": -96.04,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2859,13 +3869,18 @@
    "name": "Aether Holdings, Inc. - Common Stock",
    "listed": "2025-04-10",
    "months": 17,
-   "close": 3.48,
+   "close": 3.5,
    "close_date": "2026-10-02",
    "ref_close": 3.75,
    "ref_close_date": "2026-09-30",
    "first_close": 5.75,
    "first_close_date": "2025-04-10",
-   "drawdown_pct": -34.78
+   "peak_close": 17.39,
+   "peak_close_date": "2025-05-22",
+   "surge_max_ratio": 3.4504,
+   "surge_date": "2025-05-22",
+   "drawdown_pct": -78.44,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2873,13 +3888,18 @@
    "name": "Cuprina Holdings (Cayman) Limited - Class A Ordinary shares",
    "listed": "2025-04-10",
    "months": 17,
-   "close": 2.27,
+   "close": 2.3425,
    "close_date": "2026-10-02",
    "ref_close": 2.28,
    "ref_close_date": "2026-09-30",
    "first_close": 33.2,
    "first_close_date": "2025-04-10",
-   "drawdown_pct": -93.13
+   "peak_close": 75.2,
+   "peak_close_date": "2025-08-14",
+   "surge_max_ratio": 4.2908,
+   "surge_date": "2026-06-15",
+   "drawdown_pct": -96.97,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2893,7 +3913,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 35.5,
    "first_close_date": "2025-04-10",
-   "drawdown_pct": -94.54
+   "peak_close": 41.1,
+   "peak_close_date": "2025-04-14",
+   "surge_max_ratio": 2.6282,
+   "surge_date": "2026-06-04",
+   "drawdown_pct": -95.28,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2901,13 +3926,18 @@
    "name": "MasterBeef Group - Ordinary Shares",
    "listed": "2025-04-10",
    "months": 17,
-   "close": 3.9301,
+   "close": 3.93,
    "close_date": "2026-10-02",
    "ref_close": 3.95,
    "ref_close_date": "2026-09-30",
    "first_close": 4.1,
    "first_close_date": "2025-04-10",
-   "drawdown_pct": -3.66
+   "peak_close": 15.24,
+   "peak_close_date": "2025-07-23",
+   "surge_max_ratio": 5.08,
+   "surge_date": "2025-07-23",
+   "drawdown_pct": -74.08,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -2915,13 +3945,18 @@
    "name": "Robin Energy Ltd. - Common Stock",
    "listed": "2025-04-11",
    "months": 17,
-   "close": 2.305,
+   "close": 2.29,
    "close_date": "2026-10-02",
    "ref_close": 2.393,
    "ref_close_date": "2026-09-30",
    "first_close": 637.5,
    "first_close_date": "2025-04-11",
-   "drawdown_pct": -99.62
+   "peak_close": 1050.0,
+   "peak_close_date": "2025-06-13",
+   "surge_max_ratio": 5.8824,
+   "surge_date": "2025-06-13",
+   "drawdown_pct": -99.77,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -2929,13 +3964,18 @@
    "name": "Haoxin Holdings Limited - Class A Ordinary Shares",
    "listed": "2025-04-15",
    "months": 17,
-   "close": 0.357,
+   "close": 0.3778,
    "close_date": "2026-10-02",
    "ref_close": 0.4,
    "ref_close_date": "2026-09-30",
    "first_close": 3.11,
    "first_close_date": "2025-04-15",
-   "drawdown_pct": -87.14
+   "peak_close": 3.11,
+   "peak_close_date": "2025-04-15",
+   "surge_max_ratio": 3.7391,
+   "surge_date": "2025-12-22",
+   "drawdown_pct": -87.14,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2943,13 +3983,18 @@
    "name": "Chagee Holdings Limited - American Depositary Shares, each representing 1 Class A ordinary share",
    "listed": "2025-04-17",
    "months": 17,
-   "close": 10.98,
+   "close": 11.01,
    "close_date": "2026-10-02",
    "ref_close": 11.7,
    "ref_close_date": "2026-09-30",
    "first_close": 30.393,
    "first_close_date": "2025-04-17",
-   "drawdown_pct": -61.5
+   "peak_close": 33.438,
+   "peak_close_date": "2025-05-02",
+   "surge_max_ratio": 1.44,
+   "surge_date": "2026-06-01",
+   "drawdown_pct": -65.01,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2957,13 +4002,18 @@
    "name": "Everbright Digital Holding Limited - Ordinary Shares",
    "listed": "2025-04-17",
    "months": 17,
-   "close": 5.25,
+   "close": 5.215,
    "close_date": "2026-10-02",
    "ref_close": 5.0,
    "ref_close_date": "2026-09-30",
    "first_close": 67.2,
    "first_close_date": "2025-04-17",
-   "drawdown_pct": -92.56
+   "peak_close": 100.32,
+   "peak_close_date": "2025-07-08",
+   "surge_max_ratio": 3.9688,
+   "surge_date": "2026-06-12",
+   "drawdown_pct": -95.02,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2971,13 +4021,18 @@
    "name": "newcleo plc - Ordinary Shares",
    "listed": "2025-04-17",
    "months": 17,
-   "close": 8.0,
+   "close": 7.9,
    "close_date": "2026-10-02",
    "ref_close": 7.85,
    "ref_close_date": "2026-09-30",
    "first_close": 9.93,
    "first_close_date": "2025-04-17",
-   "drawdown_pct": -20.95
+   "peak_close": 11.44,
+   "peak_close_date": "2026-06-01",
+   "surge_max_ratio": 1.1394,
+   "surge_date": "2026-06-01",
+   "drawdown_pct": -31.38,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2991,7 +4046,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.87,
    "first_close_date": "2025-04-21",
-   "drawdown_pct": 6.89
+   "peak_close": 10.55,
+   "peak_close_date": "2026-09-30",
+   "surge_max_ratio": 1.0638,
+   "surge_date": "2025-10-15",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -2999,13 +4059,18 @@
    "name": "Pinnacle Food Group Limited - Class A Common Shares",
    "listed": "2025-04-21",
    "months": 17,
-   "close": 2.79,
+   "close": 2.63,
    "close_date": "2026-10-02",
    "ref_close": 2.77,
    "ref_close_date": "2026-09-30",
    "first_close": 4.0,
    "first_close_date": "2025-04-21",
-   "drawdown_pct": -30.75
+   "peak_close": 4.57,
+   "peak_close_date": "2025-10-15",
+   "surge_max_ratio": 3.2643,
+   "surge_date": "2025-10-15",
+   "drawdown_pct": -39.39,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3019,7 +4084,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.89,
    "first_close_date": "2025-04-21",
-   "drawdown_pct": 6.59
+   "peak_close": 10.6,
+   "peak_close_date": "2026-09-09",
+   "surge_max_ratio": 1.0586,
+   "surge_date": "2026-03-30",
+   "drawdown_pct": -0.55,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3027,13 +4097,18 @@
    "name": "TMD Energy Limited Ordinary Shares",
    "listed": "2025-04-21",
    "months": 17,
-   "close": 0.66,
+   "close": 0.6591,
    "close_date": "2026-10-02",
    "ref_close": 0.65,
    "ref_close_date": "2026-09-30",
    "first_close": 3.63,
    "first_close_date": "2025-04-21",
-   "drawdown_pct": -82.09
+   "peak_close": 5.78,
+   "peak_close_date": "2025-04-23",
+   "surge_max_ratio": 9.8537,
+   "surge_date": "2026-03-03",
+   "drawdown_pct": -88.75,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -3041,13 +4116,18 @@
    "name": "Teamshares Inc. - Common Stock",
    "listed": "2025-04-21",
    "months": 17,
-   "close": 7.73,
+   "close": 7.71,
    "close_date": "2026-10-02",
    "ref_close": 7.265,
    "ref_close_date": "2026-09-30",
    "first_close": 9.93,
    "first_close_date": "2025-04-21",
-   "drawdown_pct": -26.84
+   "peak_close": 12.5,
+   "peak_close_date": "2026-06-23",
+   "surge_max_ratio": 1.6957,
+   "surge_date": "2026-09-24",
+   "drawdown_pct": -41.88,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3061,7 +4141,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 3.65,
    "first_close_date": "2025-04-25",
-   "drawdown_pct": 402.47
+   "peak_close": 133.12,
+   "peak_close_date": "2026-01-30",
+   "surge_max_ratio": 51.7977,
+   "surge_date": "2026-01-30",
+   "drawdown_pct": -86.22,
+   "surge_excluded": true
   },
   {
    "market": "KOSDAQ",
@@ -3075,7 +4160,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 13680.0,
    "first_close_date": "2025-04-28",
-   "drawdown_pct": -53.22
+   "peak_close": 18300.0,
+   "peak_close_date": "2026-02-03",
+   "surge_max_ratio": 2.4016,
+   "surge_date": "2026-02-03",
+   "drawdown_pct": -65.03,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -3089,7 +4179,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 13500.0,
    "first_close_date": "2025-04-29",
-   "drawdown_pct": -74.74
+   "peak_close": 13950.0,
+   "peak_close_date": "2025-05-22",
+   "surge_max_ratio": 1.6692,
+   "surge_date": "2025-10-16",
+   "drawdown_pct": -75.56,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3103,7 +4198,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 14.7323,
    "first_close_date": "2025-04-30",
-   "drawdown_pct": -15.56
+   "peak_close": 28.4769,
+   "peak_close_date": "2025-07-09",
+   "surge_max_ratio": 2.1695,
+   "surge_date": "2025-07-09",
+   "drawdown_pct": -56.32,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3111,13 +4211,18 @@
    "name": "PN Smart Energy Limited - Class A Ordinary Shares",
    "listed": "2025-03-04",
    "months": 18,
-   "close": 2.735,
+   "close": 2.61,
    "close_date": "2026-10-02",
    "ref_close": 2.74,
    "ref_close_date": "2026-09-30",
    "first_close": 80.6,
    "first_close_date": "2025-03-04",
-   "drawdown_pct": -96.6
+   "peak_close": 82.0,
+   "peak_close_date": "2025-07-28",
+   "surge_max_ratio": 10.7104,
+   "surge_date": "2026-07-30",
+   "drawdown_pct": -96.66,
+   "surge_excluded": true
   },
   {
    "market": "KOSDAQ",
@@ -3131,7 +4236,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 12110.0,
    "first_close_date": "2025-03-06",
-   "drawdown_pct": -76.67
+   "peak_close": 17520.0,
+   "peak_close_date": "2025-04-02",
+   "surge_max_ratio": 1.5985,
+   "surge_date": "2025-04-02",
+   "drawdown_pct": -83.88,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3139,13 +4249,18 @@
    "name": "Advanced Biomed Inc. - Common Stock",
    "listed": "2025-03-06",
    "months": 18,
-   "close": 6.86,
+   "close": 7.05,
    "close_date": "2026-10-02",
    "ref_close": 6.23,
    "ref_close_date": "2026-09-30",
    "first_close": 73.0,
    "first_close_date": "2025-03-06",
-   "drawdown_pct": -91.47
+   "peak_close": 80.0,
+   "peak_close_date": "2025-03-28",
+   "surge_max_ratio": 5.1159,
+   "surge_date": "2026-07-24",
+   "drawdown_pct": -92.21,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -3153,13 +4268,18 @@
    "name": "House of Doge Inc. - Common Stock",
    "listed": "2025-03-06",
    "months": 18,
-   "close": 0.1426,
+   "close": 0.1399,
    "close_date": "2026-10-02",
    "ref_close": 0.16,
    "ref_close_date": "2026-09-30",
    "first_close": 34.4,
    "first_close_date": "2025-03-06",
-   "drawdown_pct": -99.53
+   "peak_close": 52.88,
+   "peak_close_date": "2025-03-28",
+   "surge_max_ratio": 4.4199,
+   "surge_date": "2025-10-10",
+   "drawdown_pct": -99.7,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3167,13 +4287,18 @@
    "name": "Kestra Medical Technologies, Ltd. - Common Stock",
    "listed": "2025-03-06",
    "months": 18,
-   "close": 27.39,
+   "close": 27.2773,
    "close_date": "2026-10-02",
    "ref_close": 28.29,
    "ref_close_date": "2026-09-30",
    "first_close": 21.84,
    "first_close_date": "2025-03-06",
-   "drawdown_pct": 29.53
+   "peak_close": 28.46,
+   "peak_close_date": "2026-09-29",
+   "surge_max_ratio": 1.9371,
+   "surge_date": "2025-12-22",
+   "drawdown_pct": -0.6,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -3187,7 +4312,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 11100.0,
    "first_close_date": "2025-03-07",
-   "drawdown_pct": 29.64
+   "peak_close": 36250.0,
+   "peak_close_date": "2026-03-19",
+   "surge_max_ratio": 4.7386,
+   "surge_date": "2026-03-19",
+   "drawdown_pct": -60.3,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -3201,7 +4331,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 3330.0,
    "first_close_date": "2025-03-07",
-   "drawdown_pct": -13.36
+   "peak_close": 9170.0,
+   "peak_close_date": "2025-07-11",
+   "surge_max_ratio": 2.9157,
+   "surge_date": "2025-07-11",
+   "drawdown_pct": -68.54,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3209,13 +4344,18 @@
    "name": "Euroholdings Ltd. - Common Stock",
    "listed": "2025-03-07",
    "months": 18,
-   "close": 12.19,
+   "close": 11.82,
    "close_date": "2026-10-02",
    "ref_close": 11.717,
    "ref_close_date": "2026-09-30",
    "first_close": 15.7996,
    "first_close_date": "2025-03-07",
-   "drawdown_pct": -25.84
+   "peak_close": 18.1109,
+   "peak_close_date": "2025-03-12",
+   "surge_max_ratio": 2.6673,
+   "surge_date": "2026-09-10",
+   "drawdown_pct": -35.3,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3223,13 +4363,18 @@
    "name": "GOWell Energy Technology - Ordinary shares",
    "listed": "2025-03-07",
    "months": 18,
-   "close": 3.6292,
+   "close": 3.815,
    "close_date": "2026-10-02",
    "ref_close": 3.18,
    "ref_close_date": "2026-09-30",
    "first_close": 9.87,
    "first_close_date": "2025-03-07",
-   "drawdown_pct": -67.78
+   "peak_close": 11.0,
+   "peak_close_date": "2026-09-02",
+   "surge_max_ratio": 1.7569,
+   "surge_date": "2026-09-30",
+   "drawdown_pct": -71.09,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3237,13 +4382,18 @@
    "name": "Micropolis AI Robotics Ordinary Shares",
    "listed": "2025-03-07",
    "months": 18,
-   "close": 0.7336,
+   "close": 0.7368,
    "close_date": "2026-10-02",
    "ref_close": 0.756,
    "ref_close_date": "2026-09-30",
    "first_close": 3.55,
    "first_close_date": "2025-03-07",
-   "drawdown_pct": -78.7
+   "peak_close": 4.4,
+   "peak_close_date": "2026-03-06",
+   "surge_max_ratio": 5.641,
+   "surge_date": "2026-03-06",
+   "drawdown_pct": -82.82,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -3251,13 +4401,18 @@
    "name": "Ribbon Acquisition Corp - Class A Ordinary Shares",
    "listed": "2025-03-07",
    "months": 18,
-   "close": 8.2514,
+   "close": 8.23,
    "close_date": "2026-10-02",
    "ref_close": 8.4,
    "ref_close_date": "2026-09-30",
    "first_close": 9.97,
    "first_close_date": "2025-03-07",
-   "drawdown_pct": -15.75
+   "peak_close": 13.69,
+   "peak_close_date": "2026-09-09",
+   "surge_max_ratio": 1.3408,
+   "surge_date": "2026-09-09",
+   "drawdown_pct": -38.64,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3265,13 +4420,18 @@
    "name": "SAGTEC GLOBAL LIMITED - Class A Ordinary shares",
    "listed": "2025-03-07",
    "months": 18,
-   "close": 0.56,
+   "close": 0.579,
    "close_date": "2026-10-02",
    "ref_close": 0.573,
    "ref_close_date": "2026-09-30",
    "first_close": 3.6,
    "first_close_date": "2025-03-07",
-   "drawdown_pct": -84.08
+   "peak_close": 5.77,
+   "peak_close_date": "2025-05-02",
+   "surge_max_ratio": 2.7346,
+   "surge_date": "2025-05-02",
+   "drawdown_pct": -90.07,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3285,7 +4445,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.93,
    "first_close_date": "2025-03-13",
-   "drawdown_pct": 7.55
+   "peak_close": 10.68,
+   "peak_close_date": "2026-09-30",
+   "surge_max_ratio": 1.0524,
+   "surge_date": "2026-03-20",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3293,13 +4458,18 @@
    "name": "Marwynn Holdings, Inc. - Common stock",
    "listed": "2025-03-13",
    "months": 18,
-   "close": 1.07,
+   "close": 1.1,
    "close_date": "2026-10-02",
    "ref_close": 1.12,
    "ref_close_date": "2026-09-30",
    "first_close": 4.3,
    "first_close_date": "2025-03-13",
-   "drawdown_pct": -73.95
+   "peak_close": 10.22,
+   "peak_close_date": "2025-05-21",
+   "surge_max_ratio": 3.3618,
+   "surge_date": "2025-05-21",
+   "drawdown_pct": -89.04,
+   "surge_excluded": false
   },
   {
    "market": "KOSPI",
@@ -3313,7 +4483,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 32000.0,
    "first_close_date": "2025-03-14",
-   "drawdown_pct": 32.66
+   "peak_close": 62000.0,
+   "peak_close_date": "2026-02-20",
+   "surge_max_ratio": 2.0564,
+   "surge_date": "2026-02-20",
+   "drawdown_pct": -31.53,
+   "surge_excluded": false
   },
   {
    "market": "KOSPI",
@@ -3327,7 +4502,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 6331.0,
    "first_close_date": "2025-03-17",
-   "drawdown_pct": -71.27
+   "peak_close": 6331.0,
+   "peak_close_date": "2025-03-17",
+   "surge_max_ratio": 1.9383,
+   "surge_date": "2026-09-17",
+   "drawdown_pct": -71.27,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3341,7 +4521,12 @@
    "ref_close_date": null,
    "first_close": 2.86,
    "first_close_date": "2026-10-01",
-   "drawdown_pct": null
+   "peak_close": null,
+   "peak_close_date": null,
+   "surge_max_ratio": null,
+   "surge_date": null,
+   "drawdown_pct": null,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -3355,7 +4540,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 26400.0,
    "first_close_date": "2025-03-20",
-   "drawdown_pct": -7.01
+   "peak_close": 60200.0,
+   "peak_close_date": "2026-03-23",
+   "surge_max_ratio": 2.4876,
+   "surge_date": "2026-03-23",
+   "drawdown_pct": -59.22,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -3369,7 +4559,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 20700.0,
    "first_close_date": "2025-03-20",
-   "drawdown_pct": -41.06
+   "peak_close": 24550.0,
+   "peak_close_date": "2026-01-22",
+   "surge_max_ratio": 2.2859,
+   "surge_date": "2026-08-05",
+   "drawdown_pct": -50.31,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -3383,7 +4578,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 2402.0,
    "first_close_date": "2025-03-20",
-   "drawdown_pct": 8.66
+   "peak_close": 2710.0,
+   "peak_close_date": "2026-09-29",
+   "surge_max_ratio": 1.1143,
+   "surge_date": "2026-09-29",
+   "drawdown_pct": -3.69,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -3397,7 +4597,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 14500.0,
    "first_close_date": "2025-03-21",
-   "drawdown_pct": -67.0
+   "peak_close": 17340.0,
+   "peak_close_date": "2025-06-18",
+   "surge_max_ratio": 2.1391,
+   "surge_date": "2026-05-22",
+   "drawdown_pct": -72.4,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3405,13 +4610,18 @@
    "name": "Baiya International Group Inc.  - Ordinary Shares",
    "listed": "2025-03-21",
    "months": 18,
-   "close": 1.615,
+   "close": 1.6001,
    "close_date": "2026-10-02",
    "ref_close": 1.96,
    "ref_close_date": "2026-09-30",
    "first_close": 1045.0,
    "first_close_date": "2025-03-21",
-   "drawdown_pct": -99.81
+   "peak_close": 1795.0,
+   "peak_close_date": "2025-03-28",
+   "surge_max_ratio": 3.7534,
+   "surge_date": "2025-06-04",
+   "drawdown_pct": -99.89,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3419,13 +4629,18 @@
    "name": "RedCloud Holdings plc - Ordinary Shares",
    "listed": "2025-03-21",
    "months": 18,
-   "close": 0.1934,
+   "close": 0.1885,
    "close_date": "2026-10-02",
    "ref_close": 0.194,
    "ref_close_date": "2026-09-30",
    "first_close": 4.5,
    "first_close_date": "2025-03-21",
-   "drawdown_pct": -95.69
+   "peak_close": 4.78,
+   "peak_close_date": "2025-03-24",
+   "surge_max_ratio": 3.4048,
+   "surge_date": "2025-07-01",
+   "drawdown_pct": -95.94,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -3439,7 +4654,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 2696.0,
    "first_close_date": "2025-03-24",
-   "drawdown_pct": 5.53
+   "peak_close": 6570.0,
+   "peak_close_date": "2025-07-10",
+   "surge_max_ratio": 2.8417,
+   "surge_date": "2025-07-10",
+   "drawdown_pct": -56.7,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3453,7 +4673,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.95,
    "first_close_date": "2025-03-24",
-   "drawdown_pct": 7.74
+   "peak_close": 10.72,
+   "peak_close_date": "2026-09-25",
+   "surge_max_ratio": 1.0543,
+   "surge_date": "2026-03-24",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3467,7 +4692,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 3.474,
    "first_close_date": "2025-03-25",
-   "drawdown_pct": -79.27
+   "peak_close": 6.2532,
+   "peak_close_date": "2025-05-12",
+   "surge_max_ratio": 3.8057,
+   "surge_date": "2025-05-12",
+   "drawdown_pct": -88.49,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3475,13 +4705,18 @@
    "name": "Epsium Enterprise Limited - Class A Ordinary Shares",
    "listed": "2025-03-26",
    "months": 18,
-   "close": 1.25,
+   "close": 1.24,
    "close_date": "2026-10-02",
    "ref_close": 1.3,
    "ref_close_date": "2026-09-30",
    "first_close": 4.82,
    "first_close_date": "2025-03-26",
-   "drawdown_pct": -73.03
+   "peak_close": 138.0,
+   "peak_close_date": "2025-09-09",
+   "surge_max_ratio": 29.8121,
+   "surge_date": "2025-09-09",
+   "drawdown_pct": -99.06,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -3489,13 +4724,18 @@
    "name": "NeOnc Technologies Holdings, Inc. - Common Stock",
    "listed": "2025-03-26",
    "months": 18,
-   "close": 2.96,
+   "close": 2.99,
    "close_date": "2026-10-02",
    "ref_close": 3.405,
    "ref_close_date": "2026-09-30",
    "first_close": 12.11,
    "first_close_date": "2025-03-26",
-   "drawdown_pct": -71.88
+   "peak_close": 16.55,
+   "peak_close_date": "2025-03-28",
+   "surge_max_ratio": 3.609,
+   "surge_date": "2025-09-18",
+   "drawdown_pct": -79.43,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3503,13 +4743,18 @@
    "name": "WF Holding Limited - Ordinary Shares",
    "listed": "2025-03-27",
    "months": 18,
-   "close": 2.4228,
+   "close": 2.388,
    "close_date": "2026-10-02",
    "ref_close": 2.49,
    "ref_close_date": "2026-09-30",
    "first_close": 18.75,
    "first_close_date": "2025-03-27",
-   "drawdown_pct": -86.72
+   "peak_close": 35.2,
+   "peak_close_date": "2025-06-20",
+   "surge_max_ratio": 2.9048,
+   "surge_date": "2026-06-18",
+   "drawdown_pct": -92.93,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -3523,7 +4768,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 20600.0,
    "first_close_date": "2025-03-28",
-   "drawdown_pct": -54.76
+   "peak_close": 23750.0,
+   "peak_close_date": "2025-04-23",
+   "surge_max_ratio": 1.8056,
+   "surge_date": "2025-09-11",
+   "drawdown_pct": -60.76,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3531,13 +4781,18 @@
    "name": "CoreWeave, Inc. - Class A Common Stock",
    "listed": "2025-03-28",
    "months": 18,
-   "close": 89.415,
+   "close": 89.7557,
    "close_date": "2026-10-02",
    "ref_close": 87.12,
    "ref_close_date": "2026-09-30",
    "first_close": 40.0,
    "first_close_date": "2025-03-28",
-   "drawdown_pct": 117.8
+   "peak_close": 183.58,
+   "peak_close_date": "2025-06-20",
+   "surge_max_ratio": 5.1837,
+   "surge_date": "2025-06-20",
+   "drawdown_pct": -52.54,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -3545,13 +4800,18 @@
    "name": "Intercont (Cayman) Limited - Class A Ordinary shares",
    "listed": "2025-03-28",
    "months": 18,
-   "close": 1.51,
+   "close": 1.68,
    "close_date": "2026-10-02",
    "ref_close": 1.56,
    "ref_close_date": "2026-09-30",
    "first_close": 4281.25,
    "first_close_date": "2025-03-28",
-   "drawdown_pct": -99.96
+   "peak_close": 5006.25,
+   "peak_close_date": "2025-04-15",
+   "surge_max_ratio": 3.2422,
+   "surge_date": "2026-09-01",
+   "drawdown_pct": -99.97,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3559,13 +4819,18 @@
    "name": "Newsmax, Inc. Class B Common Stock",
    "listed": "2025-03-31",
    "months": 18,
-   "close": 9.58,
+   "close": 9.345,
    "close_date": "2026-10-02",
    "ref_close": 10.81,
    "ref_close_date": "2026-09-30",
    "first_close": 83.51,
    "first_close_date": "2025-03-31",
-   "drawdown_pct": -87.06
+   "peak_close": 233.0,
+   "peak_close_date": "2025-04-01",
+   "surge_max_ratio": 2.7901,
+   "surge_date": "2025-04-01",
+   "drawdown_pct": -95.36,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -3579,7 +4844,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 8980.0,
    "first_close_date": "2025-02-03",
-   "drawdown_pct": 55.12
+   "peak_close": 22650.0,
+   "peak_close_date": "2026-02-20",
+   "surge_max_ratio": 2.9822,
+   "surge_date": "2026-02-20",
+   "drawdown_pct": -38.5,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3587,13 +4857,18 @@
    "name": "Avalanche Treasury Corporation - Class A Common Stock",
    "listed": "2025-02-03",
    "months": 19,
-   "close": 1.9,
+   "close": 1.82,
    "close_date": "2026-10-02",
    "ref_close": 1.83,
    "ref_close_date": "2026-09-30",
    "first_close": 9.95,
    "first_close_date": "2025-02-03",
-   "drawdown_pct": -81.61
+   "peak_close": 10.62,
+   "peak_close_date": "2026-05-28",
+   "surge_max_ratio": 7.5585,
+   "surge_date": "2026-09-22",
+   "drawdown_pct": -82.77,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -3607,7 +4882,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.91,
    "first_close_date": "2025-02-03",
-   "drawdown_pct": 8.27
+   "peak_close": 10.73,
+   "peak_close_date": "2026-09-30",
+   "surge_max_ratio": 1.0646,
+   "surge_date": "2026-01-15",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -3621,7 +4901,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 4365.0,
    "first_close_date": "2025-02-04",
-   "drawdown_pct": 20.05
+   "peak_close": 13450.0,
+   "peak_close_date": "2025-02-19",
+   "surge_max_ratio": 3.0813,
+   "surge_date": "2025-02-19",
+   "drawdown_pct": -61.04,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -3635,7 +4920,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 4355.0,
    "first_close_date": "2025-02-04",
-   "drawdown_pct": -61.97
+   "peak_close": 4570.0,
+   "peak_close_date": "2025-02-10",
+   "surge_max_ratio": 1.4596,
+   "surge_date": "2026-04-14",
+   "drawdown_pct": -63.76,
+   "surge_excluded": false
   },
   {
    "market": "KOSPI",
@@ -3649,7 +4939,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 55800.0,
    "first_close_date": "2025-02-05",
-   "drawdown_pct": 23.66
+   "peak_close": 143700.0,
+   "peak_close_date": "2026-06-01",
+   "surge_max_ratio": 2.8512,
+   "surge_date": "2026-06-01",
+   "drawdown_pct": -51.98,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3657,13 +4952,18 @@
    "name": "Callan JMB Inc. - Common Stock",
    "listed": "2025-02-05",
    "months": 19,
-   "close": 2.3426,
+   "close": 2.42,
    "close_date": "2026-10-02",
    "ref_close": 2.43,
    "ref_close_date": "2026-09-30",
    "first_close": 4.1,
    "first_close_date": "2025-02-05",
-   "drawdown_pct": -40.73
+   "peak_close": 6.32,
+   "peak_close_date": "2025-02-06",
+   "surge_max_ratio": 3.8746,
+   "surge_date": "2026-08-18",
+   "drawdown_pct": -61.55,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3677,7 +4977,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 115.2,
    "first_close_date": "2025-02-05",
-   "drawdown_pct": -99.54
+   "peak_close": 302.4,
+   "peak_close_date": "2025-03-17",
+   "surge_max_ratio": 4.4282,
+   "surge_date": "2026-05-04",
+   "drawdown_pct": -99.82,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3685,13 +4990,18 @@
    "name": "Millrose Properties, Inc. Class A Common Stock",
    "listed": "2025-02-05",
    "months": 19,
-   "close": 24.67,
+   "close": 24.55,
    "close_date": "2026-10-02",
    "ref_close": 25.97,
    "ref_close_date": "2026-09-30",
    "first_close": 19.071,
    "first_close_date": "2025-02-05",
-   "drawdown_pct": 36.18
+   "peak_close": 32.0882,
+   "peak_close_date": "2025-08-28",
+   "surge_max_ratio": 1.7397,
+   "surge_date": "2025-08-28",
+   "drawdown_pct": -19.07,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3699,13 +5009,18 @@
    "name": "Plutus Financial Group Limited - Ordinary Shares",
    "listed": "2025-02-05",
    "months": 19,
-   "close": 2.13,
+   "close": 1.95,
    "close_date": "2026-10-02",
    "ref_close": 2.33,
    "ref_close_date": "2026-09-30",
    "first_close": 4.0,
    "first_close_date": "2025-02-05",
-   "drawdown_pct": -41.75
+   "peak_close": 4.15,
+   "peak_close_date": "2025-02-07",
+   "surge_max_ratio": 1.8372,
+   "surge_date": "2025-09-26",
+   "drawdown_pct": -43.86,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3713,13 +5028,18 @@
    "name": "SL Science Holding Limited - Ordinary Shares",
    "listed": "2025-02-05",
    "months": 19,
-   "close": 1.5833,
+   "close": 1.5756,
    "close_date": "2026-10-02",
    "ref_close": 1.7,
    "ref_close_date": "2026-09-30",
    "first_close": 10.02,
    "first_close_date": "2025-02-05",
-   "drawdown_pct": -83.03
+   "peak_close": 12.812,
+   "peak_close_date": "2026-02-24",
+   "surge_max_ratio": 2.6697,
+   "surge_date": "2026-06-16",
+   "drawdown_pct": -86.73,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3727,13 +5047,18 @@
    "name": "FBS Global Limited - Ordinary Shares",
    "listed": "2025-02-06",
    "months": 19,
-   "close": 3.88,
+   "close": 3.77,
    "close_date": "2026-10-02",
    "ref_close": 3.63,
    "ref_close_date": "2026-09-30",
    "first_close": 34.5,
    "first_close_date": "2025-02-06",
-   "drawdown_pct": -89.48
+   "peak_close": 34.5,
+   "peak_close_date": "2025-02-06",
+   "surge_max_ratio": 2.8279,
+   "surge_date": "2026-02-27",
+   "drawdown_pct": -89.48,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3741,13 +5066,18 @@
    "name": "ONE Nuclear Energy Inc. - Common Stock",
    "listed": "2025-02-06",
    "months": 19,
-   "close": 1.82,
+   "close": 1.8559,
    "close_date": "2026-10-02",
    "ref_close": 2.15,
    "ref_close_date": "2026-09-30",
    "first_close": 9.82,
    "first_close_date": "2025-02-06",
-   "drawdown_pct": -78.11
+   "peak_close": 11.26,
+   "peak_close_date": "2026-09-08",
+   "surge_max_ratio": 1.7635,
+   "surge_date": "2026-09-08",
+   "drawdown_pct": -80.91,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3755,13 +5085,18 @@
    "name": "Sionna Therapeutics, Inc. - Common Stock",
    "listed": "2025-02-07",
    "months": 19,
-   "close": 4.905,
+   "close": 4.925,
    "close_date": "2026-10-02",
    "ref_close": 5.26,
    "ref_close_date": "2026-09-30",
    "first_close": 25.0,
    "first_close_date": "2025-02-07",
-   "drawdown_pct": -78.96
+   "peak_close": 51.04,
+   "peak_close_date": "2026-08-07",
+   "surge_max_ratio": 5.8068,
+   "surge_date": "2026-02-03",
+   "drawdown_pct": -89.69,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -3769,13 +5104,18 @@
    "name": "Titan America SA Common Shares",
    "listed": "2025-02-07",
    "months": 19,
-   "close": 13.37,
+   "close": 13.43,
    "close_date": "2026-10-02",
    "ref_close": 13.59,
    "ref_close_date": "2026-09-30",
    "first_close": 16.4421,
    "first_close_date": "2025-02-07",
-   "drawdown_pct": -17.35
+   "peak_close": 19.2633,
+   "peak_close_date": "2026-06-26",
+   "surge_max_ratio": 1.764,
+   "surge_date": "2026-02-24",
+   "drawdown_pct": -29.45,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3783,13 +5123,18 @@
    "name": "BOXABL, Inc.  - Common stock",
    "listed": "2025-02-11",
    "months": 19,
-   "close": 3.29,
+   "close": 3.26,
    "close_date": "2026-10-02",
    "ref_close": 3.27,
    "ref_close_date": "2026-09-30",
    "first_close": 9.65,
    "first_close_date": "2025-02-11",
-   "drawdown_pct": -66.11
+   "peak_close": 14.89,
+   "peak_close_date": "2026-06-22",
+   "surge_max_ratio": 1.6185,
+   "surge_date": "2026-06-22",
+   "drawdown_pct": -78.04,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -3803,7 +5148,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 22500.0,
    "first_close_date": "2025-02-12",
-   "drawdown_pct": -68.18
+   "peak_close": 22500.0,
+   "peak_close_date": "2025-02-12",
+   "surge_max_ratio": 2.0043,
+   "surge_date": "2026-05-27",
+   "drawdown_pct": -68.18,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3811,13 +5161,18 @@
    "name": "Aureus Greenway Holdings Inc. - Common Stock",
    "listed": "2025-02-12",
    "months": 19,
-   "close": 3.2311,
+   "close": 3.155,
    "close_date": "2026-10-02",
    "ref_close": 3.88,
    "ref_close_date": "2026-09-30",
    "first_close": 3.88,
    "first_close_date": "2025-02-12",
-   "drawdown_pct": 0.0
+   "peak_close": 7.815,
+   "peak_close_date": "2025-10-27",
+   "surge_max_ratio": 14.1576,
+   "surge_date": "2025-10-27",
+   "drawdown_pct": -50.35,
+   "surge_excluded": true
   },
   {
    "market": "KOSDAQ",
@@ -3831,7 +5186,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9680.0,
    "first_close_date": "2025-02-13",
-   "drawdown_pct": -36.16
+   "peak_close": 14030.0,
+   "peak_close_date": "2025-06-17",
+   "surge_max_ratio": 1.5021,
+   "surge_date": "2025-06-17",
+   "drawdown_pct": -55.95,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3839,13 +5199,18 @@
    "name": "Aardvark Therapeutics, Inc. - Common Stock",
    "listed": "2025-02-13",
    "months": 19,
-   "close": 5.12,
+   "close": 5.03,
    "close_date": "2026-10-02",
    "ref_close": 5.27,
    "ref_close_date": "2026-09-30",
    "first_close": 14.31,
    "first_close_date": "2025-02-13",
-   "drawdown_pct": -63.17
+   "peak_close": 17.41,
+   "peak_close_date": "2025-10-07",
+   "surge_max_ratio": 2.4871,
+   "surge_date": "2025-10-07",
+   "drawdown_pct": -69.73,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3853,13 +5218,18 @@
    "name": "Karman Holdings Inc. Common Stock",
    "listed": "2025-02-13",
    "months": 19,
-   "close": 34.43,
+   "close": 33.985,
    "close_date": "2026-10-02",
    "ref_close": 32.42,
    "ref_close_date": "2026-09-30",
    "first_close": 30.05,
    "first_close_date": "2025-02-13",
-   "drawdown_pct": 7.89
+   "peak_close": 115.29,
+   "peak_close_date": "2026-01-28",
+   "surge_max_ratio": 4.3067,
+   "surge_date": "2026-01-28",
+   "drawdown_pct": -71.88,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3867,13 +5237,18 @@
    "name": "SailPoint, Inc. - Common Stock",
    "listed": "2025-02-13",
    "months": 19,
-   "close": 20.095,
+   "close": 20.185,
    "close_date": "2026-10-02",
    "ref_close": 20.36,
    "ref_close_date": "2026-09-30",
    "first_close": 22.0,
    "first_close_date": "2025-02-13",
-   "drawdown_pct": -7.45
+   "peak_close": 25.7,
+   "peak_close_date": "2025-02-18",
+   "surge_max_ratio": 2.1087,
+   "surge_date": "2026-09-24",
+   "drawdown_pct": -20.78,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3881,13 +5256,18 @@
    "name": "Sandisk Corporation - Common Stock When-Issued",
    "listed": "2025-02-13",
    "months": 19,
-   "close": 1722.5726,
+   "close": 1719.01,
    "close_date": "2026-10-02",
    "ref_close": 1739.89,
    "ref_close_date": "2026-09-30",
    "first_close": 36.0,
    "first_close_date": "2025-02-13",
-   "drawdown_pct": 4733.03
+   "peak_close": 2335.0,
+   "peak_close_date": "2026-06-25",
+   "surge_max_ratio": 57.3851,
+   "surge_date": "2026-06-25",
+   "drawdown_pct": -25.49,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -3895,13 +5275,18 @@
    "name": "Translational Development Acquisition Corp. - Ordinary Shares",
    "listed": "2025-02-13",
    "months": 19,
-   "close": 10.86,
+   "close": 10.82,
    "close_date": "2026-10-02",
    "ref_close": 10.83,
    "ref_close_date": "2026-09-30",
    "first_close": 10.01,
    "first_close_date": "2025-02-13",
-   "drawdown_pct": 8.19
+   "peak_close": 10.9,
+   "peak_close_date": "2026-09-09",
+   "surge_max_ratio": 1.0584,
+   "surge_date": "2026-04-20",
+   "drawdown_pct": -0.64,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3909,13 +5294,18 @@
    "name": "TEN Holdings, Inc. - Common Stock",
    "listed": "2025-02-13",
    "months": 19,
-   "close": 0.5142,
+   "close": 0.5065,
    "close_date": "2026-10-02",
    "ref_close": 0.648,
    "ref_close_date": "2026-09-30",
    "first_close": 102.0,
    "first_close_date": "2025-02-13",
-   "drawdown_pct": -99.36
+   "peak_close": 102.0,
+   "peak_close_date": "2025-02-13",
+   "surge_max_ratio": 16.2484,
+   "surge_date": "2026-09-25",
+   "drawdown_pct": -99.36,
+   "surge_excluded": true
   },
   {
    "market": "KOSDAQ",
@@ -3929,7 +5319,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 21800.0,
    "first_close_date": "2025-02-14",
-   "drawdown_pct": 1.61
+   "peak_close": 143700.0,
+   "peak_close_date": "2026-01-09",
+   "surge_max_ratio": 8.448,
+   "surge_date": "2026-01-09",
+   "drawdown_pct": -84.59,
+   "surge_excluded": true
   },
   {
    "market": "KOSDAQ",
@@ -3943,7 +5338,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 6265.0,
    "first_close_date": "2025-02-17",
-   "drawdown_pct": -54.43
+   "peak_close": 7665.0,
+   "peak_close_date": "2025-02-18",
+   "surge_max_ratio": 1.5045,
+   "surge_date": "2026-09-28",
+   "drawdown_pct": -62.75,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3951,13 +5351,18 @@
    "name": "Cycurion, Inc. - Common Stock",
    "listed": "2025-02-18",
    "months": 19,
-   "close": 3.86,
+   "close": 3.73,
    "close_date": "2026-10-02",
    "ref_close": 2.68,
    "ref_close_date": "2026-09-30",
    "first_close": 789.7839,
    "first_close_date": "2025-02-18",
-   "drawdown_pct": -99.66
+   "peak_close": 789.7839,
+   "peak_close_date": "2025-02-18",
+   "surge_max_ratio": 5.963,
+   "surge_date": "2026-07-30",
+   "drawdown_pct": -99.66,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -3965,13 +5370,18 @@
    "name": "Northpointe Bancshares, Inc. Common Stock",
    "listed": "2025-02-18",
    "months": 19,
-   "close": 15.26,
+   "close": 15.305,
    "close_date": "2026-10-02",
    "ref_close": 14.57,
    "ref_close_date": "2026-09-30",
    "first_close": 14.4568,
    "first_close_date": "2025-02-18",
-   "drawdown_pct": 0.78
+   "peak_close": 19.2841,
+   "peak_close_date": "2026-07-01",
+   "surge_max_ratio": 1.6427,
+   "surge_date": "2026-04-17",
+   "drawdown_pct": -24.45,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3979,13 +5389,18 @@
    "name": "TIC Solutions, Inc. Common Stock",
    "listed": "2025-02-18",
    "months": 19,
-   "close": 8.33,
+   "close": 8.295,
    "close_date": "2026-10-02",
    "ref_close": 8.32,
    "ref_close_date": "2026-09-30",
    "first_close": 12.0,
    "first_close_date": "2025-02-18",
-   "drawdown_pct": -30.67
+   "peak_close": 14.49,
+   "peak_close_date": "2025-09-26",
+   "surge_max_ratio": 1.6116,
+   "surge_date": "2026-08-11",
+   "drawdown_pct": -42.58,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -3993,13 +5408,18 @@
    "name": "Anbio Biotechnology - Class A Ordinary Shares",
    "listed": "2025-02-19",
    "months": 19,
-   "close": 5.94,
+   "close": 5.66,
    "close_date": "2026-10-02",
    "ref_close": 6.3,
    "ref_close_date": "2026-09-30",
    "first_close": 5.77,
    "first_close_date": "2025-02-19",
-   "drawdown_pct": 9.19
+   "peak_close": 52.1,
+   "peak_close_date": "2025-08-19",
+   "surge_max_ratio": 9.1887,
+   "surge_date": "2025-08-19",
+   "drawdown_pct": -87.91,
+   "surge_excluded": true
   },
   {
    "market": "KOSDAQ",
@@ -4013,7 +5433,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 17610.0,
    "first_close_date": "2025-02-20",
-   "drawdown_pct": -77.85
+   "peak_close": 21000.0,
+   "peak_close_date": "2025-02-21",
+   "surge_max_ratio": 1.6085,
+   "surge_date": "2025-04-02",
+   "drawdown_pct": -81.43,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4021,13 +5446,18 @@
    "name": "Heidmar Maritime Holdings Corp. - Common Stock",
    "listed": "2025-02-20",
    "months": 19,
-   "close": 1.674,
+   "close": 1.6601,
    "close_date": "2026-10-02",
    "ref_close": 1.67,
    "ref_close_date": "2026-09-30",
    "first_close": 5.95,
    "first_close_date": "2025-02-20",
-   "drawdown_pct": -71.93
+   "peak_close": 5.95,
+   "peak_close_date": "2025-02-20",
+   "surge_max_ratio": 2.702,
+   "surge_date": "2025-03-13",
+   "drawdown_pct": -71.93,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4035,13 +5465,18 @@
    "name": "Skyline Builders Group Holding Limited - Class A Ordinary Shares",
    "listed": "2025-02-20",
    "months": 19,
-   "close": 2.52,
+   "close": 2.5625,
    "close_date": "2026-10-02",
    "ref_close": 2.86,
    "ref_close_date": "2026-09-30",
    "first_close": 8.59,
    "first_close_date": "2025-02-20",
-   "drawdown_pct": -66.71
+   "peak_close": 13.61,
+   "peak_close_date": "2025-05-12",
+   "surge_max_ratio": 10.9318,
+   "surge_date": "2025-11-04",
+   "drawdown_pct": -78.99,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -4055,7 +5490,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 31.0,
    "first_close_date": "2025-02-20",
-   "drawdown_pct": -68.06
+   "peak_close": 39.98,
+   "peak_close_date": "2025-04-23",
+   "surge_max_ratio": 1.7338,
+   "surge_date": "2026-04-22",
+   "drawdown_pct": -75.24,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4063,13 +5503,18 @@
    "name": "DataMeds AI, Inc. - Common Stock",
    "listed": "2025-02-21",
    "months": 19,
-   "close": 3.79,
+   "close": 3.611,
    "close_date": "2026-10-02",
    "ref_close": 3.17,
    "ref_close_date": "2026-09-30",
    "first_close": 190.5,
    "first_close_date": "2025-02-21",
-   "drawdown_pct": -98.34
+   "peak_close": 248.0,
+   "peak_close_date": "2025-03-21",
+   "surge_max_ratio": 7.1328,
+   "surge_date": "2026-09-16",
+   "drawdown_pct": -98.72,
+   "surge_excluded": true
   },
   {
    "market": "KOSDAQ",
@@ -4083,7 +5528,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 34000.0,
    "first_close_date": "2025-02-24",
-   "drawdown_pct": -82.15
+   "peak_close": 34000.0,
+   "peak_close_date": "2025-02-24",
+   "surge_max_ratio": 1.6449,
+   "surge_date": "2026-05-04",
+   "drawdown_pct": -82.15,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4091,13 +5541,18 @@
    "name": "Resolute Holdings Management Common Stock",
    "listed": "2025-02-24",
    "months": 19,
-   "close": 117.57,
+   "close": 118.7,
    "close_date": "2026-10-02",
    "ref_close": 118.25,
    "ref_close_date": "2026-09-30",
    "first_close": 35.89,
    "first_close_date": "2025-02-24",
-   "drawdown_pct": 229.48
+   "peak_close": 226.37,
+   "peak_close_date": "2026-01-15",
+   "surge_max_ratio": 9.0875,
+   "surge_date": "2026-01-15",
+   "drawdown_pct": -47.76,
+   "surge_excluded": true
   },
   {
    "market": "KOSDAQ",
@@ -4111,7 +5566,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 58800.0,
    "first_close_date": "2025-02-25",
-   "drawdown_pct": -60.46
+   "peak_close": 58800.0,
+   "peak_close_date": "2025-02-25",
+   "surge_max_ratio": 3.1185,
+   "surge_date": "2026-02-11",
+   "drawdown_pct": -60.46,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4119,13 +5579,18 @@
    "name": "Basel Medical Group Ltd - ordinary shares",
    "listed": "2025-02-25",
    "months": 19,
-   "close": 3.24,
+   "close": 3.3,
    "close_date": "2026-10-02",
    "ref_close": 3.12,
    "ref_close_date": "2026-09-30",
    "first_close": 53.28,
    "first_close_date": "2025-02-25",
-   "drawdown_pct": -94.14
+   "peak_close": 72.96,
+   "peak_close_date": "2025-05-30",
+   "surge_max_ratio": 5.9608,
+   "surge_date": "2025-05-30",
+   "drawdown_pct": -95.72,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -4139,7 +5604,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.96,
    "first_close_date": "2025-02-25",
-   "drawdown_pct": 9.24
+   "peak_close": 10.88,
+   "peak_close_date": "2026-09-28",
+   "surge_max_ratio": 1.0604,
+   "surge_date": "2026-09-28",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4153,7 +5623,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 3.73,
    "first_close_date": "2025-02-26",
-   "drawdown_pct": -70.78
+   "peak_close": 9.27,
+   "peak_close_date": "2026-07-24",
+   "surge_max_ratio": 31.9655,
+   "surge_date": "2026-07-24",
+   "drawdown_pct": -88.24,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -4161,13 +5636,18 @@
    "name": "Luda Technology Group Limited Ordinary Shares",
    "listed": "2025-02-27",
    "months": 19,
-   "close": 4.21,
+   "close": 3.95,
    "close_date": "2026-10-02",
    "ref_close": 3.95,
    "ref_close_date": "2026-09-30",
    "first_close": 4.0,
    "first_close_date": "2025-02-27",
-   "drawdown_pct": -1.25
+   "peak_close": 19.7,
+   "peak_close_date": "2025-09-10",
+   "surge_max_ratio": 5.4571,
+   "surge_date": "2025-09-10",
+   "drawdown_pct": -79.95,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -4181,7 +5661,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 100.0,
    "first_close_date": "2025-02-27",
-   "drawdown_pct": -98.85
+   "peak_close": 573.6,
+   "peak_close_date": "2025-05-29",
+   "surge_max_ratio": 5.736,
+   "surge_date": "2025-05-29",
+   "drawdown_pct": -99.8,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -4189,13 +5674,18 @@
    "name": "Wetour Robotics Limited - Ordinary Shares",
    "listed": "2025-02-27",
    "months": 19,
-   "close": 1.095,
+   "close": 1.085,
    "close_date": "2026-10-02",
    "ref_close": 1.01,
    "ref_close_date": "2026-09-30",
    "first_close": 360.0,
    "first_close_date": "2025-02-27",
-   "drawdown_pct": -99.72
+   "peak_close": 430.0,
+   "peak_close_date": "2025-04-25",
+   "surge_max_ratio": 11.0,
+   "surge_date": "2026-08-18",
+   "drawdown_pct": -99.77,
+   "surge_excluded": true
   },
   {
    "market": "KOSDAQ",
@@ -4209,7 +5699,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10200.0,
    "first_close_date": "2025-02-28",
-   "drawdown_pct": -30.0
+   "peak_close": 31300.0,
+   "peak_close_date": "2025-04-11",
+   "surge_max_ratio": 4.808,
+   "surge_date": "2025-04-11",
+   "drawdown_pct": -77.19,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4217,13 +5712,18 @@
    "name": "INLIF LIMITED - Class A Ordinary shares",
    "listed": "2025-01-02",
    "months": 20,
-   "close": 3.5586,
+   "close": 3.5699,
    "close_date": "2026-10-02",
    "ref_close": 4.08,
    "ref_close_date": "2026-09-30",
    "first_close": 14240.0,
    "first_close_date": "2025-01-02",
-   "drawdown_pct": -99.97
+   "peak_close": 52256.0,
+   "peak_close_date": "2025-02-14",
+   "surge_max_ratio": 4.0123,
+   "surge_date": "2025-02-14",
+   "drawdown_pct": -99.99,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4231,13 +5731,18 @@
    "name": "Rain Enhancement Technologies Holdco, Inc. - Class A Common Stock",
    "listed": "2025-01-02",
    "months": 20,
-   "close": 0.76,
+   "close": 0.795,
    "close_date": "2026-10-02",
    "ref_close": 0.8,
    "ref_close_date": "2026-09-30",
    "first_close": 7.3,
    "first_close_date": "2025-01-02",
-   "drawdown_pct": -89.04
+   "peak_close": 8.13,
+   "peak_close_date": "2025-12-30",
+   "surge_max_ratio": 4.371,
+   "surge_date": "2025-12-30",
+   "drawdown_pct": -90.16,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4245,13 +5750,18 @@
    "name": "XCF Global, Inc. - Class A Common Stock",
    "listed": "2025-01-02",
    "months": 20,
-   "close": 0.3307,
+   "close": 0.3284,
    "close_date": "2026-10-02",
    "ref_close": 0.34,
    "ref_close_date": "2026-09-30",
    "first_close": 10.22,
    "first_close_date": "2025-01-02",
-   "drawdown_pct": -96.67
+   "peak_close": 36.22,
+   "peak_close_date": "2025-06-09",
+   "surge_max_ratio": 18.0199,
+   "surge_date": "2025-06-09",
+   "drawdown_pct": -99.06,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -4265,7 +5775,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.95,
    "first_close_date": "2025-01-03",
-   "drawdown_pct": 8.64
+   "peak_close": 27.58,
+   "peak_close_date": "2025-12-29",
+   "surge_max_ratio": 2.7719,
+   "surge_date": "2025-12-29",
+   "drawdown_pct": -60.8,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4273,13 +5788,18 @@
    "name": "Cantor Equity Partners I, Inc. - Class A Ordinary Shares",
    "listed": "2025-01-07",
    "months": 20,
-   "close": 10.75,
+   "close": 10.7599,
    "close_date": "2026-10-02",
    "ref_close": 10.77,
    "ref_close_date": "2026-09-30",
    "first_close": 10.05,
    "first_close_date": "2025-01-07",
-   "drawdown_pct": 7.16
+   "peak_close": 15.24,
+   "peak_close_date": "2025-07-16",
+   "surge_max_ratio": 1.5164,
+   "surge_date": "2025-07-16",
+   "drawdown_pct": -29.33,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4287,13 +5807,18 @@
    "name": "Zhengye Biotechnology Holding Limited - Class A Ordinary Shares",
    "listed": "2025-01-07",
    "months": 20,
-   "close": 1.24,
+   "close": 1.21,
    "close_date": "2026-10-02",
    "ref_close": 1.2,
    "ref_close_date": "2026-09-30",
    "first_close": 4.86,
    "first_close_date": "2025-01-07",
-   "drawdown_pct": -75.31
+   "peak_close": 14.15,
+   "peak_close_date": "2025-04-28",
+   "surge_max_ratio": 12.3994,
+   "surge_date": "2026-07-20",
+   "drawdown_pct": -91.52,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -4301,13 +5826,18 @@
    "name": "3 E Network Technology Group Ltd - Class A Ordinary Shares",
    "listed": "2025-01-08",
    "months": 20,
-   "close": 0.8695,
+   "close": 0.85,
    "close_date": "2026-10-02",
    "ref_close": 0.813,
    "ref_close_date": "2026-09-30",
    "first_close": 81.25,
    "first_close_date": "2025-01-08",
-   "drawdown_pct": -99.0
+   "peak_close": 102.5,
+   "peak_close_date": "2025-03-21",
+   "surge_max_ratio": 4.3952,
+   "surge_date": "2026-06-01",
+   "drawdown_pct": -99.21,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4315,13 +5845,18 @@
    "name": "Mint Incorporation Limited - Class A Ordinary Shares",
    "listed": "2025-01-10",
    "months": 20,
-   "close": 0.899,
+   "close": 0.8827,
    "close_date": "2026-10-02",
    "ref_close": 0.9,
    "ref_close_date": "2026-09-30",
    "first_close": 41.1,
    "first_close_date": "2025-01-10",
-   "drawdown_pct": -97.81
+   "peak_close": 107.5,
+   "peak_close_date": "2025-09-15",
+   "surge_max_ratio": 2.9054,
+   "surge_date": "2025-09-15",
+   "drawdown_pct": -99.16,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4335,7 +5870,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.93,
    "first_close_date": "2025-01-14",
-   "drawdown_pct": 9.37
+   "peak_close": 10.86,
+   "peak_close_date": "2026-09-25",
+   "surge_max_ratio": 1.0817,
+   "surge_date": "2025-10-13",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4343,13 +5883,18 @@
    "name": "Uni-Fuels Holdings Limited - Class A Ordinary Shares",
    "listed": "2025-01-14",
    "months": 20,
-   "close": 0.4352,
+   "close": 0.4351,
    "close_date": "2026-10-02",
    "ref_close": 0.451,
    "ref_close_date": "2026-09-30",
    "first_close": 4.0,
    "first_close_date": "2025-01-14",
-   "drawdown_pct": -88.72
+   "peak_close": 9.65,
+   "peak_close_date": "2025-09-09",
+   "surge_max_ratio": 4.9235,
+   "surge_date": "2025-09-09",
+   "drawdown_pct": -95.33,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4357,13 +5902,18 @@
    "name": "Cellyan Biotechnology Co., Ltd  - Class A Ordinary Shares",
    "listed": "2025-01-15",
    "months": 20,
-   "close": 0.1099,
+   "close": 0.107,
    "close_date": "2026-10-02",
    "ref_close": 0.116,
    "ref_close_date": "2026-09-30",
    "first_close": 2.82,
    "first_close_date": "2025-01-15",
-   "drawdown_pct": -95.89
+   "peak_close": 2.82,
+   "peak_close_date": "2025-01-15",
+   "surge_max_ratio": 2.4432,
+   "surge_date": "2025-06-09",
+   "drawdown_pct": -95.89,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4371,13 +5921,18 @@
    "name": "Flowco Holdings Inc. Class A Common Stock",
    "listed": "2025-01-16",
    "months": 20,
-   "close": 18.82,
+   "close": 18.78,
    "close_date": "2026-10-02",
    "ref_close": 18.1,
    "ref_close_date": "2026-09-30",
    "first_close": 28.7915,
    "first_close_date": "2025-01-16",
-   "drawdown_pct": -37.13
+   "peak_close": 29.3247,
+   "peak_close_date": "2025-01-21",
+   "surge_max_ratio": 1.995,
+   "surge_date": "2026-05-20",
+   "drawdown_pct": -38.28,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4391,7 +5946,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.82,
    "first_close_date": "2025-01-16",
-   "drawdown_pct": 7.74
+   "peak_close": 12.0,
+   "peak_close_date": "2026-07-30",
+   "surge_max_ratio": 1.1905,
+   "surge_date": "2026-07-30",
+   "drawdown_pct": -11.83,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4399,13 +5959,18 @@
    "name": "PicoCELA Inc. - American Depositary Shares",
    "listed": "2025-01-16",
    "months": 20,
-   "close": 6.779,
+   "close": 6.78,
    "close_date": "2026-10-02",
    "ref_close": 6.775,
    "ref_close_date": "2026-09-30",
    "first_close": 85.2,
    "first_close_date": "2025-01-16",
-   "drawdown_pct": -92.05
+   "peak_close": 264.3,
+   "peak_close_date": "2025-02-20",
+   "surge_max_ratio": 8.8889,
+   "surge_date": "2026-05-26",
+   "drawdown_pct": -97.44,
+   "surge_excluded": true
   },
   {
    "market": "KOSDAQ",
@@ -4419,7 +5984,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 5520.0,
    "first_close_date": "2025-01-21",
-   "drawdown_pct": -40.67
+   "peak_close": 5520.0,
+   "peak_close_date": "2025-01-21",
+   "surge_max_ratio": 1.4619,
+   "surge_date": "2026-08-28",
+   "drawdown_pct": -40.67,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4427,13 +5997,18 @@
    "name": "Diginex Limited - Ordinary Shares",
    "listed": "2025-01-22",
    "months": 20,
-   "close": 1.26,
+   "close": 1.275,
    "close_date": "2026-10-02",
    "ref_close": 1.17,
    "ref_close_date": "2026-09-30",
    "first_close": 5.69,
    "first_close_date": "2025-01-22",
-   "drawdown_pct": -79.44
+   "peak_close": 251.12,
+   "peak_close_date": "2025-10-09",
+   "surge_max_ratio": 44.1336,
+   "surge_date": "2025-10-09",
+   "drawdown_pct": -99.53,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -4441,13 +6016,18 @@
    "name": "Decent Holding Inc. - Class A Ordinary Shares",
    "listed": "2025-01-22",
    "months": 20,
-   "close": 2.435,
+   "close": 2.4,
    "close_date": "2026-10-02",
    "ref_close": 2.5,
    "ref_close_date": "2026-09-30",
    "first_close": 101.5,
    "first_close_date": "2025-01-22",
-   "drawdown_pct": -97.54
+   "peak_close": 101.5,
+   "peak_close_date": "2025-01-22",
+   "surge_max_ratio": 5.4568,
+   "surge_date": "2026-03-11",
+   "drawdown_pct": -97.54,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -4455,13 +6035,18 @@
    "name": "TJGC Group Limited - Class A Ordinary Shares",
    "listed": "2025-01-22",
    "months": 20,
-   "close": 32.91,
+   "close": 32.24,
    "close_date": "2026-10-02",
    "ref_close": 30.2,
    "ref_close_date": "2026-09-30",
    "first_close": 12.99,
    "first_close_date": "2025-01-22",
-   "drawdown_pct": 132.49
+   "peak_close": 98.7,
+   "peak_close_date": "2025-06-03",
+   "surge_max_ratio": 23.2432,
+   "surge_date": "2026-09-29",
+   "drawdown_pct": -69.4,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -4469,13 +6054,18 @@
    "name": "Toppoint Holdings Inc. Common Stock",
    "listed": "2025-01-22",
    "months": 20,
-   "close": 0.1264,
+   "close": 0.121,
    "close_date": "2026-10-02",
    "ref_close": 0.129,
    "ref_close_date": "2026-09-30",
    "first_close": 3.76,
    "first_close_date": "2025-01-22",
-   "drawdown_pct": -96.57
+   "peak_close": 3.76,
+   "peak_close_date": "2025-01-22",
+   "surge_max_ratio": 3.9063,
+   "surge_date": "2026-05-28",
+   "drawdown_pct": -96.57,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -4489,7 +6079,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 4736.0,
    "first_close_date": "2025-01-23",
-   "drawdown_pct": -44.57
+   "peak_close": 5930.0,
+   "peak_close_date": "2025-07-14",
+   "surge_max_ratio": 1.9629,
+   "surge_date": "2025-07-14",
+   "drawdown_pct": -55.73,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -4503,7 +6098,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 1914.0,
    "first_close_date": "2025-01-23",
-   "drawdown_pct": 5.8
+   "peak_close": 2035.0,
+   "peak_close_date": "2026-02-27",
+   "surge_max_ratio": 1.0606,
+   "surge_date": "2025-12-03",
+   "drawdown_pct": -0.49,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -4517,7 +6117,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 10800.0,
    "first_close_date": "2025-01-24",
-   "drawdown_pct": -47.04
+   "peak_close": 19250.0,
+   "peak_close_date": "2025-06-10",
+   "surge_max_ratio": 1.9543,
+   "surge_date": "2025-06-10",
+   "drawdown_pct": -70.29,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -4531,7 +6136,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 7800.0,
    "first_close_date": "2025-01-24",
-   "drawdown_pct": -57.37
+   "peak_close": 9420.0,
+   "peak_close_date": "2025-04-14",
+   "surge_max_ratio": 1.5885,
+   "surge_date": "2025-04-14",
+   "drawdown_pct": -64.7,
+   "surge_excluded": false
   },
   {
    "market": "KOSDAQ",
@@ -4545,7 +6155,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 6640.0,
    "first_close_date": "2025-01-24",
-   "drawdown_pct": -9.49
+   "peak_close": 16100.0,
+   "peak_close_date": "2025-11-05",
+   "surge_max_ratio": 2.4247,
+   "surge_date": "2025-11-05",
+   "drawdown_pct": -62.67,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4553,13 +6168,18 @@
    "name": "Ascentage Pharma Group International - American Depository Shares",
    "listed": "2025-01-24",
    "months": 20,
-   "close": 15.09,
+   "close": 15.6,
    "close_date": "2026-10-02",
    "ref_close": 16.31,
    "ref_close_date": "2026-09-30",
    "first_close": 17.38,
    "first_close_date": "2025-01-24",
-   "drawdown_pct": -6.16
+   "peak_close": 47.9,
+   "peak_close_date": "2025-08-22",
+   "surge_max_ratio": 2.7849,
+   "surge_date": "2025-08-22",
+   "drawdown_pct": -65.95,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4567,13 +6187,18 @@
    "name": "Eason Technology Limited American Depositary Shares (each representing sixty-thousand (60,000) Ordinary Shares)",
    "listed": "2025-01-24",
    "months": 20,
-   "close": 0.4501,
+   "close": 0.4606,
    "close_date": "2026-10-02",
    "ref_close": 0.5,
    "ref_close_date": "2026-09-30",
    "first_close": 29.0,
    "first_close_date": "2025-01-24",
-   "drawdown_pct": -98.28
+   "peak_close": 30.51,
+   "peak_close_date": "2025-02-04",
+   "surge_max_ratio": 4.2683,
+   "surge_date": "2026-05-14",
+   "drawdown_pct": -98.36,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4581,13 +6206,18 @@
    "name": "Venture Global, Inc. Class A common stock",
    "listed": "2025-01-24",
    "months": 20,
-   "close": 13.325,
+   "close": 13.1694,
    "close_date": "2026-10-02",
    "ref_close": 12.64,
    "ref_close_date": "2026-09-30",
    "first_close": 23.7067,
    "first_close_date": "2025-01-24",
-   "drawdown_pct": -46.68
+   "peak_close": 23.7067,
+   "peak_close_date": "2025-01-24",
+   "surge_max_ratio": 2.9652,
+   "surge_date": "2026-03-27",
+   "drawdown_pct": -46.68,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4601,7 +6231,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.91,
    "first_close_date": "2025-01-28",
-   "drawdown_pct": 8.78
+   "peak_close": 10.78,
+   "peak_close_date": "2026-09-28",
+   "surge_max_ratio": 1.0535,
+   "surge_date": "2026-02-06",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4609,13 +6244,18 @@
    "name": "Smithfield Foods, Inc. - Common Stock",
    "listed": "2025-01-28",
    "months": 20,
-   "close": 18.94,
+   "close": 18.885,
    "close_date": "2026-10-02",
    "ref_close": 18.72,
    "ref_close_date": "2026-09-30",
    "first_close": 18.1868,
    "first_close_date": "2025-01-28",
-   "drawdown_pct": 2.93
+   "peak_close": 28.8207,
+   "peak_close_date": "2026-04-09",
+   "surge_max_ratio": 1.6276,
+   "surge_date": "2026-04-08",
+   "drawdown_pct": -35.05,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4623,13 +6263,18 @@
    "name": "Beta Bionics, Inc. - Common Stock",
    "listed": "2025-01-30",
    "months": 20,
-   "close": 18.625,
+   "close": 18.71,
    "close_date": "2026-10-02",
    "ref_close": 18.98,
    "ref_close_date": "2026-09-30",
    "first_close": 23.63,
    "first_close_date": "2025-01-30",
-   "drawdown_pct": -19.68
+   "peak_close": 31.99,
+   "peak_close_date": "2026-01-08",
+   "surge_max_ratio": 3.2945,
+   "surge_date": "2026-01-08",
+   "drawdown_pct": -40.67,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4637,13 +6282,18 @@
    "name": "Cloudastructure, Inc. - Class A Common Stock",
    "listed": "2025-01-30",
    "months": 20,
-   "close": 2.689,
+   "close": 2.64,
    "close_date": "2026-10-02",
    "ref_close": 2.76,
    "ref_close_date": "2026-09-30",
    "first_close": 1012.5,
    "first_close_date": "2025-01-30",
-   "drawdown_pct": -99.73
+   "peak_close": 1130.4,
+   "peak_close_date": "2025-02-13",
+   "surge_max_ratio": 6.9907,
+   "surge_date": "2025-02-13",
+   "drawdown_pct": -99.76,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -4657,7 +6307,12 @@
    "ref_close_date": "2026-09-30",
    "first_close": 9.96,
    "first_close_date": "2025-01-30",
-   "drawdown_pct": 8.73
+   "peak_close": 10.83,
+   "peak_close_date": "2026-09-25",
+   "surge_max_ratio": 1.0625,
+   "surge_date": "2026-06-16",
+   "drawdown_pct": 0.0,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4665,13 +6320,18 @@
    "name": "Infinity Natural Resources, Inc. Class A Common Stock",
    "listed": "2025-01-31",
    "months": 20,
-   "close": 12.935,
+   "close": 12.91,
    "close_date": "2026-10-02",
    "ref_close": 12.6,
    "ref_close_date": "2026-09-30",
    "first_close": 21.07,
    "first_close_date": "2025-01-31",
-   "drawdown_pct": -40.2
+   "peak_close": 21.89,
+   "peak_close_date": "2025-02-03",
+   "surge_max_ratio": 1.717,
+   "surge_date": "2026-03-27",
+   "drawdown_pct": -42.44,
+   "surge_excluded": false
   },
   {
    "market": "US",
@@ -4679,13 +6339,18 @@
    "name": "Maze Therapeutics, Inc. - Common Stock",
    "listed": "2025-01-31",
    "months": 20,
-   "close": 26.45,
+   "close": 26.63,
    "close_date": "2026-10-02",
    "ref_close": 27.18,
    "ref_close_date": "2026-09-30",
    "first_close": 15.95,
    "first_close_date": "2025-01-31",
-   "drawdown_pct": 70.41
+   "peak_close": 51.835,
+   "peak_close_date": "2026-03-12",
+   "surge_max_ratio": 6.8474,
+   "surge_date": "2026-03-12",
+   "drawdown_pct": -47.56,
+   "surge_excluded": true
   },
   {
    "market": "US",
@@ -4693,13 +6358,18 @@
    "name": "Plum Acquisition Corp. IV - Class A Ordinary Shares",
    "listed": "2025-01-31",
    "months": 20,
-   "close": 10.64,
+   "close": 10.645,
    "close_date": "2026-10-02",
    "ref_close": 10.72,
    "ref_close_date": "2026-09-30",
    "first_close": 9.97,
    "first_close_date": "2025-01-31",
-   "drawdown_pct": 7.52
+   "peak_close": 11.3,
+   "peak_close_date": "2026-07-13",
+   "surge_max_ratio": 1.1003,
+   "surge_date": "2026-07-13",
+   "drawdown_pct": -5.13,
+   "surge_excluded": false
   }
  ]
 }

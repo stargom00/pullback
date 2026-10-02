@@ -25,8 +25,10 @@
 [종가·하락률] 필터를 통과한 종목**만** 저점 스크린의 fetch_kr(naver 일봉 1900일)/fetch_us(yahoo 5년)로
 받는다(전수 조회 없음). 13~20개월 종목은 상장일이 이 기간 안이라 그 시계열의 **첫 봉 = 첫 거래일**이고,
 같은 응답에서 세 값을 뽑는다(추가 요청 0): 최신 종가(close), 기준일 종가(기준일 이하 마지막 봉),
-첫 거래일 종가(첫 봉). 하락률 = (기준일 종가 − 첫 거래일 종가)/첫 거래일 종가(v5.314 추가 지시 —
-**공모가 기준이 아니다**). 둘 다 수정주가라 분할이 있어도 두 값이 같은 기준이다.
+첫 거래일 종가(첫 봉), 상장 후 최고 종가(첫 봉~기준일 최댓값)와 그 날짜. v5.315(사용자 지시)부터
+하락률 = (기준일 종가 − 상장 후 최고 종가)/최고 종가 — "고점에서 반토막 이상 난 종목"을 보려는 것이라
+기준을 첫 거래일 종가에서 신고가로 바꿨다(v5.314는 첫 거래일 종가 기준). 수정주가라 분할이 있어도
+같은 기준이다.
 
 실행(로컬):
   python3 scripts/screens/newlisting.py --ref 2026-09-30 --publish
@@ -57,10 +59,17 @@ US_DATE_CAVEAT = ("US 상장일 = yahoo firstTradeDate(첫 거래일). IPO일의
                   "SPAC 합병 상장은 실제 IPO일과 다를 수 있다.")
 KR_DATE_CAVEAT = ("KR 상장일 = KIND 상장법인 목록의 상장일(현재 시장 기준). 코넥스→코스닥·코스닥→코스피 "
                   "이전상장은 이전일이 상장일이다.")
-DRAWDOWN_DEFINITION = ("하락률 = (기준일 종가 − 첫 거래일 종가) / 첫 거래일 종가 × 100. **첫 거래일 '종가' 기준 — "
-                       "공모가가 아니다.** 첫 거래일 종가 = 결과 종목 일봉의 첫 봉(KR naver·US yahoo, 둘 다 수정주가), "
-                       "기준일 종가 = 기준일 이하 마지막 봉. 첫 봉 날짜가 상장일과 다르면 표에 따로 표시한다 — "
-                       "KR 이전상장은 첫 봉이 이전 시장(코넥스 등) 거래일이고, US 큰 하락은 역분할이 수정주가에 반영된 값이다.")
+DRAWDOWN_DEFINITION = ("하락률 = (기준일 종가 − 상장 후 최고 종가) / 상장 후 최고 종가 × 100. **상장 후 최고 종가(신고가) "
+                       "기준 — 공모가·첫 거래일 종가가 아니다.** 최고 종가 = 결과 종목 일봉의 첫 봉부터 기준일까지 종가의 최댓값"
+                       "(KR naver·US yahoo, 둘 다 수정주가), 기준일 종가 = 기준일 이하 마지막 봉. 첫 봉 날짜가 상장일과 다르면 "
+                       "표에 따로 표시한다 — KR 이전상장은 첫 봉이 이전 시장(코넥스 등) 거래일이라 **최고 종가에 코넥스 시절이 "
+                       "섞일 수 있다.** US 큰 하락은 역분할이 수정주가에 반영된 값이다.")
+# v5.315 추가 지시(사용자 지정값 — 5배·365일): 급등 전력 제외
+SURGE_RATIO = 5.0
+SURGE_WINDOW_DAYS = 365
+SURGE_DEFINITION = (f"급등 전력 제외: 기준일까지의 일봉에서 어느 날 t든 close[t] / min(close[t−{SURGE_WINDOW_DAYS}일..t]) "
+                    f"≥ {SURGE_RATIO:g}(배)인 날이 하루라도 있으면 목록에서 뺀다(창은 과거 방향 — t 이후의 저점은 "
+                    f"t의 판정에 안 들어간다). 결과 파일에는 남기고 surge_excluded로 표시한다.")
 MONTHS_DEFINITION = ("개월수 = (기준월 − 상장월), 기준일은 월말 — 상장일의 일(day)은 무관. "
                      f"{MONTHS_MIN} ≤ 개월수 ≤ {MONTHS_MAX} 포함.")
 
@@ -224,18 +233,33 @@ def select(rows: list, ref: date) -> list:
     return sorted(out, key=lambda r: (r["months"], r["listed"], r["market"], r["code"]))
 
 
-def drawdown_pct(ref_close, first_close):
-    """(기준일 종가 − 첫 거래일 종가)/첫 거래일 종가 × 100, 소수 2자리. 값이 없거나 0 이하면 None."""
-    if ref_close is None or first_close is None or not first_close > 0 or not ref_close > 0:
+def drawdown_pct(ref_close, base_close):
+    """(기준일 종가 − 기준값)/기준값 × 100, 소수 2자리. 값이 없거나 0 이하면 None.
+    v5.315부터 기준값 = 상장 후 최고 종가(apply_series)."""
+    if ref_close is None or base_close is None or not base_close > 0 or not ref_close > 0:
         return None
-    return round((float(ref_close) - float(first_close)) / float(first_close) * 100, 2)
+    return round((float(ref_close) - float(base_close)) / float(base_close) * 100, 2)
+
+
+def surge_check(c) -> tuple[float | None, str | None]:
+    """시계열 c(날짜 인덱스·오름차순, 기준일까지 자른 것)에서 close[t]/min(close[t−365일..t])의
+    최댓값과 그 날짜. 창은 달력 365일, 양 끝 포함(rolling closed='both'). 값이 없으면 (None, None)."""
+    if c is None or len(c) == 0:
+        return None, None
+    lo = c.rolling(f"{SURGE_WINDOW_DAYS}D", closed="both").min()
+    ratio = c / lo
+    t = ratio.idxmax()
+    return round(float(ratio.max()), 4), str(t.date())
 
 
 def apply_series(r: dict, c, ref: date):
-    """결과 행 하나에 종가 시계열 c(날짜 인덱스, 오름차순)의 세 값과 하락률을 붙인다(순수)."""
-    keys = ("close", "close_date", "ref_close", "ref_close_date", "first_close", "first_close_date")
+    """결과 행 하나에 종가 시계열 c(날짜 인덱스, 오름차순)의 값들과 하락률을 붙인다(순수).
+    최고 종가는 **첫 봉~기준일** 구간만 본다 — 기준일 뒤 고점이 섞이면 기준일 시점의 하락률이 아니다."""
+    keys = ("close", "close_date", "ref_close", "ref_close_date", "first_close", "first_close_date",
+            "peak_close", "peak_close_date", "surge_max_ratio", "surge_date")
     r.update(dict.fromkeys(keys))
     r["drawdown_pct"] = None
+    r["surge_excluded"] = False
     if c is None or not len(c):
         return r
     r["close"], r["close_date"] = round(float(c.iloc[-1]), 4), str(c.index[-1].date())
@@ -243,7 +267,11 @@ def apply_series(r: dict, c, ref: date):
     upto = c[[d.date() <= ref for d in c.index]]
     if len(upto):
         r["ref_close"], r["ref_close_date"] = round(float(upto.iloc[-1]), 4), str(upto.index[-1].date())
-    r["drawdown_pct"] = drawdown_pct(r["ref_close"], r["first_close"])
+        peak_at = upto.idxmax()                     # 같은 최고가가 여러 번이면 처음 날짜
+        r["peak_close"], r["peak_close_date"] = round(float(upto.max()), 4), str(peak_at.date())
+        r["surge_max_ratio"], r["surge_date"] = surge_check(upto)
+        r["surge_excluded"] = r["surge_max_ratio"] is not None and r["surge_max_ratio"] >= SURGE_RATIO
+    r["drawdown_pct"] = drawdown_pct(r["ref_close"], r["peak_close"])
     return r
 
 
@@ -297,6 +325,7 @@ def build(ref: date, *, us_listings_path: str | None = None, cache_paths: list |
         "kr_date_caveat": KR_DATE_CAVEAT,
         "us_date_caveat": US_DATE_CAVEAT,
         "drawdown_definition": DRAWDOWN_DEFINITION,
+        "surge_definition": SURGE_DEFINITION,
         "run_stamp": harness.run_stamp(),
         "counts": {
             "kr": {"listed_total": kr_meta["total"], "date_unparsed": len(kr_meta["date_unparsed"]),
@@ -306,6 +335,9 @@ def build(ref: date, *, us_listings_path: str | None = None, cache_paths: list |
                    "yahoo_seconds": round(us_secs, 1), "hits": sum(r["market"] == "US" for r in rows)},
             "no_close": sum(r.get("close") is None for r in rows),
             "no_drawdown": sum(r.get("drawdown_pct") is None for r in rows),
+            # 급등 전력으로 목록에서 빠지는 13~20개월 종목 수(시장별)
+            "excluded_surge": {"kr": sum(bool(r.get("surge_excluded")) and r["market"] != "US" for r in rows),
+                               "us": sum(bool(r.get("surge_excluded")) and r["market"] == "US" for r in rows)},
             # 첫 봉 날짜가 상장일과 다르면(데이터가 상장일보다 늦게 시작) 그 하락률은 첫 거래일 기준이 아니다 — 건수로 드러낸다
             "first_bar_after_listed": sum(bool(r.get("first_close_date")) and r["first_close_date"] > r["listed"]
                                           for r in rows),

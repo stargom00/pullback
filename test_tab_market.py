@@ -61,7 +61,8 @@ def _modes_in(elem_id: str) -> list:
 
 # ── 메뉴 구조 (v5.294, 사용자 지시) ─────────────────────────────────
 # 메인: 홈 · US눌림목 · ABC · 추세전환 · 더보기▾ / 오른쪽: 업종/테마 · 마감정리 · 일지
-EXPECTED_MAIN = ["calendar", "pullback", "abc", "turnaround"]
+# v5.315(사용자 지시 "더보기 안에 있어 접근 불편 — 밖으로"): 신규상장을 추세전환 옆으로
+EXPECTED_MAIN = ["calendar", "pullback", "abc", "turnaround", "newlisting"]
 EXPECTED_UTIL = ["themes", "eod", "journal", "lowpoint_track"]
 EXPECTED_MORE_TABS = ["jongga", "imminent", "boxbreak", "breakout", "surge_observe", "positions"]
 

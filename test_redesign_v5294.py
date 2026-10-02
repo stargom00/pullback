@@ -28,7 +28,7 @@ EXISTING_MODES = {
     "journal", "super", "leader", "sectors", "moneyflow", "inverse",
     "breakdown", "pattern", "stage2", "ibd9", "strong_pivot", "earnings", "surge",
     "lowpoint_track",   # v5.302 신설, v5.303부터 오른쪽 작은 메뉴(일지 옆) — 새 키는 여기 명시적으로 추가해야 통과
-    "newlisting",       # v5.314 신설(더보기 패널 "탭" 칸) — 신규상장 13~20개월차
+    "newlisting",       # v5.314 신설(더보기) → v5.315 메인 줄(추세전환 옆) — 신규상장 13~20개월차
 }
 
 
@@ -41,11 +41,18 @@ def _element(elem_id: str, close: str) -> str:
     return TEXT[i:TEXT.index(close, i)]
 
 
-def test_main_tab_row_is_exactly_five_buttons():
+def test_main_tab_row_is_exactly_six_buttons():
+    """v5.315(사용자 지시): 신규상장을 더보기에서 꺼내 추세전환 옆으로 — 나머지 순서 불변."""
     body = _element("modeTabs", "</nav>")
     labels = [re.sub(r"<[^>]+>", "", b).strip()
               for b in re.findall(r"<button\b[^>]*>(.*?)</button>", body, re.S)]
-    assert labels == ["홈", "US눌림목", "ABC", "추세전환", "더보기"], labels
+    assert labels == ["홈", "US눌림목", "ABC", "추세전환", "신규상장", "더보기"], labels
+
+
+def test_newlisting_moved_out_of_more_panel():
+    more = re.findall(r'data-mode="(\w+)"', _element("moreTabsPanel", "</header>"))
+    assert "newlisting" not in more
+    assert TEXT.count('data-mode="newlisting"') == 1
 
 
 def test_every_existing_mode_key_exists_exactly_once():

@@ -9,6 +9,10 @@
 ② _lowpoint_due에서 신규상장의 "월봉 끝난 뒤" 조건 제거 → test_newlisting_waits_for_month 4건 FAIL
 ③ (하락률 추가 지시) 종가·첫 봉 조회를 결과 종목이 아니라 전체 목록으로(전수 조회) →
    test_first_close_fetch_only_for_result_rows FAIL
+④ (v5.315) 하락률 기준을 신고가에서 첫 거래일 종가로 되돌림 → test_peak_is_series_max_up_to_ref_date +
+   test_drawdown_from_peak_boundaries 3건 FAIL
+⑤ (v5.315 급등 제외) apply_series에서 surge_excluded를 항상 False로 → test_surge_rule_boundaries 2건 +
+   test_build_records_surge_counts FAIL / 탭이 급등 제외 전 행으로 목록을 그리게 → test_tab_hides_surge_rows_and_reports_count FAIL
 """
 from __future__ import annotations
 
@@ -412,9 +416,32 @@ def test_apply_series_uses_first_bar_and_ref_date_close():
     assert nl.apply_series({}, None, REF)["drawdown_pct"] is None
 
 
-def test_definition_says_first_day_close_not_ipo_price():
-    assert "공모가가 아니다" in nl.DRAWDOWN_DEFINITION and "첫 거래일 '종가'" in nl.DRAWDOWN_DEFINITION
-    assert "d.drawdown_definition" in SRC and "공모가 아님" in SRC
+def test_definition_says_peak_close_not_ipo_or_first_close():
+    """v5.315: 기준 = 상장 후 최고 종가(신고가). 공모가·첫 거래일 종가가 아님을 명시, 코넥스 혼입 한계도."""
+    d = nl.DRAWDOWN_DEFINITION
+    assert "상장 후 최고 종가" in d and "공모가·첫 거래일 종가가 아니다" in d and "코넥스 시절이 섞일 수 있다" in d
+    assert "d.drawdown_definition" in SRC and "상장 후 최고 종가 대비 기준일 종가(공모가 아님)" in SRC
+
+
+def test_peak_is_series_max_up_to_ref_date():
+    """신고가 = 첫 봉~기준일 종가의 최댓값(기준일 뒤 고점은 제외). 하락률은 신고가 기준."""
+    idx = pd.to_datetime(["2025-06-05", "2025-09-10", "2025-09-11", "2026-09-30", "2026-10-02"])
+    c = pd.Series([40.0, 100.0, 100.0, 45.0, 200.0], index=idx)
+    r = nl.apply_series({"listed": "2025-06-05"}, c, REF)
+    assert (r["peak_close"], r["peak_close_date"]) == (100.0, "2025-09-10")   # 같은 고가면 처음 날짜, 10-02 고점 제외
+    assert r["first_close"] == 40.0 and r["ref_close"] == 45.0
+    assert r["drawdown_pct"] == -55.0, "하락률이 신고가가 아니라 다른 값을 기준으로 계산됐다"
+
+
+@pytest.mark.parametrize("closes,want", [
+    ([10.0, 20.0, 10.0], -50.0),      # 정확히 −50%
+    ([10.0, 20.0, 6.0], -70.0),       # 정확히 −70%
+    ([10.0, 10.0, 10.0], 0.0),        # 스팩처럼 평평 — 하락 없음
+    ([10.0, 15.0, 30.0], 0.0),        # 기준일이 신고가 — 상승 종목
+])
+def test_drawdown_from_peak_boundaries(closes, want):
+    idx = pd.to_datetime(["2025-06-05", "2025-12-01", "2026-09-30"])
+    assert nl.apply_series({}, pd.Series(closes, index=idx), REF)["drawdown_pct"] == want
 
 
 def test_first_close_fetch_only_for_result_rows(monkeypatch):
@@ -462,11 +489,20 @@ def test_chip_filters_include_exact_boundaries():
     assert got == [["a", "c", "d", "e"], ["c", "e"]]      # −50·−70 정확히 포함, −49.99·−69.99 제외
 
 
-def test_chip_counts_match_filtered_rows():
+def test_chip_counts_match_filtered_rows_and_no_all_chip():
     counts = _js(f"nlChipCounts({json.dumps(DD_ROWS)})")
-    assert counts == {"0": 7, "50": 4, "70": 2}
-    lens = _js(f"[0, 50, 70].map(lv => nlFilterByDrawdown({json.dumps(DD_ROWS)}, lv).length)")
-    assert lens == [counts["0"], counts["50"], counts["70"]]
+    assert counts == {"50": 4, "70": 2}, "칩은 −50%/−70% 두 개뿐(전체 칩 없음)"
+    lens = _js(f"[50, 70].map(lv => nlFilterByDrawdown({json.dumps(DD_ROWS)}, lv).length)")
+    assert lens == [counts["50"], counts["70"]]
+
+
+def test_list_never_shows_less_than_minus_50():
+    """고점 대비 −50% 미만(스팩·상승 종목·하락률 없음)은 어떤 레벨로도 목록에 안 나온다 — 기본 −50%."""
+    for lv in ("0", "null", "undefined", "50"):
+        got = _js(f"nlFilterByDrawdown({json.dumps(DD_ROWS)}, {lv}).map(r => r.code)")
+        assert got == ["a", "c", "d", "e"], lv
+    assert "ddLevel: 50," in SRC and "const NL_DD_LEVELS = [50, 70];" in SRC
+    assert "'전체'" not in _fn("renderNewlisting")
 
 
 def test_drawdown_sort_nulls_last():
@@ -481,3 +517,61 @@ def test_drawdown_column_uses_existing_return_colors():
     assert "_lptPct(r.drawdown_pct)" in tbl and "nlToggleDdSort()" in tbl
     # 첫 봉이 상장일과 다르면(이전상장 등) 조용히 넘기지 않고 첫 봉 날짜를 표에 표시
     assert "r.first_close_date !== r.listed ?" in tbl and "첫 봉 ${r.first_close_date}" in tbl
+
+
+# ── v5.315 추가 지시: 급등 전력 제외(close[t]/min(close[t−365일..t]) ≥ 5) ──
+def _s(points):
+    return pd.Series([v for _, v in points], index=pd.to_datetime([d for d, _ in points]))
+
+
+@pytest.mark.parametrize("points,excluded,ratio", [
+    ([("2025-01-02", 10.0), ("2025-06-02", 30.0), ("2025-12-30", 50.0)], True, 5.0),    # 정확히 5.0배 → 제외
+    ([("2025-01-02", 10.0), ("2025-06-02", 30.0), ("2025-12-30", 49.0)], False, 4.9),   # 4.9배 → 포함
+    ([("2025-01-02", 50.0), ("2025-06-02", 20.0), ("2025-12-30", 10.0)], False, 1.0),   # 고점 뒤 폭락 저점 → 제외 아님
+    ([("2025-01-02", 10.0), ("2026-01-03", 50.0)], False, 1.0),                          # 저점이 366일 전 — 창 밖
+    ([("2025-01-02", 10.0), ("2026-01-02", 50.0)], True, 5.0),                           # 정확히 365일 전 — 창 안(양 끝 포함)
+])
+def test_surge_rule_boundaries(points, excluded, ratio):
+    r = nl.apply_series({}, _s(points), date(2026, 1, 31))
+    assert r["surge_excluded"] is excluded
+    assert r["surge_max_ratio"] == ratio
+
+
+def test_surge_check_ignores_bars_after_ref():
+    pts = [("2025-06-02", 10.0), ("2026-09-30", 20.0), ("2026-10-02", 60.0)]   # 기준일 뒤 6배는 무시
+    assert nl.apply_series({}, _s(pts), REF)["surge_excluded"] is False
+
+
+def test_surge_values_are_user_given_and_documented():
+    assert (nl.SURGE_RATIO, nl.SURGE_WINDOW_DAYS) == (5.0, 365)
+    assert "≥ 5" in nl.SURGE_DEFINITION and "365일" in nl.SURGE_DEFINITION
+
+
+def test_build_records_surge_counts(fake_sources, monkeypatch):
+    idx_surge = pd.to_datetime(["2025-08-14", "2026-01-05", "2026-09-30"])
+
+    def attach(rows, ref):
+        for r in rows:
+            closes = [10.0, 80.0, 20.0] if r["code"] == "111111.KS" else [10.0, 12.0, 4.0]
+            nl.apply_series(r, pd.Series(closes, index=idx_surge), ref)
+    monkeypatch.setattr(nl, "_attach_closes", attach)
+    e = nl.build(REF, us_lookup={"CRCL": date(2025, 6, 5)}.get, check_us_ready=False)
+    assert e["counts"]["excluded_surge"] == {"kr": 1, "us": 0}
+    assert e["surge_definition"] == nl.SURGE_DEFINITION
+    assert {r["code"]: r["surge_excluded"] for r in e["rows"]} == {"111111.KS": True, "CRCL": False, "333333.KQ": False}
+
+
+def test_tab_hides_surge_rows_and_reports_count():
+    rows = [{"code": "a", "drawdown_pct": -60.0, "surge_excluded": True},
+            {"code": "b", "drawdown_pct": -60.0, "surge_excluded": False},
+            {"code": "c", "drawdown_pct": -80.0}]
+    if not shutil.which("node"):
+        pytest.skip("node 미설치")
+    js = _fn("nlSurgeSplit") + f"\nconst s = nlSurgeSplit({json.dumps(rows)});\nconsole.log(JSON.stringify([s.kept.map(r => r.code), s.excluded.map(r => r.code)]));"
+    p = subprocess.run(["node", "-e", js], capture_output=True, text=True, timeout=20)
+    assert p.returncode == 0, p.stderr
+    assert json.loads(p.stdout) == [["b", "c"], ["a"]]
+    body = _fn("renderNewlisting")
+    assert "nlFilterByDrawdown(split.kept, _nl.ddLevel)" in body, "목록이 급등 제외 전 행으로 그려진다"
+    assert "nlChipCounts(nlSurgeSplit(shown).kept)" in body
+    assert "급등 제외 ${exN}종목" in body and "d.surge_definition" in body

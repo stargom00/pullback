@@ -1039,7 +1039,9 @@ tr.editing{background:var(--c-orange-a6)}
 
 /* ── 헤더 ── */
 header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1px solid var(--n-line)}
-.hdr-row{display:flex;align-items:center;gap:20px;min-height:64px;padding:0 var(--n-gutter)}
+/* v5.315: 메인 줄에 신규상장이 들어가 1440px에서 탭 줄이 5px 넘쳐 '저점'이 잘렸다(필요 689 / 자리 684) —
+   브랜드·탭·오른쪽 묶음 사이 간격만 20→12px로 줄여 자리를 만든다(버튼 크기·글자 불변). */
+.hdr-row{display:flex;align-items:center;gap:12px;min-height:64px;padding:0 var(--n-gutter)}
 .hdr-brand{display:flex;align-items:baseline;gap:8px;flex-shrink:0}
 .hdr-title{font-size:17px;font-weight:700;letter-spacing:-.2px;color:var(--n-text);display:inline-flex;align-items:center;gap:8px}
 /* v5.305: 앱 이름 앞 앰버 사각 점(현재 위치 표시와 같은 앰버) */
@@ -1351,7 +1353,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.314</span>
+      <span class="ver mono" id="verBadge">v5.315</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -1362,6 +1364,8 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
         <button class="tab" data-mode="pullback" title="진입 시 시장 필터가 미국으로 전환됩니다(탭을 벗어나면 원래대로).">US눌림목</button>
         <button class="tab" data-mode="abc" title="A(하락)·B(바닥다지기)·C(돌파) 패턴 — KR 전용, 관심 신호(진입 근거 없음, 측정 전)">ABC</button>
         <button class="tab" data-mode="turnaround">추세전환</button>
+        <!-- v5.314 신설(더보기) → v5.315(사용자 지시 "더보기 안에 있어 접근 불편 — 밖으로"): 추세전환 옆 -->
+        <button class="tab" data-mode="newlisting" title="상장 13~20개월차 KR·US 중 상장 후 최고 종가 대비 −50% 이상 하락 — 매월 1일 저점 월봉 뒤 자동 갱신">신규상장</button>
         <button class="tab hdr-more" id="moreTabsToggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="moreTabsPanel">더보기<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
       </nav>
       <span class="hdr-sep" aria-hidden="true"></span>
@@ -1396,8 +1400,6 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
            "급등 스캔"(surge, analyze_surge 게이트)과 다른 기능이다. -->
       <button class="tab" data-mode="surge_observe" title="당일 +15%↑ & 거래량 20일평균 10배↑ KR — 판정/EV/진입가 없음, 순수 관찰(2주 실험)">급등<span class="exp-tag">2주 실험</span></button>
       <button class="tab" data-mode="positions">포지션</button>
-      <!-- v5.314(사용자 지시): 상장 13~20개월차 KR·US 전 상장종목 — 월 1회(1일, 저점 월봉 뒤) -->
-      <button class="tab" data-mode="newlisting" title="상장 13~20개월차 KR·US 전 상장종목 — 매월 1일 저점 월봉 뒤 자동 갱신">신규상장</button>
     </div>
     <div class="more-sec">
       <div class="more-h">실험</div>
@@ -7629,13 +7631,22 @@ function nlSplitRows(rows) {
   by.KR.sort(cmp); by.US.sort(cmp);
   return by;
 }
-// v5.314 추가 지시: 상장 후 하락률(drawdown_pct = (기준일 종가 − 첫 거래일 종가)/첫 거래일 종가 %,
-// 서버·로컬 스크린이 계산해 저장 — 공모가 기준 아님). 칩: 전체 / −50% 이상 / −70% 이상 하락.
-// "−50% 이상" = 하락률 ≤ −50(정확히 −50% 포함). 하락률이 없는 종목은 '전체'에만 센다.
-const NL_DD_LEVELS = [0, 50, 70];
+// 상장 후 하락률(drawdown_pct, 서버·로컬 스크린이 계산해 저장). v5.315(사용자 지시): 기준을 첫 거래일
+// 종가 → **상장 후 최고 종가(신고가)**로 바꾸고, "고점에서 반토막 이상 난 종목"만 보이게 칩은 −50% 이상
+// (기본) / −70% 이상 두 개 — "전체" 칩 없음. "−50% 이상" = 하락률 ≤ −50(정확히 −50% 포함).
+// 하락률이 없는 종목(시계열 없음)은 어느 칩에도 안 나온다.
+const NL_DD_LEVELS = [50, 70];
 function nlFilterByDrawdown(rows, level) {
-  if (!level) return rows.slice();
-  return rows.filter(r => typeof r.drawdown_pct === 'number' && r.drawdown_pct <= -level);
+  // v5.315: "전체" 보기 없음 — 레벨이 비어도 전부 보여주지 않는다(최소 −50%)
+  const lv = Math.max(Number(level) || 0, NL_DD_LEVELS[0]);
+  return rows.filter(r => typeof r.drawdown_pct === 'number' && r.drawdown_pct <= -lv);
+}
+// v5.315 추가 지시: 급등 전력(어느 날이든 직전 365일 최저 종가 대비 5배 이상) 종목은 목록에서 뺀다.
+// 판정은 서버·로컬 스크린이 해서 surge_excluded로 저장 — 여기선 나누기만(순수 함수).
+function nlSurgeSplit(rows) {
+  const kept = [], excluded = [];
+  for (const r of rows || []) (r.surge_excluded ? excluded : kept).push(r);
+  return { kept, excluded };
 }
 function nlChipCounts(rows) {
   const out = {};
@@ -7653,7 +7664,7 @@ function nlSortRows(rows, key, dir) {
     return sign * (x - y);
   });
 }
-let _nl = { data: null, error: null, ddLevel: 0, sortKey: 'months', sortDir: 'asc' };
+let _nl = { data: null, error: null, ddLevel: 50, sortKey: 'months', sortDir: 'asc' };
 function nlSetLevel(lv) { _nl.ddLevel = lv; renderNewlisting(); }
 function nlToggleDdSort() {
   if (_nl.sortKey !== 'dd') { _nl.sortKey = 'dd'; _nl.sortDir = 'asc'; }
@@ -7677,19 +7688,22 @@ function _nlTable(rows, mkt) {
       + `<td class="num">${r.listed}</td><td class="num r">${r.months}개월</td>`
       + `<td class="num r">${r.close == null ? '<span class="n-sub">—</span>' : _lptFmt(r.close, mkt)}`
       + `${r.close_date ? `<div class="jr-s">${r.close_date}</div>` : ''}</td>`
-      + `<td class="r" title="${r.first_close != null ? `첫 거래일(${r.first_close_date}) 종가 ${_lptFmt(r.first_close, mkt)} → 기준일(${r.ref_close_date}) ${_lptFmt(r.ref_close, mkt)}` : '첫 거래일 종가 없음'}">${_lptPct(r.drawdown_pct)}${r.first_close_date && r.first_close_date !== r.listed ? `<div class="jr-s">첫 봉 ${r.first_close_date}</div>` : ''}</td></tr>`;
+      + `<td class="num r">${r.peak_close == null ? '<span class="n-sub">—</span>' : _lptFmt(r.peak_close, mkt)}`
+      + `${r.peak_close_date ? `<div class="jr-s">${r.peak_close_date}</div>` : ''}</td>`
+      + `<td class="r" title="${r.peak_close != null ? `상장 후 최고 종가(${r.peak_close_date}) ${_lptFmt(r.peak_close, mkt)} → 기준일(${r.ref_close_date}) ${_lptFmt(r.ref_close, mkt)}` : '최고 종가 없음'}">${_lptPct(r.drawdown_pct)}${r.first_close_date && r.first_close_date !== r.listed ? `<div class="jr-s">첫 봉 ${r.first_close_date}</div>` : ''}</td></tr>`;
   }).join('');
   const arrow = _nl.sortKey === 'dd' ? (_nl.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
   return `<div class="jr-table-wrap"><table class="jr-table lpt-table"><thead><tr><th>종목</th><th>상장일</th>`
     + `<th class="r">개월수</th><th class="r">종가</th>`
-    + `<th class="r"><button type="button" class="n-link" style="font-size:12px" onclick="nlToggleDdSort()" title="첫 거래일 종가 대비 기준일 종가 — 클릭해 정렬">하락률${arrow}</button></th>`
+    + `<th class="r">신고가</th>`
+    + `<th class="r"><button type="button" class="n-link" style="font-size:12px" onclick="nlToggleDdSort()" title="상장 후 최고 종가 대비 기준일 종가 — 클릭해 정렬">하락률${arrow}</button></th>`
     + `</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 function renderNewlisting() {
   const wrap = document.getElementById('newlistingView');
   if (!wrap || wrap.style.display === 'none') return;
   const d = _nl.data || {};
-  const head = `<div class="jr-title"><h2>신규상장</h2><span class="n-sub" style="font-size:13px">상장 13~20개월차 · KR·US 전 상장종목 · 매월 1일 갱신</span></div>`;
+  const head = `<div class="jr-title"><h2>신규상장</h2><span class="n-sub" style="font-size:13px">상장 13~20개월차 · 상장 후 신고가 대비 −50% 이상 하락 · KR·US 전 상장종목 · 매월 1일 갱신</span></div>`;
   if (_nl.error || d.missing) {
     const msg = _nl.error ? _escapeHtml(_nl.error.message) : '아직 실행 결과가 없어요';
     wrap.innerHTML = head + `<section class="n-card" style="padding:18px 22px"><div class="n-sub">${msg}</div>`
@@ -7697,8 +7711,10 @@ function renderNewlisting() {
     return;
   }
   const shown = (d.rows || []).filter(r => (market === 'us') ? r.market === 'US' : (market === 'kr') ? r.market !== 'US' : true);
-  const counts = nlChipCounts(shown);
-  const by = nlSplitRows(nlFilterByDrawdown(d.rows || [], _nl.ddLevel));
+  const split = nlSurgeSplit(d.rows);
+  const counts = nlChipCounts(nlSurgeSplit(shown).kept);   // 칩 건수 = 실제로 보이는 목록(급등 제외 후)
+  const by = nlSplitRows(nlFilterByDrawdown(split.kept, _nl.ddLevel));
+  const exBy = nlSplitRows(nlFilterByDrawdown(split.excluded, _nl.ddLevel));   // 같은 하락 조건인데 급등 전력으로 빠진 것
   by.KR = nlSortRows(by.KR, _nl.sortKey, _nl.sortDir); by.US = nlSortRows(by.US, _nl.sortKey, _nl.sortDir);
   const c = d.counts || {}, cu = c.us || {}, ck = c.kr || {};
   const showKr = market !== 'us', showUs = market !== 'kr';
@@ -7708,17 +7724,18 @@ function renderNewlisting() {
       <div><b>기준일 ${_escapeHtml(d.ref_date || '')}</b> <span class="n-sub">· ${_escapeHtml(d.months_definition || '')}</span></div>
       <div class="n-sub" style="font-size:12px">${_escapeHtml(d.kr_date_caveat || '')}</div>
       <div class="n-sub" style="font-size:12px">${_escapeHtml(d.us_date_caveat || '')}${cu.first_trade_failed ? ` · ⚠️ US 첫 거래일 조회 실패 ${cu.first_trade_failed}건(목록에서 빠짐)` : ''}</div>
-      <div class="n-sub" style="font-size:12px">${_escapeHtml(d.drawdown_definition || '하락률 = 첫 거래일 종가 대비 기준일 종가(공모가 아님)')}</div>
+      <div class="n-sub" style="font-size:12px">${_escapeHtml(d.drawdown_definition || '하락률 = 상장 후 최고 종가 대비 기준일 종가(공모가 아님)')}</div>
+      ${d.surge_definition ? `<div class="n-sub" style="font-size:12px">${_escapeHtml(d.surge_definition)}</div>` : ''}
       <div class="n-sub" style="font-size:12px">${d.source === 'repo' ? '레포 결과(로컬 실행분)' : '서버 자동 실행 결과'} · 실행 ${_escapeHtml((d.run_stamp && d.run_stamp.run_at_kst) || '')}</div>
       ${fail}
     </section>`;
-  const sec = (label, rows, mkt, total) => `<section class="n-card" style="padding:18px 22px">
-      <div class="jr-card-h" style="padding:0 0 10px"><span class="n-h">${label}</span><span class="n-sub">${rows.length}종목 · 전체 ${total ?? '—'}종목 중 · ${_nl.sortKey === 'dd' ? (_nl.sortDir === 'asc' ? '하락 큰 순' : '하락 작은 순') : '개월수 오름차순'}</span></div>
+  const sec = (label, rows, mkt, total, hits, exN) => `<section class="n-card" style="padding:18px 22px">
+      <div class="jr-card-h" style="padding:0 0 10px"><span class="n-h">${label}</span><span class="n-sub">−${_nl.ddLevel}% 이상 하락 ${rows.length}종목 · 급등 제외 ${exN}종목 · 13~20개월 ${hits ?? '—'}종목 중(전체 상장 ${total ?? '—'}) · ${_nl.sortKey === 'dd' ? (_nl.sortDir === 'asc' ? '하락 큰 순' : '하락 작은 순') : '개월수 오름차순'}</span></div>
       ${_nlTable(rows, mkt)}</section>`;
   const chips = `<div class="lp-chips" role="group" aria-label="하락률 필터">${NL_DD_LEVELS.map(lv =>
-      `<button type="button" class="jr-pill${_nl.ddLevel === lv ? ' on' : ''}" onclick="nlSetLevel(${lv})">${lv ? `−${lv}% 이상` : '전체'}(${counts[lv]})</button>`).join('')}</div>`;
-  wrap.innerHTML = head + meta + chips + (showKr ? sec('한국', by.KR, 'KR', ck.listed_total) : '')
-    + (showUs ? sec('미국', by.US, 'US', cu.listed_total) : '');
+      `<button type="button" class="jr-pill${_nl.ddLevel === lv ? ' on' : ''}" onclick="nlSetLevel(${lv})">−${lv}% 이상(${counts[lv]})</button>`).join('')}</div>`;
+  wrap.innerHTML = head + meta + chips + (showKr ? sec('한국', by.KR, 'KR', ck.listed_total, ck.hits, exBy.KR.length) : '')
+    + (showUs ? sec('미국', by.US, 'US', cu.listed_total, cu.hits, exBy.US.length) : '');
 }
 
 // 앱 시작 시 서버에서 일지 로드 + 구 localStorage 데이터 마이그레이션
