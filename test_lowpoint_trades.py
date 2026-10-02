@@ -143,7 +143,7 @@ def _js(expr):
     # v5.311: lpMonthlySummary가 공용 가드 lpRealizedPnl(값 누락 레코드 제외)을 쓴다 —
     # 추출 목록에 없으면 ReferenceError로 즉시 드러난다(실제로 그렇게 잡혔다).
     src = "\n".join(_fn(n) for n in ("lpMergeBuy", "lpSplitSell", "lpSortHoldings", "lpReturnPct",
-                                     "lpTargetPrice", "lpRealizedPnl", "lpMonthlySummary"))
+                                     "lpTargetPrice", "lpRealizedPnl", "lpCurrencyBucket", "lpMonthlySummary"))
     p = subprocess.run(["node", "-e", src + f"\nconsole.log(JSON.stringify({expr}));"],
                        capture_output=True, text=True, timeout=20)
     assert p.returncode == 0, p.stderr

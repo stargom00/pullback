@@ -5,6 +5,22 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.313 [저점 탭 업비트 코인 기록 — 사용자 지시 "저점 탭에 업비트 코인 매매도 기록하고 싶다"]
+    [입력] "KRW-BTC"처럼 업비트 마켓코드 그대로(KRW- 접두사)만 코인으로 본다 — 접두사 없는
+    입력은 기존 KR/US 경로 그대로(미국 티커와 충돌 방지). `/api/lowpoint/resolve`가 이 형식이면
+    목록 매칭보다 먼저 업비트로 가고 주식 경로로 넘기지 않는다. [확인] 신설 `upbit.py` — 공개
+    엔드포인트만(키·인증 없음): 실재는 `/v1/ticker?markets=` 응답으로만 판정(404·빈 응답 = 실패),
+    이름은 `/v1/market/all`의 korean_name(KRW-BTC → 비트코인), market 표기 "UPBIT". 타임아웃은
+    새로 만들지 않고 naver_kr `_TIMEOUT`(8초) 재사용. 서버 검증(`_lp_trade_invalid`)이 mkt
+    UPBIT ⇔ KRW-XXX 코드를 짝으로 강제. [현재가] `/api/prices`가 KRW- 티커는 업비트 ticker로
+    마켓 하나씩 조회(여러 개를 한 번에 물으면 하나만 없어도 전체 404 — 2026-10-02 실측), 가격은
+    업비트 값 그대로, closed는 항상 false(24시간 거래). [표시] `_lptFmt` UPBIT = 업비트 자릿수
+    그대로 + "원"(정수 강제 금지). [집계] 합계는 통화 버킷으로 — 공용 `lpCurrencyBucket()`
+    (UPBIT → ₩ 버킷 'KR', US만 $ 버킷). 버킷 키 이름(KR/US)은 기존 테스트·화면 호환으로 두고
+    월간 요약이 그 버킷의 시장 목록(`markets`)을 같이 돌려줘 "KR · UPBIT"로 표기(이름만 보고
+    오독 방지 — CLAUDE.md 필드 이름 원칙의 보조 필드 방식). [트레이딩뷰] `tvUrl()` 한 곳에
+    UPBIT 분기 추가(UPBIT:BTCKRW) — 생성 함수 단일 원칙 유지. [안내] 실패 hint에 "코인은 KRW-BTC
+    형식(업비트 마켓코드)" 줄 추가, 업비트 실패면 "업비트 원화(KRW) 마켓에 없어요".
 v5.312 [저점 탭 종목명 → 트레이딩뷰, 사용자 지시] 보유·종료 목록의 종목명을 클릭하면
     트레이딩뷰 차트가 새 탭으로 열린다(`target=_blank rel=noopener`).
     **URL은 다른 탭이 쓰는 `tvUrl()`을 그대로 재사용**한다 — 새 변형을 만들면 같은 종목이
@@ -8355,6 +8371,7 @@ def _sector_fields(t: str, bundle: dict) -> dict:
 from universe import get_universe, load_alerts, _kr_cache_slot, get_kr_universe_info, load_kr_dynamic
 import scanner as scanner_mod
 import naver_kr
+import upbit   # v5.313: 저점 매매 기록 코인(업비트 공개 시세)
 import fundamentals as fundamentals_mod
 import earnings as earnings_mod
 import money_flow
@@ -8583,7 +8600,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.312"
+VERSION = "v5.313"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -19655,10 +19672,13 @@ def _lp_trade_invalid(rec: dict) -> "str | None":
     """레코드 단위 규칙. 문제가 있으면 사유 문자열."""
     if rec.get("kind") not in ("단기", "장기"):
         return "kind는 단기|장기"
-    if rec.get("mkt") not in ("KR", "US"):
-        return "mkt는 KR|US"
+    if rec.get("mkt") not in ("KR", "US", "UPBIT"):
+        return "mkt는 KR|US|UPBIT"
     if not str(rec.get("code") or "").strip():
         return "code 필요"
+    # v5.313: 코인은 업비트 마켓코드(KRW-XXX) 그대로만 — mkt와 코드 형식이 어긋나면 거부
+    if (rec.get("mkt") == "UPBIT") != upbit.is_upbit(rec.get("code")):
+        return "UPBIT 레코드의 code는 KRW-XXX 형식(그 외 시장은 KRW- 코드 불가)"
     if (_lp_num(rec.get("buyPrice")) or 0) <= 0:
         return "buyPrice는 0보다 커야 함"
     if (_lp_num(rec.get("qty")) or 0) <= 0:
@@ -19814,6 +19834,11 @@ def _us_ticker_name(ticker: str) -> str | None:
         return None
 
 
+# 종목 확인 실패 안내 — v5.310 문구 + v5.313 코인 입력 형식 한 줄(사용자 지시).
+LP_RESOLVE_HINT = ("6자리 코드(KR) 또는 티커(US)로 입력하면 목록에 없어도 조회합니다\n"
+                   "코인은 KRW-BTC 형식(업비트 마켓코드)")
+
+
 @app.get("/api/lowpoint/resolve/{query}")
 async def lp_resolve(query: str):
     """저점 매매 기록 추가용 종목 해석 — **새 시세 조회 없이** 이미 있는 목록에서만 찾는다.
@@ -19827,6 +19852,16 @@ async def lp_resolve(query: str):
     if not q:
         return JSONResponse({"ok": False, "reason": "empty"})
     qu = q.upper()
+    # v5.313(사용자 지시): "KRW-BTC" 형식(업비트 마켓코드 그대로)만 코인으로 본다 — 목록
+    # 매칭보다 먼저, 그리고 이 형식이면 주식 경로로 넘기지 않는다(접두사 없는 입력은 기존 그대로).
+    # 실재는 업비트 공개 ticker 응답으로만 판정(404·빈 응답이면 실패).
+    if upbit.is_upbit(qu):
+        got = await asyncio.get_event_loop().run_in_executor(_executor, upbit.resolve, qu)
+        if got:
+            return JSONResponse({"ok": True, "ticker": got["code"], "name": got["name"],
+                                 "mkt": "UPBIT", "source": "upbit"})
+        return JSONResponse({"ok": False, "reason": "not_found", "query": q, "kr_code": False,
+                             "upbit": True, "hint": LP_RESOLVE_HINT})
     rows = []
     for src in (_lowpoint_read(LOWPOINT_DATA_PATH) or {}, _lowpoint_read(LOWPOINT_LATEST_PATH) or {}):
         for tf in LOWPOINT_TFS:
@@ -19873,7 +19908,7 @@ async def lp_resolve(query: str):
                                  "mkt": "US", "source": "yahoo"})
     return JSONResponse({"ok": False, "reason": "not_found", "query": q,
                          "kr_code": kr_code,
-                         "hint": "6자리 코드(KR) 또는 티커(US)로 입력하면 목록에 없어도 조회합니다"})
+                         "hint": LP_RESOLVE_HINT})
 
 
 @app.post("/api/prices")
@@ -19895,6 +19930,14 @@ async def batch_prices(request: Request):
 
     def _one_price(tk: str):
         try:
+            if upbit.is_upbit(tk):
+                # v5.313: 업비트 KRW 마켓 — 공개 ticker를 마켓 하나씩(한 번에 물으면 하나만 없어도
+                # 전체 404). 가격은 업비트 값 그대로(소수점 알트 정수화 금지). 고가·거래량은 당일 값.
+                row = upbit.fetch_ticker(tk)
+                if row:
+                    return tk, float(row["trade_price"]), float(row.get("high_price") or row["trade_price"]), \
+                        float(row.get("acc_trade_volume") or 0)
+                return tk, None, None, None
             if naver_kr.is_kr(tk):
                 # v4.90: fetch_live_price는 결국 하루 지연된 값(가장 최근 '완결'
                 # 거래일 종가)만 주는 API라 여기 쓰면 오히려 stale — siseJson
@@ -19927,7 +19970,8 @@ async def batch_prices(request: Request):
     prices = {tk: p for tk, p, _, _ in results if p is not None}
     highs = {tk: h for tk, _, h, _ in results if h is not None}
     volumes = {tk: vol for tk, _, _, vol in results if vol is not None}
-    closed = {tk: (not _is_market_open_now(naver_kr.is_kr(tk))) for tk in prices}
+    # 코인은 24시간 거래 — 장 마감 개념이 없다(v5.313)
+    closed = {tk: (False if upbit.is_upbit(tk) else not _is_market_open_now(naver_kr.is_kr(tk))) for tk in prices}
     return JSONResponse({"prices": prices, "closed": closed, "highs": highs, "volumes": volumes})
 
 

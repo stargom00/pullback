@@ -1351,7 +1351,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.312</span>
+      <span class="ver mono" id="verBadge">v5.313</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -7298,21 +7298,29 @@ function lpRealizedPnl(r) {
   const pnl = (sell - buy) * qty;
   return isFinite(pnl) ? { buy, sell, qty, pnl } : null;
 }
-// 월간 요약: 매도월(sellDate) 기준, KR/US 분리. 수익금 = (매도가-평단)×수량(통화 그대로).
+// v5.313(사용자 지시): 합계는 **통화** 단위로 묶는다 — 업비트(UPBIT) 코인은 ₩라 KR과 같은
+// ₩ 버킷('KR')에 들어가고, $ 버킷('US')에는 US 주식만. 버킷 이름은 기존 키(KR/US)를 그대로
+// 두되 실제 의미는 "₩/$"다 — 그래서 월간 요약은 그 버킷에 들어간 시장 목록(markets)을 같이
+// 돌려줘 화면에 "KR · UPBIT"처럼 그대로 표기한다(이름만 보고 오독하지 않게).
+// 두 집계(상단 요약·월간 요약)가 **이 함수 하나**로 버킷을 정한다(사본 금지).
+function lpCurrencyBucket(mkt) { return mkt === 'US' ? 'US' : 'KR'; }
+// 월간 요약: 매도월(sellDate) 기준, ₩/$ 분리. 수익금 = (매도가-평단)×수량(통화 그대로).
 // v5.311: 값 누락 레코드는 집계에서 빼고 그 월·시장의 skipped로 센다(표시는 호출부).
 function lpMonthlySummary(closed) {
   const g = {};
   for (const r of closed) {
     if (!r.sellDate) continue;
-    const key = r.sellDate.slice(0, 7) + '|' + r.mkt;
-    const x = g[key] || (g[key] = { month: r.sellDate.slice(0, 7), mkt: r.mkt, n: 0, wins: 0,
+    const bucket = lpCurrencyBucket(r.mkt);
+    const key = r.sellDate.slice(0, 7) + '|' + bucket;
+    const x = g[key] || (g[key] = { month: r.sellDate.slice(0, 7), mkt: bucket, markets: [], n: 0, wins: 0,
                                     retSum: 0, pnl: 0, skipped: 0 });
+    if (r.mkt && !x.markets.includes(r.mkt)) x.markets.push(r.mkt);
     const v = lpRealizedPnl(r);
     if (!v) { x.skipped += 1; continue; }
     x.n += 1; x.retSum += lpReturnPct(v.sell, v.buy); x.pnl += v.pnl;
     if (v.sell > v.buy) x.wins += 1;
   }
-  return Object.values(g).map(x => ({ month: x.month, mkt: x.mkt, n: x.n, wins: x.wins,
+  return Object.values(g).map(x => ({ month: x.month, mkt: x.mkt, markets: x.markets.sort(), n: x.n, wins: x.wins,
       winRate: x.n ? Math.round(x.wins / x.n * 1000) / 10 : null,
       avgRet: x.n ? Math.round(x.retSum / x.n * 100) / 100 : null,
       pnl: Math.round(x.pnl * 100) / 100, skipped: x.skipped }))
@@ -7329,7 +7337,7 @@ function lpRealizedSummary(closed, today) {
                 n: { month: { KR: 0, US: 0 }, year: { KR: 0, US: 0 } }, skipped: 0 };
   for (const r of closed) {
     if (!r.sellDate) continue;                       // 보유 중 — 실현 아님
-    const mkt = r.mkt === 'US' ? 'US' : 'KR';
+    const mkt = lpCurrencyBucket(r.mkt);   // v5.313: ₩(KR·UPBIT) / $(US)
     // 가드는 월간 요약과 **같은 함수**를 쓴다(lpRealizedPnl — 사본 금지)
     const v = lpRealizedPnl(r);
     if (!v) { out.skipped += 1; continue; }
@@ -7347,8 +7355,11 @@ let _lpt = { trades: [], settings: { target_pct: { '단기': 4, '장기': 100 } 
              error: null, selling: null, pendingKr: null, busy: false };
 function _lptFmt(v, mkt) {
   if (v == null || isNaN(v)) return '—';
-  return mkt === 'US' ? '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                      : Math.round(Number(v)).toLocaleString('ko-KR') + '원';
+  if (mkt === 'US') return '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // v5.313: 코인은 업비트 호가 자릿수 그대로(정수 강제 금지 — 알트는 0.0123원 같은 가격이 있다).
+  // 상한 8자리는 부동소수 찌꺼기(0.30000000000000004) 표시만 막는 용도 — 업비트 원화 호가는 그보다 짧다.
+  if (mkt === 'UPBIT') return Number(v).toLocaleString('ko-KR', { maximumFractionDigits: 8 }) + '원';
+  return Math.round(Number(v)).toLocaleString('ko-KR') + '원';
 }
 function _lptPct(v) {
   if (v == null || isNaN(v)) return '<span class="n-sub">—</span>';
@@ -7431,7 +7442,8 @@ async function lptAdd(form) {
       if (t.candidates) throw new Error('여러 종목이 해당돼요: ' + t.candidates.map(c => c.name + '(' + c.ticker + ')').join(', '));
       if (t.kr_code) { _lpt.pendingKr = { code: q.toUpperCase() }; return; }   // 시장 선택 칸을 띄운다
       // v5.310: 서버가 보내는 hint(코드/티커로 넣으면 목록 밖도 조회된다)를 덧붙인다
-      throw new Error(`'${q}' 종목을 찾지 못했어요(저점 후보·스캐너 유니버스·미국 상장목록에 없음)`
+      throw new Error((t.upbit ? `'${q}' 업비트 원화(KRW) 마켓에 없어요`
+                               : `'${q}' 종목을 찾지 못했어요(저점 후보·스캐너 유니버스·미국 상장목록에 없음)`)
         + (t.hint ? ' — ' + t.hint : ''));
     }
     _lpt.pendingKr = null;
@@ -7498,7 +7510,7 @@ function renderLowpointTrack() {
   const addHtml = `<section class="n-card" style="padding:18px 22px">
     <form class="lpt-form" onsubmit="event.preventDefault();lptAdd(this)">
       <label>구분<select name="kind">${LPT_KINDS.map(k => `<option>${k}</option>`).join('')}</select></label>
-      <label style="flex:1 1 180px">종목<input name="q" placeholder="종목명 또는 코드" value="${kr ? _escapeHtml(kr.code) : ''}" required></label>
+      <label style="flex:1 1 180px">종목<input name="q" placeholder="종목명·코드 또는 KRW-BTC" value="${kr ? _escapeHtml(kr.code) : ''}" required></label>
       ${kr ? `<label>시장<select name="krMarket" required><option value="">선택</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select></label>
               <label>종목명<input name="krName" placeholder="직접 입력"></label>` : ''}
       <label>매수일<input type="date" name="buyDate" value="${today}" required></label>
@@ -7554,7 +7566,7 @@ function renderLowpointTrack() {
   }).join('');
   const months = lpMonthlySummary(closed);
   // v5.311: 값 누락으로 집계에서 뺀 건수를 그 월 행에 함께 표시한다(조용히 빼지 않는다)
-  const monthRows = months.map(m => `<tr><td class="num">${m.month}</td><td>${m.mkt}</td><td class="num r">${m.n}${m.skipped ? `<span class="n-sub" style="font-size:11px"> ⚠️값 누락 ${m.skipped}건 제외</span>` : ''}</td>
+  const monthRows = months.map(m => `<tr><td class="num">${m.month}</td><td>${(m.markets && m.markets.length ? m.markets : [m.mkt]).join(' · ')}</td><td class="num r">${m.n}${m.skipped ? `<span class="n-sub" style="font-size:11px"> ⚠️값 누락 ${m.skipped}건 제외</span>` : ''}</td>
       <td class="num r">${m.winRate == null ? '<span class="n-sub">—</span>' : m.winRate + '%'}</td><td class="r">${_lptPct(m.avgRet)}</td>
       <td class="num r" style="color:${m.pnl > 0 ? 'var(--c-red-fg3)' : m.pnl < 0 ? 'var(--c-blue-fg4)' : 'inherit'}">${m.pnl > 0 ? '+' : ''}${_lptFmt(m.pnl, m.mkt)}</td></tr>`).join('');
   const settingsHtml = `<form class="lpt-form" onsubmit="event.preventDefault();lptSaveSettings(this)" style="margin-top:12px">
@@ -7577,7 +7589,7 @@ function renderLowpointTrack() {
     <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start">
       ${_rsCell('이번 달 수익금', 'month')}
       ${_rsCell('올해 수익금', 'year')}
-      <span class="n-sub" style="font-size:11px;margin-left:auto">실현 손익(종료 기록) · 매도일 기준 · KR/US 분리${rs.skipped ? ` · ⚠️ 값 누락 ${rs.skipped}건 제외` : ''}</span>
+      <span class="n-sub" style="font-size:11px;margin-left:auto">실현 손익(종료 기록) · 매도일 기준 · ₩(KR·UPBIT)/$(US) 분리${rs.skipped ? ` · ⚠️ 값 누락 ${rs.skipped}건 제외` : ''}</span>
     </div></section>`;
   wrap.innerHTML = `${head}${statHtml}${addHtml}
     <section class="n-card" style="padding:18px 22px">
@@ -7592,7 +7604,7 @@ function renderLowpointTrack() {
       <tbody>${closedRows || '<tr><td colspan="9" class="n-sub" style="padding:18px;text-align:center">종료 기록 없음</td></tr>'}</tbody></table></div>
     </section>
     <section class="n-card" style="padding:18px 22px">
-      <div class="jr-card-h" style="padding:0 0 10px"><span class="n-h">월간 요약</span><span class="n-sub">매도월 기준 · KR/US 분리</span></div>
+      <div class="jr-card-h" style="padding:0 0 10px"><span class="n-h">월간 요약</span><span class="n-sub">매도월 기준 · ₩(KR·UPBIT)/$(US) 분리</span></div>
       <div class="jr-table-wrap"><table class="jr-table lpt-table"><thead><tr><th>월</th><th>시장</th><th class="r">건수</th><th class="r">승률</th><th class="r">평균 수익률</th><th class="r">수익금</th></tr></thead>
       <tbody>${monthRows || '<tr><td colspan="6" class="n-sub" style="padding:18px;text-align:center">아직 없음</td></tr>'}</tbody></table></div>
     </section>`;
@@ -7692,6 +7704,10 @@ function tvUrl(tickerOrObj, market, interval) {
   }
   if (!ticker) return '#';
   ticker = String(ticker).toUpperCase();
+  // v5.313: 업비트 원화 마켓(KRW-BTC) → UPBIT:BTCKRW
+  if (market === 'UPBIT' || /^KRW-[A-Z0-9]+$/.test(ticker)) {
+    return tvSymbolUrl(`UPBIT:${ticker.replace(/^KRW-/, '')}KRW`, interval);
+  }
   if (market === 'kr' || market === 'KR' || /\.(KS|KQ)$/.test(ticker)) {
     const code = ticker.replace(/\.(KS|KQ)$/, '');
     return tvSymbolUrl(`KRX:${code}`, interval);

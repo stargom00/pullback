@@ -56,13 +56,13 @@ def _node(call: str, *fns: str):
 def _run(closed, today="2026-10-01"):
     return _node(f"lpRealizedSummary({json.dumps(closed, ensure_ascii=False)},"
                  f" {json.dumps(today)})",
-                 "lpRealizedPnl", "lpRealizedSummary")
+                 "lpRealizedPnl", "lpCurrencyBucket", "lpRealizedSummary")
 
 
 def _months(closed):
     """월간 요약(lpMonthlySummary) — 같은 공용 가드를 쓴다."""
     return _node(f"lpMonthlySummary({json.dumps(closed, ensure_ascii=False)})",
-                 "lpRealizedPnl", "lpReturnPct", "lpMonthlySummary")
+                 "lpRealizedPnl", "lpCurrencyBucket", "lpReturnPct", "lpMonthlySummary")
 
 
 def _t(mkt, sell_date, buy, sell, qty, **kw):
