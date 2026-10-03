@@ -4,6 +4,7 @@
 (_rev_store_put 공용), 화면 집계·정렬은 production JS를 그대로 node로 실행한다.
 
 사보타주 확인(2026-10-04, FAIL 확인 후 원복):
+③ (v5.318 원문 기준) 의미있는 상승의 +30% 경계를 '상승이면 O'(rise > 0)로 바꿈 → test_rise_30pct_boundary 등 FAIL
 ② (v5.318) 서버 허용 키(LP_EVAL_MANUAL_KEYS)에서 ichimoku_cloud 제거 → 키 동기화·호환 테스트 등 3건 FAIL
 ① lowpoint_eval의 급등 판정을 신규상장 surge_check 호출 대신 사본(rolling 365D 직접 계산)으로 바꿈
    → test_surge_check_is_reused_not_copied FAIL
@@ -137,10 +138,9 @@ def test_higher_lows_needs_12_months():
 
 
 # ── ⑦ 20일선 · ⑨ 거래대금 ───────────────────────────────────────────
-def test_above_ma20_and_tv_rising():
+def test_tv_rising():
     d = _daily([10.0] * 79 + [12.0], vols=[100.0] * 60 + [200.0] * 20)
     items = ev.long_checks(d, _months(n=13))
-    assert _item(items, "above_ma20")["result"] is True
     assert _item(items, "tv_rising")["result"] is True
     d2 = _daily([10.0] * 80, vols=[200.0] * 60 + [100.0] * 20)
     assert _item(ev.long_checks(d2, _months(n=13)), "tv_rising")["result"] is False
@@ -274,8 +274,8 @@ MANUAL = [["rise_2x", "a"], ["long_base", "b"], ["dilution", "c"]]
 def test_tally_counts_auto_and_manual():
     rec = {"auto": {"items": [{"result": True}, {"result": True}, {"result": False}, {"result": None}]},
            "manual": {"rise_2x": "O", "dilution": "X"}}
-    assert _js(f"lpeTally({json.dumps(rec)}, {json.dumps(MANUAL)})", "lpeTally") == {"O": 3, "X": 2, "blank": 2}
-    assert _js(f"lpeTally({{}}, {json.dumps(MANUAL)})", "lpeTally") == {"O": 0, "X": 0, "blank": 3}
+    assert _js(f"lpeTally({json.dumps(rec)}, {json.dumps(MANUAL)})", "lpeManualEffective", "lpeTally") == {"O": 3, "X": 2, "blank": 2}
+    assert _js(f"lpeTally({{}}, {json.dumps(MANUAL)})", "lpeManualEffective", "lpeTally") == {"O": 0, "X": 0, "blank": 3}
 
 
 def test_manual_cycle():
@@ -324,10 +324,96 @@ def test_old_record_without_new_key_is_compatible(store):
     lst = json.loads(asyncio.run(app.lp_evals_list()).body)
     rec = lst["evals"][0]
     assert "ichimoku_cloud" not in rec["manual"]
-    tally = _js(f"lpeTally({json.dumps(rec)}, {json.dumps(lst['manual_items'])})", "lpeTally")
+    tally = _js(f"lpeTally({json.dumps(rec)}, {json.dumps(lst['manual_items'])})", "lpeManualEffective", "lpeTally")
     assert tally == {"O": 1, "X": 1, "blank": 2}           # dilution·ichimoku_cloud 미표시
     s, d = _put({**rec, "manual": {**rec["manual"], "ichimoku_cloud": "O"}}, rec["rev"])
     assert s == 200 and d["record"]["manual"]["ichimoku_cloud"] == "O"
-    tally2 = _js(f"lpeTally({json.dumps(d['record'])}, {json.dumps(lst['manual_items'])})", "lpeTally")
+    tally2 = _js(f"lpeTally({json.dumps(d['record'])}, {json.dumps(lst['manual_items'])})", "lpeManualEffective", "lpeTally")
     assert tally2 == {"O": 2, "X": 1, "blank": 1}
     assert _put({**d["record"], "manual": {"ichimoku_cloud": "Z"}}, d["record"]["rev"])[0] == 400
+
+
+
+# ── v5.318 원문 기준: ⑦ 월봉 20선 · 의미있는 상승 자동값 · 해당 없음(—) ──
+@pytest.mark.parametrize("closes,want", [
+    ([10.0] * 19, None),                       # 월봉 19개 → —
+    ([10.0] * 19 + [11.0], True),              # 마지막 월봉 종가 > 20개월 평균
+    ([10.0] * 20, False),                      # 같으면 위가 아니다(초과만 O)
+    ([12.0] * 19 + [10.0], False),
+])
+def test_above_monthly_ma20(closes, want):
+    it = _item(ev.long_checks(_daily([999.0] * 100), _months(closes=closes)), "above_ma20")
+    assert it["result"] is want
+    assert ev.MA_MONTHS == 20 and "월봉" in it["label"]
+
+
+def _mask(flags):
+    return pd.Series(flags)
+
+
+@pytest.mark.parametrize("after,want", [(129.9, False), (130.0, True), (150.0, True)])
+def test_rise_30pct_boundary(after, want):
+    m = _months(closes=[200.0, 100.0, after, 90.0])
+    r = ev.rise_after_signal(m, _mask([False, True, False, False]))
+    assert r["month"] == "2020-02" and r["result"] is want
+
+
+def test_rise_counts_only_after_signal_and_uses_last_ended_episode():
+    # 신호 전 200은 무시, 진행 중인 마지막 구간(마지막 달 신호)은 빼고 그 전 끝난 구간을 본다
+    m = _months(closes=[200.0, 100.0, 120.0, 80.0, 70.0])
+    r = ev.rise_after_signal(m, _mask([False, True, False, True, True]))
+    assert r["month"] == "2020-02" and r["rise_pct"] == 20.0 and r["result"] is False
+    assert ev.rise_after_signal(m, _mask([False] * 5)) is None                  # 신호 없음 → —
+    assert ev.rise_after_signal(m, _mask([False, False, False, True, True])) is None   # 진행 중뿐 → —
+
+
+def test_manual_auto_na_rules():
+    short = _months(n=10)
+    ma = ev.manual_auto(short)
+    assert ma["ichimoku_cloud"]["na"] is True                      # 52개 미만 — 구름 미형성
+    assert ma["long_base"]["na"] is True                           # 폭등 없음
+    assert ev.manual_auto(_months(n=52))["ichimoku_cloud"]["na"] is False
+    assert ev.manual_auto(_months(n=51))["ichimoku_cloud"]["na"] is True
+
+
+def _eff(rec, key):
+    return _js(f"lpeManualEffective({json.dumps(rec)}, '{key}')", "lpeManualEffective")
+
+
+def test_manual_override_over_auto_value():
+    auto = {"manual_auto": {"rise_2x": {"result": True, "na": False, "detail": "RSI<30: +45%"},
+                            "long_base": {"result": None, "na": True, "detail": "폭등 없음"}}}
+    e = _eff({"auto": auto, "manual": {}}, "rise_2x")
+    assert e["v"] is True and e["src"] == "auto"
+    e = _eff({"auto": auto, "manual": {"rise_2x": "X"}}, "rise_2x")
+    assert e["v"] == "X" and e["src"] == "manual" and "덮어씀" in e["detail"]
+    e = _eff({"auto": auto, "manual": {"long_base": "O"}}, "long_base")      # 해당 없음이면 수동값 무시
+    assert e["v"] is None and e["src"] == "na"
+
+
+def test_na_is_blank_in_tally():
+    rec = {"auto": {"items": [{"result": True}],
+                    "manual_auto": {"rise_2x": {"result": False, "na": False, "detail": ""},
+                                    "long_base": {"result": None, "na": True, "detail": ""},
+                                    "ichimoku_cloud": {"result": None, "na": True, "detail": ""}}},
+           "manual": {"long_base": "O", "ichimoku_cloud": "X", "dilution": "O"}}
+    manual = [[k, k] for k in app.LP_EVAL_MANUAL_KEYS]
+    # O: items 1 + dilution 1 / X: rise_2x 자동 X / 미표시: long_base·ichimoku(해당 없음 — 수동값 무시)
+    assert _js(f"lpeTally({json.dumps(rec)}, {json.dumps(manual)})", "lpeManualEffective", "lpeTally") == \
+        {"O": 2, "X": 1, "blank": 2}
+
+
+def test_override_saved_and_restored(store):
+    rec = {**REC, "auto": {"items": [], "manual_auto": {"rise_2x": {"result": True, "na": False, "detail": "x"}}},
+           "manual": {"rise_2x": "X"}}
+    assert _put(rec, None)[0] == 200
+    back = json.loads(asyncio.run(app.lp_evals_list()).body)["evals"][0]
+    e = _eff(back, "rise_2x")
+    assert e["v"] == "X" and e["src"] == "manual"
+    s, d = _put({**back, "manual": {"rise_2x": None}}, back["rev"])            # 덮어쓰기 해제 → 자동값으로
+    assert s == 200 and _eff(d["record"], "rise_2x")["src"] == "auto"
+
+
+def test_evaluate_returns_manual_auto_and_ui_saves_it():
+    assert "manual_auto: a.manual_auto" in _fn("lpeEvaluate")
+    assert '"manual_auto": manual_auto(months)' in open(ev.__file__, encoding="utf-8").read()

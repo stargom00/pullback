@@ -9,7 +9,7 @@
   UPBIT upbit.fetch_candles(마켓, "days"/"months") — 공개 API 1회 최대 200봉(일봉 약 200일, 월봉 약 16년)
 월봉은 KR·US는 일봉을 달력 월말로 묶고, 코인은 업비트 월봉을 그대로 쓴다. **진행 중인 이번 달 봉은 뺀다**
 (저점 스크린과 같은 마감 판정 lowpoint.is_bar_closed — 코인은 KST 달력 월).
-한계: "상장 후 신고가"는 조회 기간(KR·US 최대 약 10년) 안의 최고 종가다. 코인의 일봉 지표(⑤⑦⑧⑨)는 최근
+한계: "상장 후 신고가"는 조회 기간(KR·US 최대 약 10년) 안의 최고 종가다. 코인의 일봉 지표(⑤⑧⑨)는 최근
 200일 안에서만 계산한다.
 
 [장기 체크리스트 — 자동] 결과는 True(O)/False(X)/None(데이터 부족 — 미판정).
@@ -19,7 +19,7 @@
   ④ 월봉 StochRSI %K가 0 근접(≤ STOCH_NEAR_ZERO)으로 마감한 달이 있다
   ⑤ 급등 전력 없음 — **신규상장 스크린의 surge_check를 그대로 호출**(5배·365일, 사본 금지)
   ⑥ 저점 높이기 — 최근 완성 월봉 6개의 최저가 ≥ 그 직전 6개의 최저가
-  ⑦ 현재가(마지막 일봉 종가) > 20일 단순이동평균
+  ⑦ 월봉 20선 위 — 마지막 완성 월봉 종가 > 월봉 종가 20개 단순이동평균(v5.318, 예전 일봉 20일선)
   ⑧ 현재가 위 +30% 구간 매물대 비중 ≤ VP_UP30_MAX_PCT — 낮을수록 위가 가볍다(O)
   ⑨ 최근 20일 평균 거래대금 > 그 직전 60일 평균 거래대금
   매물대 = **일봉 종가 × 거래량 근사**: 그날 거래량 전부가 그날 종가에 있었다고 보고, 전 기간 거래량 중
@@ -54,7 +54,9 @@ MIN_MONTHS = 12
 DRAWDOWN_MAX = -50.0
 RSI_OVERSOLD = 30.0
 HL_MONTHS = 6
-MA_DAYS = 20
+MA_MONTHS = 20          # v5.318: 원문 체크리스트는 전부 월봉 기준 — "20선" = 월봉 종가 20개 단순이동평균
+RISE_MIN_PCT = 30.0     # v5.318: 신호월 종가 대비 이후 월봉 최고 종가 +30% 이상 = 의미있는 상승(사용자 지시 값)
+CLOUD_MIN_MONTHS = 52   # 월봉 일목 구름(선행스팬2 = 52개월 고저 중간값)이 처음 그려지려면 완성 월봉 52개 필요
 VP_UP_LONG_PCT = 30.0
 TV_RECENT, TV_PRIOR = 20, 60
 SHORT_VP_UP_PCT = 5.0
@@ -72,7 +74,7 @@ LONG_ITEMS = [
     ("stoch_zero", "월봉 StochRSI 0 근접 마감"),
     ("no_surge", "1년 내 5배 급등 전력 없음"),
     ("higher_lows", "저점 높이기(최근 6개월 저가 ≥ 직전 6개월)"),
-    ("above_ma20", "20일선 위"),
+    ("above_ma20", "월봉 20선 위(20개월 이동평균)"),
     ("light_overhead", "위 +30% 구간 매물대 비중 낮음"),
     ("tv_rising", "거래대금 증가(20일 평균 > 직전 60일)"),
 ]
@@ -192,12 +194,15 @@ def long_checks(daily: pd.DataFrame, months: pd.DataFrame) -> list:
     else:
         out.append(_item("higher_lows", lab["higher_lows"], None, None, f"완성 월봉 {HL_MONTHS * 2}개 필요"))
 
-    if len(c) >= MA_DAYS:
-        ma = float(c.iloc[-MA_DAYS:].mean())
-        out.append(_item("above_ma20", lab["above_ma20"], float(c.iloc[-1]) > ma, round(ma, 4),
-                         f"종가 {_n(c.iloc[-1])} / 20일선 {_n(ma)}"))
+    # v5.318: 일봉 20일선 → 월봉 20선(사용자 지시 — 작가의 20선은 월봉 차트 위 20개월 이동평균).
+    # 다른 월봉 항목과 같이 완성 월봉만 쓴다(마지막 완성 월봉 종가 vs 그 시점까지 20개월 평균).
+    if n >= MA_MONTHS:
+        mc = months["Close"]
+        ma = float(mc.iloc[-MA_MONTHS:].mean())
+        out.append(_item("above_ma20", lab["above_ma20"], float(mc.iloc[-1]) > ma, round(ma, 4),
+                         f"월봉 종가 {_n(mc.iloc[-1])}({months.index[-1].strftime('%Y-%m')}) / 20개월 평균 {_n(ma)}"))
     else:
-        out.append(_item("above_ma20", lab["above_ma20"], None, None, "일봉 20개 필요"))
+        out.append(_item("above_ma20", lab["above_ma20"], None, None, f"완성 월봉 {MA_MONTHS}개 필요(현재 {n}개)"))
 
     vp = volume_share_above(daily, VP_UP_LONG_PCT)
     out.append(_item("light_overhead", lab["light_overhead"], None if vp is None else vp <= VP_UP30_MAX_PCT, vp,
@@ -210,6 +215,61 @@ def long_checks(daily: pd.DataFrame, months: pd.DataFrame) -> list:
                          round(r20 / p60, 3) if p60 > 0 else None, f"20일 평균 / 직전 60일 평균 = {r20 / p60:.2f}배" if p60 > 0 else "직전 거래대금 0"))
     else:
         out.append(_item("tv_rising", lab["tv_rising"], None, None, f"일봉 {TV_RECENT + TV_PRIOR}개 필요"))
+    return out
+
+
+def rise_after_signal(months: pd.DataFrame, signal_mask: pd.Series) -> dict | None:
+    """**끝난** 가장 최근 신호 구간의 마지막 신호월 종가 대비 **그 이후** 완성 월봉 최고 종가 상승률(%).
+    신호 구간 = 연속된 신호월 묶음, 끝났다 = 뒤에 비신호 달이 1개 이상 있다. 지금 진행 중인 구간(마지막
+    월봉까지 신호)은 빼고 그 전 구간을 본다 — 저점 종목은 대개 이번 달이 신호월이라 "그 뒤"가 아직 없기
+    때문(v5.318 해석, 사용자 보고). 신호월 이전의 상승은 보지 않는다. 끝난 구간이 없으면 None."""
+    flags = [bool(v) for v in signal_mask.tolist()]
+    ended = [i for i in range(len(flags) - 1) if flags[i] and not flags[i + 1]]
+    if not ended:
+        return None
+    i = ended[-1]
+    base = float(months["Close"].iloc[i])
+    after = months["Close"].iloc[i + 1:]
+    rise = round((float(after.max()) / base - 1) * 100, 2) if len(after) and base > 0 else None
+    return {"month": months.index[i].strftime("%Y-%m"), "rise_pct": rise,
+            "result": None if rise is None else rise >= RISE_MIN_PCT}
+
+
+def manual_auto(months: pd.DataFrame) -> dict:
+    """수동 항목의 자동값(v5.318). 화면은 수동값이 있으면 그걸(덮어쓰기), 없으면 이 값을 쓴다.
+      rise_2x       — RSI<30 마감월 / StochRSI 0 근접 마감월 각각, (끝난 가장 최근 신호 구간의) 신호월 종가
+                      대비 이후 월봉 최고 종가 +30% 이상이면 O. 두 곳 다 신호 없음 → —. 판정된 곳이 모두 O면 O,
+                      하나라도 X면 X(“2곳” 모두 나왔나 — 결합 규칙은 v5.318 해석).
+      long_base     — 폭등(두 곳 중 한 곳이라도 +30% 이상)이 없으면 해당 없음(—). 있으면 사람이 판단.
+      ichimoku_cloud — 완성 월봉 52개 미만(신규상장 등)이면 구름 미형성 → 해당 없음(—)."""
+    import scanner
+    n = 0 if months is None else len(months)
+    places = []
+    if n >= 2:
+        rsi = scanner.rsi(months["Close"], 14)
+        k = stoch_rsi_k(months["Close"])
+        for name, mask in (("RSI<30", rsi < RSI_OVERSOLD), ("StochRSI 0 근접", k <= STOCH_NEAR_ZERO)):
+            places.append((name, rise_after_signal(months, mask.fillna(False))))
+    else:
+        places = [("RSI<30", None), ("StochRSI 0 근접", None)]
+    judged = [p for _, p in places if p and p["result"] is not None]
+    rise = None if not judged else all(p["result"] for p in judged)
+    parts = []
+    for name, p in places:
+        if p is None:
+            parts.append(f"{name}: 끝난 신호 없음")
+        elif p["rise_pct"] is None:
+            parts.append(f"{name}({p['month']}): 이후 월봉 없음")
+        else:
+            parts.append(f"{name}({p['month']}): 이후 최고 {p['rise_pct']:+.1f}% {'O' if p['result'] else 'X'}")
+    out = {"rise_2x": {"result": rise, "na": False, "detail": " · ".join(parts),
+                       "places": [{"signal": name, **(p or {})} for name, p in places]}}
+    surge_seen = any(p["result"] for p in judged)    # 폭등 = 한 곳이라도 +30% 이상
+    out["long_base"] = ({"result": None, "na": True, "detail": "폭등(신호 뒤 +30% 이상) 없음 — 해당 없음"}
+                        if not surge_seen else {"result": None, "na": False, "detail": "폭등 있음 — 직접 판단"})
+    out["ichimoku_cloud"] = ({"result": None, "na": True, "detail": f"월봉 {n}개 — 구름 미형성(52개 필요) · 해당 없음"}
+                             if n < CLOUD_MIN_MONTHS else {"result": None, "na": False, "detail": "직접 판단"})
+    out["dilution"] = {"result": None, "na": False, "detail": "직접 판단"}
     return out
 
 
@@ -271,7 +331,7 @@ def evaluate(code: str, mkt: str, now: datetime) -> dict:
     months = completed_months(monthly, mkt, now)
     items = long_checks(daily, months)
     # O·X·미표시 집계는 화면(lpeTally)이 자동+수동을 합쳐 한 곳에서 센다(사본 금지)
-    return {"ok": True, "items": items,
+    return {"ok": True, "items": items, "manual_auto": manual_auto(months),
             "last_date": str(daily.index[-1].date()), "close": float(daily["Close"].iloc[-1])}
 
 

@@ -6949,12 +6949,24 @@ let _lpe = { evals: [], longItems: [], manualItems: [], hits: null, short: null,
              // 판정이 끝날 때마다 화면을 다시 그리므로, 그 사이 입력 중이던 종목·메모가 지워지지 않게 따로 든다
              draft: '', memoDraft: {} };
 function lpeCycle(v) { return v === 'O' ? 'X' : v === 'X' ? null : 'O'; }   // 미표시 → O → X → 미표시
-// 자동(result true/false/null) + 수동("O"/"X"/null)을 같은 규칙으로 센다. 수동 키는 manualItems 기준.
+// v5.318: 수동 항목의 실제 값 — ① 해당 없음(na: 폭등 없으면 긴 횡보 · 구름 미형성이면 파란구름)은 —
+// ② 수동값이 있으면 그것(자동값 덮어쓰기) ③ 없으면 서버 자동값(의미있는 상승) ④ 그것도 없으면 —.
+// 해당 없음 동안 저장된 수동값은 지우지 않고 무시한다(조건이 바뀌면 다시 살아난다).
+function lpeManualEffective(rec, key) {
+  const auto = ((rec.auto && rec.auto.manual_auto) || {})[key] || null;
+  const man = (rec.manual || {})[key] ?? null;
+  if (auto && auto.na) return { v: null, src: 'na', detail: auto.detail || '해당 없음', auto };
+  if (man !== null) return { v: man, src: 'manual', detail: auto && auto.result != null ? `자동값 ${auto.result ? 'O' : 'X'} 위에 수동 덮어씀 · ${auto.detail}` : (auto ? auto.detail : ''), auto };
+  if (auto && auto.result != null) return { v: auto.result, src: 'auto', detail: auto.detail || '', auto };
+  return { v: null, src: 'manual', detail: auto ? auto.detail : '', auto };
+}
+// 자동(result true/false/null) + 수동 항목의 실제 값(lpeManualEffective)을 같은 규칙으로 센다.
+// —(null·해당 없음)은 O·X 어느 쪽에도 안 들어가고 미표시로만 센다.
 function lpeTally(rec, manualItems) {
   const out = { O: 0, X: 0, blank: 0 };
   const add = v => { if (v === true || v === 'O') out.O++; else if (v === false || v === 'X') out.X++; else out.blank++; };
   for (const it of ((rec.auto && rec.auto.items) || [])) add(it.result);
-  for (const [k] of (manualItems || [])) add((rec.manual || {})[k] ?? null);
+  for (const [k] of (manualItems || [])) add(lpeManualEffective(rec, k).v);
   return out;
 }
 // 단기 표 정렬 — 값 없음은 방향과 무관하게 맨 뒤.
@@ -7013,7 +7025,7 @@ async function lpeEvaluate(id) {
   try {
     const a = await apiJson('/api/lowpoint/eval/auto/' + encodeURIComponent(rec.code) + '?mkt=' + rec.mkt);
     if (!a.ok) throw new Error(a.error || '자동 판정 실패');
-    await _lpePut({ ...rec, auto: { items: a.items, last_date: a.last_date, close: a.close }, checked_at: a.checked_at }, rec.rev);
+    await _lpePut({ ...rec, auto: { items: a.items, manual_auto: a.manual_auto, last_date: a.last_date, close: a.close }, checked_at: a.checked_at }, rec.rev);
   } catch (e) { alert('자동 판정 실패 — ' + e.message); }
   finally { delete _lpe.evaluating[id]; await lpeLoad(); renderLowpointTrack(); }
 }
@@ -7082,9 +7094,14 @@ function _lpeCard(rec) {
   const items = (rec.auto && rec.auto.items) || [];
   const autoRows = items.map(it => `<tr><td>${_escapeHtml(it.label)} <span class="chip">자동</span></td>
       <td class="r">${_lpeMark(it.result)}</td><td class="n-sub" style="font-size:12px">${_escapeHtml(it.detail || '')}</td></tr>`).join('');
-  const manualRows = _lpe.manualItems.map(([k, label]) => `<tr><td>${_escapeHtml(label)} <span class="chip accent">수동</span></td>
-      <td class="r"><button type="button" class="n-btn sm" onclick="lpeSetManual('${_escapeHtml(rec.id)}','${k}')" title="미표시 → O → X">${_lpeMark((rec.manual || {})[k] ?? null)}</button></td>
-      <td class="n-sub" style="font-size:12px">눌러서 O/X/미표시</td></tr>`).join('');
+  const manualRows = _lpe.manualItems.map(([k, label]) => {
+    const e = lpeManualEffective(rec, k);
+    const tag = e.src === 'na' ? '<span class="chip">해당 없음</span>' : e.src === 'auto' ? '<span class="chip">자동</span>' : '<span class="chip accent">수동</span>';
+    const hint = e.src === 'na' ? '' : (e.auto && e.auto.result != null ? ' · 눌러서 수동 덮어쓰기(미표시 = 자동값)' : ' · 눌러서 O/X/미표시');
+    return `<tr><td>${_escapeHtml(label)} ${tag}</td>
+      <td class="r"><button type="button" class="n-btn sm" onclick="lpeSetManual('${_escapeHtml(rec.id)}','${k}')" title="미표시 → O → X" ${e.src === 'na' ? 'disabled' : ''}>${_lpeMark(e.v)}</button></td>
+      <td class="n-sub" style="font-size:12px">${_escapeHtml(e.detail || '')}${hint}</td></tr>`;
+  }).join('');
   const busy = _lpe.evaluating[rec.id];
   return `<section class="n-card" style="padding:18px 22px">
     <div class="jr-card-h" style="padding:0 0 10px;flex-wrap:wrap;gap:8px">
