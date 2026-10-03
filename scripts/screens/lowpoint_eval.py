@@ -56,6 +56,12 @@ RSI_OVERSOLD = 30.0
 HL_MONTHS = 6
 MA_MONTHS = 20          # v5.318: 원문 체크리스트는 전부 월봉 기준 — "20선" = 월봉 종가 20개 단순이동평균
 RISE_MIN_PCT = 30.0     # v5.318: 신호월 종가 대비 이후 월봉 최고 종가 +30% 이상 = 의미있는 상승(사용자 지시 값)
+# v5.318 후속(사용자 지시 (a)): 신호 4항목(③·④·의미있는 상승 2곳)은 **데이터 시작 후 36개월 이후** 신호만
+# 인정한다 — 첫 36개 월봉의 신호는 무시(37번째 월봉부터). 근거: NKE 10년 창에서 2016-11(2번째 월봉) RSI가
+# 0.0으로 나왔는데 전체 히스토리로는 45.93 — Wilder RSI가 창 시작 직후 수렴 전이라 생긴 가짜 신호였다
+# (조사 2026-10-04: 37번째 월봉 이후로는 10년 창과 전체 히스토리의 신호월이 NKE·AAPL·ZUMZ 모두 일치).
+# 값은 저점 스크린의 월봉 최소 봉수(lowpoint.MIN_BARS["month"]=36)를 그대로 쓴다(새 값 없음).
+SIGNAL_WARMUP_MONTHS = lp.MIN_BARS["month"]
 CLOUD_MIN_MONTHS = 52   # 월봉 일목 구름(선행스팬2 = 52개월 고저 중간값)이 처음 그려지려면 완성 월봉 52개 필요
 VP_UP_LONG_PCT = 30.0
 TV_RECENT, TV_PRIOR = 20, 60
@@ -169,21 +175,25 @@ def long_checks(daily: pd.DataFrame, months: pd.DataFrame) -> list:
     out.append(_item("drawdown", lab["drawdown"], None if dd is None else dd <= DRAWDOWN_MAX, dd,
                      f"최고 종가 {_n(peak)}({peak_at.date()}) 대비 {dd}%" if dd is not None else "계산 불가"))
 
-    if n >= 2:
+    w = SIGNAL_WARMUP_MONTHS
+    if n > w:
         mr = __import__("scanner").rsi(months["Close"], 14)
         bull = months["Close"] > months["Open"]
-        hits = [months.index[i + 1] for i in range(n - 1) if mr.iloc[i] < RSI_OVERSOLD and bool(bull.iloc[i + 1])]
-        out.append(_item("rsi_rebound", lab["rsi_rebound"], bool(hits), len(hits),
-                         f"해당 {len(hits)}회" + (f" · 최근 {hits[-1].strftime('%Y-%m')}" if hits else "")))
+        sig = warmed(mr < RSI_OVERSOLD)
+        hits = [months.index[i + 1] for i in range(n - 1) if bool(sig.iloc[i]) and bool(bull.iloc[i + 1])]
+        out.append(_item("rsi_rebound", lab["rsi_rebound"], bool(hits) if n > w + 1 else None, len(hits),
+                         f"해당 {len(hits)}회" + (f" · 최근 {hits[-1].strftime('%Y-%m')}" if hits else "")
+                         + f" (첫 {w}개월 신호 미인정)"))
         k = stoch_rsi_k(months["Close"])
-        near = k[k <= STOCH_NEAR_ZERO].dropna()
-        valid = int(k.notna().sum())
-        out.append(_item("stoch_zero", lab["stoch_zero"], bool(len(near)) if valid else None, len(near),
+        zs = warmed(k <= STOCH_NEAR_ZERO)
+        near = k[zs]
+        out.append(_item("stoch_zero", lab["stoch_zero"], bool(len(near)), len(near),
                          f"%K≤{STOCH_NEAR_ZERO:g} {len(near)}회" + (f" · 최근 {near.index[-1].strftime('%Y-%m')}"
-                                                                   if len(near) else "") if valid else "월봉 부족"))
+                                                                   if len(near) else "") + f" (첫 {w}개월 신호 미인정)"))
     else:
-        out += [_item("rsi_rebound", lab["rsi_rebound"], None, None, "월봉 부족"),
-                _item("stoch_zero", lab["stoch_zero"], None, None, "월봉 부족")]
+        msg = f"월봉 {n}개 — 첫 {w}개월은 신호 미인정(RSI 수렴 전)"
+        out += [_item("rsi_rebound", lab["rsi_rebound"], None, None, msg),
+                _item("stoch_zero", lab["stoch_zero"], None, None, msg)]
 
     ratio, when = nl.surge_check(c)   # 신규상장 스크린과 같은 함수(사본 금지)
     out.append(_item("no_surge", lab["no_surge"], None if ratio is None else ratio < nl.SURGE_RATIO, ratio,
@@ -220,6 +230,13 @@ def long_checks(daily: pd.DataFrame, months: pd.DataFrame) -> list:
     return out
 
 
+def warmed(mask: pd.Series) -> pd.Series:
+    """신호 마스크에서 데이터 첫 SIGNAL_WARMUP_MONTHS개 월봉을 지운다(시딩 구간 신호 무시)."""
+    m = mask.fillna(False).astype(bool).copy()
+    m.iloc[:SIGNAL_WARMUP_MONTHS] = False
+    return m
+
+
 def rise_after_signal(months: pd.DataFrame, signal_mask: pd.Series) -> dict | None:
     """**끝난** 가장 최근 신호 구간의 마지막 신호월 종가 대비 **그 이후** 완성 월봉 최고 종가 상승률(%).
     신호 구간 = 연속된 신호월 묶음, 끝났다 = 뒤에 비신호 달이 1개 이상 있다. 지금 진행 중인 구간(마지막
@@ -247,15 +264,17 @@ def manual_auto(months: pd.DataFrame) -> dict:
     import scanner
     n = 0 if months is None else len(months)
     places = {"rise_rsi": ("RSI<30", None), "rise_stoch": ("StochRSI 0 근접", None)}
-    if n >= 2:
+    if n > SIGNAL_WARMUP_MONTHS:
         rsi = scanner.rsi(months["Close"], 14)
         k = stoch_rsi_k(months["Close"])
-        places["rise_rsi"] = ("RSI<30", rise_after_signal(months, (rsi < RSI_OVERSOLD).fillna(False)))
-        places["rise_stoch"] = ("StochRSI 0 근접", rise_after_signal(months, (k <= STOCH_NEAR_ZERO).fillna(False)))
+        places["rise_rsi"] = ("RSI<30", rise_after_signal(months, warmed(rsi < RSI_OVERSOLD)))
+        places["rise_stoch"] = ("StochRSI 0 근접", rise_after_signal(months, warmed(k <= STOCH_NEAR_ZERO)))
     out = {}
     for key, (name, p) in places.items():
         if p is None:
-            out[key] = {"result": None, "na": False, "detail": f"{name}: 끝난 신호 없음", "signal_month": None, "rise_pct": None}
+            why = (f"끝난 신호 없음(첫 {SIGNAL_WARMUP_MONTHS}개월 신호 미인정)" if n > SIGNAL_WARMUP_MONTHS
+                   else f"월봉 {n}개 — 첫 {SIGNAL_WARMUP_MONTHS}개월은 신호 미인정")
+            out[key] = {"result": None, "na": False, "detail": f"{name}: {why}", "signal_month": None, "rise_pct": None}
         elif p["rise_pct"] is None:
             out[key] = {"result": None, "na": False, "detail": f"신호월 {p['month']} · 이후 월봉 없음",
                         "signal_month": p["month"], "rise_pct": None}

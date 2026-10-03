@@ -4,6 +4,7 @@
 (_rev_store_put 공용), 화면 집계·정렬은 production JS를 그대로 node로 실행한다.
 
 사보타주 확인(2026-10-04, FAIL 확인 후 원복):
+⑤ (v5.318 후속 (a)) warmed()의 36개월 제거를 없앰(첫 달부터 인정) → 36개월 경계·NKE 시딩 재현 테스트 FAIL
 ④ (v5.318 후속) 두 항목 분리 후 rise_stoch를 rise_rsi 값으로 덮어 결합처럼 만듦 → test_two_items_judged_separately FAIL
 ③ (v5.318 원문 기준) 의미있는 상승의 +30% 경계를 '상승이면 O'(rise > 0)로 바꿈 → test_rise_30pct_boundary 등 FAIL
 ② (v5.318) 서버 허용 키(LP_EVAL_MANUAL_KEYS)에서 ichimoku_cloud 제거 → 키 동기화·호환 테스트 등 3건 FAIL
@@ -75,8 +76,12 @@ def test_drawdown_uses_monthly_peak_when_daily_window_is_short():
 
 
 # ── ③ RSI<30 다음 달 양봉 · ④ StochRSI 0 근접 ───────────────────────
+# v5.318 후속: 신호는 데이터 첫 36개월 뒤부터만 인정 — 합성 데이터 앞에 36개월(작게 오르내림)을 붙인다
+WARM = [100.0 + (1.0 if i % 2 else 0.0) for i in range(36)]
+
+
 def _falling_then(next_open, next_close):
-    closes = [100.0 * (0.9 ** i) for i in range(18)]
+    closes = WARM + [100.0 * (0.9 ** i) for i in range(18)]
     opens = closes[:]
     closes.append(next_close)
     opens.append(next_open)
@@ -94,7 +99,7 @@ def test_rsi_rebound_requires_bullish_next_month():
 def _rally_then(drops):
     """상승(가끔 조정) 15개월 뒤 drops개월 연속 하락 — RSI가 움직여야 StochRSI가 정의된다
     (단조 하락이면 RSI가 0으로 일정해 0÷0)."""
-    c = [100.0]
+    c = WARM + [100.0]
     for i in range(1, 16):
         c.append(c[-1] * (1.08 if i % 4 else 0.97))
     for _ in range(drops):
@@ -105,7 +110,7 @@ def _rally_then(drops):
 def test_stoch_zero_detects_bottom_close():
     d = _daily([10.0] * 100)
     assert _item(ev.long_checks(d, _rally_then(8)), "stoch_zero")["result"] is True
-    rising = _months(closes=[100.0 * (1.06 if i % 3 else 0.97) ** i for i in range(30)])
+    rising = _months(closes=WARM + [100.0 * (1.06 if i % 3 else 0.97) ** i for i in range(30)])
     assert _item(ev.long_checks(d, rising), "stoch_zero")["result"] is False
     assert _item(ev.long_checks(d, _months(n=5)), "stoch_zero")["result"] is None     # 계산 구간 부족 = 미판정
 
@@ -459,3 +464,58 @@ def test_legacy_combined_manual_value_is_kept_but_not_counted(store):
     assert s == 200
     assert "예전 합산 항목" in _fn("_lpeCard") and "rise_2x" in _fn("_lpeCard")
     assert app.LP_EVAL_LEGACY_MANUAL_KEYS == ("rise_2x",)
+
+
+
+# ── v5.318 후속 (a): 데이터 시작 후 36개월 이후 신호만 인정 ───────────────
+def test_signal_warmup_reuses_lowpoint_min_bars():
+    import lowpoint as lp
+    assert ev.SIGNAL_WARMUP_MONTHS == lp.MIN_BARS["month"] == 36
+
+
+def test_warmup_boundary_36_months():
+    flags = [False] * 40
+    flags[35] = True                                  # 36번째 월봉(첫 36개월 안) → 무시
+    assert not ev.warmed(pd.Series(flags)).any()
+    flags[35], flags[36] = False, True                # 37번째 월봉 → 인정
+    assert ev.warmed(pd.Series(flags)).tolist()[36] is True
+    m = _months(closes=[100.0] * 36 + [100.0, 140.0, 120.0, 110.0])
+    sig = pd.Series([False] * 36 + [True, False, False, False])
+    r = ev.rise_after_signal(m, ev.warmed(sig))
+    assert r["month"] == m.index[36].strftime("%Y-%m") and r["result"] is True
+    early = pd.Series([False] * 35 + [True] + [False] * 4)
+    assert ev.rise_after_signal(m, ev.warmed(early)) is None
+
+
+def test_short_history_signals_are_dash():
+    """월봉 36개 이하(신규상장·짧은 창)는 신호 항목이 모두 —(가짜 신호 대신 판정 불가)."""
+    m = _months(closes=[100.0 * (0.85 ** i) for i in range(36)])     # 내내 하락 — 예전엔 RSI<30 신호가 떴다
+    items = ev.long_checks(_daily([10.0] * 100), m)
+    assert _item(items, "rsi_rebound")["result"] is None and _item(items, "stoch_zero")["result"] is None
+    ma = ev.manual_auto(m)
+    assert ma["rise_rsi"]["result"] is None and ma["rise_stoch"]["result"] is None and "신호 미인정" in ma["rise_rsi"]["detail"]
+
+
+def test_nke_style_seeding_signal_is_gone():
+    """NKE 10년 창 재현: 창 2번째 월봉이 하락이라 RSI=0(가짜 RSI<30) → 그 뒤 크게 오른 모양. 예전엔
+    'RSI<30 이후 +250% O'가 나왔다. 이제 그 신호는 첫 36개월 안이라 무시되어 —."""
+    closes = [60.0, 43.3] + [45.0 + 5.0 * (i % 2) for i in range(60)] + [150.0, 90.0, 60.0]
+    m = _months(closes=closes)
+    import scanner
+    assert float(scanner.rsi(m["Close"], 14).iloc[1]) == 0.0          # 시딩 왜곡 재현
+    assert ev.manual_auto(m)["rise_rsi"]["result"] is None
+    assert _item(ev.long_checks(_daily([60.0] * 100), m), "rsi_rebound")["value"] == 0
+
+
+def test_nke_live_fake_2016_11_signal_removed():
+    """실데이터(10년 창): 2016-11은 창 2번째 월봉 — 더 이상 RSI 신호월로 잡히지 않는다."""
+    import harness
+    d = harness._fetch_us_batch(["NKE"], period=ev.lp.US_PERIOD["month"]).get("NKE")
+    if d is None or d.empty:
+        pytest.skip("yfinance 응답 없음(네트워크) — 원천 자체 실패")
+    d = d[["Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Close"])
+    m = ev.completed_months(ev.monthly_ohlc(d), "US", datetime.now(KST))
+    ma = ev.manual_auto(m)
+    assert ma["rise_rsi"]["signal_month"] != "2016-11"
+    it = _item(ev.long_checks(d, m), "rsi_rebound")
+    assert "2016-12" not in it["detail"]
