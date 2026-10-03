@@ -5,6 +5,21 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.317 [저점 탭 "평가" — 사용자 지시 "장기 후보를 체크리스트로 O/X 평가해 관심종목 판정, 단기 후보는 '뭐가
+    먼저 +5% 가는지' 비교. 수동 표 대신 서버 데이터로 자동 판정"] 저점 탭에 "매매 기록 | 평가" 서브페이지.
+    [자동 판정] 신설 scripts/screens/lowpoint_eval.py — 평가하는 그 종목만 기존 조회 함수로(KR naver 일봉·US
+    yfinance 10년·코인 업비트 공개 캔들 일/월 200봉). ① 완성 월봉 >12 ② 상장 후 최고 종가 대비 −50% 이하
+    (newlisting.drawdown_pct) ③ 월봉 RSI<30 마감 다음 달 양봉 ④ 월봉 StochRSI %K≤5 마감 ⑤ 급등 전력 없음
+    (newlisting.surge_check 그대로 호출 — 사본 금지) ⑥ 최근 6개월 월저가 ≥ 직전 6개월 ⑦ 종가>20일선 ⑧ 위 +30%
+    매물대 비중 ≤20%(일봉 종가×거래량 근사, UI 명기) ⑨ 20일 평균 거래대금 > 직전 60일. 진행 중인 달은 뺀다.
+    AI가 제안하고 사용자가 승인한 값(2026-10-04 "기준값 4개 모두 승인(③은 '바로 다음 달' 유지)"): StochRSI 0
+    근접 = %K≤5, 매물대 ≤20%, 단기 "5일 거래대금 증가율" = 최근 5일 평균 ÷ 직전 5일 평균, ③ = 바로 다음 달 양봉. [수동] 의미있는 상승(2곳)·긴 횡보·희석 이력 O/X/미표시 + 메모, 관심 등록. 집계는 화면
+    lpeTally 한 곳. [단기 비교] 이번 주 주봉 저점 히트만 조회 — ATR%(14, scanner.atr)·위 +5% 매물대·5일 거래대금
+    증가율·10일 수익률 기준 후보 안 RS 순위, 정렬. [저장] /data/lowpoint_evals.json, 종목별 1건(id=코드), 매매
+    기록과 같은 rev 규칙 — 그 규칙을 _rev_store_put으로 뽑아 두 저장소가 공유(매매 기록 PUT도 이 함수로 리팩터,
+    기존 테스트 통과), 1세대 .bak·날짜별 사본·삭제 로그. 업비트 일/월 캔들 조회 upbit.fetch_candles 추가.
+    API: GET /api/lowpoint/evals · PUT/DELETE /api/lowpoint/evals/{코드} · GET /api/lowpoint/eval/auto/{코드}
+    · GET /api/lowpoint/eval/short · GET /api/lowpoint/hits.
 v5.316 [홈 재배치 — 사용자 지시 "오늘할일 카드는 1% ATR 종목만 떠서 안 보게 됨 — 후보 카드와 함께 홈에서
     제거. 저점종목 카드는 그 위 자리(홈 상단)로 이동"] static/index.html만(서버 today_decision·/api/calendar
     불변). 공유 여부를 먼저 확인해 홈에서만 쓰던 코드를 지웠다: renderTodayDecisionHtml(즉시행동·후보 카드),
@@ -8652,7 +8667,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.316"
+VERSION = "v5.317"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -12989,6 +13004,7 @@ async def _scheduler_loop():
             await _maybe_run_weekly_money_flow()   # v5.147: 돈의흐름 주 1회 전환
             _journal_daily_backup()   # v5.300: 날짜별 일지 사본(그날 없을 때만)
             _daily_backup(LP_TRADES_PATH, "lowpoint_trades", lock=_LP_TRADES_LOCK)   # v5.302
+            _daily_backup(LP_EVALS_PATH, "lowpoint_evals", lock=_LP_EVALS_LOCK)      # v5.317
             asyncio.create_task(_maybe_run_lowpoint())   # v5.301: 저점종목 토요일 자동 실행(백그라운드)
         except Exception as e:
             print(f"[scheduler] loop error: {e}")
@@ -13044,6 +13060,7 @@ async def _start_scheduler():
     try:
         _journal_daily_backup(force=True)   # v5.300: 서버 시작 직후 1회
         _daily_backup(LP_TRADES_PATH, "lowpoint_trades", force=True, lock=_LP_TRADES_LOCK)   # v5.302
+        _daily_backup(LP_EVALS_PATH, "lowpoint_evals", force=True, lock=_LP_EVALS_LOCK)      # v5.317
     except Exception as e:
         print(f"[journal-backup] 시작 백업 실패: {e}", flush=True)
     asyncio.create_task(_scheduler_loop())
@@ -19750,28 +19767,78 @@ LP_TRADES_DEFAULT_SETTINGS = {"target_pct": {"단기": 4.0, "장기": 100.0}}   
 _LP_TRADES_LOCK = _threading.RLock()
 
 
-def _lp_trades_load() -> list:
-    if not os.path.exists(LP_TRADES_PATH):
+def _rec_list_load(path: str) -> list:
+    """레코드 배열 파일 읽기(저점 매매 기록·평가 공용, v5.317에서 공용화). 없으면 [], 배열이 아니면 예외."""
+    if not os.path.exists(path):
         return []
-    with open(LP_TRADES_PATH, encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         data = _json.load(f)
     if not isinstance(data, list):
-        raise ValueError("lowpoint_trades.json 최상위가 배열이 아님")
+        raise ValueError(f"{os.path.basename(path)} 최상위가 배열이 아님")
     return data
 
 
-def _lp_trades_write(data: list):
+def _rec_list_write(path: str, data: list):
     """원자적(tmp→rename) + 1세대 .bak. 날짜별 사본은 _daily_backup(스케줄러·시작 시)."""
-    if os.path.exists(LP_TRADES_PATH):
+    if os.path.exists(path):
         try:
             import shutil
-            shutil.copy2(LP_TRADES_PATH, LP_TRADES_PATH + ".bak")
+            shutil.copy2(path, path + ".bak")
         except OSError:
             pass
-    tmp = LP_TRADES_PATH + ".tmp"
+    tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         _json.dump(data, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, LP_TRADES_PATH)
+    os.replace(tmp, path)
+
+
+def _rev_store_put(records: list, rid, rec: dict, base_rev, on_create=None):
+    """레코드 단위 rev 저장 규칙 — 저점 매매 기록(v5.302)과 평가(v5.317)가 **이 함수 하나**를 쓴다.
+    records를 제자리에서 고친다. 반환 (HTTP 상태, 응답 dict, 바뀌었는가).
+    없는 id + base_rev 있음 → 409 gone(삭제된 기록을 되살리지 않는다), base_rev 불일치 → 409 conflict
+    + 서버본, 내용 같음 → unchanged. on_create(records, rec)가 문자열을 돌려주면 400."""
+    idx = next((i for i, r in enumerate(records) if r.get("id") == rid), None)
+    if idx is None:
+        if base_rev not in (None, 0):
+            return 409, {"ok": False, "code": "gone", "record": None, "error": "서버에서 이미 삭제된 기록이에요"}, False
+        if on_create:
+            err = on_create(records, rec)
+            if err:
+                return 400, {"ok": False, "error": err}, False
+        new = dict(rec)
+        new["rev"] = 1
+        new["updated_at"] = _now_iso()
+        records.append(new)
+        return 200, {"ok": True, "created": True, "record": new}, True
+    srv = records[idx]
+    if int(base_rev or 0) != int(srv.get("rev") or 0):
+        return 409, {"ok": False, "code": "conflict", "record": srv, "error": "다른 곳에서 먼저 바뀐 기록이에요"}, False
+    new = dict(rec)
+    new["rev"] = srv.get("rev")
+    new["updated_at"] = srv.get("updated_at")
+    if _journal_same(new, srv):
+        return 200, {"ok": True, "unchanged": True, "record": srv}, False
+    _journal_bump(new)
+    records[idx] = new
+    return 200, {"ok": True, "record": new}, True
+
+
+def _rev_store_delete_log(log_path: str, rid, request, removed: dict, tag: str):
+    entry = {"ts": _now_iso(), "id": rid, "client": (request.client.host if request.client else None),
+             "user_agent": request.headers.get("user-agent"), "record": removed}
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(_json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as e:
+        print(f"[{tag}] 삭제 로그 기록 실패(삭제 자체는 완료): {e}", flush=True)
+
+
+def _lp_trades_load() -> list:
+    return _rec_list_load(LP_TRADES_PATH)
+
+
+def _lp_trades_write(data: list):
+    _rec_list_write(LP_TRADES_PATH, data)
 
 
 def _lp_num(v):
@@ -19849,40 +19916,22 @@ async def lp_trade_put(rid: int, request: Request):
             trades = _lp_trades_load()
         except (OSError, ValueError) as e:
             return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
-        idx = next((i for i, r in enumerate(trades) if r.get("id") == rid), None)
-        if idx is None:
-            if base_rev not in (None, 0):
-                return JSONResponse({"ok": False, "code": "gone", "record": None,
-                                     "error": "서버에서 이미 삭제된 기록이에요"}, status_code=409)
+        def partial_check(records, rec):
             po = rec.get("partial_of")
-            if po is not None:
-                hold = next((r for r in trades if r.get("id") == po), None)
-                if not hold or hold.get("sellDate"):
-                    return JSONResponse({"ok": False, "error": "분할 종료 대상 보유 기록이 없어요"}, status_code=400)
-                if hold.get("code") != rec.get("code") or hold.get("kind") != rec.get("kind"):
-                    return JSONResponse({"ok": False, "error": "분할 종료가 보유 기록과 종목·구분이 달라요"}, status_code=400)
-                if not (_lp_num(rec["qty"]) < (_lp_num(hold.get("qty")) or 0)):
-                    return JSONResponse({"ok": False, "error": "분할 종료 수량은 보유 수량보다 작아야 해요(전량이면 보유 기록을 종료)"},
-                                        status_code=400)
-            new = dict(rec)
-            new["rev"] = 1
-            new["updated_at"] = _now_iso()
-            trades.append(new)
+            if po is None:
+                return None
+            hold = next((r for r in records if r.get("id") == po), None)
+            if not hold or hold.get("sellDate"):
+                return "분할 종료 대상 보유 기록이 없어요"
+            if hold.get("code") != rec.get("code") or hold.get("kind") != rec.get("kind"):
+                return "분할 종료가 보유 기록과 종목·구분이 달라요"
+            if not (_lp_num(rec["qty"]) < (_lp_num(hold.get("qty")) or 0)):
+                return "분할 종료 수량은 보유 수량보다 작아야 해요(전량이면 보유 기록을 종료)"
+            return None
+        status, payload, changed = _rev_store_put(trades, rid, rec, base_rev, on_create=partial_check)
+        if changed:
             _lp_trades_write(trades)
-            return JSONResponse(_clean_nan({"ok": True, "created": True, "record": new}))
-        srv = trades[idx]
-        if int(base_rev or 0) != int(srv.get("rev") or 0):
-            return JSONResponse(_clean_nan({"ok": False, "code": "conflict", "record": srv,
-                                            "error": "다른 곳에서 먼저 바뀐 기록이에요"}), status_code=409)
-        new = dict(rec)
-        new["rev"] = srv.get("rev")
-        new["updated_at"] = srv.get("updated_at")
-        if _journal_same(new, srv):
-            return JSONResponse(_clean_nan({"ok": True, "unchanged": True, "record": srv}))
-        _journal_bump(new)
-        trades[idx] = new
-        _lp_trades_write(trades)
-        return JSONResponse(_clean_nan({"ok": True, "record": new}))
+        return JSONResponse(_clean_nan(payload), status_code=status)
 
 
 @app.delete("/api/lowpoint/trades/{rid}")
@@ -19897,15 +19946,130 @@ async def lp_trade_delete(rid: int, request: Request):
             return JSONResponse({"ok": True, "already_gone": True})
         removed = trades.pop(idx)
         _lp_trades_write(trades)
-        entry = {"ts": _now_iso(), "id": rid,
-                 "client": (request.client.host if request.client else None),
-                 "user_agent": request.headers.get("user-agent"), "record": removed}
-        try:
-            with open(LP_TRADES_DELETE_LOG_PATH, "a", encoding="utf-8") as f:
-                f.write(_json.dumps(entry, ensure_ascii=False) + "\n")
-        except OSError as e:
-            print(f"[lowpoint-trades] 삭제 로그 기록 실패(삭제 자체는 완료): {e}", flush=True)
+        _rev_store_delete_log(LP_TRADES_DELETE_LOG_PATH, rid, request, removed, "lowpoint-trades")
     return JSONResponse({"ok": True, "deleted": rid})
+
+
+# ── v5.317(사용자 지시) 저점 탭 "평가" — 장기 체크리스트·단기 비교 ─────────────────
+# 저장은 저점 매매 기록과 같은 규칙(/data · 레코드 단위 rev · 1세대 .bak · 날짜별 사본 · 삭제 로그,
+# _rev_store_put 공용). **종목별 1건** — id = 종목 코드(KRW-BTC·042000.KQ·NKE). 재평가는 같은 레코드의
+# auto 스냅샷·checked_at을 갱신한다. 계산은 scripts/screens/lowpoint_eval.py(평가하는 종목만 조회).
+LP_EVALS_PATH = _resolve_persistent_path("lowpoint_evals.json")
+LP_EVALS_DELETE_LOG_PATH = os.path.join(os.path.dirname(LP_EVALS_PATH), "lowpoint_evals_deletions.log")
+_LP_EVALS_LOCK = _threading.RLock()
+# 평가 계산 전용 워커 1개 — 공용 _executor는 장중·기동 스캔이 점유해 평가 요청이 그 뒤에 줄 선다(로컬 확인:
+# 기동 스캔 중 자동 판정 요청이 응답 없이 대기). 저점 월봉 러너(_LOWPOINT_EXECUTOR)와도 분리 — 월 1회 실행이
+# 몇 분 걸리는 동안 평가가 막히지 않게. 워커 1개라 동시 평가는 순서대로 처리된다.
+_LP_EVAL_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lp-eval")
+LP_EVAL_MANUAL_KEYS = ("rise_2x", "long_base", "dilution")   # lowpoint_eval.MANUAL_ITEMS와 같은 키(테스트로 고정)
+
+
+def _lp_eval_invalid(rec: dict) -> "str | None":
+    if rec.get("mkt") not in ("KR", "US", "UPBIT"):
+        return "mkt는 KR|US|UPBIT"
+    code = str(rec.get("code") or "").strip()
+    if not code or rec.get("id") != code:
+        return "id는 종목 코드와 같아야 함(종목별 1건)"
+    if (rec.get("mkt") == "UPBIT") != upbit.is_upbit(code):
+        return "UPBIT 레코드의 code는 KRW-XXX 형식"
+    manual = rec.get("manual") or {}
+    if not isinstance(manual, dict) or any(k not in LP_EVAL_MANUAL_KEYS for k in manual) \
+            or any(v not in ("O", "X", None) for v in manual.values()):
+        return "manual은 정해진 항목의 O|X|null"
+    if not isinstance(rec.get("memo") or "", str) or len(rec.get("memo") or "") > 4000:
+        return "memo는 4000자 이하 문자열"
+    if not isinstance(rec.get("interest", False), bool):
+        return "interest는 true|false"
+    if rec.get("auto") is not None and not isinstance(rec.get("auto"), dict):
+        return "auto는 객체"
+    return None
+
+
+def _lp_eval_mod():
+    screens = os.path.join(os.path.dirname(__file__), "scripts", "screens")
+    if screens not in sys.path:
+        sys.path.insert(0, screens)
+    import lowpoint_eval
+    return lowpoint_eval
+
+
+@app.get("/api/lowpoint/evals")
+async def lp_evals_list():
+    try:
+        evals = _rec_list_load(LP_EVALS_PATH)
+    except (OSError, ValueError) as e:
+        return JSONResponse({"ok": False, "error": f"평가 기록 읽기 실패: {e}"}, status_code=500)
+    ev = _lp_eval_mod()
+    return JSONResponse(_clean_nan({"ok": True, "evals": evals,
+                                    "long_items": ev.LONG_ITEMS, "manual_items": ev.MANUAL_ITEMS}))
+
+
+@app.put("/api/lowpoint/evals/{rid}")
+async def lp_eval_put(rid: str, request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "JSON 본문 필요"}, status_code=400)
+    rec = body.get("record") if isinstance(body, dict) else None
+    if not isinstance(rec, dict) or rec.get("id") != rid:
+        return JSONResponse({"ok": False, "error": "record.id가 경로 id와 같아야 함"}, status_code=400)
+    bad = _lp_eval_invalid(rec)
+    if bad:
+        return JSONResponse({"ok": False, "error": bad}, status_code=400)
+    with _LP_EVALS_LOCK:
+        try:
+            evals = _rec_list_load(LP_EVALS_PATH)
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
+        status, payload, changed = _rev_store_put(evals, rid, rec, body.get("base_rev"))
+        if changed:
+            _rec_list_write(LP_EVALS_PATH, evals)
+        return JSONResponse(_clean_nan(payload), status_code=status)
+
+
+@app.delete("/api/lowpoint/evals/{rid}")
+async def lp_eval_delete(rid: str, request: Request):
+    with _LP_EVALS_LOCK:
+        try:
+            evals = _rec_list_load(LP_EVALS_PATH)
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
+        idx = next((i for i, r in enumerate(evals) if r.get("id") == rid), None)
+        if idx is None:
+            return JSONResponse({"ok": True, "already_gone": True})
+        removed = evals.pop(idx)
+        _rec_list_write(LP_EVALS_PATH, evals)
+        _rev_store_delete_log(LP_EVALS_DELETE_LOG_PATH, rid, request, removed, "lowpoint-evals")
+    return JSONResponse({"ok": True, "deleted": rid})
+
+
+@app.get("/api/lowpoint/eval/auto/{code}")
+async def lp_eval_auto(code: str, mkt: str = "KR"):
+    """장기 체크리스트 자동 판정 — 그 종목 하나만 조회(읽기 전용, 저장은 프론트가 PUT)."""
+    if mkt not in ("KR", "US", "UPBIT"):
+        return JSONResponse({"ok": False, "error": "mkt는 KR|US|UPBIT"}, status_code=400)
+    ev = _lp_eval_mod()
+    res = await asyncio.get_event_loop().run_in_executor(_LP_EVAL_EXECUTOR, ev.evaluate, code, mkt, datetime.now(KST))
+    res["checked_at"] = datetime.now(KST).strftime("%Y-%m-%d")
+    return JSONResponse(_clean_nan(res))
+
+
+@app.get("/api/lowpoint/hits")
+async def lp_hits():
+    """주봉·월봉 저점 히트(평가 원클릭 추가용) — 홈 카드와 같은 _lowpoint_view(새 계산 없음)."""
+    return JSONResponse(_clean_nan({"ok": True, "view": _lowpoint_view()}))
+
+
+@app.get("/api/lowpoint/eval/short")
+async def lp_eval_short():
+    """단기 비교 — 이번 주(주봉) 저점 히트 종목만 조회해 자동 지표 + 후보 안 RS 순위."""
+    view = _lowpoint_view() or {}
+    week = view.get("week") or {}
+    hits = [{"code": r.get("code"), "name": r.get("name"), "market": r.get("market")}
+            for r in (week.get("rows") or []) if r.get("code")]
+    ev = _lp_eval_mod()
+    rows = await asyncio.get_event_loop().run_in_executor(_LP_EVAL_EXECUTOR, ev.short_table, hits) if hits else []
+    return JSONResponse(_clean_nan({"ok": True, "bar_date": week.get("bar_date"), "rows": rows}))
 
 
 @app.put("/api/lowpoint/trade-settings")

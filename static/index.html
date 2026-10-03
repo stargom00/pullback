@@ -1330,7 +1330,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.316</span>
+      <span class="ver mono" id="verBadge">v5.317</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -6941,11 +6941,229 @@ async function lptSaveSettings(form) {
     _lpt.settings = d.settings;
   });
 }
+// ══ v5.317(사용자 지시) 저점 탭 "평가" 서브페이지 — 장기 체크리스트(자동 9 + 수동 3) · 단기 비교 ══
+// 자동 판정은 서버(scripts/screens/lowpoint_eval.py, 그 종목만 조회), 저장은 /api/lowpoint/evals
+// (매매 기록과 같은 레코드 단위 rev 규칙, 종목별 1건). O·X·미표시 집계는 lpeTally 한 곳에서만 센다.
+let _lpe = { evals: [], longItems: [], manualItems: [], hits: null, short: null, shortBusy: false,
+             sortKey: 'rs_rank', sortDir: 'asc', error: null, busy: false, evaluating: {},
+             // 판정이 끝날 때마다 화면을 다시 그리므로, 그 사이 입력 중이던 종목·메모가 지워지지 않게 따로 든다
+             draft: '', memoDraft: {} };
+function lpeCycle(v) { return v === 'O' ? 'X' : v === 'X' ? null : 'O'; }   // 미표시 → O → X → 미표시
+// 자동(result true/false/null) + 수동("O"/"X"/null)을 같은 규칙으로 센다. 수동 키는 manualItems 기준.
+function lpeTally(rec, manualItems) {
+  const out = { O: 0, X: 0, blank: 0 };
+  const add = v => { if (v === true || v === 'O') out.O++; else if (v === false || v === 'X') out.X++; else out.blank++; };
+  for (const it of ((rec.auto && rec.auto.items) || [])) add(it.result);
+  for (const [k] of (manualItems || [])) add((rec.manual || {})[k] ?? null);
+  return out;
+}
+// 단기 표 정렬 — 값 없음은 방향과 무관하게 맨 뒤.
+function lpeSortRows(rows, key, dir) {
+  const sign = dir === 'desc' ? -1 : 1;
+  return rows.slice().sort((a, b) => {
+    const x = a[key], y = b[key];
+    const xn = x == null, yn = y == null;
+    if (xn || yn) return xn === yn ? 0 : (xn ? 1 : -1);
+    return typeof x === 'string' ? sign * x.localeCompare(y) : sign * (x - y);
+  });
+}
+function lpSetView(v) {
+  _lpt.view = v;
+  if (v === 'eval') { lpeLoad().then(renderLowpointTrack); }
+  renderLowpointTrack();
+}
+async function lpeLoad() {
+  try {
+    const d = await apiJson('/api/lowpoint/evals');
+    _lpe.evals = d.evals || []; _lpe.longItems = d.long_items || []; _lpe.manualItems = d.manual_items || [];
+    _lpe.error = null;
+    if (!_lpe.hits) { const h = await apiJson('/api/lowpoint/hits'); _lpe.hits = h.view || {}; }
+  } catch (e) { _lpe.error = e; }
+}
+async function _lpePut(rec, baseRev) {
+  const res = await fetch('/api/lowpoint/evals/' + encodeURIComponent(rec.id), {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ record: rec, base_rev: baseRev == null ? null : baseRev }) });
+  const d = await apiParse(res, { allow: [409] });
+  if (res.status === 409) {
+    await lpeLoad();
+    throw new Error('다른 곳에서 먼저 바뀐 평가라 저장하지 않았어요 — 최신으로 다시 불렀어요');
+  }
+  return d.record;
+}
+async function _lpeRun(fn) {
+  if (_lpe.busy) return;
+  _lpe.busy = true;
+  try { await fn(); } catch (e) { alert('평가 저장 실패 — ' + e.message); }
+  finally { _lpe.busy = false; await lpeLoad(); renderLowpointTrack(); }
+}
+async function _lpeEnsure(code, name, mkt) {
+  let rec = _lpe.evals.find(r => r.id === code);
+  if (!rec) {
+    rec = await _lpePut({ id: code, code, name, mkt, created_at: kstStr(), manual: {}, memo: '', interest: false,
+                          auto: null, checked_at: null }, null);
+    _lpe.evals.push(rec);
+  }
+  return rec;
+}
+async function lpeEvaluate(id) {
+  const rec = _lpe.evals.find(r => r.id === id);
+  if (!rec) return;
+  _lpe.evaluating[id] = true; renderLowpointTrack();
+  try {
+    const a = await apiJson('/api/lowpoint/eval/auto/' + encodeURIComponent(rec.code) + '?mkt=' + rec.mkt);
+    if (!a.ok) throw new Error(a.error || '자동 판정 실패');
+    await _lpePut({ ...rec, auto: { items: a.items, last_date: a.last_date, close: a.close }, checked_at: a.checked_at }, rec.rev);
+  } catch (e) { alert('자동 판정 실패 — ' + e.message); }
+  finally { delete _lpe.evaluating[id]; await lpeLoad(); renderLowpointTrack(); }
+}
+async function lpeAdd(form) {
+  const q = String(new FormData(form).get('q') || '').trim();
+  if (!q) return;
+  let id = null;
+  await _lpeRun(async () => {
+    const t = await apiJson('/api/lowpoint/resolve/' + encodeURIComponent(q));   // 저점 매매 기록과 같은 해석(코드·티커·KRW-)
+    if (!t.ok) throw new Error(`'${q}'를 찾지 못했어요` + (t.hint ? ' — ' + t.hint : ''));
+    id = (await _lpeEnsure(t.ticker, t.name, t.mkt)).id;
+    _lpe.draft = '';
+    form.reset();
+  });
+  if (id) await lpeEvaluate(id);
+}
+async function lpeAddHit(code, name, market) {
+  const mkt = market === 'US' ? 'US' : 'KR';
+  let id = null;
+  await _lpeRun(async () => { id = (await _lpeEnsure(code, name, mkt)).id; });
+  if (id) await lpeEvaluate(id);
+}
+async function lpeSetManual(id, key) {
+  await _lpeRun(async () => {
+    const rec = _lpe.evals.find(r => r.id === id);
+    await _lpePut({ ...rec, manual: { ...(rec.manual || {}), [key]: lpeCycle((rec.manual || {})[key] ?? null) } }, rec.rev);
+  });
+}
+async function lpeSaveMemo(id) {
+  const el = document.getElementById('lpeMemo_' + id);
+  await _lpeRun(async () => {
+    const rec = _lpe.evals.find(r => r.id === id);
+    await _lpePut({ ...rec, memo: el ? el.value : (rec.memo || '') }, rec.rev);
+    delete _lpe.memoDraft[id];
+  });
+}
+async function lpeToggleInterest(id) {
+  await _lpeRun(async () => {
+    const rec = _lpe.evals.find(r => r.id === id);
+    await _lpePut({ ...rec, interest: !rec.interest }, rec.rev);
+  });
+}
+async function lpeDelete(id) {
+  const rec = _lpe.evals.find(r => r.id === id);
+  if (!rec || !confirm(`${rec.name} 평가를 삭제할까요? (서버 삭제 로그에 남아요)`)) return;
+  await _lpeRun(async () => { await apiJson('/api/lowpoint/evals/' + encodeURIComponent(id), { method: 'DELETE' }); });
+}
+async function lpeLoadShort() {
+  _lpe.shortBusy = true; renderLowpointTrack();
+  try { _lpe.short = await apiJson('/api/lowpoint/eval/short'); }
+  catch (e) { _lpe.short = { ok: false, error: e.message, rows: [] }; }
+  _lpe.shortBusy = false; renderLowpointTrack();
+}
+function lpeSort(key) {
+  if (_lpe.sortKey === key) _lpe.sortDir = _lpe.sortDir === 'asc' ? 'desc' : 'asc';
+  else { _lpe.sortKey = key; _lpe.sortDir = key === 'rs_rank' ? 'asc' : 'desc'; }
+  renderLowpointTrack();
+}
+function _lpeMark(v) {
+  if (v === true || v === 'O') return '<span class="st-dot st-good">O</span>';
+  if (v === false || v === 'X') return '<span class="st-dot st-bad">X</span>';
+  return '<span class="n-sub">—</span>';
+}
+function _lpeCard(rec) {
+  const ta = lpeTally(rec, _lpe.manualItems);
+  const items = (rec.auto && rec.auto.items) || [];
+  const autoRows = items.map(it => `<tr><td>${_escapeHtml(it.label)} <span class="chip">자동</span></td>
+      <td class="r">${_lpeMark(it.result)}</td><td class="n-sub" style="font-size:12px">${_escapeHtml(it.detail || '')}</td></tr>`).join('');
+  const manualRows = _lpe.manualItems.map(([k, label]) => `<tr><td>${_escapeHtml(label)} <span class="chip accent">수동</span></td>
+      <td class="r"><button type="button" class="n-btn sm" onclick="lpeSetManual('${_escapeHtml(rec.id)}','${k}')" title="미표시 → O → X">${_lpeMark((rec.manual || {})[k] ?? null)}</button></td>
+      <td class="n-sub" style="font-size:12px">눌러서 O/X/미표시</td></tr>`).join('');
+  const busy = _lpe.evaluating[rec.id];
+  return `<section class="n-card" style="padding:18px 22px">
+    <div class="jr-card-h" style="padding:0 0 10px;flex-wrap:wrap;gap:8px">
+      <span class="n-h"><a class="name-link" href="${tvUrl(rec.code, rec.mkt)}" target="_blank" rel="noopener">${_escapeHtml(rec.name || rec.code)}</a></span>
+      <span class="n-sub">${_escapeHtml(rec.code)} · ${rec.mkt}${rec.interest ? ' · <b class="st-accent">관심</b>' : ''}</span>
+      <span class="jr-title-sp"></span>
+      <span class="num">O ${ta.O} · X ${ta.X} · 미표시 ${ta.blank}</span>
+      <span class="n-sub">체크 ${rec.checked_at || '—'}</span>
+      <button type="button" class="n-btn sm" onclick="lpeEvaluate('${_escapeHtml(rec.id)}')" ${busy ? 'disabled' : ''}>${busy ? '판정 중…' : '재평가'}</button>
+      <button type="button" class="n-btn sm${rec.interest ? ' primary' : ''}" onclick="lpeToggleInterest('${_escapeHtml(rec.id)}')">${rec.interest ? '관심 해제' : '관심 등록'}</button>
+      <button type="button" class="n-btn sm" onclick="lpeDelete('${_escapeHtml(rec.id)}')">삭제</button>
+    </div>
+    <div class="jr-table-wrap"><table class="jr-table lpt-table"><tbody>
+      ${autoRows || '<tr><td colspan="3" class="n-sub">자동 판정 전 — 재평가를 누르세요</td></tr>'}${manualRows}
+    </tbody></table></div>
+    <div style="display:flex;gap:8px;margin-top:10px;align-items:flex-start">
+      <textarea id="lpeMemo_${_escapeHtml(rec.id)}" rows="2" style="flex:1;min-width:0" placeholder="메모"
+        oninput="_lpe.memoDraft['${_escapeHtml(rec.id)}']=this.value">${_escapeHtml(_lpe.memoDraft[rec.id] ?? rec.memo ?? '')}</textarea>
+      <button type="button" class="n-btn sm" onclick="lpeSaveMemo('${_escapeHtml(rec.id)}')">메모 저장</button>
+    </div>
+  </section>`;
+}
+function _lpeShortHtml() {
+  const s = _lpe.short;
+  const btn = `<button type="button" class="n-btn sm" onclick="lpeLoadShort()" ${_lpe.shortBusy ? 'disabled' : ''}>${_lpe.shortBusy ? '불러오는 중…' : (s ? '다시 계산' : '불러오기')}</button>`;
+  if (!s) return `<div class="n-sub">이번 주 주봉 저점 히트 종목의 자동 지표 — ${btn}</div>`;
+  if (!s.ok) return `<div class="st-dot st-bad">${_escapeHtml(s.error || '실패')}</div> ${btn}`;
+  const cols = [['name', '종목'], ['atr_pct', 'ATR%(14)'], ['vp_up5_pct', '위 +5% 매물대%'], ['tv5_chg_pct', '5일 거래대금 증가%'],
+                ['ret10_pct', '10일 수익률%'], ['rs_rank', 'RS 순위']];
+  const arrow = k => _lpe.sortKey === k ? (_lpe.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+  const head = cols.map(([k, l]) => `<th class="${k === 'name' ? '' : 'r'}"><button type="button" class="n-link" style="font-size:12px" onclick="lpeSort('${k}')">${l}${arrow(k)}</button></th>`).join('');
+  const fmt = v => v == null ? '<span class="n-sub">—</span>' : v;
+  const body = lpeSortRows(s.rows || [], _lpe.sortKey, _lpe.sortDir).map(r => `<tr>
+      <td><b><a class="name-link" href="${tvUrl(r.code, r.mkt)}" target="_blank" rel="noopener">${_escapeHtml(r.name)}</a></b><div class="jr-s num">${_escapeHtml(r.code)}</div></td>
+      <td class="num r">${fmt(r.atr_pct)}</td><td class="num r">${fmt(r.vp_up5_pct)}</td><td class="num r">${fmt(r.tv5_chg_pct)}</td>
+      <td class="num r">${fmt(r.ret10_pct)}</td><td class="num r">${fmt(r.rs_rank)}</td></tr>`).join('');
+  return `<div class="n-sub" style="margin-bottom:8px">주봉 ${_escapeHtml(s.bar_date || '')} 기준 ${(s.rows || []).length}종목 · ${btn}</div>
+    <div class="jr-table-wrap"><table class="jr-table lpt-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function renderLowpointEval() {
+  if (_lpe.error) return `<section class="n-card" style="padding:18px 22px"><div class="st-dot st-bad">평가 기록을 불러오지 못했어요 — ${_escapeHtml(_lpe.error.message)}</div></section>`;
+  const have = new Set(_lpe.evals.map(r => r.id));
+  const hitChips = ['week', 'month'].map(tf => {
+    const v = (_lpe.hits || {})[tf];
+    const rows = (v && v.rows) || [];
+    if (!rows.length) return '';
+    return `<div style="margin-top:8px"><span class="n-sub">${tf === 'week' ? '주봉' : '월봉'} ${_escapeHtml((v && v.bar_date) || '')} 히트</span>
+      <div class="lp-chips" style="margin-top:6px">${rows.map(r => have.has(r.code)
+        ? `<span class="chip">${_escapeHtml(r.name || r.code)} ✓</span>`
+        : `<button type="button" class="jr-pill" onclick="lpeAddHit('${_escapeHtml(r.code)}','${_escapeHtml(String(r.name || r.code).replace(/'/g, ''))}','${r.market === 'US' ? 'US' : 'KR'}')">+ ${_escapeHtml(r.name || r.code)}</button>`).join('')}</div></div>`;
+  }).join('');
+  const sorted = _lpe.evals.slice().sort((a, b) => (b.interest - a.interest) || String(b.checked_at || '').localeCompare(String(a.checked_at || '')));
+  return `<section class="n-card" style="padding:18px 22px">
+      <form class="lpt-form" onsubmit="event.preventDefault();lpeAdd(this)">
+        <label style="flex:1 1 220px">종목<input name="q" placeholder="종목명·코드·티커 또는 KRW-BTC" required
+          value="${_escapeHtml(_lpe.draft)}" oninput="_lpe.draft=this.value"></label>
+        <button type="submit" class="n-btn primary">평가 추가</button>
+      </form>${hitChips}
+      <div class="n-sub" style="margin-top:10px;font-size:12px">자동 판정은 서버가 그 종목만 조회해 계산해요. 매물대는 <b>일봉 종가×거래량 근사</b>(그날 거래량이 모두 종가에 있었다고 봄).
+        StochRSI "0 근접"(%K≤5)·위 +30% 매물대 기준(≤20%)은 제안값을 승인한 기준이에요(성과 검증 전).</div>
+    </section>
+    <h3 class="n-h" style="margin:4px 0 0">장기 체크리스트</h3>
+    ${sorted.map(_lpeCard).join('') || '<section class="n-card" style="padding:18px 22px"><div class="n-sub">평가한 종목이 없어요</div></section>'}
+    <h3 class="n-h" style="margin:4px 0 0">단기 비교</h3>
+    <section class="n-card" style="padding:18px 22px">${_lpeShortHtml()}</section>`;
+}
 function renderLowpointTrack() {
   const wrap = document.getElementById('lowpointTrackView');
   if (!wrap || wrap.style.display === 'none') return;
+  const view = _lpt.view || 'trades';
+  const viewTabs = `<div class="lp-chips" role="tablist" aria-label="저점 탭 보기">${[['trades', '매매 기록'], ['eval', '평가']].map(([k, l]) =>
+      `<button type="button" class="jr-pill${view === k ? ' on' : ''}" onclick="lpSetView('${k}')">${l}</button>`).join('')}</div>`;
+  if (view === 'eval') {
+    wrap.innerHTML = `<div class="jr-title"><h2>저점 평가</h2><span class="n-sub" style="font-size:13px">장기 체크리스트 · 단기 비교</span></div>`
+      + viewTabs + renderLowpointEval();
+    return;
+  }
   const head = `<div class="jr-title"><h2>저점 매매</h2><span class="n-sub" style="font-size:13px">저점종목 매매 기록 · 일지와 별도 저장</span>
-    <span class="jr-title-sp"></span><button type="button" class="n-btn" onclick="_lptPrices().then(renderLowpointTrack)">현재가 갱신</button></div>`;
+    <span class="jr-title-sp"></span><button type="button" class="n-btn" onclick="_lptPrices().then(renderLowpointTrack)">현재가 갱신</button></div>` + viewTabs;
   if (_lpt.error) {
     wrap.innerHTML = head + `<section class="n-card jr-gate jr-gate-bad" role="alert" style="display:block;padding:18px 20px">
       <div style="font-size:15px;font-weight:600">기록을 불러오지 못했어요</div><div class="n-sub" style="margin-top:6px">${_escapeHtml(_lpt.error.message)}</div>

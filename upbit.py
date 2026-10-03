@@ -72,3 +72,32 @@ def resolve(market: str) -> dict | None:
     if not row:
         return None
     return {"code": m, "name": korean_name(m) or m, "price": row["trade_price"]}
+
+
+_CANDLE_URL = "https://api.upbit.com/v1/candles/{unit}"
+CANDLE_MAX = 200   # 업비트 공개 캔들 API의 1회 최대 개수(문서 값)
+
+
+def fetch_candles(market: str, unit: str = "days", count: int = CANDLE_MAX):
+    """v5.314+ 저점 평가용 일봉/월봉(unit="days"|"months"). 공개 API 1회 호출, 최신→과거 응답을 날짜
+    오름차순 DataFrame(Open·High·Low·Close·Volume, KST 날짜 인덱스)으로. 실패면 None."""
+    import pandas as pd
+    m = str(market or "").strip().upper()
+    if not is_upbit(m) or unit not in ("days", "months"):
+        return None
+    try:
+        resp = requests.get(_CANDLE_URL.format(unit=unit), params={"market": m, "count": min(count, CANDLE_MAX)},
+                            timeout=_TIMEOUT)
+        if resp.status_code != 200:
+            return None
+        rows = resp.json()
+    except (requests.RequestException, ValueError):
+        return None
+    if not isinstance(rows, list) or not rows:
+        return None
+    df = pd.DataFrame({
+        "Open": [r.get("opening_price") for r in rows], "High": [r.get("high_price") for r in rows],
+        "Low": [r.get("low_price") for r in rows], "Close": [r.get("trade_price") for r in rows],
+        "Volume": [r.get("candle_acc_trade_volume") for r in rows],
+    }, index=pd.to_datetime([str(r.get("candle_date_time_kst", ""))[:10] for r in rows]))
+    return df.sort_index().astype(float)
