@@ -19,6 +19,11 @@ v5.318 [저점 평가 수동 항목 추가 — 사용자 지시 "파란구름의
     ③ 해당 없음: 폭등(두 곳 중 한 곳이라도 +30%) 없으면 "긴 횡보" —, 완성 월봉 52개 미만(구름 미형성)이면
     "파란구름" — . 해당 없음 동안 저장된 수동값은 지우지 않고 무시. 집계(lpeTally)에서 —는 O·X 어디에도 안
     들어감(테스트). 자동값은 평가 레코드의 auto.manual_auto에 함께 저장.
+    [의미있는 상승 두 항목 분리 — 사용자 지시 "결합 판정을 제거하고 원문처럼 두 항목으로 분리"] "RSI<30 이후
+    의미있는 상승(+30%)" / "StochRSI 0 이후 의미있는 상승(+30%)" 각각 O/X/—, 근거(신호월·이후 최대 상승률),
+    집계·수동 덮어쓰기도 항목별(rise_rsi·rise_stoch). 옛 합산 수동값 rise_2x는 나눌 근거가 없어 옮기지 않고
+    서버가 계속 받되(LP_EVAL_LEGACY_MANUAL_KEYS) 판정·집계에서 빼며 카드에 "항목별로 다시 지정" 안내. 옛 합산
+    자동값은 재평가 때 분리값으로 갱신된다(그 전엔 두 항목이 —).
 v5.317 [저점 탭 "평가" — 사용자 지시 "장기 후보를 체크리스트로 O/X 평가해 관심종목 판정, 단기 후보는 '뭐가
     먼저 +5% 가는지' 비교. 수동 표 대신 서버 데이터로 자동 판정"] 저점 탭에 "매매 기록 | 평가" 서브페이지.
     [자동 판정] 신설 scripts/screens/lowpoint_eval.py — 평가하는 그 종목만 기존 조회 함수로(KR naver 일봉·US
@@ -19975,7 +19980,11 @@ _LP_EVALS_LOCK = _threading.RLock()
 # 기동 스캔 중 자동 판정 요청이 응답 없이 대기). 저점 월봉 러너(_LOWPOINT_EXECUTOR)와도 분리 — 월 1회 실행이
 # 몇 분 걸리는 동안 평가가 막히지 않게. 워커 1개라 동시 평가는 순서대로 처리된다.
 _LP_EVAL_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lp-eval")
-LP_EVAL_MANUAL_KEYS = ("rise_2x", "long_base", "dilution", "ichimoku_cloud")   # lowpoint_eval.MANUAL_ITEMS와 같은 키(테스트로 고정)
+LP_EVAL_MANUAL_KEYS = ("rise_rsi", "rise_stoch", "long_base", "dilution", "ichimoku_cloud")   # lowpoint_eval.MANUAL_ITEMS와 같은 키(테스트로 고정)
+# 예전(v5.318 첫 후속) 합산 항목 "의미있는 상승(2곳)"의 수동값 — 두 항목으로 나눌 근거가 없어 옮기지 않는다.
+# 저장은 계속 받되(예전 레코드의 다른 칸을 고칠 때 400이 나지 않게) 판정·집계에는 안 쓰고, 화면이 "항목별로
+# 다시 지정" 안내만 띄운다(조용히 지우지 않는다).
+LP_EVAL_LEGACY_MANUAL_KEYS = ("rise_2x",)
 
 
 def _lp_eval_invalid(rec: dict) -> "str | None":
@@ -19987,7 +19996,7 @@ def _lp_eval_invalid(rec: dict) -> "str | None":
     if (rec.get("mkt") == "UPBIT") != upbit.is_upbit(code):
         return "UPBIT 레코드의 code는 KRW-XXX 형식"
     manual = rec.get("manual") or {}
-    if not isinstance(manual, dict) or any(k not in LP_EVAL_MANUAL_KEYS for k in manual) \
+    if not isinstance(manual, dict) or any(k not in LP_EVAL_MANUAL_KEYS + LP_EVAL_LEGACY_MANUAL_KEYS for k in manual) \
             or any(v not in ("O", "X", None) for v in manual.values()):
         return "manual은 정해진 항목의 O|X|null"
     if not isinstance(rec.get("memo") or "", str) or len(rec.get("memo") or "") > 4000:

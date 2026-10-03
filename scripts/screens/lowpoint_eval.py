@@ -79,7 +79,9 @@ LONG_ITEMS = [
     ("tv_rising", "거래대금 증가(20일 평균 > 직전 60일)"),
 ]
 MANUAL_ITEMS = [
-    ("rise_2x", "의미있는 상승이 나왔나(2곳)"),
+    # v5.318 후속(사용자 지시): 원문처럼 두 항목 — 결합 판정(옛 rise_2x)은 없앴다
+    ("rise_rsi", "RSI<30 이후 의미있는 상승(+30%)"),
+    ("rise_stoch", "StochRSI 0 이후 의미있는 상승(+30%)"),
     ("long_base", "긴 횡보를 거쳤나"),
     ("dilution", "희석 이력(유증·CB)"),
     # v5.318(사용자 지시) — 같은 O/X/미표시 토글. 예전 레코드엔 이 키가 없어 미표시로 시작한다.
@@ -236,35 +238,32 @@ def rise_after_signal(months: pd.DataFrame, signal_mask: pd.Series) -> dict | No
 
 
 def manual_auto(months: pd.DataFrame) -> dict:
-    """수동 항목의 자동값(v5.318). 화면은 수동값이 있으면 그걸(덮어쓰기), 없으면 이 값을 쓴다.
-      rise_2x       — RSI<30 마감월 / StochRSI 0 근접 마감월 각각, (끝난 가장 최근 신호 구간의) 신호월 종가
-                      대비 이후 월봉 최고 종가 +30% 이상이면 O. 두 곳 다 신호 없음 → —. 판정된 곳이 모두 O면 O,
-                      하나라도 X면 X(“2곳” 모두 나왔나 — 결합 규칙은 v5.318 해석).
-      long_base     — 폭등(두 곳 중 한 곳이라도 +30% 이상)이 없으면 해당 없음(—). 있으면 사람이 판단.
+    """수동 항목의 자동값(v5.318). 화면은 수동값이 있으면 그걸(항목별 덮어쓰기), 없으면 이 값을 쓴다.
+      rise_rsi / rise_stoch — 각각 RSI<30 마감월 / StochRSI 0 근접 마감월(끝난 가장 최근 신호 구간의 마지막
+                      신호월) 종가 대비 이후 월봉 최고 종가 +30% 이상이면 O, 미만 X, 신호 없음 —. 두 항목은
+                      따로 판정·집계한다(결합 판정 없음 — 사용자 지시로 원문처럼 분리).
+      long_base     — 폭등(두 항목 중 하나라도 O)이 없으면 해당 없음(—). 있으면 사람이 판단.
       ichimoku_cloud — 완성 월봉 52개 미만(신규상장 등)이면 구름 미형성 → 해당 없음(—)."""
     import scanner
     n = 0 if months is None else len(months)
-    places = []
+    places = {"rise_rsi": ("RSI<30", None), "rise_stoch": ("StochRSI 0 근접", None)}
     if n >= 2:
         rsi = scanner.rsi(months["Close"], 14)
         k = stoch_rsi_k(months["Close"])
-        for name, mask in (("RSI<30", rsi < RSI_OVERSOLD), ("StochRSI 0 근접", k <= STOCH_NEAR_ZERO)):
-            places.append((name, rise_after_signal(months, mask.fillna(False))))
-    else:
-        places = [("RSI<30", None), ("StochRSI 0 근접", None)]
-    judged = [p for _, p in places if p and p["result"] is not None]
-    rise = None if not judged else all(p["result"] for p in judged)
-    parts = []
-    for name, p in places:
+        places["rise_rsi"] = ("RSI<30", rise_after_signal(months, (rsi < RSI_OVERSOLD).fillna(False)))
+        places["rise_stoch"] = ("StochRSI 0 근접", rise_after_signal(months, (k <= STOCH_NEAR_ZERO).fillna(False)))
+    out = {}
+    for key, (name, p) in places.items():
         if p is None:
-            parts.append(f"{name}: 끝난 신호 없음")
+            out[key] = {"result": None, "na": False, "detail": f"{name}: 끝난 신호 없음", "signal_month": None, "rise_pct": None}
         elif p["rise_pct"] is None:
-            parts.append(f"{name}({p['month']}): 이후 월봉 없음")
+            out[key] = {"result": None, "na": False, "detail": f"신호월 {p['month']} · 이후 월봉 없음",
+                        "signal_month": p["month"], "rise_pct": None}
         else:
-            parts.append(f"{name}({p['month']}): 이후 최고 {p['rise_pct']:+.1f}% {'O' if p['result'] else 'X'}")
-    out = {"rise_2x": {"result": rise, "na": False, "detail": " · ".join(parts),
-                       "places": [{"signal": name, **(p or {})} for name, p in places]}}
-    surge_seen = any(p["result"] for p in judged)    # 폭등 = 한 곳이라도 +30% 이상
+            out[key] = {"result": p["result"], "na": False,
+                        "detail": f"신호월 {p['month']} · 이후 최대 {p['rise_pct']:+.1f}% (기준 +{RISE_MIN_PCT:g}%)",
+                        "signal_month": p["month"], "rise_pct": p["rise_pct"]}
+    surge_seen = out["rise_rsi"]["result"] is True or out["rise_stoch"]["result"] is True
     out["long_base"] = ({"result": None, "na": True, "detail": "폭등(신호 뒤 +30% 이상) 없음 — 해당 없음"}
                         if not surge_seen else {"result": None, "na": False, "detail": "폭등 있음 — 직접 판단"})
     out["ichimoku_cloud"] = ({"result": None, "na": True, "detail": f"월봉 {n}개 — 구름 미형성(52개 필요) · 해당 없음"}
