@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.318 [저점 평가 수동 항목 추가 — 사용자 지시 "파란구름의 두꺼운 구간을 충분히 지났다(월봉 일목 구름 기준)"]
+    기존 수동 3개와 같은 O/X/미표시 토글(lowpoint_eval.MANUAL_ITEMS · LP_EVAL_MANUAL_KEYS에 ichimoku_cloud 추가).
+    화면은 서버가 주는 항목 목록을 그대로 그려 별도 수정 없음, 집계(lpeTally)에 자동 포함. 예전 레코드엔 키가
+    없어 미표시로 시작하고 그대로 저장된다(마이그레이션 없음 — 테스트로 확인).
 v5.317 [저점 탭 "평가" — 사용자 지시 "장기 후보를 체크리스트로 O/X 평가해 관심종목 판정, 단기 후보는 '뭐가
     먼저 +5% 가는지' 비교. 수동 표 대신 서버 데이터로 자동 판정"] 저점 탭에 "매매 기록 | 평가" 서브페이지.
     [자동 판정] 신설 scripts/screens/lowpoint_eval.py — 평가하는 그 종목만 기존 조회 함수로(KR naver 일봉·US
@@ -8667,7 +8671,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.317"
+VERSION = "v5.318"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -19961,7 +19965,7 @@ _LP_EVALS_LOCK = _threading.RLock()
 # 기동 스캔 중 자동 판정 요청이 응답 없이 대기). 저점 월봉 러너(_LOWPOINT_EXECUTOR)와도 분리 — 월 1회 실행이
 # 몇 분 걸리는 동안 평가가 막히지 않게. 워커 1개라 동시 평가는 순서대로 처리된다.
 _LP_EVAL_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lp-eval")
-LP_EVAL_MANUAL_KEYS = ("rise_2x", "long_base", "dilution")   # lowpoint_eval.MANUAL_ITEMS와 같은 키(테스트로 고정)
+LP_EVAL_MANUAL_KEYS = ("rise_2x", "long_base", "dilution", "ichimoku_cloud")   # lowpoint_eval.MANUAL_ITEMS와 같은 키(테스트로 고정)
 
 
 def _lp_eval_invalid(rec: dict) -> "str | None":

@@ -4,6 +4,7 @@
 (_rev_store_put 공용), 화면 집계·정렬은 production JS를 그대로 node로 실행한다.
 
 사보타주 확인(2026-10-04, FAIL 확인 후 원복):
+② (v5.318) 서버 허용 키(LP_EVAL_MANUAL_KEYS)에서 ichimoku_cloud 제거 → 키 동기화·호환 테스트 등 3건 FAIL
 ① lowpoint_eval의 급등 판정을 신규상장 surge_check 호출 대신 사본(rolling 365D 직접 계산)으로 바꿈
    → test_surge_check_is_reused_not_copied FAIL
 """
@@ -306,3 +307,27 @@ def test_version_badge_matches():
     import re
     m = re.search(r'id="verBadge">(v[\d.]+)<', SRC)
     assert m and m.group(1) == app.VERSION
+
+
+# ── v5.318: 수동 항목 "파란구름(월봉 일목 구름)" 추가 ───────────────
+def test_ichimoku_manual_item_added_and_keys_in_sync():
+    keys = [k for k, _ in ev.MANUAL_ITEMS]
+    assert keys == ["rise_2x", "long_base", "dilution", "ichimoku_cloud"]
+    assert tuple(keys) == app.LP_EVAL_MANUAL_KEYS
+    assert dict(ev.MANUAL_ITEMS)["ichimoku_cloud"] == "파란구름의 두꺼운 구간을 충분히 지났다(월봉 일목 구름 기준)"
+
+
+def test_old_record_without_new_key_is_compatible(store):
+    """v5.317 레코드(새 키 없음)가 그대로 저장·로드되고, 새 항목은 미표시로 센다. 새 항목 O/X도 저장된다."""
+    old = {**REC, "manual": {"rise_2x": "O", "long_base": "X", "dilution": None}}
+    assert _put(old, None)[0] == 200
+    lst = json.loads(asyncio.run(app.lp_evals_list()).body)
+    rec = lst["evals"][0]
+    assert "ichimoku_cloud" not in rec["manual"]
+    tally = _js(f"lpeTally({json.dumps(rec)}, {json.dumps(lst['manual_items'])})", "lpeTally")
+    assert tally == {"O": 1, "X": 1, "blank": 2}           # dilution·ichimoku_cloud 미표시
+    s, d = _put({**rec, "manual": {**rec["manual"], "ichimoku_cloud": "O"}}, rec["rev"])
+    assert s == 200 and d["record"]["manual"]["ichimoku_cloud"] == "O"
+    tally2 = _js(f"lpeTally({json.dumps(d['record'])}, {json.dumps(lst['manual_items'])})", "lpeTally")
+    assert tally2 == {"O": 2, "X": 1, "blank": 1}
+    assert _put({**d["record"], "manual": {"ichimoku_cloud": "Z"}}, d["record"]["rev"])[0] == 400
