@@ -1,18 +1,17 @@
-"""v5.321 — 저점 스크린·평가의 KR 가격 = KRX 정규장 기준(B안 하이브리드), 나머지 KR 경로는 naver 통합 시세 그대로.
+"""저점 스크린·평가의 KR 가격 기준 — v5.323: naver 통합 시세 단일 소스로 복귀(v5.321 정규장 B안 철회).
 
-배경(2026-10-04 조사): naver 일봉 종가는 애프터마켓(통합 시세) 마지막 체결가다. 인바이오젠(101140.KS) 10-02는
-naver 5,230 / 정규장 4,820 — 주봉 A조건(직전 주 종가 < 최근 주 종가)이 뒤집혀 잘못 히트했다. naver에는 정규장
-전용 옵션이 없어(공개 엔드포인트 3종·파라미터 11종 시도) yfinance(auto_adjust=False)를 쓴다. 표본 10종목의
-yfinance 종가는 naver가 주는 KRX 공식 "전일 종가"와 10/10 일치했다. yfinance KR 과거 일봉은 하루 튐·수정주가
-차이가 있어 사용자 확정 B안: NXT 개장(2025-03-04) 이전 naver + 이후 yfinance, 이음새 비율 검증(±0.5%) →
-재조정 또는 경고 플래그(조용히 섞지 않는다).
+경위: v5.321은 인바이오젠(101140.KS) 10-02 오히트(naver 5,230 / 정규장 4,820)를 보고 KR을 정규장(2025-03-04 이전
+naver + 이후 yfinance, 이음새 비율 검증 ±0.5%)으로 바꿨다. 키움 10-02 주봉 목록과 대조하니 KR 일치가 6/8 → 3/9로
+나빠졌고, naver 통합 + 고전 Wilder RSI + 최소 봉 수 없음이면 키움 KR 7/7이 재현됐다(키움도 통합 시세) — 사용자 결정
+으로 복귀. B안 코드(splice_regular·fetch_kr_regular*·price_note)는 **비활성**으로 남는다: 호출 0곳을 여기서 고정하고,
+함수 자체의 이음새 테스트(합성·실데이터 RSI 연속성)는 재사용 대비로 유지한다.
 
 실데이터 픽스처 test_fixtures/kr_seam_closes.json(2026-10-04 수집, 2024-11-01~2025-05-30 naver·yfinance 종가):
 일양약품 007570.KS(비율 1.1187 → 재조정), 제이케이시냅스 060230.KQ(1.0488 → 재조정), 인바이오젠 101140.KS(1.0 → 그대로).
 
 사보타주 확인(2026-10-04, FAIL 확인 후 원복):
-① screen_market의 KR 조회를 fetch_kr_regular → fetch_kr(naver)로 되돌림 → test_kr_screen_uses_regular_close_not_after FAIL
-② fetch_kr_regular_frames의 auto_adjust=False를 지움 → test_regular_fetch_requests_unadjusted_close FAIL
+① screen_market의 KR 조회를 fetch_kr → fetch_kr_regular(정규장 B안)로 → test_kr_screen_uses_naver_integrated FAIL
+② 평가 페이지 KR을 B안 함수로 → test_eval_page_kr_uses_naver FAIL
 ③ splice_regular의 재조정을 끔(rescaled 분기에서 pre를 그대로 이음) → 이음새 RSI 연속성(합성·실데이터) FAIL
 ④ 재조정 불가 분기가 경고 없이 status ok를 돌려줌 → test_unstable_ratio_is_flagged_not_mixed_silently FAIL
 ⑤ lpDisplayName이 market만 보게(평가 카드·단기 비교는 mkt) → test_display_name_us_ticker_kr_name FAIL
@@ -60,27 +59,28 @@ def _weekly_series(last_close: float) -> pd.Series:
 
 
 def test_basis_constants_in_sync():
-    assert lp.KR_PRICE_BASIS == app.LOWPOINT_KR_PRICE_BASIS == "krx_regular"
+    assert lp.CALC_BASIS == app.LOWPOINT_CALC_BASIS == "naver_integrated+wilder_sma"
+    assert not hasattr(app, "LOWPOINT_KR_PRICE_BASIS") and not hasattr(lp, "KR_PRICE_BASIS")
 
 
-def test_kr_screen_uses_regular_close_not_after(monkeypatch):
-    """같은 날 정규장(4,820)과 애프터(5,230)가 다를 때 — 스크린은 정규장 값으로 판정해야 한다.
-    naver 경로(fetch_kr)가 불리면 실패."""
+def test_kr_screen_uses_naver_integrated(monkeypatch):
+    """같은 날 정규장(5,300)과 애프터(5,450)가 다를 때 — 스크린은 naver 통합 시세(애프터 포함) 값으로 판정한다
+    (키움 조건검색과 같은 기준). 정규장 B안 경로가 불리면 실패."""
+    boom = lambda *a, **k: (_ for _ in ()).throw(AssertionError("정규장 B안 사용"))
     monkeypatch.setattr(lp, "kr_universe", lambda board: ({"101140.KS": "인바이오젠"}, {}))
-    monkeypatch.setattr(lp, "fetch_kr", lambda *a, **k: (_ for _ in ()).throw(AssertionError("naver 통합 시세 사용")))
+    monkeypatch.setattr(lp, "fetch_kr_regular", boom)
+    monkeypatch.setattr(lp, "fetch_kr_regular_frames", boom)
     seen = {}
 
-    def regular(tickers, tf):
+    def naver(tickers, tf):
         seen["called"] = (tuple(tickers), tf)
-        return {"101140.KS": _weekly_series(5300.0)}, [], {"101140.KS": {"status": "ok", "ratio": 1.0}}
-    monkeypatch.setattr(lp, "fetch_kr_regular", regular)
+        return {"101140.KS": _weekly_series(5450.0)}, []
+    monkeypatch.setattr(lp, "fetch_kr", naver)
     res = lp.screen_market("kospi", "week", NOW)
     assert seen["called"] == (("101140.KS",), "week")
-    ev_regular = lp.evaluate(_weekly_series(5300.0), "week", "kr", NOW)
-    ev_after = lp.evaluate(_weekly_series(5450.0), "week", "kr", NOW)
-    assert ev_after["status"] == "hit", "전제: 애프터 값이면 히트(인바이오젠과 같은 모양)"
-    assert ev_regular["status"] == "no", "정규장 값이면 A가 거짓이라 히트 아님"
-    assert res["rows"] == [], "스크린이 정규장이 아닌 값으로 판정했다"
+    assert [r["코드"] for r in res["rows"]] == ["101140.KS"], "애프터 포함 값이면 히트(A 참)"
+    assert "데이터경고" not in res["rows"][0] and "price_flags" not in res          # ⚠ 플래그 비활성(v5.321 연결 제거)
+    assert lp.evaluate(_weekly_series(5300.0), "week", "kr", NOW)["status"] == "no"  # 전제: 0봉 값이 결과를 가른다
 
 
 def _ohlcv(idx, close):
@@ -119,25 +119,31 @@ def test_regular_fetch_requests_unadjusted_close(fake_sources):
     pd.testing.assert_series_equal(data["005930.KS"], base, check_names=False, check_freq=False)
 
 
-def test_eval_page_kr_uses_same_hybrid(fake_sources, monkeypatch):
+def test_eval_page_kr_uses_naver(fake_sources):
     calls, base = fake_sources
-    daily, monthly, note = ev.fetch_ohlcv_noted("101140.KS", "KR")
-    assert calls["naver"] and calls["yf"][0][2] is False
-    assert note == lp.price_note({"status": "rescaled", "ratio": 1.25}) and "1.25" in note
-    assert float(daily["Close"].iloc[0]) == pytest.approx(float(base.iloc[0]))
-    assert float(daily["Volume"].iloc[0]) == pytest.approx(1250.0)       # 거래량은 비율만큼 곱한다(거래대금 보존)
+    daily, monthly = ev.fetch_ohlcv("101140.KS", "KR")
+    assert calls["naver"] == [("101140.KS", lp.KR_DAYS["month"])] and calls["yf"] == []
+    assert float(daily["Close"].iloc[0]) == pytest.approx(float(base.iloc[0]) * 1.25)    # naver 값 그대로(재조정 없음)
     rows = ev.short_table([{"code": "101140.KS", "market": "KOSPI"}, {"code": "NKE", "market": "US"}])
-    by = {r["code"]: r for r in rows}
-    assert by["101140.KS"]["price_note"] and by["NKE"]["price_note"] is None
-    assert (("NKE",), lp.US_PERIOD["month"], True) in calls["yf"]
-    assert all(a is False for t, p, a in calls["yf"] if t[0].endswith((".KS", ".KQ")))
-    assert "lp.fetch_kr_regular_frames" in inspect.getsource(ev.fetch_ohlcv_noted)
-    assert "lp.fetch_kr_regular_frames" in inspect.getsource(ev.short_table)
-
-
-def test_eval_result_carries_price_note(fake_sources):
+    assert all("price_note" not in r for r in rows)
+    assert calls["yf"] == [(("NKE",), lp.US_PERIOD["month"], True)]                    # yfinance는 US만
     res = ev.evaluate("101140.KS", "KR", datetime(2026, 10, 4, 12, 0, tzinfo=KST))
-    assert res["ok"] and "재조정" in res["price_note"]
+    assert res["ok"] and "price_note" not in res
+
+
+def test_inactive_b_option_has_no_callers():
+    """B안 함수는 남겨 두되 어디서도 부르지 않는다(비활성) — B안 함수끼리의 내부 호출만 예외."""
+    import ast
+    names = {"splice_regular", "price_note", "fetch_kr_regular", "fetch_kr_regular_frames"}
+    for path in ("scripts/screens/lowpoint.py", "scripts/screens/lowpoint_eval.py", "scripts/screens/newlisting.py", "app.py"):
+        tree = ast.parse(open(os.path.join(ROOT, path), encoding="utf-8").read())
+        inside = set()
+        for fn in ast.walk(tree):
+            if isinstance(fn, ast.FunctionDef) and fn.name in names:
+                inside |= {id(n) for n in ast.walk(fn)}
+        bad = [ast.unparse(n)[:60] for n in ast.walk(tree) if isinstance(n, ast.Call) and id(n) not in inside
+               and ((isinstance(n.func, ast.Name) and n.func.id in names) or (isinstance(n.func, ast.Attribute) and n.func.attr in names))]
+        assert bad == [], f"{path}: 비활성 B안 호출 {bad}"
 
 
 # ── 이음새(2025-03-04) ────────────────────────────────────────────
@@ -244,36 +250,12 @@ def test_listed_after_seam_and_missing_regular():
     assert lp.splice_regular(None, None)[0] is None
 
 
-def test_seam_flags_reach_rows_and_publish(monkeypatch):
-    monkeypatch.setattr(lp, "kr_universe", lambda board: ({"007570.KS": "일양약품", "005930.KS": "삼성전자"}, {}))
-    monkeypatch.setattr(lp, "fetch_kr_regular", lambda tickers, tf: (
-        {"007570.KS": _weekly_series(5450.0), "005930.KS": _weekly_series(5450.0)}, [],
-        {"007570.KS": {"status": "rescaled", "ratio": 1.1187}, "005930.KS": {"status": "ok", "ratio": 1.0}}))
-    res = lp.screen_market("kospi", "week", NOW)
-    notes = {r["코드"]: r["데이터경고"] for r in res["rows"]}
-    assert notes == {"007570.KS": "수정주가 재조정 ×1.1187(naver↔정규장 이음새)", "005930.KS": None}
-    assert res["seam_counts"] == {"rescaled": 1, "ok": 1}
-    entry = lp.publish_entry([res], "week", {"kospi": pd.Timestamp("2026-10-02")}, {})
-    assert {r["code"]: r["price_note"] for r in entry["rows"]} == {"007570.KS": notes["007570.KS"], "005930.KS": None}
-    assert entry["excluded_counts"]["KOSPI"]["seam"] == {"rescaled": 1, "ok": 1}
-    lines = "\n".join(lp.exclusion_detail_lines(res, "week"))
-    assert "이음새(2025-03-04) 상태" in lines and "007570.KS(일양약품)" in lines
-
-
-def test_other_kr_paths_still_use_naver_integrated_price():
-    """5탭 스캐너·현재가·종가베팅·신규상장은 naver 통합 시세 그대로(측정 기반 데이터 정의 보존)."""
-    assert "naver_kr.fetch(ticker)" in inspect.getsource(app._fetch)                     # 스캐너 일봉
-    assert "naver_kr.fetch_history(tk, days=10)" in inspect.getsource(app.batch_prices)   # 현재가 갱신
-    assert "naver_kr.fetch_history(ticker)" in inspect.getsource(app._jongga_bars)        # 종가베팅 보충
-    assert "lp.fetch_kr(kr, \"week\")" in inspect.getsource(nl._attach_closes)            # 신규상장 종가
-    assert "def fetch_kr(" in inspect.getsource(lp) and "naver_kr.fetch_history" in inspect.getsource(lp.fetch_kr)
-
-
-# ── 서버: 가격 기준이 바뀐 결과는 창 안에서 다시 돈다 ──────────────────────
+# ── 서버: 계산 기준이 바뀐 결과는 창 안에서 다시 돈다 ──────────────────────
 @pytest.mark.parametrize("state_basis,now,due", [
-    (None, "2026-10-04 12:00", "2026-10-02"),            # 예전(naver) 기준 결과 · 창 안 → 다시
-    ("krx_regular", "2026-10-04 12:00", None),           # 이미 새 기준 → 안 돈다
-    (None, "2026-10-05 09:01", None),                    # 창(토 09:00 + 48시간) 밖 → 다음 예약 때
+    (None, "2026-10-04 12:00", "2026-10-02"),                          # v5.320 이전 기준 결과 · 창 안 → 다시
+    ("krx_regular", "2026-10-04 12:00", "2026-10-02"),                 # v5.321 정규장 기준 결과 → 다시(복귀)
+    ("naver_integrated+wilder_sma", "2026-10-04 12:00", None),        # 이미 v5.323 기준 → 안 돈다
+    ("krx_regular", "2026-10-05 09:01", None),                         # 창(토 09:00 + 48시간) 밖 → 다음 예약 때
 ])
 def test_week_rerun_when_basis_changed(state_basis, now, due):
     st = {"week": {"target": "2026-10-02", "status": "ok", "attempts": 1, **({"basis": state_basis} if state_basis else {})}}
@@ -282,7 +264,7 @@ def test_week_rerun_when_basis_changed(state_basis, now, due):
 
 
 def test_newlisting_not_affected_by_basis():
-    st = {"month": {"target": "2026-09-30", "status": "ok", "attempts": 1, "basis": "krx_regular"},
+    st = {"month": {"target": "2026-09-30", "status": "ok", "attempts": 1, "basis": "naver_integrated+wilder_sma"},
           "newlisting": {"target": "2026-09-30", "status": "ok", "attempts": 1}}
     assert app._lowpoint_due("newlisting", datetime(2026, 10, 1, 9, 0, tzinfo=KST), st) is None
 

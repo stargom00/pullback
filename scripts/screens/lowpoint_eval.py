@@ -4,8 +4,8 @@
 단기 후보는 '뭐가 먼저 +5% 가는지' 비교. 수동 표 대신 서버 데이터로 자동 판정."
 
 데이터: 평가하는 **그 종목만** 기존 조회 함수로 받는다(새 소스 없음).
-  KR    lowpoint.fetch_kr_regular_frames(10년) — **KRX 정규장 기준 OHLCV**(v5.321 B안: 2025-03-04 이전 naver +
-        이후 yfinance 정규장, 이음새 검증·경고는 lowpoint.splice_regular — lowpoint.KR_PRICE_BASIS 주석)
+  KR    naver_kr.fetch_history(코드, days=lowpoint.KR_DAYS["month"]) — 일봉 약 10년, naver 통합 시세(애프터 포함 —
+        저점 스크린과 같은 단일 소스. v5.321 정규장 B안은 v5.323에 철회, lowpoint.CALC_BASIS 주석)
   US    harness._fetch_us_batch([티커], period=lowpoint.US_PERIOD["month"]) — yfinance 일봉, 10년
   UPBIT upbit.fetch_candles(마켓, "days"/"months") — 공개 API 1회 최대 200봉(일봉 약 200일, 월봉 약 16년)
 월봉은 KR·US는 일봉을 달력 월말로 묶고, 코인은 업비트 월봉을 그대로 쓴다. **진행 중인 이번 달 봉은 뺀다**
@@ -121,9 +121,9 @@ def completed_months(monthly: pd.DataFrame, mkt: str, now: datetime) -> pd.DataF
 
 
 def stoch_rsi_k(close: pd.Series, period: int = 14, smooth: int = 3) -> pd.Series:
-    """StochRSI %K(0~100) = RSI의 period 구간 최저~최고 안 위치를 smooth로 평활. RSI는 scanner.rsi 그대로."""
-    import scanner
-    r = scanner.rsi(close, period)
+    """StochRSI %K(0~100) = RSI의 period 구간 최저~최고 안 위치를 smooth로 평활. RSI는 고전 Wilder
+    (lowpoint.rsi_wilder_sma — v5.323, 저점 스크린과 같은 함수)."""
+    r = lp.rsi_wilder_sma(close, period)
     lo, hi = r.rolling(period).min(), r.rolling(period).max()
     st = (r - lo) / (hi - lo).replace(0, float("nan")) * 100
     return st.rolling(smooth).mean()
@@ -178,7 +178,7 @@ def long_checks(daily: pd.DataFrame, months: pd.DataFrame) -> list:
 
     w = SIGNAL_WARMUP_MONTHS
     if n > w:
-        mr = __import__("scanner").rsi(months["Close"], 14)
+        mr = lp.rsi_wilder_sma(months["Close"], 14)   # v5.323: 고전 Wilder(저점 스크린과 같은 함수)
         bull = months["Close"] > months["Open"]
         sig = warmed(mr < RSI_OVERSOLD)
         hits = [months.index[i + 1] for i in range(n - 1) if bool(sig.iloc[i]) and bool(bull.iloc[i + 1])]
@@ -266,7 +266,7 @@ def manual_auto(months: pd.DataFrame) -> dict:
     n = 0 if months is None else len(months)
     places = {"rise_rsi": ("RSI<30", None), "rise_stoch": ("StochRSI 0 근접", None)}
     if n > SIGNAL_WARMUP_MONTHS:
-        rsi = scanner.rsi(months["Close"], 14)
+        rsi = lp.rsi_wilder_sma(months["Close"], 14)   # v5.323: 고전 Wilder
         k = stoch_rsi_k(months["Close"])
         places["rise_rsi"] = ("RSI<30", rise_after_signal(months, warmed(rsi < RSI_OVERSOLD)))
         places["rise_stoch"] = ("StochRSI 0 근접", rise_after_signal(months, warmed(k <= STOCH_NEAR_ZERO)))
@@ -326,61 +326,54 @@ def rank_by_ret10(rows: list) -> list:
 
 # ── 데이터(평가하는 종목만) ────────────────────────────────────────────
 
-def fetch_ohlcv_noted(code: str, mkt: str) -> tuple:
-    """(일봉, 월봉, 데이터 경고 | None) — 월봉은 진행 중인 달 포함(호출부가 completed_months로 뺀다).
-    경고는 KR 이음새(lowpoint.price_note) — 평가 결과에 그대로 실어 화면에 표시한다(조용히 섞지 않는다)."""
+def fetch_ohlcv(code: str, mkt: str) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+    """(일봉, 월봉) — 월봉은 진행 중인 달 포함(호출부가 completed_months로 뺀다)."""
     if mkt == "UPBIT":
         import upbit
-        return upbit.fetch_candles(code, "days"), upbit.fetch_candles(code, "months"), None
-    import harness
-    note = None
+        return upbit.fetch_candles(code, "days"), upbit.fetch_candles(code, "months")
     if mkt == "KR":
-        # v5.321: KR은 정규장 기준 — 저점 스크린과 같은 함수(B안: 2025-03-04 이전 naver + 이후 yfinance)
-        frames, flags = lp.fetch_kr_regular_frames([code], "month")
-        d, note = frames.get(code), lp.price_note(flags.get(code))
+        # v5.323: KR은 naver 통합 시세(저점 스크린과 같은 단일 소스 — v5.321 정규장 B안 철회, lowpoint.CALC_BASIS 주석)
+        import naver_kr
+        d = naver_kr.fetch_history(code, days=lp.KR_DAYS["month"])
     else:
+        import harness
         d = harness._fetch_us_batch([code], period=lp.US_PERIOD["month"]).get(code)
     if d is None or d.empty:
-        return None, None, note
+        return None, None
     d = d[["Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Close"])
-    return d, monthly_ohlc(d), note
-
-
-def fetch_ohlcv(code: str, mkt: str) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
-    """(일봉, 월봉) — fetch_ohlcv_noted에서 경고만 뺀 것."""
-    return fetch_ohlcv_noted(code, mkt)[:2]
+    return d, monthly_ohlc(d)
 
 
 def evaluate(code: str, mkt: str, now: datetime) -> dict:
-    daily, monthly, note = fetch_ohlcv_noted(code, mkt)
+    daily, monthly = fetch_ohlcv(code, mkt)
     if daily is None or daily.empty:
         return {"ok": False, "error": "일봉을 받지 못했어요", "items": []}
     months = completed_months(monthly, mkt, now)
     items = long_checks(daily, months)
     # O·X·미표시 집계는 화면(lpeTally)이 자동+수동을 합쳐 한 곳에서 센다(사본 금지)
     return {"ok": True, "items": items, "manual_auto": manual_auto(months),
-            "last_date": str(daily.index[-1].date()), "close": float(daily["Close"].iloc[-1]),
-            "price_note": note}
+            "last_date": str(daily.index[-1].date()), "close": float(daily["Close"].iloc[-1])}
 
 
 def short_table(hits: list) -> list:
-    """이번 주 저점 히트(행: code·name·market) → 단기 비교 행. 평가 시점에 그 종목들만 yfinance로 조회 —
-    KR은 정규장 기준(lowpoint.fetch_kr_regular_frames, v5.321), US는 기존 그대로. 순위는 rank_by_ret10."""
+    """이번 주 저점 히트(행: code·name·market) → 단기 비교 행. KR은 naver 일봉, US는 yfinance 한 번에
+    (평가 시점에 그 종목들만 조회). 순위는 rank_by_ret10."""
+    from concurrent.futures import ThreadPoolExecutor
+    import naver_kr
     import harness
     kr = [h["code"] for h in hits if h.get("market") != "US"]
     us = [h["code"] for h in hits if h.get("market") == "US"]
     data = {}
     if us:
         data.update(harness._fetch_us_batch(us, period=lp.US_PERIOD["month"]))
-    notes = {}
     if kr:
-        frames, flags = lp.fetch_kr_regular_frames(kr, "month")
-        data.update(frames)
-        notes = {t: lp.price_note(f) for t, f in flags.items()}
+        with ThreadPoolExecutor(max_workers=lp.FETCH_CONCURRENCY) as ex:
+            for code, df in zip(kr, ex.map(lambda c: naver_kr.fetch_history(c, days=lp.KR_DAYS["month"]), kr)):
+                if df is not None and not df.empty:
+                    data[code] = df
     rows = []
     for h in hits:
         m = short_metrics(data.get(h["code"]))
         rows.append({"code": h["code"], "name": h.get("name") or h["code"],
-                     "mkt": "US" if h.get("market") == "US" else "KR", **m,
-                     "price_note": notes.get(h["code"])})
+                     "mkt": "US" if h.get("market") == "US" else "KR", **m})
     return rank_by_ret10(rows)

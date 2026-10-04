@@ -247,10 +247,6 @@ def test_upcoming_card_fully_removed():
     assert "async function runMacroCalendarNow(" in SRC or "function runMacroCalendarNow(" in SRC
 
 
-def _head_src(path):
-    return _sp.run(["git", "show", f"HEAD:{path}"], capture_output=True, text=True, cwd=ROOT).stdout
-
-
 def _fn_in(src, name):
     start = src.index(f"function {name}(")
     i = src.index("{", src.index(")", start))
@@ -265,11 +261,15 @@ def _fn_in(src, name):
                                   "renderMyTrackBoard", "saveDailyNote", "loadDailyNoteBox", "_dailyNotePastInput",
                                   "copyAllDailyNotes"])
 def test_other_cards_and_note_saving_unchanged(name):
-    """다른 카드·메모 저장 경로는 v5.321(직전 커밋)과 글자 하나 다르지 않다."""
-    head = _head_src("static/index.html")
-    if "function renderHomeCal(" in head:
-        pytest.skip("직전 커밋에 이미 달력이 있다 — 비교 기준이 아님")
-    assert _fn_in(SRC, name) == _fn_in(head, name)
+    """다른 카드·메모 저장 경로는 달력 도입 직전(v5.321 커밋 1cb1c11)과 글자 하나 다르지 않다.
+    기준 커밋을 고정한다(HEAD 비교는 달력 커밋 뒤 늘 skip이 돼 아무것도 안 지킨다). 이 함수들을 일부러 고칠 때는
+    BASE를 그 커밋으로 올리고 이유를 남길 것."""
+    BASE = "1cb1c11"
+    base = _sp.run(["git", "show", f"{BASE}:static/index.html"], capture_output=True, text=True, cwd=ROOT).stdout
+    if not base:
+        pytest.fail(f"기준 커밋 {BASE}을 읽지 못했다(얕은 클론?) — 조용히 건너뛰지 않는다")
+    assert "function renderHomeCal(" not in base
+    assert _fn_in(SRC, name) == _fn_in(base, name)
 
 
 def test_note_compact_three_lines():

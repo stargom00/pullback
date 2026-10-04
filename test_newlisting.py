@@ -254,8 +254,8 @@ def test_newlisting_uses_month_slot():
     (None, None),                                                                         # 월봉 아직
     ({"target": "2026-10-31", "status": "running", "attempts": 1}, None),                # 월봉 실행 중
     ({"target": "2026-10-31", "status": "failed", "attempts": 1}, None),                 # 월봉 재시도 남음
-    ({"target": "2026-09-30", "status": "ok", "basis": "krx_regular", "attempts": 1}, None),                     # 지난달 월봉만 끝남
-    ({"target": "2026-10-31", "status": "ok", "basis": "krx_regular", "attempts": 1}, "2026-10-31"),             # 월봉 성공 → 이어서
+    ({"target": "2026-09-30", "status": "ok", "basis": "naver_integrated+wilder_sma", "attempts": 1}, None),                     # 지난달 월봉만 끝남
+    ({"target": "2026-10-31", "status": "ok", "basis": "naver_integrated+wilder_sma", "attempts": 1}, "2026-10-31"),             # 월봉 성공 → 이어서
     ({"target": "2026-10-31", "status": "failed", "attempts": 3}, "2026-10-31"),         # 월봉 시도 소진 → 이어서
 ])
 def test_newlisting_waits_for_month(month_state, due):
@@ -264,18 +264,18 @@ def test_newlisting_waits_for_month(month_state, due):
 
 
 def test_newlisting_inherits_window_retry_and_kr_hours_block():
-    ok_month = {"month": {"target": "2026-10-31", "status": "ok", "basis": "krx_regular", "attempts": 1}}
+    ok_month = {"month": {"target": "2026-10-31", "status": "ok", "basis": "naver_integrated+wilder_sma", "attempts": 1}}
     assert app._lowpoint_due("newlisting", _k("2026-11-03 08:01"), ok_month) is None    # 48시간 창 밖
     failed = {**ok_month, "newlisting": {"target": "2026-10-31", "status": "failed", "attempts": 1,
                                          "started_at": _k("2026-11-02 08:10").isoformat()}}
     assert app._lowpoint_due("newlisting", _k("2026-11-02 08:50"), failed) is None       # 60분 안 됨
     assert app._lowpoint_due("newlisting", _k("2026-11-02 09:30"), failed) is None       # KR 장중(월요일) 차단
     assert app._lowpoint_due("newlisting", _k("2026-11-02 15:40"), failed) == "2026-10-31"
-    done = {**ok_month, "newlisting": {"target": "2026-10-31", "status": "ok", "basis": "krx_regular", "attempts": 1}}
+    done = {**ok_month, "newlisting": {"target": "2026-10-31", "status": "ok", "basis": "naver_integrated+wilder_sma", "attempts": 1}}
     assert app._lowpoint_due("newlisting", _k("2026-11-01 09:00"), done) is None
 
 
-WEEK_DONE = {"week": {"target": "2026-10-30", "status": "ok", "basis": "krx_regular", "attempts": 1}}   # 10-31(토) 주봉은 끝난 상태
+WEEK_DONE = {"week": {"target": "2026-10-30", "status": "ok", "basis": "naver_integrated+wilder_sma", "attempts": 1}}   # 10-31(토) 주봉은 끝난 상태
 
 
 @pytest.fixture
@@ -316,12 +316,12 @@ def test_runner_runs_month_then_newlisting_sequentially(runner_paths, monkeypatc
 
 def test_runner_never_overlaps(runner_paths, monkeypatch):
     monkeypatch.setattr(app, "_lowpoint_running", True)
-    (runner_paths / "state.json").write_text(json.dumps({**WEEK_DONE, "month": {"target": "2026-10-31", "status": "ok", "basis": "krx_regular", "attempts": 1}}))
+    (runner_paths / "state.json").write_text(json.dumps({**WEEK_DONE, "month": {"target": "2026-10-31", "status": "ok", "basis": "naver_integrated+wilder_sma", "attempts": 1}}))
     assert asyncio.run(app._maybe_run_lowpoint(_k("2026-11-01 08:04"), _job=lambda tf, now: 1 / 0)) is None
 
 
 def test_runner_records_data_not_ready_for_newlisting(runner_paths, monkeypatch):
-    (runner_paths / "state.json").write_text(json.dumps({**WEEK_DONE, "month": {"target": "2026-10-31", "status": "ok", "basis": "krx_regular", "attempts": 1}}))
+    (runner_paths / "state.json").write_text(json.dumps({**WEEK_DONE, "month": {"target": "2026-10-31", "status": "ok", "basis": "naver_integrated+wilder_sma", "attempts": 1}}))
 
     def nl_job(tf, now):
         import lowpoint as lp

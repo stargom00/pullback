@@ -7,8 +7,10 @@
 AND RSI[2] >= 30)"):
   A: close[1] < close[0]
   B: rsi[1] < 30 and rsi[2] >= 30
-RSI는 scanner.rsi()(Wilder, ewm alpha=1/14) 그대로. 일봉 종가를 주봉(W-FRI)/
-월봉(ME)으로 리샘플한 뒤 계산한다.
+RSI는 **고전 Wilder**(v5.323, rsi_wilder_sma — 첫 14개 변화량의 단순평균으로 시작한 뒤 Wilder 평활) — 키움·트레이딩뷰
+(ta.rsi) 표준과 같은 시딩. 5탭 스캐너의 scanner.rsi()(첫 변화량부터 ewm)와는 시작부가 다르다(이력이 짧을수록 차이가
+크고, 길면 사라진다). 일봉 종가를 주봉(W-FRI)/월봉(ME)으로 리샘플한 뒤 계산한다. KR 가격은 naver 통합 시세(애프터
+포함) — 키움 조건검색과 같은 기준(CLAUDE.md "KR 가격 기준 — naver 통합 단일 소스").
 
 0봉 = 마지막 "마감된" 봉. 진행 중인 봉(이번 주/이번 달)은 반드시 버린다 —
 주중·월중에 돌려도 결과가 바뀌지 않게. 마감 판정은 봉 구간의 달력상 마지막
@@ -47,7 +49,7 @@ for _p in (_ROOT, os.path.join(_ROOT, "scripts", "measurements")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from scanner import rsi  # noqa: E402  (Wilder RSI — 재구현 금지)
+import numpy as np  # noqa: E402
 
 OUT_DIR = os.path.join(_HERE, "out")
 # 앱(app.py `_load_lowpoint_latest()`)이 읽는 게시 파일 — Railway 볼륨(/data)이
@@ -198,12 +200,37 @@ def last_closed_label(tf: str, market: str, now: datetime) -> pd.Timestamp:
     return closed[-1]
 
 
+def rsi_wilder_sma(close: pd.Series, period: int = RSI_PERIOD) -> pd.Series:
+    """고전 Wilder RSI(v5.323, 사용자 지시 "저점·평가의 RSI를 고전 Wilder(첫 14봉 SMA 시드)로 교체"):
+    첫 평균 상승·하락 = 처음 period개 변화량의 단순평균(그 봉에 첫 값), 이후 avg = (avg×(period−1) + 이번 값)/period.
+    앞 period개 봉은 NaN. 하락 평균 0이면 100(상승도 0이면 NaN — 판정 불가). 키움·트레이딩뷰(ta.rsi = rma)와 같은 정의.
+    내부 요구 봉수: period+1(이보다 짧으면 전부 NaN)."""
+    c = close.astype(float)
+    out = np.full(len(c), np.nan)
+    if len(c) <= period:
+        return pd.Series(out, index=c.index)
+    d = np.diff(c.to_numpy())
+    g, l = np.clip(d, 0, None), np.clip(-d, 0, None)
+    ag, al = g[:period].mean(), l[:period].mean()
+
+    def val(ag, al):
+        if al == 0:
+            return 100.0 if ag > 0 else np.nan
+        return 100 - 100 / (1 + ag / al)
+    out[period] = val(ag, al)
+    for i in range(period, len(d)):
+        ag = (ag * (period - 1) + g[i]) / period
+        al = (al * (period - 1) + l[i]) / period
+        out[i + 1] = val(ag, al)
+    return pd.Series(out, index=c.index)
+
+
 def evaluate(close: pd.Series, tf: str, market: str, now: datetime) -> dict:
     """한 종목 판정. 반환 dict의 status: 'hit' | 'no' | 'short'(번인 부족)."""
     bars = drop_in_progress(resample_bars(close, tf), market, now)
     if len(bars) < max(MIN_BARS[tf], 3):
         return {"status": "short", "n_bars": len(bars)}
-    r = rsi(bars["close"], RSI_PERIOD)
+    r = rsi_wilder_sma(bars["close"], RSI_PERIOD)
     c0, c1 = float(bars["close"].iloc[-1]), float(bars["close"].iloc[-2])
     r0, r1, r2 = float(r.iloc[-1]), float(r.iloc[-2]), float(r.iloc[-3])
     hit = lowpoint_signal(c0, c1, r1, r2)
@@ -224,14 +251,12 @@ def publish_entry(results: list, tf: str, labels: dict, stamp: dict) -> dict:
                 "bar_date": r["기준봉날짜"],       # 구간 내 실제 마지막 거래일
                 "close0": r["0봉종가"], "close1": r["1봉종가"],
                 "rsi2": r["RSI[2]"], "rsi1": r["RSI[1]"], "rsi0": r["RSI[0]"],
-                "price_note": r.get("데이터경고"),   # v5.321: KR 이음새 경고(없으면 None)
             })
     excluded = {res["market"].upper(): {
         "universe": res["universe"], "fetched": res["fetched"],
         "failed": len(res["failed"]), "stale": len(res["stale"]),
         "short": len(res["short"]),
         "admin_excluded": len((res["meta"] or {}).get("admin_excluded") or {}),
-        "seam": res.get("seam_counts") or {},          # v5.321: KR 이음새 상태별 종목 수
     } for res in results}
     return {
         # 봉 구간 라벨(주봉=금요일, 월봉=말일) — 낡음 판정은 앱이 이 값으로 한다
@@ -366,6 +391,18 @@ def fetch_kr(tickers: list, tf: str, concurrency: int = FETCH_CONCURRENCY) -> tu
     return data, failed
 
 
+# ── 계산 기준(v5.323, 사용자 결정) ──────────────────────────────────────────────────────────
+# KR 가격 = naver 통합 시세(애프터마켓 포함) 단일 소스, RSI = 고전 Wilder(rsi_wilder_sma).
+# 경위: v5.321에서 인바이오젠(101140.KS) 10-02 오히트(naver 5,230 vs 정규장 4,820)를 보고 KR을 정규장(2025-03-04 이전
+# naver + 이후 yfinance, 이음새 비율 검증)으로 바꿨는데, 키움 10-02 주봉 목록과 대조하니 **일치가 6/8 → 3/9로
+# 나빠졌다**. naver 통합 + 고전 Wilder + 최소 봉 수 조건 없음이면 키움 KR 7종목이 7/7 재현됐다 — 키움 조건검색도 통합
+# 시세를 쓴다(KRX 공식 종가도 애프터 포함). 단일 소스가 이음새·yfinance 과거 일봉 오류(하루 튐·수정주가 차이)도 없다.
+# 그래서 되돌렸다. 아래 B안 코드(splice_regular·fetch_kr_regular*·price_note)는 **비활성**으로 남겨 둔다(호출 0곳 —
+# test_lowpoint_kr_basis.py가 고정) — 같은 조사를 반복하지 않도록 근거로 둔다. 상세: CLAUDE.md "KR 가격 기준" 절.
+CALC_BASIS = "naver_integrated+wilder_sma"   # 서버 실행 상태에 기록 — 바뀌면 그 주·달 결과를 창 안에서 다시 만든다
+
+
+# [비활성 — v5.321 B안, v5.323에 철회] 원래 주석:
 # v5.321(사용자 지시) — **저점 스크린·평가의 KR 가격 = KRX 정규장 종가(B안 하이브리드).**
 # naver 일봉(fetch_kr)의 종가는 정규장(15:30) 종가가 아니라 애프터마켓(통합 시세, NXT 16:00~20:00) 마지막 체결가다
 # (2026-10-04 조사: 인바이오젠 10-02 naver 5,230 vs 정규장 4,820 → 주봉 A조건이 뒤집혀 잘못 히트, 10-02 KR 표본
@@ -380,8 +417,8 @@ def fetch_kr(tickers: list, tf: str, concurrency: int = FETCH_CONCURRENCY) -> tu
 # 단다 — 조용히 섞지 않는다(사용자 지시). 남는 한계: NXT 이후 yfinance 일봉의 하루 튐은 걸러지지 않는다.
 # **나머지 KR 경로(5탭 스캐너·종가베팅·현재가·신규상장)는 naver 통합 시세 그대로다** — 그쪽 측정·백테스트가
 # 그 데이터 정의(애프터 포함, KR_CLOSE_CONFIRMED_HM 20:10 이후 확정)로 이뤄져 있어 바꾸면 근거가 깨진다.
-# 두 기준이 공존하는 이유는 CLAUDE.md "KR 가격 기준 두 가지" 절.
-KR_PRICE_BASIS = "krx_regular"
+# (v5.321 당시 기록 — v5.323에 철회. 현재 기준은 CLAUDE.md "KR 가격 기준" 절.)
+
 NXT_START = pd.Timestamp("2025-03-04")   # 넥스트레이드(NXT) 개장일 — 이날부터 naver 일봉 종가가 통합 시세
 SEAM_TOL = 0.005                          # 이음새 비율 허용 ±0.5%(사용자 지시 값)
 SEAM_DAYS = 20                            # 경계 직전 공통 거래일 수 — 비율 중앙값을 재는 창(AI 판단 어림값, 재검토 필요)
@@ -508,8 +545,7 @@ def fetch_us(tickers: list, tf: str, batch: int = 100) -> tuple[dict, list, dict
 # ── 실행 ───────────────────────────────────────────────────────────────
 
 _MKT_ORDER = {"KOSPI": 0, "KOSDAQ": 1, "US": 2}
-COLS = ["시장", "코드", "종목명", "기준봉날짜", "0봉종가", "1봉종가", "RSI[2]", "RSI[1]", "RSI[0]",
-        "데이터경고"]   # v5.321: KR 이음새 경고(price_note) — CSV에도 남긴다
+COLS = ["시장", "코드", "종목명", "기준봉날짜", "0봉종가", "1봉종가", "RSI[2]", "RSI[1]", "RSI[0]"]
 
 
 def clock_of(market: str) -> str:
@@ -526,10 +562,9 @@ def screen_market(market: str, tf: str, now: datetime, refresh_universe: bool = 
     t0 = time.time()
     meta = {}
     opt_dropped = {}
-    price_flags = {}   # KR만: 이음새 검증 결과(splice_regular info) — 경고는 결과 행에 붙는다
     if market in KR_BOARDS:
         uni, meta = kr_universe(market)
-        data, failed, price_flags = fetch_kr_regular(list(uni), tf)   # v5.321: 정규장 종가(B안 — naver 이전 + yfinance 이후)
+        data, failed = fetch_kr(list(uni), tf)   # v5.323: naver 통합 시세 단일 소스로 복귀(v5.321 정규장 B안 철회 — CALC_BASIS 주석)
     else:
         # v5.309: 유니버스·일봉을 받기 **전에** 데이터 도착부터 확인(위 docstring)
         meta["data_ready"] = check_us_data_ready(tf, last_closed_label(tf, "us", now),
@@ -565,13 +600,10 @@ def screen_market(market: str, tf: str, now: datetime, refresh_universe: bool = 
                          "기준봉날짜": str(res["bar_date"].date()),
                          "0봉종가": round(res["c0"], 2), "1봉종가": round(res["c1"], 2),
                          "RSI[2]": round(res["r2"], 2), "RSI[1]": round(res["r1"], 2),
-                         "RSI[0]": round(res["r0"], 2),
-                         "데이터경고": price_note(price_flags.get(t))})
-    seam = Counter((v or {}).get("status") for v in price_flags.values())
+                         "RSI[0]": round(res["r0"], 2)})
     return {"market": market, "universe": len(uni), "fetched": len(data), "failed": sorted(failed),
             "session": session, "stale": stale, "short": short, "rows": rows, "meta": meta,
-            "opt_dropped": opt_dropped, "elapsed": time.time() - t0, "names": uni,
-            "price_flags": price_flags, "seam_counts": dict(seam)}
+            "opt_dropped": opt_dropped, "elapsed": time.time() - t0, "names": uni}
 
 
 ALL_MARKETS = ["kospi", "kosdaq", "us"]
@@ -613,11 +645,6 @@ def exclusion_detail_lines(res: dict, tf: str) -> list:
     elif "excluded_by_reason" in meta:                  # US(Nasdaq Trader 상장목록)
         out.append(f"[{m}] 상장목록 제외(사유별): {meta['excluded_by_reason']} "
                    f"— 원본 {meta['total']}행 → 보통주 {meta['kept']}")
-    flagged = {t: price_note(v) for t, v in (res.get("price_flags") or {}).items() if price_note(v)}
-    if res.get("price_flags"):                           # KR(v5.321 이음새 검증) — 0건이어도 남긴다
-        out.append(f"[{m}] 이음새(2025-03-04) 상태: {res.get('seam_counts')} — 경고 {len(flagged)}종목"
-                   + (": " + ", ".join(f"{t}({res['names'].get(t, '')}) {n}" for t, n in sorted(flagged.items())[:40])
-                      if flagged else ""))
     if res.get("opt_dropped"):
         out.append(f"[{m}] 옵션 필터 제외 {len(res['opt_dropped'])}종목: "
                    + ", ".join(f"{t}({v})" for t, v in sorted(res["opt_dropped"].items())[:20]))

@@ -103,17 +103,17 @@ def test_publish_entry_shape_from_screen_rows():
     res = {"market": "kospi", "universe": 800, "fetched": 790, "failed": ["1.KS"],
            "stale": {"2.KS": "2026-01-02"}, "short": {"3.KS": 10}, "meta": {},
            "rows": [dict(zip(lp.COLS, ["KOSPI", "005930.KS", "삼성전자", "2026-09-25",
-                                       71200, 70800, 31.2, 28.4, 29.9, None]))]}
+                                       71200, 70800, 31.2, 28.4, 29.9]))]}
     import pandas as pd
     entry = lp.publish_entry([res], "week", {"kospi": pd.Timestamp("2026-09-25")},
                              {"run_at_kst": "x"})
     assert entry["bar_date"] == "2026-09-25"
     assert entry["rows"] == [{"market": "KOSPI", "code": "005930.KS", "name": "삼성전자",
                               "bar_date": "2026-09-25", "close0": 71200, "close1": 70800,
-                              "rsi2": 31.2, "rsi1": 28.4, "rsi0": 29.9, "price_note": None}]
+                              "rsi2": 31.2, "rsi1": 28.4, "rsi0": 29.9}]
     assert entry["excluded_counts"]["KOSPI"] == {"universe": 800, "fetched": 790,
                                                  "failed": 1, "stale": 1, "short": 1,
-                                                 "admin_excluded": 0, "seam": {}}
+                                                 "admin_excluded": 0}
 
 
 # ── ② 서버 낡음 판정 ─────────────────────────────────────────────────

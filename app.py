@@ -5,6 +5,24 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.323 [저점 KR 가격 기준 복귀 + RSI 고전 Wilder — 사용자 결정 "v5.321의 가격 기준 교체를 되돌려 저점·평가도 naver
+    통합 단일 소스로 복귀 … 저점·평가의 RSI를 고전 Wilder(첫 14봉 SMA 시드)로 교체"] 근거: 키움 10-02 주봉 대조 —
+    v5.321 정규장 기준은 KR 일치 6/8 → 3/9로 나빠졌고, naver 통합 + 고전 Wilder + 최소 봉 수 없음이면 키움 KR 7/7 재현
+    (키움도 통합 시세, KRX 공식 종가도 애프터 포함, 단일 소스라 이음새·yfinance 과거 일봉 오류 없음). ① 저점 스크린
+    (주·월, 서버 자동 실행 포함)·평가 페이지 KR = naver_kr.fetch_history로 복귀. B안(splice_regular·fetch_kr_regular*·
+    price_note)은 비활성으로 남김 — 호출 0곳을 테스트로 고정, 결과 행의 데이터경고·seam 집계·CLI 이음새 줄 제거(⚠ 화면
+    코드는 값이 안 와 표시 안 됨). ② lowpoint.rsi_wilder_sma(첫 14개 변화량 SMA 시드 → Wilder 평활, StockCharts 표와
+    0.1 이내) — 저점 판정·평가 월봉 RSI·StochRSI가 이 함수. 5탭 scanner.rsi는 그대로(측정 기반). ③ 서버 실행 상태
+    basis = LOWPOINT_CALC_BASIS "naver_integrated+wilder_sma"(옛 이름 LOWPOINT_KR_PRICE_BASIS는 가격만 뜻해 개명) — 기준이
+    다른 결과는 따라잡기 창 안에서 다시 돈다: 10-02 주봉은 10-05 09:00 KST 전 배포면 재생성, 09-30 월봉은 창(10-03 08:00)이
+    지나 다음 예약(11-01) 때 새 기준. ④ 유지: US 티커 표기, 최소 52주, 평가 36개월 가드. [재실행 — 로컬, 같은 코드]
+    10-02 주봉 KR 7: 화승엔터프라이즈·신일전자·제로투세븐·한진·꿈비·하이딥·인바이오젠 — 키움 KR 7 중 6 일치(삼진식품
+    0013V0은 주봉 41개라 최소 52주 가드로 제외 — 설명 가능한 잔차). 인바이오젠은 우리만(고전 Wilder RSI[2] 30.25 /
+    RSI[1] 29.81 / RSI[0] 34.84, 0봉 5,230 > 1봉 4,910 — B1이 30 아래라 잔차 유지; 키움 검색 시각 가설은 기각, 키움 종가
+    산출 차이 또는 B1 경계로 추정). 오아는 고전 Wilder로 빠짐(RSI[2] 30.56→28.74). US는 RSI 교체로 판정 변화 0(키움 11 중
+    8 일치 그대로 — JBGS 30.04·ARAY 30.30 경계, ELF 비과매도). 09-30 월봉 KR 4: 사조동아원·NEW·아이퀘스트·
+    제이케이시냅스(옛 RSI: 사조동아원·NEW·디모아) — 키움 확인 3종목(제이케이시냅스 O·아이퀘스트 O·디모아 X) 3/3 일치.
+    테스트: test_lowpoint_rsi_wilder.py 신규, test_lowpoint_kr_basis.py 복귀 기준으로 갱신.
 v5.322 [홈 달력 — 사용자 지시 "홈 오른쪽 열 최상단에 월 달력 추가. 날짜별 주요 일정 표시 + 사용자가 직접 일정
     등록. 기존 '다가오는 일정' 카드는 달력에 흡수하고 제거."] ① 달력 카드: 월 그리드(일요일 시작, 이번 달 기본, ◀▶
     이동, "오늘"), 오늘 강조, 일정 있는 날 점(시스템 회색·내 일정 강조색). ② 시스템 일정 = 다가오는 일정 카드가 쓰던
@@ -8741,7 +8759,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.322"
+VERSION = "v5.323"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -17907,10 +17925,11 @@ LOWPOINT_CATCHUP_HOURS = 48
 # 슬롯을 그대로 쓰고(LOWPOINT_SLOT_TF), 월봉이 그 기준봉에서 끝난 뒤(성공 또는 시도 소진)에만
 # due가 된다(_lowpoint_due). 실행 상태는 같은 lowpoint_run_state.json의 "newlisting" 칸.
 LOWPOINT_JOBS = ("week", "month", "newlisting")
-# v5.321(사용자 지시): 저점 스크린 KR 가격 = KRX 정규장 종가(scripts/screens/lowpoint.py KR_PRICE_BASIS와 같은 값
-# — 테스트로 고정). 실행 기록에 이 값을 남기고, 다른 기준으로 만든 결과(예전 naver 통합 시세)는 따라잡기 창 안이면
-# 다시 돌린다 — 운영에 손으로 쓰지 않고 배포만으로 /data 결과가 새 기준으로 바뀌게(창이 지났으면 다음 예약 때).
-LOWPOINT_KR_PRICE_BASIS = "krx_regular"
+# 저점 스크린 계산 기준(scripts/screens/lowpoint.py CALC_BASIS와 같은 값 — 테스트로 고정). 실행 기록에 이 값을 남기고,
+# 다른 기준으로 만든 결과는 따라잡기 창 안이면 다시 돌린다 — 운영에 손으로 쓰지 않고 배포만으로 /data 결과가 새 기준으로
+# 바뀌게(창이 지났으면 다음 예약 때). v5.321 "krx_regular"(KR 정규장) → v5.323 naver 통합 + 고전 Wilder RSI로 복귀·교체.
+# 가격 기준만 담던 옛 이름(v5.321 KR_PRICE_BASIS)을 계산 기준 전체(가격+RSI)를 뜻하는 이름으로 바꿨다.
+LOWPOINT_CALC_BASIS = "naver_integrated+wilder_sma"
 LOWPOINT_SLOT_TF = {"week": "week", "month": "month", "newlisting": "month"}
 NEWLISTING_DATA_PATH = _resolve_persistent_path("newlisting_latest.json")
 NEWLISTING_LATEST_PATH = os.path.join(os.path.dirname(__file__), "data", "newlisting_latest.json")
@@ -17992,7 +18011,7 @@ def _lowpoint_due(tf: str, now: "datetime", state: dict) -> "str | None":
         return target
     status = st.get("status")
     if status == "ok":
-        if tf in ("week", "month") and st.get("basis") != LOWPOINT_KR_PRICE_BASIS:
+        if tf in ("week", "month") and st.get("basis") != LOWPOINT_CALC_BASIS:
             return target   # 가격 기준이 바뀐 뒤의 첫 실행(창 안일 때만 — 위에서 이미 걸렀다)
         return None
     try:
@@ -18085,7 +18104,7 @@ async def _maybe_run_lowpoint(now: "datetime | None" = None, *, _job=None) -> "d
         attempts = (int(prev.get("attempts") or 0) + 1) if prev.get("target") == target else 1
         rec = {"target": target, "status": "running", "attempts": attempts,
                "started_at": now.isoformat(), "last_ok_at": prev.get("last_ok_at"),
-               "basis": LOWPOINT_KR_PRICE_BASIS if tf in ("week", "month") else None}
+               "basis": LOWPOINT_CALC_BASIS if tf in ("week", "month") else None}
         state[tf] = rec
         _lowpoint_save_state(state)
         _lowpoint_running = True

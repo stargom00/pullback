@@ -201,8 +201,8 @@ def test_no_new_wait_constants_introduced():
         # v5.314 신규상장을 같은 러너에 얹으며 생긴 **작업 목록·슬롯 매핑** — 시간·임계값이 아니다
         # (신규상장은 월봉 슬롯·재시도 상수를 그대로 쓴다)
         "LOWPOINT_JOBS", "LOWPOINT_SLOT_TF",
-        # v5.321 가격 기준 표식(시간·임계값 아님) — 기준이 바뀐 결과를 창 안에서 다시 돌리는 데 쓴다
-        "LOWPOINT_KR_PRICE_BASIS",
+        # v5.321 가격 기준 → v5.323 계산 기준(가격+RSI) 표식(시간·임계값 아님) — 기준이 바뀐 결과를 창 안에서 다시 돌리는 데 쓴다
+        "LOWPOINT_CALC_BASIS",
     }, f"저점 상수 집합이 바뀌었다: {sorted(names)}"
     assert src.count("LOWPOINT_SLOT_TF = {") == 1 and \
         'LOWPOINT_SLOT_TF = {"week": "week", "month": "month", "newlisting": "month"}' in src
