@@ -1169,6 +1169,27 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .ev-row{display:flex;gap:14px;font-size:13px}
 .ev-row .d{flex:0 0 72px;color:var(--n-muted)}
 .home-note{padding:16px 18px}
+/* v5.322 홈 달력 — 오른쪽 열 폭 안에서 한 달(최대 6주)이 다 보이게 컴팩트 */
+.home-cal{padding:16px 18px;gap:10px}
+.hc-head{display:flex;align-items:center;gap:6px}
+.hc-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px}
+.hc-dow{font-size:11px;color:var(--n-muted);text-align:center;padding:2px 0}
+.hc-dow.sun{color:var(--c-red-fg1)}   /* 일요일 빨강·토요일 파랑(달력 관례 — 등락색 --px-up은 이 앱에서 초록이라 안 씀) */
+.hc-dow.sat{color:var(--c-blue-fg1)}
+.hc-day{position:relative;min-height:34px;padding:3px 0 8px;border:0;border-radius:6px;background:none;color:var(--n-text);
+  font:inherit;font-size:12px;font-family:var(--n-num);cursor:pointer;display:flex;flex-direction:column;align-items:center}
+.hc-day:hover{background:var(--n-chip)}
+.hc-day.out{color:var(--n-muted);opacity:max(.55,var(--fade-floor))}
+.hc-day.today>span:first-child{background:var(--n-accent);color:var(--n-card);border-radius:50%;width:20px;height:20px;line-height:20px;font-weight:600}
+.hc-day.sel{background:var(--n-chip);box-shadow:inset 0 0 0 1px var(--n-line2)}
+.hc-dots{position:absolute;bottom:3px;display:flex;gap:3px}
+.hc-dot{width:5px;height:5px;border-radius:50%;display:block}
+.hc-dot.sys{background:var(--n-muted)}
+.hc-dot.me{background:var(--n-accent)}
+.hc-daylist{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--n-line);padding-top:8px}
+.hc-daylist .ev-row{gap:8px;align-items:baseline}
+.hc-form{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--n-line);padding-top:8px}
+.hc-form input{min-height:32px;background:var(--n-card);color:var(--n-text);border:1px solid var(--n-line2);border-radius:6px;padding:0 8px;font:inherit;font-size:13px}
 @media (max-width:899px){
   .jrnl-wrap.home{padding:16px 16px 32px}
   .home-tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
@@ -1345,7 +1366,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.321</span>
+      <span class="ver mono" id="verBadge">v5.322</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -1545,9 +1566,15 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
       <div id="calendarDocTop">불러오는 중…</div>
     </div>
     <aside class="home-col home-side">
-      <!-- 오른쪽: 종가베팅 실전 N/30 → 섹터 가속 → 다가오는 일정 (v5.316: 저점종목은 왼쪽 위로) -->
-      <div id="calendarDocSide"></div>
+      <!-- 오른쪽: 달력 → 메모 → 종가베팅 실전 N/30 → 섹터 가속 (v5.322: 다가오는 일정 카드는 달력에 흡수).
+           달력의 일정 추가·수정 폼(#homeCalForm)은 renderCalendar 밖 — 데이터 재렌더가 입력을 지우지 않게
+           (v5.205 메모·검색창과 같은 규칙). 재렌더는 #homeCalMain(머리·그리드·그날 목록)만. -->
+      <section class="n-card side-card home-cal" id="homeCalBox" aria-label="달력">
+        <div id="homeCalMain"></div>
+        <div id="homeCalForm"></div>
+      </section>
       <div id="dailyNoteBox"></div>
+      <div id="calendarDocSide"></div>
     </aside>
   </div>
 </div>
@@ -5132,7 +5159,8 @@ function _escapeHtml(s) {
 // (scrollHeight 기준), 그 이상은 스크롤. resize:vertical은 그대로 둬서
 // 수동으로도 늘리고 줄일 수 있게 — 다음 입력이 오면 다시 scrollHeight
 // 기준으로 재계산된다(간단함 우선, 수동 크기 "기억"은 안 함).
-const DAILY_NOTE_MAX_ROWS = 15;
+// v5.322(사용자 지시 "메모 카드를 달력 바로 아래로 … 기본 높이를 3줄 정도로 컴팩트하게(내용 많으면 스크롤)"): 15 → 3.
+const DAILY_NOTE_MAX_ROWS = 3;
 function _dailyNoteAutoGrow(el) {
   const cs = getComputedStyle(el);
   const lineHeight = parseFloat(cs.lineHeight) || 19.5;
@@ -5141,6 +5169,7 @@ function _dailyNoteAutoGrow(el) {
   const maxHeight = lineHeight * DAILY_NOTE_MAX_ROWS + paddingV;
   el.style.height = 'auto';
   const needed = el.scrollHeight;
+  if (!needed) { el.style.height = ''; return; }   // 화면에 안 보이는 동안(배치 전)엔 rows 기본 높이로 둔다
   el.style.height = Math.min(needed, maxHeight) + 'px';
   el.style.overflowY = needed > maxHeight ? 'auto' : 'hidden';
 }
@@ -5229,18 +5258,7 @@ async function copyAllDailyNotes() {
 // v5.229: "지난 메모" 토글은 이 오늘-메모 펼침과 별개로 항상 보이는
 // 위치로 옮겨졌다(toggleDailyNotePast 참고) — 여기 주석은 오늘 메모
 // 펼침 자체의 이유만 남김.
-let _dailyNoteExpanded = false;
-function toggleDailyNoteExpanded() {
-  _dailyNoteExpanded = !_dailyNoteExpanded;
-  const preview = document.getElementById('dailyNotePreview');
-  const full = document.getElementById('dailyNoteFull');
-  if (preview) preview.style.display = _dailyNoteExpanded ? 'none' : '';
-  if (full) full.style.display = _dailyNoteExpanded ? '' : 'none';
-  if (_dailyNoteExpanded) {
-    const ta = document.getElementById('dailyNoteText');
-    if (ta) { _dailyNoteAutoGrow(ta); ta.focus(); }
-  }
-}
+// v5.322: 접힘(첫 줄 미리보기 → 클릭 펼침)을 없애고 3줄 높이 textarea를 늘 보여준다 — 저장 동작·데이터는 그대로.
 function renderDailyNoteBox(d) {
   const box = document.getElementById('dailyNoteBox');
   if (!box) return;
@@ -5252,18 +5270,16 @@ function renderDailyNoteBox(d) {
     ? `<div style="cursor:pointer;font-size:12px;color:var(--muted);margin-top:6px" onclick="toggleDailyNotePast()"><span id="dailyNotePastCaret">▸</span> 지난 메모 (${history.length})</div>
        <div id="dailyNotePastBody" style="display:none;margin-top:4px">${history.map(_dailyNotePastRowHtml).join('')}</div>`
     : '';
-  const previewLine = (d.today_note || '').split('\n')[0].trim().slice(0, 60) || '오늘 메모 쓰기';
-  _dailyNoteExpanded = false;   // 탭 진입마다(=이 함수 호출마다) 접힘으로 시작
   _dailyNotePastOpen = false;
-  // v5.294(사용자 지시): 홈 오른쪽 맨 아래 "오늘 메모" 카드 — 동작(접힘·자동저장·
-  // 지난 메모 편집·전체 복사)은 그대로, 모양과 이모지만 바뀐다.
+  // v5.294(사용자 지시): 홈 오른쪽 "오늘 메모" 카드 — 동작(자동저장·지난 메모 편집·전체 복사)은 그대로.
+  // v5.322: 위치는 달력 바로 아래, 접힘 없이 3줄 높이(넘치면 스크롤) — 저장 경로(saveDailyNote)·데이터 불변.
   box.innerHTML = `<section class="n-card home-note" aria-label="오늘 메모">
     <div style="display:flex;align-items:center;gap:8px">
-      <div id="dailyNotePreview" role="button" tabindex="0" onclick="toggleDailyNoteExpanded()" onkeydown="if(event.key==='Enter'){toggleDailyNoteExpanded()}" style="flex:1;min-width:0;cursor:pointer;font-size:13px;color:var(--n-muted);min-height:36px;display:flex;align-items:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_escapeHtml(previewLine)}</div>
+      <span class="n-h" style="flex:1;font-size:14px">메모</span>
       <button type="button" class="n-btn sm" onclick="copyAllDailyNotes()" title="오늘+지난 메모 전체를 텍스트로 복사">전체 복사</button>
     </div>
-    <div id="dailyNoteFull" style="display:none;margin-top:6px">
-      <textarea id="dailyNoteText" rows="5" placeholder="오늘의 메모 — 자유롭게" style="width:100%;font-size:13px;line-height:1.5;padding:8px;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:8px;resize:vertical;box-sizing:border-box;overflow-y:hidden">${_escapeHtml(d.today_note)}</textarea>
+    <div id="dailyNoteFull" style="margin-top:6px">
+      <textarea id="dailyNoteText" rows="3" placeholder="오늘의 메모 — 자유롭게" style="width:100%;font-size:13px;line-height:1.5;padding:8px;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:8px;resize:vertical;box-sizing:border-box;overflow-y:hidden">${_escapeHtml(d.today_note)}</textarea>
       <div id="dailyNoteStatus" style="font-size:11px;margin-top:2px;height:14px"></div>
     </div>
     ${pastToggleHtml}
@@ -5279,8 +5295,6 @@ function renderDailyNoteBox(d) {
     if (status) status.textContent = '';
     _dailyNoteData.today_note = e.target.value;   // [3]: 복사 버튼이 저장 완료 전에도 최신 입력을 반영하게
     _dailyNoteSaveTimer = setTimeout(() => saveDailyNote(e.target.value), 1000);
-    const preview = document.getElementById('dailyNotePreview');
-    if (preview) preview.textContent = (e.target.value || '').split('\n')[0].trim().slice(0, 60) || '오늘 메모 쓰기';
   });
 }
 
@@ -5489,6 +5503,7 @@ async function calRunDiag(ticker) {
 
 async function onEnterCalendarTab() {
   loadDailyNoteBox();   // 캘린더 본문과 독립 — 실패해도 본문 로드는 계속
+  loadUserEvents();     // v5.322: 달력의 내 일정 — 독립 로드(본문 실패와 무관)
   loadCalSearchBox();   // v5.224: 검색창도 dailyNoteBox와 같은 독립 로드
   loadReignitionPullbackStatus();   // v5.227: 📌 내 추적 보드의 🔥 재점화 노출용, 독립 로드
   const doc = document.getElementById('calendarDocTop');
@@ -5868,40 +5883,188 @@ function renderSectorAccelCard(sf) {
   </section>`;
 }
 
-// 오른쪽 4: 다가오는 일정 3개 + "D+14 전체" 펼침. 일정 데이터(매크로·휴장·실적)는
-// 예전 D+14 목록과 같은 /api/calendar 필드를 같은 방식으로 날짜별로 묶는다.
-let _eventsExpanded = false;
-function toggleEventsExpanded() {
-  _eventsExpanded = !_eventsExpanded;
-  if (_calendarData) renderCalendar(_calendarData);
+// ── v5.322(사용자 지시): 홈 달력 — "홈 오른쪽 열 최상단에 월 달력 추가. 날짜별 주요 일정 표시 + 사용자가 직접
+// 일정 등록. 기존 '다가오는 일정' 카드는 달력에 흡수하고 제거." 시스템 일정은 다가오는 일정 카드가 쓰던 /api/calendar
+// 필드(macro_events·holidays·earnings — 서버 창은 오늘~D+14 그대로)를 같은 방식으로 날짜별로 묶는다(calSystemEvents).
+// 내 일정은 /api/user-events(레코드 단위 rev — 저점 매매 기록과 같은 저장 규칙). 판정·계산은 순수 함수(node 테스트).
+const CAL_DOW = ['일', '월', '화', '수', '목', '금', '토'];
+function calSystemEvents(data) {
+  const out = [];
+  const d = data || {};
+  (d.macro_events || []).forEach(e => out.push({ date: e.date, kind: 'sys',
+    html: `${e.country === 'KR' ? '한국' : '미국'} · ${_escapeHtml(e.event)}${e.importance === 'high' ? ' <span class="chip accent" style="font-size:11px;padding:1px 6px">High</span>' : ''}` }));
+  (d.holidays || []).forEach(h => out.push({ date: h.date, kind: 'sys', html: `${h.market === 'KR' ? '한국' : '미국'} 휴장` }));
+  (d.earnings || []).forEach(e => out.push({ date: e.date, kind: 'sys', html: `${_escapeHtml(e.ticker)} 실적 <b class="num">D-${e.d_minus}</b>` }));
+  return out;
 }
-function renderUpcomingCard(data) {
-  const byDate = {};
-  const add = (date, html) => { (byDate[date] = byDate[date] || []).push(html); };
-  (data.macro_events || []).forEach(e => add(e.date,
-    `${e.country === 'KR' ? '한국' : '미국'} · ${_escapeHtml(e.event)}${e.importance === 'high' ? ' <span class="chip accent" style="font-size:11px;padding:1px 6px">High</span>' : ''}`));
-  (data.holidays || []).forEach(h => add(h.date, `${h.market === 'KR' ? '한국' : '미국'} 휴장`));
-  (data.earnings || []).forEach(e => add(e.date, `${_escapeHtml(e.ticker)} 실적 <b class="num">D-${e.d_minus}</b>`));
-  const dow = ['일', '월', '화', '수', '목', '금', '토'];
-  const dates = Object.keys(byDate).sort();
-  const lab = d => `${d.slice(5)} ${dow[new Date(d + 'T00:00:00+09:00').getDay()]}`;
-  const flat = [];
-  for (const d of dates) for (const h of byDate[d]) flat.push({ d, h });
-  const rowsHtml = (items) => items.map(({ d, h }) =>
-    `<div class="ev-row"><span class="num d"${d === data.today ? ' style="color:var(--n-text);font-weight:600"' : ''}>${d === data.today ? '오늘' : lab(d)}</span><span style="min-width:0">${h}</span></div>`).join('');
-  const peek = flat.slice(0, 3);
+// 날짜 → {sys:[…], user:[…]} — 같은 날 두 소스가 공존한다. 내 일정은 시간 있는 것 먼저(시각순), 그다음 시간 없음.
+function calEventsByDate(sys, user) {
+  const by = {};
+  const slot = d => (by[d] = by[d] || { sys: [], user: [] });
+  (sys || []).forEach(e => { if (e && e.date) slot(e.date).sys.push(e); });
+  (user || []).forEach(e => { if (e && e.date) slot(e.date).user.push(e); });
+  for (const k of Object.keys(by)) by[k].user.sort((a, b) => (a.time ? 0 : 1) - (b.time ? 0 : 1) || String(a.time || '').localeCompare(String(b.time || '')) || String(a.title).localeCompare(String(b.title)));
+  return by;
+}
+// 'YYYY-MM' + delta개월
+function calShiftMonth(ym, delta) {
+  const [y, m] = ym.split('-').map(Number);
+  const idx = y * 12 + (m - 1) + delta;
+  return `${Math.floor(idx / 12)}-${String(idx % 12 + 1).padStart(2, '0')}`;
+}
+// 월 그리드: 일요일 시작 주 단위 — [[{date, day, inMonth, isToday}, ×7], …]. 날짜 계산은 UTC 자정(시간대 무관).
+function calMonthGrid(ym, today) {
+  const [y, m] = ym.split('-').map(Number);
+  const first = new Date(Date.UTC(y, m - 1, 1));
+  const start = new Date(first.getTime() - first.getUTCDay() * 86400000);
+  const last = new Date(Date.UTC(y, m, 0));
+  const weeks = [];
+  let cur = start;
+  do {
+    const week = [];
+    for (let i = 0; i < 7; i++) {
+      const iso = cur.toISOString().slice(0, 10);
+      week.push({ date: iso, day: cur.getUTCDate(), inMonth: cur.getUTCMonth() === m - 1, isToday: iso === today });
+      cur = new Date(cur.getTime() + 86400000);
+    }
+    weeks.push(week);
+  } while (cur <= last);
+  return weeks;
+}
+// 일정 폼 → 레코드(검증 포함). rec가 있으면 수정(id·rev 유지), 없으면 새 id. 잘못된 값은 Error(메시지 그대로 표시).
+function calApplyEventEdit(rec, fields, newId) {
+  const title = String(fields.title || '').replace(/\s*[\r\n]+\s*/g, ' ').trim();
+  if (!title) throw new Error('제목을 입력하세요');
+  if (title.length > 100) throw new Error('제목은 100자 이하');
+  const time = String(fields.time || '').trim();
+  if (time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error('시간은 HH:MM(KST) 또는 비움');
+  const date = String(fields.date || (rec && rec.date) || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('날짜가 없어요');
+  const out = { ...(rec || { id: newId }), date, title, time: time || null };
+  return out;
+}
+const _cal = { ym: null, sel: null, user: [], error: null, editId: null, busy: false };
+function _calToday() { return (_calendarData && _calendarData.today) || kstStr(new Date(), 10); }
+async function loadUserEvents() {
+  try { const d = await apiJson('/api/user-events'); _cal.user = d.events || []; _cal.error = null; }
+  catch (e) { _cal.error = e; }
+  renderHomeCal();
+}
+async function _calPut(rec, baseRev) {
+  const res = await fetch('/api/user-events/' + encodeURIComponent(rec.id), {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ record: rec, base_rev: baseRev == null ? null : baseRev }) });
+  const d = await apiParse(res, { allow: [409, 400] });
+  if (res.status === 409) {
+    await loadUserEvents();
+    throw new Error('다른 곳에서 먼저 바뀐 일정이라 저장하지 않았어요 — 최신으로 다시 불렀어요');
+  }
+  if (res.status === 400) throw new Error((d && d.error) || '저장할 수 없는 값이에요');
+  return d.record;
+}
+function calMove(delta) {
+  _cal.ym = calShiftMonth(_cal.ym || _calToday().slice(0, 7), delta);
+  renderHomeCal();
+}
+function calGoToday() { _cal.ym = _calToday().slice(0, 7); _cal.sel = _calToday(); _cal.editId = null; renderHomeCal(); renderHomeCalForm(); }
+function calSelect(date) {
+  _cal.sel = _cal.sel === date ? null : date;
+  _cal.editId = null;
+  renderHomeCal(); renderHomeCalForm();
+}
+function calStartEdit(id) { _cal.editId = id; renderHomeCalForm(); }
+function calCancelEdit() { _cal.editId = null; renderHomeCalForm(); }
+async function calSave(form) {
+  if (_cal.busy) return;
+  const f = new FormData(form);
+  const rec = _cal.editId && _cal.editId !== 'new' ? _cal.user.find(r => r.id === _cal.editId) : null;
+  _cal.busy = true;
+  try {
+    const out = calApplyEventEdit(rec, { title: f.get('title'), time: f.get('time'), date: rec ? rec.date : _cal.sel },
+                                  'ue_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7));
+    await _calPut(out, rec ? rec.rev : null);
+    _cal.editId = null;
+    await loadUserEvents();
+    renderHomeCalForm();
+  } catch (e) { alert('일정 저장 실패 — ' + e.message); }
+  finally { _cal.busy = false; }
+}
+async function calDelete(id) {
+  const rec = _cal.user.find(r => r.id === id);
+  if (!rec || _cal.busy) return;
+  if (!confirm(`'${rec.title}' 일정을 삭제할까요?`)) return;
+  _cal.busy = true;
+  try {
+    await apiJson('/api/user-events/' + encodeURIComponent(id), { method: 'DELETE' });
+    if (_cal.editId === id) _cal.editId = null;
+    await loadUserEvents();
+    renderHomeCalForm();
+  } catch (e) { alert('일정 삭제 실패 — ' + e.message); }
+  finally { _cal.busy = false; }
+}
+function renderHomeCal() {
+  const box = document.getElementById('homeCalMain');
+  if (!box) return;
+  const today = _calToday();
+  if (!_cal.ym) _cal.ym = today.slice(0, 7);
+  const data = _calendarData || {};
+  const by = calEventsByDate(calSystemEvents(data), _cal.user);
+  const [y, m] = _cal.ym.split('-').map(Number);
+  const head = CAL_DOW.map((w, i) => `<div class="hc-dow${i === 0 ? ' sun' : i === 6 ? ' sat' : ''}">${w}</div>`).join('');
+  const cells = calMonthGrid(_cal.ym, today).flat().map(c => {
+    const ev = by[c.date];
+    const dots = ev ? `<span class="hc-dots">${ev.sys.length ? '<i class="hc-dot sys"></i>' : ''}${ev.user.length ? '<i class="hc-dot me"></i>' : ''}</span>` : '';
+    const cls = ['hc-day', c.inMonth ? '' : 'out', c.isToday ? 'today' : '', c.date === _cal.sel ? 'sel' : ''].filter(Boolean).join(' ');
+    return `<button type="button" class="${cls}" onclick="calSelect('${c.date}')" aria-label="${c.date}${ev ? ` 일정 ${ev.sys.length + ev.user.length}건` : ''}"${c.isToday ? ' aria-current="date"' : ''}><span>${c.day}</span>${dots}</button>`;
+  }).join('');
+  let dayHtml = '';
+  if (_cal.sel) {
+    const ev = by[_cal.sel] || { sys: [], user: [] };
+    const dw = CAL_DOW[new Date(_cal.sel + 'T00:00:00Z').getUTCDay()];
+    const sysRows = ev.sys.map(e => `<div class="ev-row"><span class="chip">시스템</span><span style="min-width:0">${e.html}</span></div>`).join('');
+    const userRows = ev.user.map(e => `<div class="ev-row"><span class="chip accent">내 일정</span><span style="min-width:0;flex:1">${e.time ? `<b class="num">${e.time} KST</b> ` : ''}${_escapeHtml(e.title)}</span>
+        <span style="display:flex;gap:4px"><button type="button" class="n-link" onclick="calStartEdit('${e.id}')">수정</button><button type="button" class="n-link" onclick="calDelete('${e.id}')">삭제</button></span></div>`).join('');
+    const inWindow = _cal.sel >= today && data.today;
+    dayHtml = `<div class="hc-daylist">
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="n-sub" style="font-size:12px">${_cal.sel} (${dw}) · 시각은 KST</span>
+        <button type="button" class="n-link" onclick="calStartEdit('new')">일정 추가</button></div>
+      ${sysRows}${userRows}${!sysRows && !userRows ? '<span class="n-sub" style="font-size:12px">일정 없음</span>' : ''}
+      ${!inWindow ? '<span class="n-sub" style="font-size:11px">시스템 일정(매크로·휴장·실적)은 오늘~D+14만 표시돼요</span>' : ''}
+    </div>`;
+  }
   const genAt = data.macro_generated_at ? new Date(data.macro_generated_at).toLocaleDateString('ko-KR') : null;
-  const fullHtml = _eventsExpanded ? `
-    <div style="display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--n-line);padding-top:10px">${rowsHtml(flat.slice(3)) || '<span class="n-sub">더 없음</span>'}</div>
-    <div class="n-sub" style="font-size:11px">${_escapeHtml(data.macro_note || '일정은 참고용이며 변경될 수 있어요.')}${genAt ? ` (매크로 일정 갱신: ${genAt})` : ''}</div>
+  const foot = `<div class="n-sub" style="font-size:11px">${_escapeHtml(data.macro_note || '일정은 참고용이며 변경될 수 있어요.')}${genAt ? ` (매크로 일정 갱신: ${genAt})` : ''}
+      <button type="button" class="n-link" style="font-size:11px" onclick="runMacroCalendarNow(this)" title="매크로 일정만 다시 생성(주 1회 자동 갱신, 필요하면 수동으로도)">매크로 일정 다시 생성</button></div>
     ${(!data.macro_events || !data.macro_events.length) && data.macro_error ? `<div class="st-bad" style="font-size:11px">매크로 일정 갱신 실패(이전 캐시 유지 중): ${_escapeHtml(data.macro_error)}</div>` : ''}
-    <div><button type="button" class="n-btn sm" onclick="runMacroCalendarNow(this)" title="매크로 일정만 다시 생성(주 1회 자동 갱신, 필요하면 수동으로도)">매크로 일정 다시 생성</button></div>` : '';
-  return `<section class="n-card side-card" aria-label="일정">
-    <span class="n-h">다가오는 일정</span>
-    ${peek.length ? rowsHtml(peek) : '<span class="n-sub">2주 안에 예정된 이벤트가 없어요.</span>'}
-    ${fullHtml}
-    ${flat.length > 3 || _eventsExpanded ? `<div><button type="button" class="n-link" onclick="toggleEventsExpanded()">${_eventsExpanded ? '접기' : `D+14 전체 (${flat.length})`}</button></div>` : ''}
-  </section>`;
+    ${_cal.error ? `<div class="st-bad" style="font-size:11px">내 일정을 불러오지 못했어요 — ${_escapeHtml(_cal.error.message)}</div>` : ''}`;
+  box.innerHTML = `<div class="hc-head">
+      <button type="button" class="n-btn sm" onclick="calMove(-1)" aria-label="이전 달">◀</button>
+      <span class="n-h" style="flex:1;text-align:center">${y}년 ${m}월</span>
+      <button type="button" class="n-link" onclick="calGoToday()">오늘</button>
+      <button type="button" class="n-btn sm" onclick="calMove(1)" aria-label="다음 달">▶</button>
+    </div>
+    <div class="hc-grid">${head}${cells}</div>
+    ${dayHtml}${foot}`;
+}
+// 추가·수정 폼 — 명시적 동작(날짜 선택·추가·수정·저장·취소) 때만 다시 그린다(데이터 재렌더가 입력을 안 지운다).
+function renderHomeCalForm() {
+  const box = document.getElementById('homeCalForm');
+  if (!box) return;
+  if (!_cal.editId || !_cal.sel && _cal.editId === 'new') { box.innerHTML = ''; return; }
+  const rec = _cal.editId === 'new' ? null : _cal.user.find(r => r.id === _cal.editId);
+  if (_cal.editId !== 'new' && !rec) { box.innerHTML = ''; return; }
+  box.innerHTML = `<form class="hc-form" onsubmit="event.preventDefault();calSave(this)">
+      <span class="n-sub" style="font-size:12px">${rec ? '일정 수정' : '일정 추가'} · ${rec ? rec.date : _cal.sel}</span>
+      <input name="title" maxlength="100" required placeholder="제목(한 줄)" value="${_escapeHtml(rec ? rec.title : '')}">
+      <div style="display:flex;gap:6px;align-items:center">
+        <input name="time" type="time" value="${rec && rec.time ? rec.time : ''}" aria-label="시간(선택, KST)" style="flex:0 0 auto"><span class="n-sub" style="font-size:12px">KST · 선택</span>
+        <span style="flex:1"></span>
+        <button type="button" class="n-btn sm" onclick="calCancelEdit()">취소</button>
+        <button type="submit" class="n-btn sm primary">저장</button>
+      </div>
+    </form>`;
+  const inp = box.querySelector('input[name=title]');
+  if (inp) inp.focus();
 }
 
 function renderCalendar(data) {
@@ -5930,8 +6093,8 @@ function renderCalendar(data) {
 
   docTop.innerHTML = `${warnHtml}${renderLowpointHtml(data.lowpoint)}${myTrackBoardHtml}`;
   docSide.innerHTML = renderJonggaForwardCard(data.jongga_forward)
-    + renderSectorAccelCard(data.sector_flow)
-    + renderUpcomingCard(data);
+    + renderSectorAccelCard(data.sector_flow);
+  renderHomeCal();   // v5.322: 달력(오른쪽 맨 위)은 #homeCalMain만 다시 그린다 — 폼(#homeCalForm)은 안 건드림
   renderHomeTiles();   // 종합 게이트 칸이 _calendarData.gate를 쓴다
 }
 

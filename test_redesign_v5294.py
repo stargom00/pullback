@@ -134,7 +134,7 @@ def test_home_column_order():
     # v5.316(사용자 지시): 오늘 할 일·후보 제거, 저점종목은 왼쪽 맨 위(경고 다음)로 이동
     assert "docTop.innerHTML = `${warnHtml}${renderLowpointHtml(data.lowpoint)}${myTrackBoardHtml}`;" in fn
     side = fn[fn.index("docSide.innerHTML ="):]
-    order = [side.index(x) for x in ("renderJonggaForwardCard", "renderSectorAccelCard", "renderUpcomingCard")]
+    order = [side.index(x) for x in ("renderJonggaForwardCard", "renderSectorAccelCard")]   # v5.322: 일정 카드 → 달력
     assert order == sorted(order) and "renderLowpointHtml" not in side
 
 

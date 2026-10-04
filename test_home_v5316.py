@@ -48,8 +48,8 @@ def test_lowpoint_card_is_first_card_on_home():
     side = CAL[CAL.index("docSide.innerHTML"):]
     side = side[:side.index(";")]
     assert "renderLowpointHtml" not in side
-    assert ["renderJonggaForwardCard", "renderSectorAccelCard", "renderUpcomingCard"] == \
-        re.findall(r"(render\w+)\(", side)
+    assert ["renderJonggaForwardCard", "renderSectorAccelCard"] == \
+        re.findall(r"(render\w+)\(", side)   # v5.322: 다가오는 일정 카드는 달력에 흡수(test_home_calendar.py)
     assert CAL.count("renderLowpointHtml(") == 1
 
 
@@ -79,4 +79,4 @@ def test_shared_helpers_kept_and_still_used_elsewhere():
 
 def test_home_markup_comments_match_layout():
     assert "왼쪽: 경고(있을 때만) → 저점종목 → 내 추적" in TEXT
-    assert "오른쪽: 종가베팅 실전 N/30 → 섹터 가속 → 다가오는 일정" in TEXT
+    assert "오른쪽: 달력 → 메모 → 종가베팅 실전 N/30 → 섹터 가속" in TEXT   # v5.322

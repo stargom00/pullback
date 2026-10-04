@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.322 [홈 달력 — 사용자 지시 "홈 오른쪽 열 최상단에 월 달력 추가. 날짜별 주요 일정 표시 + 사용자가 직접 일정
+    등록. 기존 '다가오는 일정' 카드는 달력에 흡수하고 제거."] ① 달력 카드: 월 그리드(일요일 시작, 이번 달 기본, ◀▶
+    이동, "오늘"), 오늘 강조, 일정 있는 날 점(시스템 회색·내 일정 강조색). ② 시스템 일정 = 다가오는 일정 카드가 쓰던
+    /api/calendar 필드(macro_events·holidays·earnings, 서버 창 오늘~D+14 그대로 — 창 밖 날짜엔 안내 문구), 매크로
+    갱신 시각·실패 안내·"매크로 일정 다시 생성" 버튼도 달력 아래로 옮김. ③ 내 일정: 날짜 클릭 → 그날 목록(시스템/
+    내 일정 칩으로 구분, 시각 "HH:MM KST") + 일정 추가(제목 한 줄, 시간 선택)·수정·삭제. ④ 저장 /data/
+    user_events.json — 저점 매매 기록·평가와 **같은 함수**(_rec_list_*·_rev_store_put rev 충돌 409·없는 id 409 gone·
+    _rev_store_delete_log 삭제 로그·_daily_backup 날짜별 사본 14개, 서버 시작 직후 1회 + 하루 1회). GET/PUT/DELETE
+    /api/user-events(/{id}). 외부 캘린더 연동 없음. ⑤ 다가오는 일정 카드(renderUpcomingCard·_eventsExpanded·
+    toggleEventsExpanded) 제거. 오른쪽 열 = 달력 → 메모 → 종가베팅 실전 → 섹터 가속(사용자 추가 지시). 메모 카드는
+    접힘(첫 줄 미리보기) 대신 3줄 높이 textarea를 늘 보여주고 넘치면 스크롤(DAILY_NOTE_MAX_ROWS 15→3) — 저장
+    경로(saveDailyNote·/api/daily-note)·데이터 불변. 달력 추가·수정 폼은 renderCalendar 밖(#homeCalForm)이라 데이터
+    재렌더가 입력을 지우지 않는다. 테스트: test_home_calendar.py.
 v5.321 [저점 스크린·평가의 KR 가격 = KRX 정규장 기준 — 사용자 지시, 2026-10-04 인바이오젠 오히트 조사 후속]
     원인: naver 일봉 종가는 정규장(15:30) 종가가 아니라 애프터마켓(NXT 통합 시세) 마지막 체결가 — 인바이오젠
     10-02 naver 5,230 vs 정규장 4,820이라 주봉 A조건(1봉전 < 0봉전)이 뒤집혀 잘못 히트. naver 공개 엔드포인트엔
@@ -8728,7 +8741,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.321"
+VERSION = "v5.322"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -13066,6 +13079,7 @@ async def _scheduler_loop():
             _journal_daily_backup()   # v5.300: 날짜별 일지 사본(그날 없을 때만)
             _daily_backup(LP_TRADES_PATH, "lowpoint_trades", lock=_LP_TRADES_LOCK)   # v5.302
             _daily_backup(LP_EVALS_PATH, "lowpoint_evals", lock=_LP_EVALS_LOCK)      # v5.317
+            _daily_backup(USER_EVENTS_PATH, "user_events", lock=_USER_EVENTS_LOCK)   # v5.322 홈 달력
             asyncio.create_task(_maybe_run_lowpoint())   # v5.301: 저점종목 토요일 자동 실행(백그라운드)
         except Exception as e:
             print(f"[scheduler] loop error: {e}")
@@ -13122,6 +13136,7 @@ async def _start_scheduler():
         _journal_daily_backup(force=True)   # v5.300: 서버 시작 직후 1회
         _daily_backup(LP_TRADES_PATH, "lowpoint_trades", force=True, lock=_LP_TRADES_LOCK)   # v5.302
         _daily_backup(LP_EVALS_PATH, "lowpoint_evals", force=True, lock=_LP_EVALS_LOCK)      # v5.317
+        _daily_backup(USER_EVENTS_PATH, "user_events", force=True, lock=_USER_EVENTS_LOCK)   # v5.322 홈 달력
     except Exception as e:
         print(f"[journal-backup] 시작 백업 실패: {e}", flush=True)
     asyncio.create_task(_scheduler_loop())
@@ -20132,6 +20147,93 @@ async def lp_eval_delete(rid: str, request: Request):
         removed = evals.pop(idx)
         _rec_list_write(LP_EVALS_PATH, evals)
         _rev_store_delete_log(LP_EVALS_DELETE_LOG_PATH, rid, request, removed, "lowpoint-evals")
+    return JSONResponse({"ok": True, "deleted": rid})
+
+
+# ── v5.322(사용자 지시) 홈 달력 — 사용자 등록 일정 ─────────────────────────────
+# "사용자가 직접 일정 등록 … 저장: /data/user_events.json — 기존 레코드 단위 규칙(rev 충돌 거부·날짜별 백업·
+# 삭제 로그) 재사용. 새 저장 구조 발명 금지." → 저점 매매 기록·평가와 **같은 함수**(_rec_list_load/_rec_list_write
+# ·_rev_store_put·_rev_store_delete_log·_daily_backup)를 쓴다. 메모리 사본 없음 — 요청마다 파일을 읽는다.
+# 레코드: {id(프론트가 만든 ue_… 문자열), date(YYYY-MM-DD, KST 날짜), title(한 줄), time(HH:MM KST | null), rev, updated_at}
+# 외부 캘린더 연동 없음(사용자 지시 "외부 캘린더 연동(구글 등) 금지 — 서버 저장만").
+USER_EVENTS_PATH = _resolve_persistent_path("user_events.json")
+USER_EVENTS_DELETE_LOG_PATH = os.path.join(os.path.dirname(USER_EVENTS_PATH), "user_events_deletions.log")
+_USER_EVENTS_LOCK = _threading.RLock()
+USER_EVENT_TITLE_MAX = 100   # 제목 한 줄 상한(AI 판단 어림값 — 달력 칸 표시용, 재검토 가능)
+
+
+def _user_event_invalid(rec: dict) -> "str | None":
+    import re as _re
+    rid = str(rec.get("id") or "")
+    if not _re.fullmatch(r"ue_[A-Za-z0-9_-]{1,60}", rid):
+        return "id는 ue_로 시작하는 영숫자"
+    d = rec.get("date")
+    try:
+        if not isinstance(d, str) or datetime.strptime(d, "%Y-%m-%d").strftime("%Y-%m-%d") != d:
+            raise ValueError
+    except ValueError:
+        return "date는 YYYY-MM-DD"
+    title = rec.get("title")
+    if not isinstance(title, str) or not title.strip():
+        return "제목을 입력하세요"
+    if "\n" in title or "\r" in title:
+        return "제목은 한 줄"
+    if len(title) > USER_EVENT_TITLE_MAX:
+        return f"제목은 {USER_EVENT_TITLE_MAX}자 이하"
+    tm = rec.get("time")
+    if tm is not None and not (isinstance(tm, str) and _re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", tm)):
+        return "시간은 HH:MM(KST) 또는 비움"
+    extra = set(rec) - {"id", "date", "title", "time", "rev", "updated_at"}
+    if extra:
+        return f"알 수 없는 필드: {sorted(extra)}"
+    return None
+
+
+@app.get("/api/user-events")
+async def user_events_list():
+    try:
+        events = _rec_list_load(USER_EVENTS_PATH)
+    except (OSError, ValueError) as e:
+        return JSONResponse({"ok": False, "error": f"일정 읽기 실패: {e}"}, status_code=500)
+    return JSONResponse({"ok": True, "events": events})
+
+
+@app.put("/api/user-events/{rid}")
+async def user_event_put(rid: str, request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "JSON 본문 필요"}, status_code=400)
+    rec = body.get("record") if isinstance(body, dict) else None
+    if not isinstance(rec, dict) or rec.get("id") != rid:
+        return JSONResponse({"ok": False, "error": "record.id가 경로 id와 같아야 함"}, status_code=400)
+    bad = _user_event_invalid(rec)
+    if bad:
+        return JSONResponse({"ok": False, "error": bad}, status_code=400)
+    with _USER_EVENTS_LOCK:
+        try:
+            events = _rec_list_load(USER_EVENTS_PATH)
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
+        status, payload, changed = _rev_store_put(events, rid, rec, body.get("base_rev"))
+        if changed:
+            _rec_list_write(USER_EVENTS_PATH, events)
+        return JSONResponse(payload, status_code=status)
+
+
+@app.delete("/api/user-events/{rid}")
+async def user_event_delete(rid: str, request: Request):
+    with _USER_EVENTS_LOCK:
+        try:
+            events = _rec_list_load(USER_EVENTS_PATH)
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
+        idx = next((i for i, r in enumerate(events) if r.get("id") == rid), None)
+        if idx is None:
+            return JSONResponse({"ok": True, "already_gone": True})
+        removed = events.pop(idx)
+        _rec_list_write(USER_EVENTS_PATH, events)
+        _rev_store_delete_log(USER_EVENTS_DELETE_LOG_PATH, rid, request, removed, "user-events")
     return JSONResponse({"ok": True, "deleted": rid})
 
 
