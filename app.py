@@ -5,6 +5,13 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.320 [저점 매매 기록 수정 — 사용자 지시 "추가·종료·삭제만 되고 수정이 안 됨. 오타·구분 변경 때마다 삭제 후
+    재입력"] 보유 행 "수정": 구분·매수일·매수가·수량(종목 불변 — 바꾸려면 삭제 후 재등록), 종료 행 "수정": 매도일·
+    매도가·수량. 목표가·수익률·수익금·월간 요약·상단 합계는 원래 렌더 때 레코드에서 계산하므로 저장 후 자동 재계산
+    (lpApplyHoldEdit/lpApplyCloseEdit). 저장은 기존 PUT(base_rev) 그대로 — rev 충돌 409+서버본, 삭제 로그·백업
+    불변, 새 저장 구조 없음. [추매와의 충돌 — 거부+안내] 같은 종목·구분 **보유** 기록은 1건 규칙: 수정·생성이 새로
+    겹침을 만들면 400("그 기록에 추매로 입력하거나 삭제 후 재등록"). 이미 겹쳐 있던 기록을 구분·보유 상태 변경 없이
+    고치는 건 허용(기존 데이터로 수정이 막히지 않게). _rev_store_put에 on_update 훅 추가(평가 저장은 영향 없음).
 v5.319 [저점 평가 카드 압축 — 사용자 지시 "한 종목 14항목이 한 화면에 안 들어옴. 원문 샘플 표처럼 촘촘하게"]
     static/index.html만. 평가 카드에 .lpe-card를 붙이고 모든 압축 규칙을 그 아래로 한정(매매 기록·다른 탭 표
     간격 불변, 테스트로 고정): 셀 패딩 16/12px → 5/8px, 근거 칸은 한 줄 말줄임(호버 title·클릭 시 펼침)·11.5px,
@@ -8698,7 +8705,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.319"
+VERSION = "v5.320"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -19823,11 +19830,11 @@ def _rec_list_write(path: str, data: list):
     os.replace(tmp, path)
 
 
-def _rev_store_put(records: list, rid, rec: dict, base_rev, on_create=None):
+def _rev_store_put(records: list, rid, rec: dict, base_rev, on_create=None, on_update=None):
     """레코드 단위 rev 저장 규칙 — 저점 매매 기록(v5.302)과 평가(v5.317)가 **이 함수 하나**를 쓴다.
     records를 제자리에서 고친다. 반환 (HTTP 상태, 응답 dict, 바뀌었는가).
     없는 id + base_rev 있음 → 409 gone(삭제된 기록을 되살리지 않는다), base_rev 불일치 → 409 conflict
-    + 서버본, 내용 같음 → unchanged. on_create(records, rec)가 문자열을 돌려주면 400."""
+    + 서버본, 내용 같음 → unchanged. on_create(records, rec)·on_update(records, srv, rec)가 문자열을 돌려주면 400."""
     idx = next((i for i, r in enumerate(records) if r.get("id") == rid), None)
     if idx is None:
         if base_rev not in (None, 0):
@@ -19844,6 +19851,10 @@ def _rev_store_put(records: list, rid, rec: dict, base_rev, on_create=None):
     srv = records[idx]
     if int(base_rev or 0) != int(srv.get("rev") or 0):
         return 409, {"ok": False, "code": "conflict", "record": srv, "error": "다른 곳에서 먼저 바뀐 기록이에요"}, False
+    if on_update:
+        err = on_update(records, srv, rec)
+        if err:
+            return 400, {"ok": False, "error": err}, False
     new = dict(rec)
     new["rev"] = srv.get("rev")
     new["updated_at"] = srv.get("updated_at")
@@ -19959,7 +19970,23 @@ async def lp_trade_put(rid: int, request: Request):
             if not (_lp_num(rec["qty"]) < (_lp_num(hold.get("qty")) or 0)):
                 return "분할 종료 수량은 보유 수량보다 작아야 해요(전량이면 보유 기록을 종료)"
             return None
-        status, payload, changed = _rev_store_put(trades, rid, rec, base_rev, on_create=partial_check)
+        def overlap(records, rec, srv=None):
+            """v5.320: 같은 종목·구분의 **보유** 기록은 1건(추매는 프론트가 합쳐 한 건으로 저장한다).
+            수정·생성이 새로 겹침을 만들면 거부 — 이미 겹쳐 있던 기록을 구분·보유 상태 변경 없이 고치는 건 허용."""
+            if rec.get("sellDate"):
+                return None
+            if srv is not None and (srv.get("code"), srv.get("kind"), bool(srv.get("sellDate"))) == \
+                    (rec.get("code"), rec.get("kind"), False):
+                return None
+            dup = next((r for r in records if r.get("id") != rec.get("id") and not r.get("sellDate")
+                        and r.get("code") == rec.get("code") and r.get("kind") == rec.get("kind")), None)
+            if dup:
+                return (f"같은 종목·구분({rec.get('kind')}) 보유 기록이 이미 있어요 — 합치려면 그 기록에 추매로 "
+                        f"입력하거나, 이 기록을 삭제 후 다시 등록하세요")
+            return None
+        status, payload, changed = _rev_store_put(trades, rid, rec, base_rev,
+                                                  on_create=lambda rs, r: partial_check(rs, r) or overlap(rs, r),
+                                                  on_update=lambda rs, srv, r: overlap(rs, r, srv))
         if changed:
             _lp_trades_write(trades)
         return JSONResponse(_clean_nan(payload), status_code=status)
