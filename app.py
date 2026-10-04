@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.319 [저점 평가 카드 압축 — 사용자 지시 "한 종목 14항목이 한 화면에 안 들어옴. 원문 샘플 표처럼 촘촘하게"]
+    static/index.html만. 평가 카드에 .lpe-card를 붙이고 모든 압축 규칙을 그 아래로 한정(매매 기록·다른 탭 표
+    간격 불변, 테스트로 고정): 셀 패딩 16/12px → 5/8px, 근거 칸은 한 줄 말줄임(호버 title·클릭 시 펼침)·11.5px,
+    자동/수동 칩·버튼·메모 축소. 1440px 실측: 카드 높이 957 → 558px(행 54 → 29~35px), 라이트·다크 동일,
+    매매 기록 표 셀 패딩은 변경 전과 같음. 색은 테마 토큰만.
 v5.318 [저점 평가 수동 항목 추가 — 사용자 지시 "파란구름의 두꺼운 구간을 충분히 지났다(월봉 일목 구름 기준)"]
     기존 수동 3개와 같은 O/X/미표시 토글(lowpoint_eval.MANUAL_ITEMS · LP_EVAL_MANUAL_KEYS에 ichimoku_cloud 추가).
     화면은 서버가 주는 항목 목록을 그대로 그려 별도 수정 없음, 집계(lpeTally)에 자동 포함. 예전 레코드엔 키가
@@ -8693,7 +8698,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.318"
+VERSION = "v5.319"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

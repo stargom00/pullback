@@ -519,3 +519,27 @@ def test_nke_live_fake_2016_11_signal_removed():
     assert ma["rise_rsi"]["signal_month"] != "2016-11"
     it = _item(ev.long_checks(d, m), "rsi_rebound")
     assert "2016-12" not in it["detail"]
+
+
+# ── v5.319: 평가 카드 압축(다른 탭으로 안 새는지) ─────────────────────
+def test_compact_rules_are_scoped_to_eval_card():
+    import re
+    style = SRC[SRC.index("<style>"):SRC.index("</style>")]
+    rules = [r for r in re.findall(r"(?m)^[^\n{]*\blpe-[\w-]+[^\n{]*\{", style)]
+    assert rules, "압축 규칙이 없다"
+    for r in rules:
+        sels = [s.strip() for s in r.rstrip("{").split(",")]
+        assert all(s.startswith(".lpe-card") for s in sels), f"평가 카드 밖으로 샐 수 있는 선택자: {r}"
+    # 공용 표·카드 기본값은 그대로
+    assert "table.jr-table td{padding:16px 12px;" in SRC
+    css = SRC[SRC.index(".lpe-card{"):SRC.index(".lpe-card .lpe-memo textarea{")]
+    assert "#" not in re.sub(r"var\(--[\w-]+\)", "", css).replace("#lowpoint", ""), "하드코딩 색"
+
+
+def test_eval_card_markup_uses_compact_classes():
+    card = _fn("_lpeCard")
+    assert 'class="n-card lpe-card"' in card and 'class="jr-table lpt-table lpe-table"' in card
+    assert 'class="lpe-detail" title="${_escapeHtml(s)}" onclick="this.classList.toggle(\'open\')"' in card
+    assert card.count("${det(") == 2                              # 자동·수동 행 모두 같은 근거 칸
+    # 매매 기록 렌더는 압축 클래스를 쓰지 않는다
+    assert "lpe-" not in _fn("renderLowpointTrack").split("if (view === 'eval')")[1].split("return;")[1]
