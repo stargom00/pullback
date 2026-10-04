@@ -1052,8 +1052,10 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .hdr-navs{display:flex;align-items:center;gap:8px;min-width:0}
 .hdr .tabs{margin:0;background:none;border:0;padding:0;gap:2px;border-radius:0}
 .hdr .tab{min-height:44px;border-radius:8px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
-.hdr-main .tab{padding:10px 14px;font-size:14px;color:var(--n-sub)}
-.hdr-util .tab{padding:10px 12px;font-size:13px;color:var(--n-muted)}
+/* v5.320: "추추일지"·"저점일지"로 이름이 길어져 1440px에서 탭 줄이 35px 넘쳤다(필요 735 / 자리 700) —
+   글자 크기·탭 높이(44px)는 그대로 두고 좌우 여백만 줄였다(메인 14→12px, 오른쪽 12→9px). */
+.hdr-main .tab{padding:10px 12px;font-size:14px;color:var(--n-sub)}
+.hdr-util .tab{padding:10px 9px;font-size:13px;color:var(--n-muted)}
 /* v5.305: 활성 탭 = 굵은 글자 + 앰버 밑줄 3px(상자 대신) */
 .hdr-main .tab.active,.hdr-util .tab.active,.hdr-more.has-active{background:none;color:var(--n-text);font-weight:700;box-shadow:inset 0 -3px 0 var(--n-accent);border-radius:8px 8px 0 0}
 .hdr-sep{width:1px;height:20px;background:var(--c-gray-bg7);flex-shrink:0}
@@ -1362,9 +1364,9 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
       <nav class="tabs hdr-util" role="tablist" aria-label="기록" id="utilTabs">
         <button class="tab" data-mode="themes" title="업종·테마별 구성종목 — 스캐너가 이미 계산한 값만 표시(새 계산 없음)">업종/테마</button>
         <button class="tab" data-mode="eod">마감정리</button>
-        <button class="tab" data-mode="journal">일지</button>
+        <button class="tab" data-mode="journal">추추일지</button>
         <!-- v5.302 저점종목 내 매매 기록(홈 저점종목 카드 = 후보와 별개). v5.303: 더보기 → 일지 옆. -->
-        <button class="tab" data-mode="lowpoint_track" title="저점종목 매매 기록 — 현재가·수익률·목표가, 일지와 별도 저장">저점</button>
+        <button class="tab" data-mode="lowpoint_track" title="저점종목 매매 기록 — 현재가·수익률·목표가, 일지와 별도 저장">저점일지</button>
       </nav>
     </div>
     <div class="hdr-right">
@@ -8895,6 +8897,14 @@ function flagStats(closed) {
 }
 
 let journalTab = 'entered';        // entered | pending | closed | missed — 상태별 주 탭
+// v5.320(조사 후 수정): 일지 목록 거르기 — 상태 탭(진입/대기/종료/무산) × 카테고리 칩. 목록과 상태 버튼 건수가
+// 이 함수 하나를 쓴다(순수 함수 — test_journal_tab_counts.py가 node로 그대로 실행).
+function journalRowsFor(all, tab, cat) {
+  const catOf = r => r.category || '추세추종';
+  const stOf = r => r.status || (r.result_r ? 'closed' : 'entered');
+  if (cat === '관찰') return all.filter(r => catOf(r) === '관찰');
+  return all.filter(r => stOf(r) === tab && catOf(r) !== '관찰' && (cat === 'all' || catOf(r) === cat));
+}
 let journalCatFilter = 'all';      // all | 추세추종 | 단타 | 재량 | 관찰 — 탭 안에서 한 번 더 좁히는 보조 필터
 const closedMonthOpen = new Set(); // 펼쳐둔 종료월(YYYY-MM) — 기본은 전부 접힘
 let watchClosedOpen = false;       // v5.47: 관찰 뷰의 "종료된 관찰" 펼침 상태 — 기본 접힘
@@ -9129,15 +9139,9 @@ function renderJournal() {
   // ②재설계: 주 탭은 상태 4개(진입/대기/종료/무산)뿐 — 관찰·추세·단타·재량·저점은
   // 탭 안에서 한 번 더 좁히는 보조 필터. 관찰은 상태 개념이 아니라 보조 필터를 켜면
   // 주 탭과 무관하게 관찰 종목 전체를 보여준다(기존 동작 그대로).
-  const isWatch = r => (r.category || '추세추종') === '관찰';
-  const stOf = r => r.status || (r.result_r ? 'closed' : 'entered');
-  let j;
-  if (journalCatFilter === '관찰') {
-    j = all.filter(isWatch);
-  } else {
-    j = all.filter(r => stOf(r) === journalTab && !isWatch(r));
-    if (journalCatFilter !== 'all') j = j.filter(r => (r.category || '추세추종') === journalCatFilter);
-  }
+  // v5.320: 목록과 상태 버튼 건수가 **같은 함수**(journalRowsFor)로 거른다 — 예전엔 건수만 카테고리를
+  // 무시해 "저점 + 종료 40건"인데 목록은 비는 불일치가 있었다.
+  let j = journalRowsFor(all, journalTab, journalCatFilter);
   j = [...j].sort((a, b) => (b.closed_date || b.date || '').localeCompare(a.closed_date || a.date || '')
     || ((b.id || 0) - (a.id || 0)));
   // 카테고리별 통계 (추세추종 / 단타 / 재량 분리 — v5.187)
@@ -9145,7 +9149,8 @@ function renderJournal() {
   const scalp = journalStats(all.filter(r => (r.category || '추세추종') === '단타'));
   const discretion = journalStats(all.filter(r => r.category === '재량'));
 
-  const tabCount = key => all.filter(r => stOf(r) === key && !isWatch(r)).length;
+  // 관찰 보기에서는 상태 버튼을 누르면 카테고리가 '전체'로 돌아가므로 그 기준으로 센다(버튼 동작과 같게)
+  const tabCount = key => journalRowsFor(all, key, journalCatFilter === '관찰' ? 'all' : journalCatFilter).length;
   const mainTab = (key, label) => {
     const on = journalTab === key && journalCatFilter !== '관찰';
     return `<button type="button" role="tab" aria-selected="${on}" class="jr-seg-b${on ? ' on' : ''}" onclick="journalTab='${key}';journalCatFilter=(journalCatFilter==='관찰'?'all':journalCatFilter);renderJournal()">${label} <span class="num" style="opacity:max(.7,var(--fade-floor))">${tabCount(key)}</span></button>`;
