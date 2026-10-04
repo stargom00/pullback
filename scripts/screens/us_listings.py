@@ -19,7 +19,8 @@ KR 경로는 건드리지 않는다.
 [제외 규칙] **시총·거래량 필터 없음**(사용자 지시 — 임계값을 임의로 정하지 않는다).
   · `ETF = Y`          → ETF/ETN 류
   · `Test Issue = Y`   → 거래소 테스트 심볼
-  · 이름 패턴          → 우선주·워런트·유닛·라이트·채권성 증권(아래 `_NAME_EXCLUDE`)
+  · 이름 패턴          → 우선주·워런트·유닛·라이트·채권성 증권(아래 `_NAME_EXCLUDE`) — v5.324: 우선주 예탁증서·
+                         잘린 "Pref"·쿠폰 금리(%)·신탁/구조화 증권 패턴 추가
   · 심볼에 `.`/`-` 외 특수문자(`+ = ~ ^ $ *` 등) → 워런트·유닛·라이트용 접미 표기
 ADR(American Depositary Shares)은 **남긴다** — 보통주에 대한 예탁증서다(제외 목록에 없음).
 제외는 사유별 개수를 항상 반환해 호출부가 출력한다(조용한 누락 금지).
@@ -60,6 +61,19 @@ _NAME_EXCLUDE = (
     ("liquidating", r"\bliquidating trust\b"),
     ("subordinated", r"\bsubordinated\b"),
     ("tracking", r"\bsubscription\b"),
+    # v5.324(사용자 지시 "유니버스 구멍 … 제외 규칙 보강 — 하드코딩 목록이 아니라 패턴 보강"): 2026-09-29 목록에서
+    # 위 규칙을 빠져나간 12개(우선주 4 + 구조화증권 8)를 이름 패턴으로 막는다 — 실제 캐시에서 이 12개만 걸린다
+    # (test_lowpoint_us_universe.py가 개수·심볼을 고정).
+    # 우선주 예탁증서: "American/Global Depositary Shares"(ADR·GDR — 보통주, 남긴다)가 아닌 맨 "Depositary Shares"
+    # (CDZIP·MNSBP·WAFDP — 각각 우선주 1/n 지분).
+    ("pref_depositary", r"(?<!american )(?<!global )\bdepositary shares\b"),
+    # 잘린 "Pref"(LILAP — "...Series A Pref"; 위 \bpreferred\b는 잘린 단어를 못 잡는다).
+    ("pref_abbrev", r"\bpref\b"),
+    # 이름에 쿠폰 금리(예: "9.0% Fixed Rate", "8.205% CorTS") — 보통주 이름엔 % 금리가 없다(LILAP·GJH·JBK·KTN).
+    ("coupon_pct", r"\d+(\.\d+)?\s*%"),
+    # 신탁·구조화 증권(STRATS·CorTS·회사채 담보 신탁증서·ABS·합성 채권) — GJO·GJP·GJR·GJS·GJT 등.
+    ("structured", r"\bstrats\b|\bcorts\b|\bcorp(orate)? backed tr|asset[- ]backed|synthetic fixed[- ]income"
+                   r"|trust certificates?"),
 )
 _NAME_EXCLUDE = tuple((tag, re.compile(rx, re.I)) for tag, rx in _NAME_EXCLUDE)
 

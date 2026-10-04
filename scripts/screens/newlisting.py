@@ -284,7 +284,7 @@ def _attach_closes(rows: list, ref: date):
         data, _ = lp.fetch_kr(kr, "week")
         closes.update(data)
     if us:
-        data, _, _ = lp.fetch_us(us, "week")
+        data, _, _ = lp.fetch_us(us, "week", auto_adjust=True)   # 저점 v5.324 배당 미조정 전환의 범위 밖 — 기존 값 유지
         closes.update(data)
     for r in rows:
         apply_series(r, closes.get(r["code"]), ref)

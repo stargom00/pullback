@@ -81,13 +81,13 @@ def test_month_due_window_first_day(now, due):
 # 옛 기준(첫 토요일)으로 쓰인 상태 파일이 있어도 새 기준에서 오작동하지 않는가.
 # 라벨(전월 말일)은 두 기준이 같다 — target 비교가 그대로 맞는다.
 @pytest.mark.parametrize("old_state,due", [
-    ({"month": {"target": "2026-08-31", "status": "ok", "basis": "naver_integrated+wilder_sma", "attempts": 1,
+    ({"month": {"target": "2026-08-31", "status": "ok", "basis": "naver_integrated+wilder_sma+us_splits_only", "attempts": 1,
                 "started_at": _k("2026-09-05 09:20").isoformat()}}, "2026-09-30"),   # 지난달 성공 기록
     ({"month": {"target": "2026-08-31", "status": "failed", "attempts": 3,
                 "started_at": _k("2026-09-05 11:20").isoformat()}}, "2026-09-30"),   # 지난달 시도 소진 — 새 달엔 무관
     ({"month": {"target": "2026-08-31", "status": "running", "attempts": 1,
                 "started_at": _k("2026-09-05 09:20").isoformat()}}, "2026-09-30"),   # 지난달 죽은 실행
-    ({"week": {"target": "2026-09-25", "status": "ok", "basis": "naver_integrated+wilder_sma", "attempts": 1}}, "2026-09-30"),    # 주봉 기록만(현 운영 형태)
+    ({"week": {"target": "2026-09-25", "status": "ok", "basis": "naver_integrated+wilder_sma+us_splits_only", "attempts": 1}}, "2026-09-30"),    # 주봉 기록만(현 운영 형태)
     ({}, "2026-09-30"),                                                                  # 상태 파일 없음/빈 파일
 ])
 def test_old_first_saturday_state_does_not_skip_oct1(old_state, due):
@@ -96,7 +96,7 @@ def test_old_first_saturday_state_does_not_skip_oct1(old_state, due):
 
 
 def test_month_ok_on_1st_is_not_rerun_on_first_saturday():
-    ok = {"month": {"target": "2026-09-30", "status": "ok", "basis": "naver_integrated+wilder_sma", "attempts": 1,
+    ok = {"month": {"target": "2026-09-30", "status": "ok", "basis": "naver_integrated+wilder_sma+us_splits_only", "attempts": 1,
                     "started_at": _k("2026-10-01 08:00").isoformat()}}
     for now in ("2026-10-01 08:20", "2026-10-02 08:00", "2026-10-03 07:59", "2026-10-03 09:20"):
         assert app._lowpoint_due("month", _k(now), ok) is None, now
@@ -110,7 +110,7 @@ def test_schedule_times_unchanged():
 def test_due_rules():
     now = _k("2026-10-03 10:00")
     assert app._lowpoint_due("week", now, {}) == "2026-10-02"
-    assert app._lowpoint_due("week", now, {"week": {"target": "2026-10-02", "status": "ok", "basis": "naver_integrated+wilder_sma"}}) is None
+    assert app._lowpoint_due("week", now, {"week": {"target": "2026-10-02", "status": "ok", "basis": "naver_integrated+wilder_sma+us_splits_only"}}) is None
     recent_fail = {"week": {"target": "2026-10-02", "status": "failed", "attempts": 1,
                             "started_at": _k("2026-10-03 09:30").isoformat()}}
     assert app._lowpoint_due("week", now, recent_fail) is None           # 60분 안 됨

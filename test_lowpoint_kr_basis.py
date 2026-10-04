@@ -59,7 +59,7 @@ def _weekly_series(last_close: float) -> pd.Series:
 
 
 def test_basis_constants_in_sync():
-    assert lp.CALC_BASIS == app.LOWPOINT_CALC_BASIS == "naver_integrated+wilder_sma"
+    assert lp.CALC_BASIS == app.LOWPOINT_CALC_BASIS == "naver_integrated+wilder_sma+us_splits_only"
     assert not hasattr(app, "LOWPOINT_KR_PRICE_BASIS") and not hasattr(lp, "KR_PRICE_BASIS")
 
 
@@ -126,7 +126,7 @@ def test_eval_page_kr_uses_naver(fake_sources):
     assert float(daily["Close"].iloc[0]) == pytest.approx(float(base.iloc[0]) * 1.25)    # naver 값 그대로(재조정 없음)
     rows = ev.short_table([{"code": "101140.KS", "market": "KOSPI"}, {"code": "NKE", "market": "US"}])
     assert all("price_note" not in r for r in rows)
-    assert calls["yf"] == [(("NKE",), lp.US_PERIOD["month"], True)]                    # yfinance는 US만
+    assert calls["yf"] == [(("NKE",), lp.US_PERIOD["month"], False)]                   # yfinance는 US만(v5.324 배당 미조정)
     res = ev.evaluate("101140.KS", "KR", datetime(2026, 10, 4, 12, 0, tzinfo=KST))
     assert res["ok"] and "price_note" not in res
 
@@ -254,7 +254,8 @@ def test_listed_after_seam_and_missing_regular():
 @pytest.mark.parametrize("state_basis,now,due", [
     (None, "2026-10-04 12:00", "2026-10-02"),                          # v5.320 이전 기준 결과 · 창 안 → 다시
     ("krx_regular", "2026-10-04 12:00", "2026-10-02"),                 # v5.321 정규장 기준 결과 → 다시(복귀)
-    ("naver_integrated+wilder_sma", "2026-10-04 12:00", None),        # 이미 v5.323 기준 → 안 돈다
+    ("naver_integrated+wilder_sma", "2026-10-05 08:50", "2026-10-02"),               # v5.323 기준(US 배당 조정) → 다시
+    ("naver_integrated+wilder_sma+us_splits_only", "2026-10-04 12:00", None),        # 이미 v5.324 기준 → 안 돈다
     ("krx_regular", "2026-10-05 09:01", None),                         # 창(토 09:00 + 48시간) 밖 → 다음 예약 때
 ])
 def test_week_rerun_when_basis_changed(state_basis, now, due):
@@ -264,7 +265,7 @@ def test_week_rerun_when_basis_changed(state_basis, now, due):
 
 
 def test_newlisting_not_affected_by_basis():
-    st = {"month": {"target": "2026-09-30", "status": "ok", "attempts": 1, "basis": "naver_integrated+wilder_sma"},
+    st = {"month": {"target": "2026-09-30", "status": "ok", "attempts": 1, "basis": "naver_integrated+wilder_sma+us_splits_only"},
           "newlisting": {"target": "2026-09-30", "status": "ok", "attempts": 1}}
     assert app._lowpoint_due("newlisting", datetime(2026, 10, 1, 9, 0, tzinfo=KST), st) is None
 

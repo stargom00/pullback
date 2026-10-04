@@ -399,7 +399,12 @@ def fetch_kr(tickers: list, tf: str, concurrency: int = FETCH_CONCURRENCY) -> tu
 # 시세를 쓴다(KRX 공식 종가도 애프터 포함). 단일 소스가 이음새·yfinance 과거 일봉 오류(하루 튐·수정주가 차이)도 없다.
 # 그래서 되돌렸다. 아래 B안 코드(splice_regular·fetch_kr_regular*·price_note)는 **비활성**으로 남겨 둔다(호출 0곳 —
 # test_lowpoint_kr_basis.py가 고정) — 같은 조사를 반복하지 않도록 근거로 둔다. 상세: CLAUDE.md "KR 가격 기준" 절.
-CALC_BASIS = "naver_integrated+wilder_sma"   # 서버 실행 상태에 기록 — 바뀌면 그 주·달 결과를 창 안에서 다시 만든다
+# v5.324(사용자 결정 "저점 스크린 US + 평가 페이지 US를 배당 미조정(분할만 조정)으로 전환"): 키움 10-02 주봉 US 12종목
+# 대조에서 배당 조정 가격이면 8/12, 미조정이면 10/12(JBGS·AVA가 맞아지고 BIT가 빠짐, 깨지는 일치 0) — 키움 US는 배당
+# 미조정으로 추정(직접 확인은 못 함). yfinance auto_adjust=False의 Close = 분할만 반영된 종가. 상세: CLAUDE.md
+# "US 배당 기준" 절. 신규상장(newlisting)은 이 결정 범위 밖이라 auto_adjust=True를 명시해 그대로 둔다.
+US_AUTO_ADJUST = False
+CALC_BASIS = "naver_integrated+wilder_sma+us_splits_only"   # 서버 실행 상태에 기록 — 바뀌면 그 주·달 결과를 창 안에서 다시 만든다
 
 
 # [비활성 — v5.321 B안, v5.323에 철회] 원래 주석:
@@ -522,14 +527,15 @@ def fetch_kr_regular(tickers: list, tf: str) -> tuple[dict, list, dict]:
 US_AVG_VOLUME_WINDOW = 60
 
 
-def fetch_us(tickers: list, tf: str, batch: int = 100) -> tuple[dict, list, dict]:
-    """스캐너와 같은 소스·파라미터(yf.download, auto_adjust=True) — 기간만 길게.
+def fetch_us(tickers: list, tf: str, batch: int = 100, auto_adjust: bool = US_AUTO_ADJUST) -> tuple[dict, list, dict]:
+    """yf.download 일봉 — 기간만 길게. 기본은 저점 기준 **배당 미조정(분할만 조정, US_AUTO_ADJUST=False)**.
+    5탭 스캐너(app._fetch_us_batch, auto_adjust=True)와는 다르다 — 그쪽은 측정 기반이라 불변.
     반환: (종가 시리즈 dict, 실패 목록, {티커: {last_close, avg_volume}})
     세 번째 값은 CLI 옵션 필터용 부가정보다 — 기본값에서는 쓰이지 않는다."""
     import harness
     data, extra = {}, {}
     for i in range(0, len(tickers), batch):
-        got = harness._fetch_us_batch(tickers[i:i + batch], period=US_PERIOD[tf])
+        got = harness._fetch_us_batch(tickers[i:i + batch], period=US_PERIOD[tf], auto_adjust=auto_adjust)
         for t, df in got.items():
             c = df["Close"].dropna()
             if c.empty:

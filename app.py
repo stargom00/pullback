@@ -5,6 +5,16 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.324 [저점 US 배당 미조정 + US 유니버스 구멍 보강 — 사용자 결정 "저점 스크린 US + 평가 페이지 US(월봉 RSI·
+    StochRSI·신고가 하락률 포함)를 배당 미조정(분할만 조정)으로 전환. 5탭 US·눌림목 데이터는 불변"] ① lowpoint.
+    US_AUTO_ADJUST=False — fetch_us 기본값, 평가 페이지 fetch_ohlcv·short_table US가 같은 값. 근거: 키움 10-02 주봉 US
+    확정 12종목 대조 — 배당 조정 8/12 → 미조정 10/12(JBGS RSI[1] 30.04→29.45, AVA 31.68→29.79 히트로 일치, BIT 우리만
+    히트 → RSI[2] 26.58로 빠짐), 깨지는 일치 0. 키움 US 배당 미조정은 추정(정황 3건). 5탭 US(app._fetch_us_batch·
+    yf.Ticker.history, auto_adjust=True)·harness 기본값 불변, 신규상장은 범위 밖이라 auto_adjust=True 명시. ② 서버 재생성
+    표식 LOWPOINT_CALC_BASIS = "naver_integrated+wilder_sma+us_splits_only" — 10-05 09:00 KST 전 배포면 10-02 주봉(KR·US)
+    재생성. ③ us_listings 제외 패턴 4개 추가(pref_depositary·pref_abbrev·coupon_pct·structured) — 09-29 목록에서 기존
+    규칙을 빠져나간 12개(우선주 4: CDZIP·MNSBP·WAFDP·LILAP, 구조화증권 8: GJH·GJO·GJP·GJR·GJS·GJT·JBK·KTN — 앞선 보고의
+    "7"은 셈 오류)만 정확히 빠짐(보통주 5,618 → 5,606, ADR 유지). 테스트: test_lowpoint_us_splits_only.py.
 v5.323 [저점 KR 가격 기준 복귀 + RSI 고전 Wilder — 사용자 결정 "v5.321의 가격 기준 교체를 되돌려 저점·평가도 naver
     통합 단일 소스로 복귀 … 저점·평가의 RSI를 고전 Wilder(첫 14봉 SMA 시드)로 교체"] 근거: 키움 10-02 주봉 대조 —
     v5.321 정규장 기준은 KR 일치 6/8 → 3/9로 나빠졌고, naver 통합 + 고전 Wilder + 최소 봉 수 없음이면 키움 KR 7/7 재현
@@ -8759,7 +8769,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.323"
+VERSION = "v5.324"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -17929,7 +17939,7 @@ LOWPOINT_JOBS = ("week", "month", "newlisting")
 # 다른 기준으로 만든 결과는 따라잡기 창 안이면 다시 돌린다 — 운영에 손으로 쓰지 않고 배포만으로 /data 결과가 새 기준으로
 # 바뀌게(창이 지났으면 다음 예약 때). v5.321 "krx_regular"(KR 정규장) → v5.323 naver 통합 + 고전 Wilder RSI로 복귀·교체.
 # 가격 기준만 담던 옛 이름(v5.321 KR_PRICE_BASIS)을 계산 기준 전체(가격+RSI)를 뜻하는 이름으로 바꿨다.
-LOWPOINT_CALC_BASIS = "naver_integrated+wilder_sma"
+LOWPOINT_CALC_BASIS = "naver_integrated+wilder_sma+us_splits_only"   # v5.324: US 배당 미조정 추가
 LOWPOINT_SLOT_TF = {"week": "week", "month": "month", "newlisting": "month"}
 NEWLISTING_DATA_PATH = _resolve_persistent_path("newlisting_latest.json")
 NEWLISTING_LATEST_PATH = os.path.join(os.path.dirname(__file__), "data", "newlisting_latest.json")

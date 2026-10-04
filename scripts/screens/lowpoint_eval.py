@@ -6,7 +6,8 @@
 데이터: 평가하는 **그 종목만** 기존 조회 함수로 받는다(새 소스 없음).
   KR    naver_kr.fetch_history(코드, days=lowpoint.KR_DAYS["month"]) — 일봉 약 10년, naver 통합 시세(애프터 포함 —
         저점 스크린과 같은 단일 소스. v5.321 정규장 B안은 v5.323에 철회, lowpoint.CALC_BASIS 주석)
-  US    harness._fetch_us_batch([티커], period=lowpoint.US_PERIOD["month"]) — yfinance 일봉, 10년
+  US    harness._fetch_us_batch([티커], period=lowpoint.US_PERIOD["month"], auto_adjust=lowpoint.US_AUTO_ADJUST) —
+        yfinance 일봉 10년, **배당 미조정(분할만 조정, v5.324)** — 월봉 RSI·StochRSI·신고가 하락률 모두 이 값
   UPBIT upbit.fetch_candles(마켓, "days"/"months") — 공개 API 1회 최대 200봉(일봉 약 200일, 월봉 약 16년)
 월봉은 KR·US는 일봉을 달력 월말로 묶고, 코인은 업비트 월봉을 그대로 쓴다. **진행 중인 이번 달 봉은 뺀다**
 (저점 스크린과 같은 마감 판정 lowpoint.is_bar_closed — 코인은 KST 달력 월).
@@ -337,7 +338,8 @@ def fetch_ohlcv(code: str, mkt: str) -> tuple[pd.DataFrame | None, pd.DataFrame 
         d = naver_kr.fetch_history(code, days=lp.KR_DAYS["month"])
     else:
         import harness
-        d = harness._fetch_us_batch([code], period=lp.US_PERIOD["month"]).get(code)
+        # v5.324: 저점 스크린과 같은 US 기준 — 배당 미조정(분할만 조정, lowpoint.US_AUTO_ADJUST)
+        d = harness._fetch_us_batch([code], period=lp.US_PERIOD["month"], auto_adjust=lp.US_AUTO_ADJUST).get(code)
     if d is None or d.empty:
         return None, None
     d = d[["Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Close"])
@@ -365,7 +367,7 @@ def short_table(hits: list) -> list:
     us = [h["code"] for h in hits if h.get("market") == "US"]
     data = {}
     if us:
-        data.update(harness._fetch_us_batch(us, period=lp.US_PERIOD["month"]))
+        data.update(harness._fetch_us_batch(us, period=lp.US_PERIOD["month"], auto_adjust=lp.US_AUTO_ADJUST))   # v5.324 배당 미조정
     if kr:
         with ThreadPoolExecutor(max_workers=lp.FETCH_CONCURRENCY) as ex:
             for code, df in zip(kr, ex.map(lambda c: naver_kr.fetch_history(c, days=lp.KR_DAYS["month"]), kr)):
