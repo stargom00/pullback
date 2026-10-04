@@ -224,12 +224,14 @@ def publish_entry(results: list, tf: str, labels: dict, stamp: dict) -> dict:
                 "bar_date": r["기준봉날짜"],       # 구간 내 실제 마지막 거래일
                 "close0": r["0봉종가"], "close1": r["1봉종가"],
                 "rsi2": r["RSI[2]"], "rsi1": r["RSI[1]"], "rsi0": r["RSI[0]"],
+                "price_note": r.get("데이터경고"),   # v5.321: KR 이음새 경고(없으면 None)
             })
     excluded = {res["market"].upper(): {
         "universe": res["universe"], "fetched": res["fetched"],
         "failed": len(res["failed"]), "stale": len(res["stale"]),
         "short": len(res["short"]),
         "admin_excluded": len((res["meta"] or {}).get("admin_excluded") or {}),
+        "seam": res.get("seam_counts") or {},          # v5.321: KR 이음새 상태별 종목 수
     } for res in results}
     return {
         # 봉 구간 라벨(주봉=금요일, 월봉=말일) — 낡음 판정은 앱이 이 값으로 한다
@@ -364,6 +366,120 @@ def fetch_kr(tickers: list, tf: str, concurrency: int = FETCH_CONCURRENCY) -> tu
     return data, failed
 
 
+# v5.321(사용자 지시) — **저점 스크린·평가의 KR 가격 = KRX 정규장 종가(B안 하이브리드).**
+# naver 일봉(fetch_kr)의 종가는 정규장(15:30) 종가가 아니라 애프터마켓(통합 시세, NXT 16:00~20:00) 마지막 체결가다
+# (2026-10-04 조사: 인바이오젠 10-02 naver 5,230 vs 정규장 4,820 → 주봉 A조건이 뒤집혀 잘못 히트, 10-02 KR 표본
+# 40종목 중 39종목이 naver ≠ 정규장). 이 스크린은 키움 조건검색 대체라 키움·트레이딩뷰와 같은 정규장 종가를 써야
+# 한다. naver 공개 엔드포인트(siseJson·모바일 일별 시세·차트 API)에 KRX 정규장 전용 옵션이 없어(파라미터 11종
+# 시도) 정규장 값은 yfinance(.KS/.KQ, auto_adjust=False — 분할 반영·배당 미반영)에서 온다. 표본 10종목에서 yfinance
+# 종가가 KRX 공식 "전일 종가"와 10/10 일치. 그런데 yfinance KR **과거** 일봉은 품질 문제가 있다(같은 날짜에 여러
+# 종목이 하루씩 튐 — NXT 이전 일봉의 1.31%, 수정주가 방식 차이 — 인바이오젠 1.25배·디모아 2024 값 엉킴).
+# 그래서 사용자 확정 B안: **NXT 개장(2025-03-04) 이전 = naver**(애프터마켓이 없던 시기라 정규장과 같고 수정주가가
+# 일관됨), **이후 = yfinance 정규장**. 이음새는 경계 직전 공통 거래일의 종가 비율로 검증해, 1±0.5% 밖이면
+# (수정주가 어긋남) 그 비율로 과거 구간을 재조정하고, 비율이 일정하지 않아 재조정할 수 없으면 경고 플래그를
+# 단다 — 조용히 섞지 않는다(사용자 지시). 남는 한계: NXT 이후 yfinance 일봉의 하루 튐은 걸러지지 않는다.
+# **나머지 KR 경로(5탭 스캐너·종가베팅·현재가·신규상장)는 naver 통합 시세 그대로다** — 그쪽 측정·백테스트가
+# 그 데이터 정의(애프터 포함, KR_CLOSE_CONFIRMED_HM 20:10 이후 확정)로 이뤄져 있어 바꾸면 근거가 깨진다.
+# 두 기준이 공존하는 이유는 CLAUDE.md "KR 가격 기준 두 가지" 절.
+KR_PRICE_BASIS = "krx_regular"
+NXT_START = pd.Timestamp("2025-03-04")   # 넥스트레이드(NXT) 개장일 — 이날부터 naver 일봉 종가가 통합 시세
+SEAM_TOL = 0.005                          # 이음새 비율 허용 ±0.5%(사용자 지시 값)
+SEAM_DAYS = 20                            # 경계 직전 공통 거래일 수 — 비율 중앙값을 재는 창(AI 판단 어림값, 재검토 필요)
+SEAM_MIN_DAYS = 5                         # 공통 거래일이 이보다 적으면 비율을 못 믿는다(AI 판단 어림값)
+
+
+def splice_regular(nv: "pd.DataFrame | None", rg: "pd.DataFrame | None") -> tuple:
+    """naver(경계 이전) + yfinance 정규장(경계부터)을 잇는다. 같은 열 구성의 일봉 DataFrame 둘(종가 열 'Close'
+    필수, 가격 열 Open/High/Low/Close와 Volume은 있으면 함께 처리). 반환 (DataFrame | None, info).
+    info["status"]: ok(비율 1±0.5% 안) · rescaled(과거 구간을 비율로 재조정 — 가격 ÷비율, 거래량 ×비율)
+                    · unverified(경계 앞뒤 비율이 일정하지 않거나 공통일이 부족 — 재조정 못 함, 그대로 이음)
+                    · regular_only(NXT 이후 상장 — yfinance만) · no_regular(yfinance 없음 — naver 통합 시세 그대로)."""
+    has_nv = nv is not None and not nv.empty
+    has_rg = rg is not None and not rg.empty
+    if not has_rg:
+        return (nv if has_nv else None), {"status": "no_regular", "ratio": None}
+    post = rg[rg.index >= NXT_START]
+    if not has_nv or nv.index[0] >= NXT_START:
+        return rg, {"status": "regular_only", "ratio": None}
+    pre = nv[nv.index < NXT_START]
+    common = pre.index.intersection(rg.index)[-SEAM_DAYS:]
+    if len(common) < SEAM_MIN_DAYS:
+        out = pd.concat([pre, post])
+        return out, {"status": "unverified", "ratio": None, "why": f"경계 직전 공통 거래일 {len(common)}일"}
+    ratio = (pre.loc[common, "Close"] / rg.loc[common, "Close"]).astype(float)
+    m = float(ratio.median())
+    half = len(ratio) // 2
+    m1, m2 = float(ratio.iloc[:half].median()), float(ratio.iloc[half:].median())
+    info = {"ratio": round(m, 4), "common_days": len(common)}
+    if abs(m - 1) <= SEAM_TOL:
+        return pd.concat([pre, post]), {**info, "status": "ok"}
+    if abs(m1 / m2 - 1) > SEAM_TOL:   # 창 안에서 비율이 바뀌었다 — 한 배수로 재조정할 근거가 없다
+        return pd.concat([pre, post]), {**info, "status": "unverified",
+                                         "why": f"경계 앞 비율이 일정하지 않음({m1:.4f}→{m2:.4f})"}
+    pre = pre.copy()
+    for col in ("Open", "High", "Low", "Close"):
+        if col in pre.columns:
+            pre[col] = pre[col] / m
+    if "Volume" in pre.columns:
+        pre["Volume"] = pre["Volume"] * m
+    return pd.concat([pre, post]), {**info, "status": "rescaled"}
+
+
+def price_note(info: dict) -> "str | None":
+    """결과 화면에 붙일 데이터 경고(조용히 섞지 않는다). ok·regular_only는 None."""
+    st = (info or {}).get("status")
+    if st == "rescaled":
+        return f"수정주가 재조정 ×{info['ratio']}(naver↔정규장 이음새)"
+    if st == "unverified":
+        return f"이음새 미검증 — {info.get('why', '')}"
+    if st == "no_regular":
+        return "정규장 시세 없음 — naver 통합 시세(애프터 포함) 사용"
+    return None
+
+
+def fetch_kr_regular_frames(tickers: list, tf: str, batch: int = 100,
+                            concurrency: int = FETCH_CONCURRENCY) -> tuple[dict, dict]:
+    """KR 정규장 일봉(B안 하이브리드, OHLCV 그대로). 반환 ({티커: DataFrame}, {티커: 이음새 info}).
+    naver는 fetch_kr과 같은 조회 기간(KR_DAYS), yfinance는 US와 같은 US_PERIOD·묶음 100·auto_adjust=False.
+    스크린(fetch_kr_regular)과 평가 페이지(lowpoint_eval)가 이 한 함수를 쓴다(사본 금지)."""
+    import harness
+    import naver_kr
+    cols = ["Open", "High", "Low", "Close", "Volume"]
+
+    def one(t):
+        try:
+            df = naver_kr.fetch_history(t, days=KR_DAYS[tf])
+            return t, (None if df is None or df.empty else df[[c for c in cols if c in df.columns]].dropna(subset=["Close"]))
+        except Exception:
+            return t, None
+    nv = {}
+    with ThreadPoolExecutor(max_workers=concurrency) as ex:
+        for fut in as_completed([ex.submit(one, t) for t in tickers]):
+            t, df = fut.result()
+            if df is not None and not df.empty:
+                nv[t] = df
+    rg = {}
+    for i in range(0, len(tickers), batch):
+        rg.update(harness._fetch_us_batch(tickers[i:i + batch], period=US_PERIOD[tf], auto_adjust=False))
+    data, flags = {}, {}
+    for t in tickers:
+        r = rg.get(t)
+        if r is not None:
+            r = r[[c for c in cols if c in r.columns]].dropna(subset=["Close"])
+        df, info = splice_regular(nv.get(t), r)
+        flags[t] = info
+        if df is not None and not df.empty:
+            data[t] = df
+    return data, flags
+
+
+def fetch_kr_regular(tickers: list, tf: str) -> tuple[dict, list, dict]:
+    """스크린용 — 종가 시리즈만. 반환 ({티커: 종가}, 실패 목록, {티커: 이음새 info})."""
+    frames, flags = fetch_kr_regular_frames(tickers, tf)
+    data = {t: df["Close"] for t, df in frames.items()}
+    return data, [t for t in tickers if t not in data], flags
+
+
 # 옵션 필터(--us-min-price / --us-min-avg-volume)용 평균 거래량 창. 기본 필터가
 # 꺼져 있으므로 이 값은 "옵션을 켰을 때 무엇을 재는지"만 정한다(임계값 아님).
 US_AVG_VOLUME_WINDOW = 60
@@ -392,7 +508,8 @@ def fetch_us(tickers: list, tf: str, batch: int = 100) -> tuple[dict, list, dict
 # ── 실행 ───────────────────────────────────────────────────────────────
 
 _MKT_ORDER = {"KOSPI": 0, "KOSDAQ": 1, "US": 2}
-COLS = ["시장", "코드", "종목명", "기준봉날짜", "0봉종가", "1봉종가", "RSI[2]", "RSI[1]", "RSI[0]"]
+COLS = ["시장", "코드", "종목명", "기준봉날짜", "0봉종가", "1봉종가", "RSI[2]", "RSI[1]", "RSI[0]",
+        "데이터경고"]   # v5.321: KR 이음새 경고(price_note) — CSV에도 남긴다
 
 
 def clock_of(market: str) -> str:
@@ -409,9 +526,10 @@ def screen_market(market: str, tf: str, now: datetime, refresh_universe: bool = 
     t0 = time.time()
     meta = {}
     opt_dropped = {}
+    price_flags = {}   # KR만: 이음새 검증 결과(splice_regular info) — 경고는 결과 행에 붙는다
     if market in KR_BOARDS:
         uni, meta = kr_universe(market)
-        data, failed = fetch_kr(list(uni), tf)
+        data, failed, price_flags = fetch_kr_regular(list(uni), tf)   # v5.321: 정규장 종가(B안 — naver 이전 + yfinance 이후)
     else:
         # v5.309: 유니버스·일봉을 받기 **전에** 데이터 도착부터 확인(위 docstring)
         meta["data_ready"] = check_us_data_ready(tf, last_closed_label(tf, "us", now),
@@ -447,10 +565,13 @@ def screen_market(market: str, tf: str, now: datetime, refresh_universe: bool = 
                          "기준봉날짜": str(res["bar_date"].date()),
                          "0봉종가": round(res["c0"], 2), "1봉종가": round(res["c1"], 2),
                          "RSI[2]": round(res["r2"], 2), "RSI[1]": round(res["r1"], 2),
-                         "RSI[0]": round(res["r0"], 2)})
+                         "RSI[0]": round(res["r0"], 2),
+                         "데이터경고": price_note(price_flags.get(t))})
+    seam = Counter((v or {}).get("status") for v in price_flags.values())
     return {"market": market, "universe": len(uni), "fetched": len(data), "failed": sorted(failed),
             "session": session, "stale": stale, "short": short, "rows": rows, "meta": meta,
-            "opt_dropped": opt_dropped, "elapsed": time.time() - t0, "names": uni}
+            "opt_dropped": opt_dropped, "elapsed": time.time() - t0, "names": uni,
+            "price_flags": price_flags, "seam_counts": dict(seam)}
 
 
 ALL_MARKETS = ["kospi", "kosdaq", "us"]
@@ -492,6 +613,11 @@ def exclusion_detail_lines(res: dict, tf: str) -> list:
     elif "excluded_by_reason" in meta:                  # US(Nasdaq Trader 상장목록)
         out.append(f"[{m}] 상장목록 제외(사유별): {meta['excluded_by_reason']} "
                    f"— 원본 {meta['total']}행 → 보통주 {meta['kept']}")
+    flagged = {t: price_note(v) for t, v in (res.get("price_flags") or {}).items() if price_note(v)}
+    if res.get("price_flags"):                           # KR(v5.321 이음새 검증) — 0건이어도 남긴다
+        out.append(f"[{m}] 이음새(2025-03-04) 상태: {res.get('seam_counts')} — 경고 {len(flagged)}종목"
+                   + (": " + ", ".join(f"{t}({res['names'].get(t, '')}) {n}" for t, n in sorted(flagged.items())[:40])
+                      if flagged else ""))
     if res.get("opt_dropped"):
         out.append(f"[{m}] 옵션 필터 제외 {len(res['opt_dropped'])}종목: "
                    + ", ".join(f"{t}({v})" for t, v in sorted(res["opt_dropped"].items())[:20]))

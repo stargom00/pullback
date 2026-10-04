@@ -5,6 +5,21 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.321 [저점 스크린·평가의 KR 가격 = KRX 정규장 기준 — 사용자 지시, 2026-10-04 인바이오젠 오히트 조사 후속]
+    원인: naver 일봉 종가는 정규장(15:30) 종가가 아니라 애프터마켓(NXT 통합 시세) 마지막 체결가 — 인바이오젠
+    10-02 naver 5,230 vs 정규장 4,820이라 주봉 A조건(1봉전 < 0봉전)이 뒤집혀 잘못 히트. naver 공개 엔드포인트엔
+    정규장 전용 옵션이 없다. 사용자 확정 B안: NXT 개장(2025-03-04) 이전 = naver(애프터가 없던 시기, 수정주가
+    일관), 이후 = yfinance(.KS/.KQ, auto_adjust=False — 표본 10/10 KRX 공식 전일 종가와 일치). 이음새 검증(사용자
+    지시): 경계 직전 공통 거래일 20일의 naver/yfinance 종가 비율 중앙값이 1±0.5% 밖이면 그 비율로 과거 구간을
+    재조정(가격 ÷비율, 거래량 ×비율), 창 안에서 비율이 일정하지 않거나 공통일 부족이면 재조정 없이 "이음새
+    미검증" 경고, yfinance 없음은 "정규장 시세 없음" 경고 — 결과 행 price_note로 홈 칩·평가 페이지에 ⚠ 표시
+    (조용히 섞지 않는다). lowpoint.splice_regular/fetch_kr_regular_frames 한 곳을 스크린(주·월, 서버 자동 실행
+    포함)·평가 페이지(장기 체크리스트·단기 비교)가 같이 쓴다. 서버: 실행 상태에 basis 기록, 옛 기준 결과는 창
+    (토 09:00 + 48시간) 안이면 다시 돈다(LOWPOINT_KR_PRICE_BASIS) — 10-02 주봉이 배포 후 새 기준으로 재생성.
+    **나머지 KR 경로(5탭 스캐너·종가베팅·현재가·신규상장)는 naver 통합 시세 그대로** — 측정·백테스트가 그 데이터
+    정의로 이뤄져 있어 보존(CLAUDE.md "KR 가격 기준 두 가지"). [UI] 저점 주봉·월봉 히트 칩(홈·평가)·평가 카드·
+    단기 비교의 미국 종목은 정식 명칭 대신 티커(lpDisplayName, 이름은 툴팁), KR·코인은 그대로.
+    테스트: test_lowpoint_kr_basis.py(이음새 합성·실데이터 RSI 연속성 — test_fixtures/kr_seam_closes.json, 사보타주 5건).
 v5.320 [저점 매매 기록 수정 — 사용자 지시 "추가·종료·삭제만 되고 수정이 안 됨. 오타·구분 변경 때마다 삭제 후
     재입력"] 보유 행 "수정": 구분·매수일·매수가·수량(종목 불변 — 바꾸려면 삭제 후 재등록), 종료 행 "수정": 매도일·
     매도가·수량. 목표가·수익률·수익금·월간 요약·상단 합계는 원래 렌더 때 레코드에서 계산하므로 저장 후 자동 재계산
@@ -8713,7 +8728,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.320"
+VERSION = "v5.321"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -17877,6 +17892,10 @@ LOWPOINT_CATCHUP_HOURS = 48
 # 슬롯을 그대로 쓰고(LOWPOINT_SLOT_TF), 월봉이 그 기준봉에서 끝난 뒤(성공 또는 시도 소진)에만
 # due가 된다(_lowpoint_due). 실행 상태는 같은 lowpoint_run_state.json의 "newlisting" 칸.
 LOWPOINT_JOBS = ("week", "month", "newlisting")
+# v5.321(사용자 지시): 저점 스크린 KR 가격 = KRX 정규장 종가(scripts/screens/lowpoint.py KR_PRICE_BASIS와 같은 값
+# — 테스트로 고정). 실행 기록에 이 값을 남기고, 다른 기준으로 만든 결과(예전 naver 통합 시세)는 따라잡기 창 안이면
+# 다시 돌린다 — 운영에 손으로 쓰지 않고 배포만으로 /data 결과가 새 기준으로 바뀌게(창이 지났으면 다음 예약 때).
+LOWPOINT_KR_PRICE_BASIS = "krx_regular"
 LOWPOINT_SLOT_TF = {"week": "week", "month": "month", "newlisting": "month"}
 NEWLISTING_DATA_PATH = _resolve_persistent_path("newlisting_latest.json")
 NEWLISTING_LATEST_PATH = os.path.join(os.path.dirname(__file__), "data", "newlisting_latest.json")
@@ -17958,6 +17977,8 @@ def _lowpoint_due(tf: str, now: "datetime", state: dict) -> "str | None":
         return target
     status = st.get("status")
     if status == "ok":
+        if tf in ("week", "month") and st.get("basis") != LOWPOINT_KR_PRICE_BASIS:
+            return target   # 가격 기준이 바뀐 뒤의 첫 실행(창 안일 때만 — 위에서 이미 걸렀다)
         return None
     try:
         last = datetime.fromisoformat(st.get("started_at") or st.get("finished_at") or "")
@@ -18048,7 +18069,8 @@ async def _maybe_run_lowpoint(now: "datetime | None" = None, *, _job=None) -> "d
         prev = state.get(tf) or {}
         attempts = (int(prev.get("attempts") or 0) + 1) if prev.get("target") == target else 1
         rec = {"target": target, "status": "running", "attempts": attempts,
-               "started_at": now.isoformat(), "last_ok_at": prev.get("last_ok_at")}
+               "started_at": now.isoformat(), "last_ok_at": prev.get("last_ok_at"),
+               "basis": LOWPOINT_KR_PRICE_BASIS if tf in ("week", "month") else None}
         state[tf] = rec
         _lowpoint_save_state(state)
         _lowpoint_running = True

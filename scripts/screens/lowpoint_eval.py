@@ -4,7 +4,8 @@
 단기 후보는 '뭐가 먼저 +5% 가는지' 비교. 수동 표 대신 서버 데이터로 자동 판정."
 
 데이터: 평가하는 **그 종목만** 기존 조회 함수로 받는다(새 소스 없음).
-  KR    naver_kr.fetch_history(코드, days=lowpoint.KR_DAYS["month"])   — 일봉 OHLCV(수정주가), 약 10년
+  KR    lowpoint.fetch_kr_regular_frames(10년) — **KRX 정규장 기준 OHLCV**(v5.321 B안: 2025-03-04 이전 naver +
+        이후 yfinance 정규장, 이음새 검증·경고는 lowpoint.splice_regular — lowpoint.KR_PRICE_BASIS 주석)
   US    harness._fetch_us_batch([티커], period=lowpoint.US_PERIOD["month"]) — yfinance 일봉, 10년
   UPBIT upbit.fetch_candles(마켓, "days"/"months") — 공개 API 1회 최대 200봉(일봉 약 200일, 월봉 약 16년)
 월봉은 KR·US는 일봉을 달력 월말로 묶고, 코인은 업비트 월봉을 그대로 쓴다. **진행 중인 이번 달 봉은 뺀다**
@@ -325,53 +326,61 @@ def rank_by_ret10(rows: list) -> list:
 
 # ── 데이터(평가하는 종목만) ────────────────────────────────────────────
 
-def fetch_ohlcv(code: str, mkt: str) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
-    """(일봉, 월봉) — 월봉은 진행 중인 달 포함(호출부가 completed_months로 뺀다)."""
+def fetch_ohlcv_noted(code: str, mkt: str) -> tuple:
+    """(일봉, 월봉, 데이터 경고 | None) — 월봉은 진행 중인 달 포함(호출부가 completed_months로 뺀다).
+    경고는 KR 이음새(lowpoint.price_note) — 평가 결과에 그대로 실어 화면에 표시한다(조용히 섞지 않는다)."""
     if mkt == "UPBIT":
         import upbit
-        return upbit.fetch_candles(code, "days"), upbit.fetch_candles(code, "months")
+        return upbit.fetch_candles(code, "days"), upbit.fetch_candles(code, "months"), None
+    import harness
+    note = None
     if mkt == "KR":
-        import naver_kr
-        d = naver_kr.fetch_history(code, days=lp.KR_DAYS["month"])
+        # v5.321: KR은 정규장 기준 — 저점 스크린과 같은 함수(B안: 2025-03-04 이전 naver + 이후 yfinance)
+        frames, flags = lp.fetch_kr_regular_frames([code], "month")
+        d, note = frames.get(code), lp.price_note(flags.get(code))
     else:
-        import harness
         d = harness._fetch_us_batch([code], period=lp.US_PERIOD["month"]).get(code)
     if d is None or d.empty:
-        return None, None
+        return None, None, note
     d = d[["Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Close"])
-    return d, monthly_ohlc(d)
+    return d, monthly_ohlc(d), note
+
+
+def fetch_ohlcv(code: str, mkt: str) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+    """(일봉, 월봉) — fetch_ohlcv_noted에서 경고만 뺀 것."""
+    return fetch_ohlcv_noted(code, mkt)[:2]
 
 
 def evaluate(code: str, mkt: str, now: datetime) -> dict:
-    daily, monthly = fetch_ohlcv(code, mkt)
+    daily, monthly, note = fetch_ohlcv_noted(code, mkt)
     if daily is None or daily.empty:
         return {"ok": False, "error": "일봉을 받지 못했어요", "items": []}
     months = completed_months(monthly, mkt, now)
     items = long_checks(daily, months)
     # O·X·미표시 집계는 화면(lpeTally)이 자동+수동을 합쳐 한 곳에서 센다(사본 금지)
     return {"ok": True, "items": items, "manual_auto": manual_auto(months),
-            "last_date": str(daily.index[-1].date()), "close": float(daily["Close"].iloc[-1])}
+            "last_date": str(daily.index[-1].date()), "close": float(daily["Close"].iloc[-1]),
+            "price_note": note}
 
 
 def short_table(hits: list) -> list:
-    """이번 주 저점 히트(행: code·name·market) → 단기 비교 행. KR은 naver 일봉, US는 yfinance 한 번에
-    (평가 시점에 그 종목들만 조회). 순위는 rank_by_ret10."""
-    from concurrent.futures import ThreadPoolExecutor
-    import naver_kr
+    """이번 주 저점 히트(행: code·name·market) → 단기 비교 행. 평가 시점에 그 종목들만 yfinance로 조회 —
+    KR은 정규장 기준(lowpoint.fetch_kr_regular_frames, v5.321), US는 기존 그대로. 순위는 rank_by_ret10."""
     import harness
     kr = [h["code"] for h in hits if h.get("market") != "US"]
     us = [h["code"] for h in hits if h.get("market") == "US"]
     data = {}
     if us:
         data.update(harness._fetch_us_batch(us, period=lp.US_PERIOD["month"]))
+    notes = {}
     if kr:
-        with ThreadPoolExecutor(max_workers=lp.FETCH_CONCURRENCY) as ex:
-            for code, df in zip(kr, ex.map(lambda c: naver_kr.fetch_history(c, days=lp.KR_DAYS["month"]), kr)):
-                if df is not None and not df.empty:
-                    data[code] = df
+        frames, flags = lp.fetch_kr_regular_frames(kr, "month")
+        data.update(frames)
+        notes = {t: lp.price_note(f) for t, f in flags.items()}
     rows = []
     for h in hits:
         m = short_metrics(data.get(h["code"]))
         rows.append({"code": h["code"], "name": h.get("name") or h["code"],
-                     "mkt": "US" if h.get("market") == "US" else "KR", **m})
+                     "mkt": "US" if h.get("market") == "US" else "KR", **m,
+                     "price_note": notes.get(h["code"])})
     return rank_by_ret10(rows)

@@ -55,14 +55,16 @@ def _fetch_kr_one(ticker, days=None):
         return ticker, None
 
 
-def _fetch_us_batch(tickers, period="2y"):
+def _fetch_us_batch(tickers, period="2y", auto_adjust=True):
+    """yfinance 일괄 일봉. auto_adjust 기본 True(기존 호출부 그대로). v5.321: 저점 스크린 KR(정규장 종가)은
+    False로 부른다 — Close = 분할만 반영한 정규장 종가(배당 조정 없음, naver 수정주가·키움·트레이딩뷰와 같은 기준)."""
     import yfinance as yf
     out = {}
     if not tickers:
         return out
     try:
         raw = yf.download(tickers, period=period, interval="1d",
-                           auto_adjust=True, group_by="ticker",
+                           auto_adjust=auto_adjust, group_by="ticker",
                            threads=True, progress=False)
     except Exception:
         return out
