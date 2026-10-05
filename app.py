@@ -5,6 +5,24 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.325 [저점일지 "관찰" 페이지 — 사용자 지시 "히트 시점 종가를 기준가로 기록하고 이후 +5% 도달 여부를 자동 추적 —
+    도달한 종목은 활성 목록에서 빠지고, 미도달 종목만 진입 후보로 남는 관찰 페이지"] ① 등록: 주·월봉 스캔(서버 러너
+    _lowpoint_job_blocking)이 게시 직후 히트 전 종목을 /data/lowpoint_watch.json에 등록 — 기준가 = 행 close0(스캔
+    기준일 종가), 기준일·주기 저장, id = w_{tf}_{기준봉라벨}_{코드}(기준일별 코호트 — 같은 종목도 다음 스캔이면 별도).
+    서버 시작 직후·일일 추적·수동 갱신 때 현재 게시 결과(주·월, /data 우선·레포 폴백)로도 맞춘다(_lp_watch_seed_from_
+    latest — 기존 10-02 주봉·09-30 월봉 히트가 첫 배포에서 들어감, 같은 id는 건너뜀, 삭제한 id는 삭제 로그를 근거로 다시
+    안 넣음). ② 추적: 저점 러너의 네 번째 작업 "watch"(LOWPOINT_JOBS) — 매일 07:00 KST 슬롯(LOWPOINT_SCHEDULE_HM,
+    사용자 지시 시각), 재시도·장중 차단·따라잡기 창은 기존 규칙 그대로(새 대기시간·임계값 0건) + 수동 "지금 갱신"(같은
+    단일 워커·같은 진행중 잠금, 409 busy). **관찰 중(active) 종목만** 일봉 조회(KR naver 통합, US yfinance 배당 미조정 —
+    기준가와 같은 소스). 판정: 기준일 다음 날부터 일봉 고가 ≥ 기준가×1.05 → 도달(정확히 1.05배 포함), 도달일·달력 일수
+    기록, 도달 레코드는 다시 조회 안 함. +5%는 평가 페이지 단기 목표 값 재사용(lowpoint_eval.SHORT_GOAL_PCT — 기존
+    SHORT_VP_UP_PCT=5.0을 의미 이름으로 묶음; 저점 매매 단기 목표%는 기본 4%·사용자 설정값이라 쓰지 않음). ③ 화면: 기준일별
+    그룹(최근 위, 같은 날 주봉 먼저), 활성 행 = 종목(US 티커)·기준가·현재가·기준가 대비 %·경과일·트레이딩뷰 링크·[기록]
+    (매매 기록 폼에 종목 프리필, 구분 단기)·[삭제]; 도달 종목은 접힌 "도달 완료" 섹션(도달일·도달까지 일수). ④ 저장 규칙은
+    저점 매매 기록과 같음(서버 쓰기는 _journal_bump rev, 삭제 로그, _daily_backup 14개). API: GET /api/lowpoint/watch ·
+    POST /api/lowpoint/watch/refresh · DELETE /api/lowpoint/watch/{id}. ⑤ conftest.py 신설 — 개발 중 러너 테스트가 실제
+    관찰 작업을 돌려 레포 루트에 lowpoint_watch.json을 만든 일이 있어, 모든 테스트의 관찰 저장 경로를 임시 폴더로 돌린다
+    (주·월봉 러너 테스트 픽스처는 작업 목록을 그 셋으로 명시). 테스트: test_lowpoint_watch.py.
 v5.324 [저점 US 배당 미조정 + US 유니버스 구멍 보강 — 사용자 결정 "저점 스크린 US + 평가 페이지 US(월봉 RSI·
     StochRSI·신고가 하락률 포함)를 배당 미조정(분할만 조정)으로 전환. 5탭 US·눌림목 데이터는 불변"] ① lowpoint.
     US_AUTO_ADJUST=False — fetch_us 기본값, 평가 페이지 fetch_ohlcv·short_table US가 같은 값. 근거: 키움 10-02 주봉 US
@@ -8769,7 +8787,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.324"
+VERSION = "v5.325"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -13108,6 +13126,7 @@ async def _scheduler_loop():
             _daily_backup(LP_TRADES_PATH, "lowpoint_trades", lock=_LP_TRADES_LOCK)   # v5.302
             _daily_backup(LP_EVALS_PATH, "lowpoint_evals", lock=_LP_EVALS_LOCK)      # v5.317
             _daily_backup(USER_EVENTS_PATH, "user_events", lock=_USER_EVENTS_LOCK)   # v5.322 홈 달력
+            _daily_backup(LP_WATCH_PATH, "lowpoint_watch", lock=_LP_WATCH_LOCK)       # v5.325 저점 관찰
             asyncio.create_task(_maybe_run_lowpoint())   # v5.301: 저점종목 토요일 자동 실행(백그라운드)
         except Exception as e:
             print(f"[scheduler] loop error: {e}")
@@ -13165,8 +13184,13 @@ async def _start_scheduler():
         _daily_backup(LP_TRADES_PATH, "lowpoint_trades", force=True, lock=_LP_TRADES_LOCK)   # v5.302
         _daily_backup(LP_EVALS_PATH, "lowpoint_evals", force=True, lock=_LP_EVALS_LOCK)      # v5.317
         _daily_backup(USER_EVENTS_PATH, "user_events", force=True, lock=_USER_EVENTS_LOCK)   # v5.322 홈 달력
+        _daily_backup(LP_WATCH_PATH, "lowpoint_watch", force=True, lock=_LP_WATCH_LOCK)       # v5.325 저점 관찰
     except Exception as e:
         print(f"[journal-backup] 시작 백업 실패: {e}", flush=True)
+    try:
+        _lp_watch_seed_from_latest()   # v5.325: 기존 주·월봉 히트를 관찰 초기 데이터로(파일 작업만, 네트워크 0)
+    except Exception as e:
+        print(f"[lowpoint-watch] 시작 시 등록 실패(일일 추적 때 재시도): {type(e).__name__}: {e}", flush=True)
     asyncio.create_task(_scheduler_loop())
 
 
@@ -17911,7 +17935,7 @@ async def refresh_market(market: str = "all"):
 LOWPOINT_DATA_PATH = _resolve_persistent_path("lowpoint_latest.json")
 LOWPOINT_STATE_PATH = _resolve_persistent_path("lowpoint_run_state.json")
 LOWPOINT_US_LISTINGS_PATH = _resolve_persistent_path("us_listings.json")
-LOWPOINT_SCHEDULE_HM = {"week": (9, 0), "month": (8, 0)}   # KST, 사용자 지시(월봉 v5.307: 1일 09:20 → 08:00)
+LOWPOINT_SCHEDULE_HM = {"week": (9, 0), "month": (8, 0), "watch": (7, 0)}   # KST, 사용자 지시(월봉 v5.307: 1일 09:20 → 08:00 · v5.325 관찰 추적 매일 07:00 — "KR 전일 마감·US 당일 마감 커버")
 LOWPOINT_RETRY_MIN = 60          # 실패 후 재시도 간격(분) — AI 판단 어림값
 # v5.308(사용자 지시) — **재시도는 KR 장외에서만.** 예약 시각(주봉 토 09:00 / 월봉 1일 08:00)은
 # 둘 다 KR 장외라 첫 시도는 영향이 없지만, 재시도는 60분 간격이라 08:00 실패 → 09:00·10:00이
@@ -17934,7 +17958,9 @@ LOWPOINT_CATCHUP_HOURS = 48
 # 차단·US 데이터 선체크 등 기존 규칙 전부 상속, 새 대기시간·임계값 0건". 그래서 예약 시각은 월봉
 # 슬롯을 그대로 쓰고(LOWPOINT_SLOT_TF), 월봉이 그 기준봉에서 끝난 뒤(성공 또는 시도 소진)에만
 # due가 된다(_lowpoint_due). 실행 상태는 같은 lowpoint_run_state.json의 "newlisting" 칸.
-LOWPOINT_JOBS = ("week", "month", "newlisting")
+# v5.325(사용자 지시) 저점 관찰 추적 — 네 번째 작업("기존 러너 패턴 재사용, 새 대기시간·임계값 금지"). 매일 07:00 KST
+# 슬롯(_lowpoint_last_slot의 일 단위 분기), 재시도·장중 차단·따라잡기 창은 기존 규칙 그대로. 라벨 = 그날 날짜.
+LOWPOINT_JOBS = ("week", "month", "newlisting", "watch")
 # 저점 스크린 계산 기준(scripts/screens/lowpoint.py CALC_BASIS와 같은 값 — 테스트로 고정). 실행 기록에 이 값을 남기고,
 # 다른 기준으로 만든 결과는 따라잡기 창 안이면 다시 돌린다 — 운영에 손으로 쓰지 않고 배포만으로 /data 결과가 새 기준으로
 # 바뀌게(창이 지났으면 다음 예약 때). v5.321 "krx_regular"(KR 정규장) → v5.323 naver 통합 + 고전 Wilder RSI로 복귀·교체.
@@ -17958,6 +17984,11 @@ def _lowpoint_last_slot(tf: str, now: "datetime") -> "tuple[datetime, str]":
     now_k = now.astimezone(KST)
     tf = LOWPOINT_SLOT_TF.get(tf, tf)   # v5.314: 신규상장은 월봉 슬롯·라벨을 그대로 쓴다
     hh, mm = LOWPOINT_SCHEDULE_HM[tf]
+    if tf == "watch":   # v5.325: 매일 — 라벨은 그 슬롯의 날짜 자체(하루 1회)
+        slot = datetime(now_k.year, now_k.month, now_k.day, hh, mm, tzinfo=KST)
+        if slot > now_k:
+            slot -= timedelta(days=1)
+        return slot, slot.date().isoformat()
     if tf == "week":
         d = now_k.date() - timedelta(days=(now_k.weekday() - 5) % 7)   # 이번 주(또는 오늘) 토요일
         slot = datetime(d.year, d.month, d.day, hh, mm, tzinfo=KST)
@@ -18060,7 +18091,14 @@ def _lowpoint_job_blocking(tf: str, now: "datetime") -> dict:
                                     is_trading_day=is_trading_day)
     entry = lp.publish_entry(results, tf, labels, harness.run_stamp())
     lp.write_publish(tf, entry, path=LOWPOINT_DATA_PATH)   # tmp → os.replace(원자적)
-    return {"bar_date": entry["bar_date"], "rows": len(entry["rows"]),
+    # v5.325: 스캔이 돌 때마다 히트 전 종목을 관찰 목록에 등록(기준가 = 스캔 기준일 종가). 실패해도 스캔 결과는
+    # 이미 써졌으니 실행을 실패로 만들지 않고, 다음 추적(_lp_watch_seed_from_latest)이 같은 결과로 다시 등록한다.
+    try:
+        watch_added = _lp_watch_register(entry, tf, "scan")
+    except Exception as e:
+        watch_added = f"등록 실패 — {type(e).__name__}: {e}"[:200]
+        print(f"[lowpoint-watch] scan {tf} 등록 실패(다음 추적 때 재시도): {watch_added}", flush=True)
+    return {"bar_date": entry["bar_date"], "rows": len(entry["rows"]), "watch_added": watch_added,
             "listings_refreshed": refresh,
             "counts": {m: {"universe": c["universe"], "fetched": c["fetched"], "failed": c["failed"]}
                        for m, c in entry["excluded_counts"].items()}}
@@ -18124,7 +18162,8 @@ async def _maybe_run_lowpoint(now: "datetime | None" = None, *, _job=None) -> "d
               f"· rss {rss0}MB", flush=True)
         try:
             loop = asyncio.get_event_loop()
-            job = _job or (_newlisting_job_blocking if tf == "newlisting" else _lowpoint_job_blocking)
+            job = _job or {"newlisting": _newlisting_job_blocking,
+                           "watch": _lp_watch_job_blocking}.get(tf, _lowpoint_job_blocking)
             summary = await loop.run_in_executor(_LOWPOINT_EXECUTOR, job, tf, now)
             rec.update(status="ok", finished_at=datetime.now(KST).isoformat(), summary=summary,
                        last_ok_at=datetime.now(KST).isoformat(), error=None)
@@ -20176,6 +20215,145 @@ async def lp_eval_delete(rid: str, request: Request):
         removed = evals.pop(idx)
         _rec_list_write(LP_EVALS_PATH, evals)
         _rev_store_delete_log(LP_EVALS_DELETE_LOG_PATH, rid, request, removed, "lowpoint-evals")
+    return JSONResponse({"ok": True, "deleted": rid})
+
+
+# ── v5.325(사용자 지시) 저점 관찰 — 히트 종가 대비 +5% 도달 추적 ──────────────────
+# "히트 시점 종가를 기준가로 기록하고 이후 +5% 도달 여부를 자동 추적 — 도달한 종목은 활성 목록에서 빠지고, 미도달
+# 종목만 진입 후보로 남는 관찰 페이지." 계산은 scripts/screens/lowpoint_watch.py(순수), 여기는 저장·등록·러너·API.
+# 저장은 저점 매매 기록과 같은 레코드 단위 규칙(_rec_list_*·_journal_bump rev·_rev_store_delete_log·_daily_backup).
+# 레코드는 서버만 만든다(스캔 결과 등록) — 사용자는 삭제만. 삭제된 id는 삭제 로그를 근거로 다시 등록하지 않는다.
+LP_WATCH_PATH = _resolve_persistent_path("lowpoint_watch.json")
+LP_WATCH_DELETE_LOG_PATH = os.path.join(os.path.dirname(LP_WATCH_PATH), "lowpoint_watch_deletions.log")
+_LP_WATCH_LOCK = _threading.RLock()
+
+
+def _lp_watch_mod():
+    for sub in (("scripts", "screens"), ("scripts", "measurements")):
+        d = os.path.join(os.path.dirname(__file__), *sub)
+        if d not in sys.path:
+            sys.path.insert(0, d)
+    import lowpoint_watch
+    return lowpoint_watch
+
+
+def _lp_watch_deleted_ids() -> set:
+    """사용자가 지운 관찰 id — 삭제 로그(한 줄 = JSON)에서. 로그가 없으면 빈 집합."""
+    out = set()
+    try:
+        with open(LP_WATCH_DELETE_LOG_PATH, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    out.add(_json.loads(line).get("id"))
+                except ValueError:
+                    continue
+    except OSError:
+        pass
+    return out
+
+
+def _lp_watch_register(entry: dict, tf: str, source: str) -> int:
+    """저점 게시 한 칸의 히트를 관찰 목록에 추가(이미 있는 id·삭제한 id는 건너뜀). 반환: 추가 건수.
+    0건이어도 로그를 남긴다(침묵을 성공으로 읽지 않게 — CLAUDE.md 사보타주 5번)."""
+    w = _lp_watch_mod()
+    new = w.records_from_entry(entry, tf)
+    with _LP_WATCH_LOCK:
+        recs = _rec_list_load(LP_WATCH_PATH)
+        have = {r.get("id") for r in recs} | _lp_watch_deleted_ids()
+        added = []
+        for r in new:
+            if r["id"] in have:
+                continue
+            r["rev"] = 1
+            r["updated_at"] = _now_iso()
+            recs.append(r)
+            added.append(r["id"])
+        if added:
+            _rec_list_write(LP_WATCH_PATH, recs)
+    print(f"[lowpoint-watch] {source} {tf} {(entry or {}).get('bar_date')} — 히트 {len(new)}건 중 {len(added)}건 등록",
+          flush=True)
+    return len(added)
+
+
+def _lp_watch_seed_from_latest() -> dict:
+    """현재 표시 중인 저점 결과(주·월, /data 우선 · 레포 폴백 — 홈 카드와 같은 소스)를 관찰 목록에 맞춘다.
+    서버 시작 직후·일일 추적·수동 갱신 때 부른다 — 기존 10-02 주봉·09-30 월봉 히트가 첫 배포에서 들어가고,
+    스캔 직후 등록이 실패했어도 다음 추적 때 따라잡는다(id가 같으면 건너뛰므로 몇 번 불러도 같다)."""
+    data = _lowpoint_read(LOWPOINT_DATA_PATH) or {}
+    repo = _lowpoint_read(LOWPOINT_LATEST_PATH) or {}
+    out = {}
+    for tf in LOWPOINT_TFS:
+        entry = data.get(tf) if isinstance(data.get(tf), dict) else repo.get(tf)
+        out[tf] = _lp_watch_register(entry, tf, "seed") if isinstance(entry, dict) else 0
+    return out
+
+
+def _lp_watch_job_blocking(tf: str, now: "datetime") -> dict:
+    """저점 러너의 "watch" 작업(매일 07:00 KST) · 수동 갱신 공용 — 스레드풀에서 돈다.
+    활성 레코드 종목만 조회(lowpoint_watch.fetch_daily)하고, 쓰기는 잠금 안에서 다시 읽어 바뀐 레코드만 rev를 올린다."""
+    w = _lp_watch_mod()
+    seeded = _lp_watch_seed_from_latest()
+    today = now.astimezone(KST).date()
+    updates, summary = w.track(_rec_list_load(LP_WATCH_PATH), today, now.astimezone(KST).isoformat())
+    with _LP_WATCH_LOCK:
+        recs = _rec_list_load(LP_WATCH_PATH)
+        changed = 0
+        for r in recs:
+            u = updates.get(r.get("id"))
+            if not u or r.get("status") != "active":
+                continue
+            r.update(u)
+            _journal_bump(r)
+            changed += 1
+        if changed:
+            _rec_list_write(LP_WATCH_PATH, recs)
+    print(f"[lowpoint-watch] 추적 — 활성 {summary['active']}건 · 조회 {summary['fetched']}종목 · 새 도달 "
+          f"{summary['reached_new']}건 · 조회 실패 {len(summary['failed'])}건 · 갱신 {changed}건", flush=True)
+    return {"bar_date": today.isoformat(), "rows": summary["active"], "counts": {**summary, "seeded": seeded}}
+
+
+@app.get("/api/lowpoint/watch")
+async def lp_watch_list():
+    try:
+        recs = _rec_list_load(LP_WATCH_PATH)
+    except (OSError, ValueError) as e:
+        return JSONResponse({"ok": False, "error": f"관찰 목록 읽기 실패: {e}"}, status_code=500)
+    st = _lowpoint_load_state().get("watch") or {}
+    return JSONResponse(_clean_nan({"ok": True, "records": recs, "reach_pct": _lp_watch_mod().REACH_PCT,
+                                    "schedule_hm": LOWPOINT_SCHEDULE_HM["watch"],
+                                    "last_run": {k: st.get(k) for k in ("target", "status", "finished_at", "error")}}))
+
+
+@app.post("/api/lowpoint/watch/refresh")
+async def lp_watch_refresh():
+    """수동 갱신 — 저점 러너와 같은 단일 워커·같은 진행중 잠금(동시에 두 번 안 돈다). 유료 API 아님(naver·yahoo 일봉)."""
+    global _lowpoint_running
+    if _lowpoint_running:
+        return JSONResponse({"ok": False, "error": "저점 작업이 이미 돌고 있어요 — 잠시 뒤 다시"}, status_code=409)
+    _lowpoint_running = True
+    try:
+        loop = asyncio.get_event_loop()
+        summary = await loop.run_in_executor(_LOWPOINT_EXECUTOR, _lp_watch_job_blocking, "watch", datetime.now(KST))
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"[:300]}, status_code=500)
+    finally:
+        _lowpoint_running = False
+    return JSONResponse(_clean_nan({"ok": True, "summary": summary}))
+
+
+@app.delete("/api/lowpoint/watch/{rid}")
+async def lp_watch_delete(rid: str, request: Request):
+    with _LP_WATCH_LOCK:
+        try:
+            recs = _rec_list_load(LP_WATCH_PATH)
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
+        idx = next((i for i, r in enumerate(recs) if r.get("id") == rid), None)
+        if idx is None:
+            return JSONResponse({"ok": True, "already_gone": True})
+        removed = recs.pop(idx)
+        _rec_list_write(LP_WATCH_PATH, recs)
+        _rev_store_delete_log(LP_WATCH_DELETE_LOG_PATH, rid, request, removed, "lowpoint-watch")
     return JSONResponse({"ok": True, "deleted": rid})
 
 

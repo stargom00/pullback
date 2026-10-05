@@ -1366,7 +1366,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.324</span>
+      <span class="ver mono" id="verBadge">v5.325</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -7101,6 +7101,7 @@ async function lptAdd(form) {
         + (t.hint ? ' — ' + t.hint : ''));
     }
     _lpt.pendingKr = null;
+    _lpt.prefill = null;   // v5.325: 관찰 [기록] 프리필은 저장되면 비운다
     const hold = _lpt.trades.find(r => !r.sellDate && r.code === t.ticker && r.kind === kind);
     if (hold) {
       await _lptPut(lpMergeBuy(hold, buy), hold.rev);          // 추매 → 평단·수량 합침
@@ -7202,7 +7203,108 @@ function lpeSortRows(rows, key, dir) {
 function lpSetView(v) {
   _lpt.view = v;
   if (v === 'eval') { lpeLoad().then(renderLowpointTrack); }
+  if (v === 'watch') { lpwLoad().then(renderLowpointTrack); }
   renderLowpointTrack();
+}
+// ── v5.325(사용자 지시) 저점 관찰 — "히트 시점 종가를 기준가로 기록하고 이후 +5% 도달 여부를 자동 추적 — 도달한
+// 종목은 활성 목록에서 빠지고, 미도달 종목만 진입 후보로 남는 관찰 페이지." 레코드·판정은 서버(lowpoint_watch.py,
+// 매일 07:00 KST + 수동 갱신), 화면은 그룹·정렬·일수만 계산한다(순수 함수 — node 테스트).
+const _lpw = { recs: [], error: null, busy: false, reachPct: null, lastRun: null, msg: '' };
+// 기준일(코호트)별 그룹 — 최근 기준일 위, 같은 날이면 주봉 먼저. 활성은 기준가 대비 %가 낮은 순(진입 후보가 위),
+// 도달은 도달일 순. 같은 종목이라도 기준일이 다르면 다른 그룹의 다른 행이다.
+function lpwGroups(recs) {
+  const by = {};
+  for (const r of recs || []) {
+    const k = r.tf + '|' + r.label;
+    (by[k] = by[k] || { key: k, tf: r.tf, label: r.label, active: [], reached: [] })[r.status === 'reached' ? 'reached' : 'active'].push(r);
+  }
+  const pct = r => (r.last_close != null && r.base_price > 0) ? (r.last_close - r.base_price) / r.base_price * 100 : Infinity;
+  const out = Object.values(by);
+  for (const g of out) {
+    g.active.sort((a, b) => pct(a) - pct(b) || String(a.code).localeCompare(String(b.code)));
+    g.reached.sort((a, b) => String(a.reached_date).localeCompare(String(b.reached_date)) || String(a.code).localeCompare(String(b.code)));
+  }
+  return out.sort((a, b) => String(b.label).localeCompare(String(a.label)) || (a.tf === 'week' ? -1 : 1));
+}
+// 달력 일수(YYYY-MM-DD 둘 사이) — 경과일·도달까지 일수. 날짜만 비교(UTC 자정, 시간대 무관).
+function lpwDays(from, to) {
+  if (!from || !to) return null;
+  return Math.round((Date.parse(to + 'T00:00:00Z') - Date.parse(from + 'T00:00:00Z')) / 86400000);
+}
+async function lpwLoad() {
+  try {
+    const d = await apiJson('/api/lowpoint/watch');
+    _lpw.recs = d.records || []; _lpw.reachPct = d.reach_pct; _lpw.lastRun = d.last_run || null; _lpw.error = null;
+  } catch (e) { _lpw.error = e; }
+}
+async function lpwRefresh() {
+  if (_lpw.busy) return;
+  _lpw.busy = true; _lpw.msg = ''; renderLowpointTrack();
+  try {
+    const res = await fetch('/api/lowpoint/watch/refresh', { method: 'POST' });
+    const d = await apiParse(res, { allow: [409, 500] });
+    if (!d.ok) throw new Error(d.error || '갱신 실패');
+    const c = (d.summary && d.summary.counts) || {};
+    _lpw.msg = `활성 ${c.active ?? '?'}건 확인 · 새 도달 ${c.reached_new ?? 0}건${(c.failed || []).length ? ` · 조회 실패 ${c.failed.length}건(${c.failed.join(', ')})` : ''}`;
+  } catch (e) { _lpw.msg = '갱신 실패 — ' + e.message; }
+  finally { _lpw.busy = false; await lpwLoad(); renderLowpointTrack(); }
+}
+async function lpwDelete(id) {
+  const r = _lpw.recs.find(x => x.id === id);
+  if (!r || !confirm(`관찰에서 '${lpDisplayName(r)}'(${r.label} ${r.tf === 'week' ? '주봉' : '월봉'})을 삭제할까요? 다시 등록되지 않아요.`)) return;
+  try { await apiJson('/api/lowpoint/watch/' + encodeURIComponent(id), { method: 'DELETE' }); }
+  catch (e) { alert('삭제 실패 — ' + e.message); }
+  await lpwLoad(); renderLowpointTrack();
+}
+// [기록] → 매매 기록 폼에 종목 프리필(구분 단기, 매수일 오늘 — 매수가·수량은 직접)
+function lpwRecord(id) {
+  const r = _lpw.recs.find(x => x.id === id);
+  if (!r) return;
+  _lpt.prefill = { q: r.code };
+  _lpt.view = 'trades';
+  renderLowpointTrack();
+  const inp = document.querySelector('#lowpointTrackView form.lpt-form input[name=buyPrice]');
+  if (inp) { inp.scrollIntoView({ block: 'center' }); inp.focus(); }
+}
+function renderLowpointWatch() {
+  if (_lpw.error) return `<section class="n-card" style="padding:18px 22px"><div class="st-dot st-bad">관찰 목록을 불러오지 못했어요 — ${_escapeHtml(_lpw.error.message)}</div></section>`;
+  const today = kstStr();
+  const pct = _lpw.reachPct != null ? _lpw.reachPct : '…';   // 값은 서버(lowpoint_watch.REACH_PCT) — 화면 사본 없음
+  const lr = _lpw.lastRun || {};
+  const lastChecked = _lpw.recs.reduce((m, r) => (r.checked_at && r.checked_at > m ? r.checked_at : m), '');
+  const runInfo = (lastChecked ? `마지막 확인 ${String(lastChecked).replace('T', ' ').slice(5, 16)} KST · ` : '')
+    + (lr.finished_at ? `자동 추적 ${String(lr.finished_at).replace('T', ' ').slice(5, 16)} KST${lr.status && lr.status !== 'ok' ? ` · <span class="st-bad">${_escapeHtml(lr.status)}</span>` : ''}` : '자동 추적 기록 없음');
+  const name = r => `<b><a class="name-link" href="${tvUrl(r.code, r.mkt)}" target="_blank" rel="noopener" title="${_escapeHtml(r.name || '')} — 트레이딩뷰">${_escapeHtml(lpDisplayName(r))}</a></b>${r.mkt === 'US' ? '' : `<div class="jr-s num">${_escapeHtml(_lptCode(r))}</div>`}`;
+  const groups = lpwGroups(_lpw.recs).map(g => {
+    const title = `${String(g.label).slice(5)} ${g.tf === 'week' ? '주봉' : '월봉'}`;
+    const act = g.active.map(r => `<tr>
+        <td>${name(r)}</td>
+        <td class="num r">${_lptFmt(r.base_price, r.mkt)}<div class="jr-s">${_escapeHtml(r.base_date)}</div></td>
+        <td class="num r">${r.last_close != null ? _lptFmt(r.last_close, r.mkt) : '<span class="n-sub">—</span>'}</td>
+        <td class="r">${_lptPct(lpReturnPct(r.last_close, Number(r.base_price)))}</td>
+        <td class="num r">${lpwDays(r.base_date, today)}일</td>
+        <td class="r" style="white-space:nowrap"><button type="button" class="n-btn sm" onclick="lpwRecord('${_escapeHtml(r.id)}')">기록</button>
+          <button type="button" class="n-btn sm" onclick="lpwDelete('${_escapeHtml(r.id)}')">삭제</button></td></tr>`).join('');
+    const rch = g.reached.map(r => `<tr>
+        <td>${name(r)}</td>
+        <td class="num r">${_lptFmt(r.base_price, r.mkt)}</td>
+        <td class="num r">${_escapeHtml(r.reached_date || '')}</td>
+        <td class="num r">${r.reached_days != null ? r.reached_days + '일' : '—'}</td>
+        <td class="r"><button type="button" class="n-btn sm" onclick="lpwDelete('${_escapeHtml(r.id)}')">삭제</button></td></tr>`).join('');
+    return `<section class="n-card" style="padding:16px 20px">
+      <div class="jr-card-h"><span class="n-h">${title}</span><span class="n-sub">관찰 ${g.active.length} · 도달 ${g.reached.length}</span></div>
+      ${act ? `<div class="jr-table-wrap"><table class="jr-table lpt-table"><thead><tr><th>종목</th><th class="r">기준가</th><th class="r">현재가</th><th class="r">기준가 대비</th><th class="r">경과</th><th></th></tr></thead><tbody>${act}</tbody></table></div>`
+            : '<div class="n-sub">관찰 중인 종목 없음 — 모두 도달</div>'}
+      ${rch ? `<details style="margin-top:8px"><summary class="n-sub" style="cursor:pointer">도달 완료 (${g.reached.length})</summary>
+        <div class="jr-table-wrap"><table class="jr-table lpt-table"><thead><tr><th>종목</th><th class="r">기준가</th><th class="r">도달일</th><th class="r">도달까지</th><th></th></tr></thead><tbody>${rch}</tbody></table></div></details>` : ''}
+    </section>`;
+  }).join('');
+  return `<section class="n-card" style="padding:14px 20px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center">
+      <span class="n-sub" style="flex:1 1 260px">저점 히트 종가(기준가) 대비 <b>+${pct}%</b> 도달을 추적해요 — 기준일 다음 거래일부터 일봉 고가로 판정, 매일 07:00 KST 자동 갱신 · ${runInfo}</span>
+      <button type="button" class="n-btn" onclick="lpwRefresh()" ${_lpw.busy ? 'disabled' : ''}>${_lpw.busy ? '갱신 중…' : '지금 갱신'}</button>
+      ${_lpw.msg ? `<span class="n-sub" style="flex-basis:100%">${_escapeHtml(_lpw.msg)}</span>` : ''}
+    </section>
+    ${groups || '<section class="n-card" style="padding:18px 22px"><div class="n-sub">관찰 중인 종목이 없어요 — 주봉·월봉 스캔이 돌면 히트 종목이 자동으로 들어와요</div></section>'}`;
 }
 async function lpeLoad() {
   try {
@@ -7397,11 +7499,16 @@ function renderLowpointTrack() {
   const wrap = document.getElementById('lowpointTrackView');
   if (!wrap || wrap.style.display === 'none') return;
   const view = _lpt.view || 'trades';
-  const viewTabs = `<div class="lp-chips" role="tablist" aria-label="저점 탭 보기">${[['trades', '매매 기록'], ['eval', '평가']].map(([k, l]) =>
+  const viewTabs = `<div class="lp-chips" role="tablist" aria-label="저점 탭 보기">${[['trades', '매매 기록'], ['eval', '평가'], ['watch', '관찰']].map(([k, l]) =>
       `<button type="button" class="jr-pill${view === k ? ' on' : ''}" onclick="lpSetView('${k}')">${l}</button>`).join('')}</div>`;
   if (view === 'eval') {
     wrap.innerHTML = `<div class="jr-title"><h2>저점 평가</h2><span class="n-sub" style="font-size:13px">장기 체크리스트 · 단기 비교</span></div>`
       + viewTabs + renderLowpointEval();
+    return;
+  }
+  if (view === 'watch') {
+    wrap.innerHTML = `<div class="jr-title"><h2>저점 관찰</h2><span class="n-sub" style="font-size:13px">히트 종가 대비 +${_lpw.reachPct != null ? _lpw.reachPct : '…'}% 도달 추적 · 미도달만 진입 후보</span></div>`
+      + viewTabs + renderLowpointWatch();
     return;
   }
   const head = `<div class="jr-title"><h2>저점 매매</h2><span class="n-sub" style="font-size:13px">저점종목 매매 기록 · 일지와 별도 저장</span>
@@ -7418,7 +7525,7 @@ function renderLowpointTrack() {
   const addHtml = `<section class="n-card" style="padding:18px 22px">
     <form class="lpt-form" onsubmit="event.preventDefault();lptAdd(this)">
       <label>구분<select name="kind">${LPT_KINDS.map(k => `<option>${k}</option>`).join('')}</select></label>
-      <label style="flex:1 1 180px">종목<input name="q" placeholder="종목명·코드 또는 KRW-BTC" value="${kr ? _escapeHtml(kr.code) : ''}" required></label>
+      <label style="flex:1 1 180px">종목<input name="q" placeholder="종목명·코드 또는 KRW-BTC" value="${kr ? _escapeHtml(kr.code) : (_lpt.prefill ? _escapeHtml(_lpt.prefill.q) : '')}" required></label>
       ${kr ? `<label>시장<select name="krMarket" required><option value="">선택</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select></label>
               <label>종목명<input name="krName" placeholder="직접 입력"></label>` : ''}
       <label>매수일<input type="date" name="buyDate" value="${today}" required></label>

@@ -247,7 +247,7 @@ def test_view_flags_failed_server_run(nl_paths):
 # ── 서버 러너: 저점 월봉 뒤 순차 ─────────────────────────────────────
 def test_newlisting_uses_month_slot():
     assert app._lowpoint_last_slot("newlisting", _k("2026-11-01 08:00")) == app._lowpoint_last_slot("month", _k("2026-11-01 08:00"))
-    assert app.LOWPOINT_JOBS == ("week", "month", "newlisting")
+    assert app.LOWPOINT_JOBS == ("week", "month", "newlisting", "watch")   # v5.325: 관찰 추적이 네 번째
 
 
 @pytest.mark.parametrize("month_state,due", [
@@ -289,6 +289,9 @@ def runner_paths(tmp_path, monkeypatch):
         raise AssertionError(f"테스트에서 진짜 작업 호출: {tf}")
     monkeypatch.setattr(app, "_lowpoint_job_blocking", real_job_forbidden)
     monkeypatch.setattr(app, "_newlisting_job_blocking", real_job_forbidden)
+    monkeypatch.setattr(app, "_lp_watch_job_blocking", real_job_forbidden)
+    # 이 파일의 대상은 월봉 → 신규상장 순차 — v5.325 관찰 추적(매일)은 test_lowpoint_watch.py가 본다
+    monkeypatch.setattr(app, "LOWPOINT_JOBS", ("week", "month", "newlisting"))
     return tmp_path
 
 

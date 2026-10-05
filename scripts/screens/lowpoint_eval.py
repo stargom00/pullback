@@ -67,7 +67,10 @@ SIGNAL_WARMUP_MONTHS = lp.MIN_BARS["month"]
 CLOUD_MIN_MONTHS = 52   # 월봉 일목 구름(선행스팬2 = 52개월 고저 중간값)이 처음 그려지려면 완성 월봉 52개 필요
 VP_UP_LONG_PCT = 30.0
 TV_RECENT, TV_PRIOR = 20, 60
-SHORT_VP_UP_PCT = 5.0
+# 단기 목표 +5% — 단기 후보는 "뭐가 먼저 +5% 가는지" 비교(v5.317 사용자 지시 원문, 모듈 docstring). 위 +5% 매물대
+# 구간과 저점 관찰(v5.325 lowpoint_watch — "히트 종가 대비 +5% 도달")이 이 한 값을 쓴다(사본 금지).
+SHORT_GOAL_PCT = 5.0
+SHORT_VP_UP_PCT = SHORT_GOAL_PCT
 SHORT_RET_DAYS = 10
 ATR_DAYS = 14
 # AI 제안 → 사용자 승인 2026-10-04(모듈 docstring)

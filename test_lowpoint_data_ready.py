@@ -150,6 +150,7 @@ def test_stale_filter_logic_untouched():
 def _run(job, now, state_path, tmp_path, monkeypatch):
     monkeypatch.setattr(app, "LOWPOINT_STATE_PATH", str(state_path))
     monkeypatch.setattr(app, "_lowpoint_running", False)
+    monkeypatch.setattr(app, "LOWPOINT_JOBS", ("week", "month", "newlisting"))   # 대상: 스캔 작업(관찰 추적은 별도 파일)
     return asyncio.run(app._maybe_run_lowpoint(now, _job=job))
 
 

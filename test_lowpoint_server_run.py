@@ -103,7 +103,7 @@ def test_month_ok_on_1st_is_not_rerun_on_first_saturday():
 
 
 def test_schedule_times_unchanged():
-    assert app.LOWPOINT_SCHEDULE_HM == {"week": (9, 0), "month": (8, 0)}   # v5.307: 월봉 08:00
+    assert app.LOWPOINT_SCHEDULE_HM == {"week": (9, 0), "month": (8, 0), "watch": (7, 0)}   # v5.307: 월봉 08:00 · v5.325 관찰 07:00
     assert app.LOWPOINT_CATCHUP_HOURS == 48
 
 
@@ -141,6 +141,8 @@ def paths(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "LOWPOINT_DATA_PATH", str(p["data"]))
     monkeypatch.setattr(app, "LOWPOINT_LATEST_PATH", str(p["repo"]))
     monkeypatch.setattr(app, "LOWPOINT_STATE_PATH", str(p["state"]))
+    # 이 파일의 대상은 주·월봉 작업 — v5.325 관찰 추적(매일)은 test_lowpoint_watch.py가 본다
+    monkeypatch.setattr(app, "LOWPOINT_JOBS", ("week", "month", "newlisting"))
     return p
 
 
