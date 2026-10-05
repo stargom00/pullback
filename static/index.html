@@ -1221,6 +1221,26 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .lpe-card .n-btn.sm{min-height:24px;padding:0 8px;font-size:12px}
 .lpe-card .lpe-memo{display:flex;gap:6px;margin-top:6px;align-items:flex-start}
 .lpe-card .lpe-memo textarea{flex:1;min-width:0;min-height:28px;padding:4px 8px;font-size:12.5px}
+/* v5.326 저점 관찰 압축 표 — 모든 규칙을 .lpw-* 아래로 한정(매매 기록·평가·일지 표 불침범 — test_lowpoint_watch_dense.py) */
+.lpw-card{padding:10px 14px}
+.lpw-info{padding:8px 14px;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;font-size:12px}
+.lpw-card .lpw-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+table.jr-table.lpw-table{font-size:12px;min-width:0}   /* 모바일 전역 table.jr-table{min-width:640px}을 관찰 표만 해제 — 바가 줄어들어 맞춘다 */
+table.jr-table.lpw-table th{padding:3px 6px;font-size:11px;white-space:nowrap}
+table.jr-table.lpw-table td{padding:2px 6px;vertical-align:middle;line-height:1.25;white-space:nowrap}
+table.jr-table.lpw-table th:first-child,table.jr-table.lpw-table td:first-child{padding-left:8px}
+table.jr-table.lpw-table th.lpw-sort{cursor:pointer;user-select:none}
+.lpw-table .lpw-sym a{font-weight:600}
+.lpw-table .lpw-px{color:var(--n-muted);font-family:var(--n-num);font-size:11.5px}
+.lpw-table .lpw-barcell{width:36%;min-width:48px}
+.lpw-table .n-btn.sm{min-height:18px;min-width:22px;padding:0 5px;font-size:11px;line-height:1;border-radius:5px}
+.lpw-bar{position:relative;height:8px;border-radius:4px;background:var(--n-chip);overflow:hidden}
+.lpw-bar::after{content:'';position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--n-line2)}
+.lpw-bar>i{position:absolute;top:0;bottom:0;display:block}
+.lpw-bar>i.pos{left:50%;background:var(--c-red-fg3)}
+.lpw-bar>i.neg{right:50%;background:var(--c-blue-fg4)}
+@media (max-width:480px){.lpw-table .lpw-pxcell{display:none}}
+/* /v5.326 */
 #lowpointTrackView>*+*,#newlistingView>*+*{margin-top:20px}
 .lpt-form{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:flex-end}
 .lpt-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--n-muted)}
@@ -1366,7 +1386,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.325</span>
+      <span class="ver mono" id="verBadge">v5.326</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -7209,7 +7229,30 @@ function lpSetView(v) {
 // ── v5.325(사용자 지시) 저점 관찰 — "히트 시점 종가를 기준가로 기록하고 이후 +5% 도달 여부를 자동 추적 — 도달한
 // 종목은 활성 목록에서 빠지고, 미도달 종목만 진입 후보로 남는 관찰 페이지." 레코드·판정은 서버(lowpoint_watch.py,
 // 매일 07:00 KST + 수동 갱신), 화면은 그룹·정렬·일수만 계산한다(순수 함수 — node 테스트).
-const _lpw = { recs: [], error: null, busy: false, reachPct: null, lastRun: null, msg: '' };
+const _lpw = { recs: [], error: null, busy: false, reachPct: null, lastRun: null, msg: '', sortKey: 'pct', sortDir: 'desc' };
+// v5.326(사용자 지시) 진행 바 — 기준가(0%)가 가운데, 오른쪽 절반 = 0 → +목표%(채워질수록 "곧 소멸"), 왼쪽 절반 = 0 → −목표%
+// (길수록 "더 싸짐"). 폭은 각 절반 안의 비율 %(목표% 넘으면 꽉 참). 색은 방향만: 양수 = 상승색, 음수 = 하락색(등락% 글자와 같음).
+function lpwBar(pct, goal) {
+  if (pct == null || !isFinite(pct) || !(goal > 0)) return { side: 'none', width: 0 };
+  const w = Math.min(Math.abs(pct) / goal, 1) * 100;
+  return pct >= 0 ? { side: 'pos', width: w } : { side: 'neg', width: w };
+}
+// v5.326 정렬 — 등락%(기본 내림차순 = +목표에 가까운 순) 또는 경과일. 현재가 없는 행은 늘 아래. 같으면 종목코드.
+function lpwSortRows(rows, key, dir, today) {
+  const val = r => key === 'days' ? lpwDays(r.base_date, today)
+    : ((r.last_close != null && r.base_price > 0) ? (r.last_close - r.base_price) / r.base_price * 100 : null);
+  const s = dir === 'asc' ? 1 : -1;
+  return (rows || []).slice().sort((a, b) => {
+    const x = val(a), y = val(b);
+    if (x == null || y == null) return (x == null) - (y == null) || String(a.code).localeCompare(String(b.code));
+    return s * (x - y) || String(a.code).localeCompare(String(b.code));
+  });
+}
+function lpwSort(key) {
+  if (_lpw.sortKey === key) _lpw.sortDir = _lpw.sortDir === 'asc' ? 'desc' : 'asc';
+  else { _lpw.sortKey = key; _lpw.sortDir = 'desc'; }
+  renderLowpointTrack();
+}
 // 기준일(코호트)별 그룹 — 최근 기준일 위, 같은 날이면 주봉 먼저. 활성은 기준가 대비 %가 낮은 순(진입 후보가 위),
 // 도달은 도달일 순. 같은 종목이라도 기준일이 다르면 다른 그룹의 다른 행이다.
 function lpwGroups(recs) {
@@ -7221,7 +7264,7 @@ function lpwGroups(recs) {
   const pct = r => (r.last_close != null && r.base_price > 0) ? (r.last_close - r.base_price) / r.base_price * 100 : Infinity;
   const out = Object.values(by);
   for (const g of out) {
-    g.active.sort((a, b) => pct(a) - pct(b) || String(a.code).localeCompare(String(b.code)));
+    g.active.sort((a, b) => pct(a) - pct(b) || String(a.code).localeCompare(String(b.code)));   // 화면 정렬은 lpwSortRows(v5.326)
     g.reached.sort((a, b) => String(a.reached_date).localeCompare(String(b.reached_date)) || String(a.code).localeCompare(String(b.code)));
   }
   return out.sort((a, b) => String(b.label).localeCompare(String(a.label)) || (a.tf === 'week' ? -1 : 1));
@@ -7274,34 +7317,46 @@ function renderLowpointWatch() {
   const lastChecked = _lpw.recs.reduce((m, r) => (r.checked_at && r.checked_at > m ? r.checked_at : m), '');
   const runInfo = (lastChecked ? `마지막 확인 ${String(lastChecked).replace('T', ' ').slice(5, 16)} KST · ` : '')
     + (lr.finished_at ? `자동 추적 ${String(lr.finished_at).replace('T', ' ').slice(5, 16)} KST${lr.status && lr.status !== 'ok' ? ` · <span class="st-bad">${_escapeHtml(lr.status)}</span>` : ''}` : '자동 추적 기록 없음');
-  const name = r => `<b><a class="name-link" href="${tvUrl(r.code, r.mkt)}" target="_blank" rel="noopener" title="${_escapeHtml(r.name || '')} — 트레이딩뷰">${_escapeHtml(lpDisplayName(r))}</a></b>${r.mkt === 'US' ? '' : `<div class="jr-s num">${_escapeHtml(_lptCode(r))}</div>`}`;
+  const name = r => `<a class="name-link" href="${tvUrl(r.code, r.mkt)}" target="_blank" rel="noopener" title="${_escapeHtml(r.name || '')} ${_escapeHtml(r.code)} — 트레이딩뷰">${_escapeHtml(lpDisplayName(r))}</a>`;
+  const arrow = k => _lpw.sortKey === k ? (_lpw.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+  const goal = Number(_lpw.reachPct);
+  const bar = p => {
+    const b = lpwBar(p, goal);
+    const tip = p == null ? '현재가 없음' : `기준가 대비 ${p >= 0 ? '+' : ''}${p.toFixed(2)}% · 목표 +${goal}%까지 ${(goal - p).toFixed(2)}%p`;
+    return `<div class="lpw-bar" title="${tip}" role="img" aria-label="${tip}">${b.side === 'none' ? '' : `<i class="${b.side}" style="width:${(b.width / 2).toFixed(1)}%"></i>`}</div>`;
+  };
   const groups = lpwGroups(_lpw.recs).map(g => {
-    const title = `${String(g.label).slice(5)} ${g.tf === 'week' ? '주봉' : '월봉'}`;
-    const act = g.active.map(r => `<tr>
-        <td>${name(r)}</td>
-        <td class="num r">${_lptFmt(r.base_price, r.mkt)}<div class="jr-s">${_escapeHtml(r.base_date)}</div></td>
-        <td class="num r">${r.last_close != null ? _lptFmt(r.last_close, r.mkt) : '<span class="n-sub">—</span>'}</td>
-        <td class="r">${_lptPct(lpReturnPct(r.last_close, Number(r.base_price)))}</td>
+    const title = `${String(g.label).slice(5)} ${g.tf === 'week' ? '주봉' : '월봉'} · 활성 ${g.active.length} / 도달 ${g.reached.length}`;
+    const dates = [...new Set([...g.active, ...g.reached].map(r => r.base_date))].sort().join(', ');
+    const act = lpwSortRows(g.active, _lpw.sortKey, _lpw.sortDir, today).map(r => {
+      const p = lpReturnPct(r.last_close, Number(r.base_price));
+      return `<tr>
+        <td class="lpw-sym">${name(r)}</td>
+        <td class="r lpw-pxcell"><span class="lpw-px">${_lptFmt(r.base_price, r.mkt)} → ${r.last_close != null ? _lptFmt(r.last_close, r.mkt) : '—'}</span></td>
+        <td class="r">${_lptPct(p)}</td>
+        <td class="lpw-barcell">${bar(p)}</td>
         <td class="num r">${lpwDays(r.base_date, today)}일</td>
-        <td class="r" style="white-space:nowrap"><button type="button" class="n-btn sm" onclick="lpwRecord('${_escapeHtml(r.id)}')">기록</button>
-          <button type="button" class="n-btn sm" onclick="lpwDelete('${_escapeHtml(r.id)}')">삭제</button></td></tr>`).join('');
+        <td class="r"><button type="button" class="n-btn sm" title="매매 기록에 이 종목으로 기록" aria-label="기록" onclick="lpwRecord('${_escapeHtml(r.id)}')">✎</button><button type="button" class="n-btn sm" title="관찰에서 삭제" aria-label="삭제" onclick="lpwDelete('${_escapeHtml(r.id)}')">✕</button></td></tr>`;
+    }).join('');
     const rch = g.reached.map(r => `<tr>
-        <td>${name(r)}</td>
-        <td class="num r">${_lptFmt(r.base_price, r.mkt)}</td>
+        <td class="lpw-sym">${name(r)}</td>
+        <td class="r lpw-pxcell"><span class="lpw-px">${_lptFmt(r.base_price, r.mkt)}</span></td>
         <td class="num r">${_escapeHtml(r.reached_date || '')}</td>
         <td class="num r">${r.reached_days != null ? r.reached_days + '일' : '—'}</td>
-        <td class="r"><button type="button" class="n-btn sm" onclick="lpwDelete('${_escapeHtml(r.id)}')">삭제</button></td></tr>`).join('');
-    return `<section class="n-card" style="padding:16px 20px">
-      <div class="jr-card-h"><span class="n-h">${title}</span><span class="n-sub">관찰 ${g.active.length} · 도달 ${g.reached.length}</span></div>
-      ${act ? `<div class="jr-table-wrap"><table class="jr-table lpt-table"><thead><tr><th>종목</th><th class="r">기준가</th><th class="r">현재가</th><th class="r">기준가 대비</th><th class="r">경과</th><th></th></tr></thead><tbody>${act}</tbody></table></div>`
+        <td class="r"><button type="button" class="n-btn sm" title="관찰에서 삭제" aria-label="삭제" onclick="lpwDelete('${_escapeHtml(r.id)}')">✕</button></td></tr>`).join('');
+    return `<section class="n-card lpw-card">
+      <div class="lpw-h"><span class="n-h">${title}</span><span class="n-sub" style="font-size:11px">기준일 ${_escapeHtml(dates)}</span></div>
+      ${act ? `<div class="jr-table-wrap"><table class="jr-table lpt-table lpw-table"><thead><tr><th>종목</th><th class="r lpw-pxcell">기준가 → 현재가</th>
+          <th class="r lpw-sort" onclick="lpwSort('pct')">등락${arrow('pct')}</th><th>+${goal}%까지</th>
+          <th class="r lpw-sort" onclick="lpwSort('days')">경과${arrow('days')}</th><th></th></tr></thead><tbody>${act}</tbody></table></div>`
             : '<div class="n-sub">관찰 중인 종목 없음 — 모두 도달</div>'}
-      ${rch ? `<details style="margin-top:8px"><summary class="n-sub" style="cursor:pointer">도달 완료 (${g.reached.length})</summary>
-        <div class="jr-table-wrap"><table class="jr-table lpt-table"><thead><tr><th>종목</th><th class="r">기준가</th><th class="r">도달일</th><th class="r">도달까지</th><th></th></tr></thead><tbody>${rch}</tbody></table></div></details>` : ''}
+      ${rch ? `<details style="margin-top:6px"><summary class="n-sub" style="cursor:pointer;font-size:12px">도달 완료 (${g.reached.length})</summary>
+        <div class="jr-table-wrap"><table class="jr-table lpt-table lpw-table"><thead><tr><th>종목</th><th class="r lpw-pxcell">기준가</th><th class="r">도달일</th><th class="r">도달까지</th><th></th></tr></thead><tbody>${rch}</tbody></table></div></details>` : ''}
     </section>`;
   }).join('');
-  return `<section class="n-card" style="padding:14px 20px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center">
+  return `<section class="n-card lpw-info">
       <span class="n-sub" style="flex:1 1 260px">저점 히트 종가(기준가) 대비 <b>+${pct}%</b> 도달을 추적해요 — 기준일 다음 거래일부터 일봉 고가로 판정, 매일 07:00 KST 자동 갱신 · ${runInfo}</span>
-      <button type="button" class="n-btn" onclick="lpwRefresh()" ${_lpw.busy ? 'disabled' : ''}>${_lpw.busy ? '갱신 중…' : '지금 갱신'}</button>
+      <button type="button" class="n-btn sm" onclick="lpwRefresh()" ${_lpw.busy ? 'disabled' : ''}>${_lpw.busy ? '갱신 중…' : '지금 갱신'}</button>
       ${_lpw.msg ? `<span class="n-sub" style="flex-basis:100%">${_escapeHtml(_lpw.msg)}</span>` : ''}
     </section>
     ${groups || '<section class="n-card" style="padding:18px 22px"><div class="n-sub">관찰 중인 종목이 없어요 — 주봉·월봉 스캔이 돌면 히트 종목이 자동으로 들어와요</div></section>'}`;
