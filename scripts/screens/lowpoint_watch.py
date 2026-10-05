@@ -126,3 +126,61 @@ def track(records: list, today: date, now_iso: str, fetch=fetch_daily) -> tuple[
         updates[r["id"]] = u
     return updates, {"active": len(active), "fetched": len(data), "reached_new": reached,
                      "failed": sorted(set(failed))}
+
+
+# ── v5.327(사용자 지시) 보유 추적 — "매매 기록의 보유 종목 수익률을 매일 자동 추적 — 관찰(진입 전)과 짝이 되는
+# 보유 중 페이지". 대상 = 매매 기록 중 종료 안 된(sellDate 없는) 기록. 관찰과 같은 작업(매일 07:00 KST + 수동 갱신)이
+# 이어서 부른다. 저장하는 것은 종목별 마지막 종가뿐 — 수익률·목표가는 화면이 매매 기록(평단·목표%)으로 계산한다.
+HOLD_LOOKBACK_DAYS = 10      # 마지막 종가만 필요 — 주말·연휴를 넘길 만큼(AI 판단 어림값, 결과값엔 영향 없음)
+
+
+def fetch_last_closes(items: list, today: date) -> dict:
+    """**이 종목들만** 마지막 종가 → {code: {last_close, last_date}}. KR naver(통합), US yfinance 배당 미조정(저점
+    기준과 같음), 코인 업비트 일봉."""
+    import harness
+    import naver_kr
+    import upbit
+    out = {}
+
+    def put(code, df):
+        if df is None or df.empty or "Close" not in df:
+            return
+        c = df["Close"].dropna()
+        if len(c):
+            out[code] = {"last_close": float(c.iloc[-1]), "last_date": str(pd.to_datetime(c.index[-1]).date())}
+    kr = sorted({i["code"] for i in items if i.get("mkt") == "KR"})
+    us = sorted({i["code"] for i in items if i.get("mkt") == "US"})
+    coin = sorted({i["code"] for i in items if i.get("mkt") == "UPBIT"})
+    for code in kr:
+        try:
+            put(code, naver_kr.fetch_history(code, days=HOLD_LOOKBACK_DAYS))
+        except Exception:
+            pass
+    if us:
+        for code, df in harness._fetch_us_batch(us, period="1mo", auto_adjust=lp.US_AUTO_ADJUST).items():
+            put(code, df)
+    for code in coin:
+        put(code, upbit.fetch_candles(code, "days", count=HOLD_LOOKBACK_DAYS))
+    return out
+
+
+def track_holdings(trades: list, today: date, now_iso: str, prev: dict | None = None,
+                   fetch=fetch_last_closes) -> tuple[dict, dict]:
+    """보유 기록(sellDate 없음)의 종목만 조회 → ({code: {mkt, last_close, last_date, checked_at}}, 집계).
+    조회 실패한 종목은 이전 값을 그대로 둔다(날짜가 남아 낡은 값임을 화면이 보여준다). 더 이상 보유하지 않는 종목은 뺀다."""
+    held = {}
+    for t in trades or []:
+        if t.get("sellDate") or not t.get("code"):
+            continue
+        held[t["code"]] = t.get("mkt")
+    got = fetch([{"code": c, "mkt": m} for c, m in held.items()], today) if held else {}
+    prev = prev or {}
+    out, failed = {}, []
+    for code, mkt in held.items():
+        if code in got:
+            out[code] = {"mkt": mkt, **got[code], "checked_at": now_iso}
+        else:
+            failed.append(code)
+            if code in prev:
+                out[code] = prev[code]
+    return out, {"held": len(held), "fetched": len(got), "failed": sorted(failed)}

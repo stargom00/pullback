@@ -538,7 +538,7 @@ def test_compact_rules_are_scoped_to_eval_card():
 
 def test_eval_card_markup_uses_compact_classes():
     card = _fn("_lpeCard")
-    assert 'class="n-card lpe-card"' in card and 'class="jr-table lpt-table lpe-table"' in card
+    assert 'class="n-card lpe-card${open ? \'\' : \' lpe-closed\'}"' in card and 'class="jr-table lpt-table lpe-table"' in card   # v5.327 접힘 클래스
     assert 'class="lpe-detail" title="${_escapeHtml(s)}" onclick="this.classList.toggle(\'open\')"' in card
     assert card.count("${det(") == 2                              # 자동·수동 행 모두 같은 근거 칸
     # 매매 기록 렌더는 압축 클래스를 쓰지 않는다

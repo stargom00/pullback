@@ -310,7 +310,8 @@ def test_price_note_mark():
 
 def test_display_name_used_in_all_lowpoint_surfaces():
     """홈 칩 · 평가 히트 칩(추가 전/후) · 평가 카드 · 단기 비교 — 5곳 + v5.325 관찰(행 이름 · 삭제 확인) 2곳."""
-    assert SRC.count("lpDisplayName(r)") + SRC.count("lpDisplayName(rec)") == 8      # 정의 1 + 호출 7
+    assert SRC.count("lpDisplayName(r)") + SRC.count("lpDisplayName(rec)") == 9      # 정의 1 + 호출 8(v5.327 추적 페이지 +1)
+    assert "lpDisplayName(r)" in _fn("renderLowpointHold")
     assert _fn("renderLowpointWatch").count("lpDisplayName(r)") == 1 and "lpDisplayName(r)" in _fn("lpwDelete")
     assert "const name = lpDisplayName(r);" in _fn("_lowpointRowHtml")
     assert _fn("renderLowpointEval").count("lpDisplayName(r)") == 2

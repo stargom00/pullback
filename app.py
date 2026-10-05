@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.327 [저점일지 개선 3건 — 사용자 지시] ① "추적" 페이지(매매 기록 | 평가 | 관찰 | 추적) — "매매 기록의 보유 종목 수익률을
+    매일 자동 추적 — 관찰(진입 전)과 짝이 되는 보유 중 페이지". 대상 = 매매 기록 중 종료 안 된 기록 그대로(별도 입력 없음 —
+    추가·종료·수정이 바로 반영). 가격: 관찰과 같은 작업(_lp_watch_job_blocking, 매일 07:00 KST + 수동 갱신)이 이어서 보유 종목만
+    조회(lowpoint_watch.track_holdings — KR naver·US yfinance 배당 미조정·코인 업비트 일봉의 마지막 종가)해
+    /data/lowpoint_holdings_track.json에 저장(서버 계산값 — 매매 기록 파일은 안 건드림, 조회 실패 종목은 이전 값 유지·실패 표시,
+    더는 보유 안 하는 종목은 뺌). GET /api/lowpoint/holdings-track. 행(관찰과 같은 밀도·같은 진행 바 lpwBar): 종목(TV) | 평단 →
+    현재가 | 수익률 | 목표 +n%까지 바(평단 0% → 구분별 목표%) | 보유일 | [종료](매매 기록과 같은 폼·동작 — _lptSellFormHtml
+    공용으로 뽑음). 단기/장기 그룹, 수익률 내림차순, 현재가 ≥ 목표가 = 종료 후보 강조(자동 종료 없음). ② 평가 정렬
+    (lpeSortEvals): 관심 우선 → 추가 시각 최신순(새 기록 created_at은 초 단위 — 옛 기록은 날짜만이라 같은 날이면 서버
+    배열 순서로). ③ 평가 카드 기본 접힘: 접힌 줄 = 종목(TV)·코드·시장 | O·X·미표시 | 체크일 | 재평가·관심·삭제, 줄 클릭으로
+    펼침/접힘(버튼·링크·입력 클릭은 토글 안 함 — lpeToggleIgnored), 새로 추가·재평가한 카드만 자동 펼침(lpeEvaluate),
+    상태는 세션 메모리(_lpe.open — localStorage 아님). 새 CSS는 .lpe-card 아래로 한정. conftest가 보유 추적 결과·매매 기록
+    경로도 테스트 임시 폴더로 돌린다. 테스트: test_lowpoint_hold_track.py.
 v5.326 [저점 관찰 표 압축 + 진행 바 — 사용자 지시 "행 높이·열 간격이 넓어 66종목이 한눈에 안 들어옴. 표 밀도를 높이고
     '+5%까지 얼마나 왔나'를 시각화"] static/index.html만(서버 불변). ① 한 행 = 한 줄(셀 여백 3px·12.5px, 아이콘 버튼 ✎ 기록 ·
     ✕ 삭제), 기준일은 그룹 헤더에만("기준일 2026-10-02"). ② 진행 바(lpwBar): 기준가(0%)가 가운데, 오른쪽 절반 = 0→+목표%
@@ -8795,7 +8808,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.326"
+VERSION = "v5.327"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -20233,6 +20246,9 @@ async def lp_eval_delete(rid: str, request: Request):
 # 레코드는 서버만 만든다(스캔 결과 등록) — 사용자는 삭제만. 삭제된 id는 삭제 로그를 근거로 다시 등록하지 않는다.
 LP_WATCH_PATH = _resolve_persistent_path("lowpoint_watch.json")
 LP_WATCH_DELETE_LOG_PATH = os.path.join(os.path.dirname(LP_WATCH_PATH), "lowpoint_watch_deletions.log")
+# v5.327 보유 추적 결과(서버 계산값 — 사용자 기록 아님): {"checked_at", "prices": {code: {mkt, last_close, last_date,
+# checked_at}}, "failed": [...]}. 매매 기록 파일은 건드리지 않는다(rev 충돌 없음). 원자적 저장(_save_json_atomic).
+LP_HOLD_TRACK_PATH = _resolve_persistent_path("lowpoint_holdings_track.json")
 _LP_WATCH_LOCK = _threading.RLock()
 
 
@@ -20317,7 +20333,33 @@ def _lp_watch_job_blocking(tf: str, now: "datetime") -> dict:
             _rec_list_write(LP_WATCH_PATH, recs)
     print(f"[lowpoint-watch] 추적 — 활성 {summary['active']}건 · 조회 {summary['fetched']}종목 · 새 도달 "
           f"{summary['reached_new']}건 · 조회 실패 {len(summary['failed'])}건 · 갱신 {changed}건", flush=True)
-    return {"bar_date": today.isoformat(), "rows": summary["active"], "counts": {**summary, "seeded": seeded}}
+    # v5.327: 같은 작업에서 보유 종목(매매 기록 중 종료 안 된 것)도 추적 — 그 종목만 조회
+    prev = (_lp_hold_track_read() or {}).get("prices") or {}
+    prices, hold = w.track_holdings(_lp_trades_load(), today, now.astimezone(KST).isoformat(), prev)
+    _save_json_atomic(LP_HOLD_TRACK_PATH, {"checked_at": now.astimezone(KST).isoformat(), "prices": prices,
+                                           "failed": hold["failed"]})
+    print(f"[lowpoint-watch] 보유 추적 — 보유 {hold['held']}종목 · 조회 {hold['fetched']} · 실패 {len(hold['failed'])}", flush=True)
+    return {"bar_date": today.isoformat(), "rows": summary["active"],
+            "counts": {**summary, "seeded": seeded, "holdings": hold}}
+
+
+def _lp_hold_track_read() -> "dict | None":
+    try:
+        with open(LP_HOLD_TRACK_PATH, encoding="utf-8") as f:
+            d = _json.load(f)
+        return d if isinstance(d, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+@app.get("/api/lowpoint/holdings-track")
+async def lp_holdings_track():
+    """v5.327 보유 추적 결과(매일 07:00 KST · 수동 갱신은 관찰과 같은 POST /api/lowpoint/watch/refresh)."""
+    d = _lp_hold_track_read() or {}
+    st = _lowpoint_load_state().get("watch") or {}
+    return JSONResponse(_clean_nan({"ok": True, "checked_at": d.get("checked_at"), "prices": d.get("prices") or {},
+                                    "failed": d.get("failed") or [],
+                                    "last_run": {k: st.get(k) for k in ("target", "status", "finished_at", "error")}}))
 
 
 @app.get("/api/lowpoint/watch")
