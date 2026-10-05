@@ -18,4 +18,7 @@ def _isolate_lowpoint_watch_store(tmp_path, monkeypatch):
     if app is not None and hasattr(app, "LP_HOLD_TRACK_PATH"):
         monkeypatch.setattr(app, "LP_HOLD_TRACK_PATH", str(tmp_path / "lowpoint_holdings_track.json"))
         monkeypatch.setattr(app, "LP_TRADES_PATH", str(tmp_path / "lowpoint_trades.json"))
+    if app is not None and hasattr(app, "LP_INTEREST_PATH"):   # v5.328 관심 추적
+        monkeypatch.setattr(app, "LP_INTEREST_PATH", str(tmp_path / "lowpoint_interest.json"))
+        monkeypatch.setattr(app, "LP_INTEREST_DELETE_LOG_PATH", str(tmp_path / "lowpoint_interest_deletions.log"))
     yield

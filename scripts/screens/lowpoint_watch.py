@@ -165,22 +165,26 @@ def fetch_last_closes(items: list, today: date) -> dict:
 
 
 def track_holdings(trades: list, today: date, now_iso: str, prev: dict | None = None,
-                   fetch=fetch_last_closes) -> tuple[dict, dict]:
-    """보유 기록(sellDate 없음)의 종목만 조회 → ({code: {mkt, last_close, last_date, checked_at}}, 집계).
-    조회 실패한 종목은 이전 값을 그대로 둔다(날짜가 남아 낡은 값임을 화면이 보여준다). 더 이상 보유하지 않는 종목은 뺀다."""
+                   interest: list | None = None, fetch=fetch_last_closes) -> tuple[dict, dict]:
+    """보유 기록(sellDate 없음)과 v5.328 관심 추적 항목의 종목만 조회 → ({code: {mkt, last_close, last_date,
+    checked_at}}, 집계). 조회 실패한 종목은 이전 값을 그대로 둔다(날짜가 남아 낡은 값임을 화면이 보여준다).
+    보유도 관심도 아닌 종목은 뺀다."""
     held = {}
     for t in trades or []:
         if t.get("sellDate") or not t.get("code"):
             continue
         held[t["code"]] = t.get("mkt")
-    got = fetch([{"code": c, "mkt": m} for c, m in held.items()], today) if held else {}
+    n_held = len(held)
+    watch = {i["code"]: i.get("mkt") for i in interest or [] if i.get("code")}
+    targets = {**watch, **held}
+    got = fetch([{"code": c, "mkt": m} for c, m in targets.items()], today) if targets else {}
     prev = prev or {}
     out, failed = {}, []
-    for code, mkt in held.items():
+    for code, mkt in targets.items():
         if code in got:
             out[code] = {"mkt": mkt, **got[code], "checked_at": now_iso}
         else:
             failed.append(code)
             if code in prev:
                 out[code] = prev[code]
-    return out, {"held": len(held), "fetched": len(got), "failed": sorted(failed)}
+    return out, {"held": n_held, "interest": len(watch), "fetched": len(got), "failed": sorted(failed)}

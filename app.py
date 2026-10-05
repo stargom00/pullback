@@ -5,6 +5,16 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.328 [저점 추적 — 관심 종목 추가, 사용자 지시 "추적 페이지가 보유 종목만 보여줌. 매수 전 종목도 같은 방식으로 추적하고
+    싶다"] ① 추적 페이지 상단 추가 폼: 저점 resolve 그대로(이름·코드·티커·KRW-), 구분(단기/장기), 기준가 = 추가 시점 마지막
+    종가 자동(GET /api/lowpoint/last-close — 추적과 같은 lowpoint_watch.fetch_last_closes), 고칠 수 있음("기준가 불러오기"로
+    미리 보고 수정 → 추가, 비워 두면 추가 때 자동). ② "관심 추적" 그룹 — 보유 단기 → 보유 장기 → 관심 추적 순(보유 그룹 이름도
+    "보유 단기·보유 장기"로). 행: 종목(US 티커)·구분 | 기준가 → 현재가 | 등락% | 목표 바(구분별 목표% 스케일, lpwBar) | 경과일
+    (기준가 날짜부터) | [기록]·[삭제]. ③ [기록] → 매매 기록 폼에 종목·구분 프리필, 매매 기록 저장 요청에 from_interest를 실어
+    보유가 실제로 저장됐을 때만(새 보유·추매, 같은 종목) 서버가 그 관심 항목을 지운다(삭제 로그 사유 converted_to_holding —
+    종료 기록·다른 종목·저장 거부면 안 지움). ④ 저장 /data/lowpoint_interest.json — 매매 기록과 같은 규칙(rev·같은 종목·구분
+    1건·삭제 로그·_daily_backup). 일일 추적·지금 갱신이 보유와 함께 관심 종목만 조회(track_holdings interest 인자).
+    API: GET/PUT/DELETE /api/lowpoint/interest(/{id}). 테스트: test_lowpoint_interest.py.
 v5.327 [저점일지 개선 3건 — 사용자 지시] ① "추적" 페이지(매매 기록 | 평가 | 관찰 | 추적) — "매매 기록의 보유 종목 수익률을
     매일 자동 추적 — 관찰(진입 전)과 짝이 되는 보유 중 페이지". 대상 = 매매 기록 중 종료 안 된 기록 그대로(별도 입력 없음 —
     추가·종료·수정이 바로 반영). 가격: 관찰과 같은 작업(_lp_watch_job_blocking, 매일 07:00 KST + 수동 갱신)이 이어서 보유 종목만
@@ -8808,7 +8818,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.327"
+VERSION = "v5.328"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -13148,6 +13158,7 @@ async def _scheduler_loop():
             _daily_backup(LP_EVALS_PATH, "lowpoint_evals", lock=_LP_EVALS_LOCK)      # v5.317
             _daily_backup(USER_EVENTS_PATH, "user_events", lock=_USER_EVENTS_LOCK)   # v5.322 홈 달력
             _daily_backup(LP_WATCH_PATH, "lowpoint_watch", lock=_LP_WATCH_LOCK)       # v5.325 저점 관찰
+            _daily_backup(LP_INTEREST_PATH, "lowpoint_interest", lock=_LP_INTEREST_LOCK)   # v5.328 관심 추적
             asyncio.create_task(_maybe_run_lowpoint())   # v5.301: 저점종목 토요일 자동 실행(백그라운드)
         except Exception as e:
             print(f"[scheduler] loop error: {e}")
@@ -13206,6 +13217,7 @@ async def _start_scheduler():
         _daily_backup(LP_EVALS_PATH, "lowpoint_evals", force=True, lock=_LP_EVALS_LOCK)      # v5.317
         _daily_backup(USER_EVENTS_PATH, "user_events", force=True, lock=_USER_EVENTS_LOCK)   # v5.322 홈 달력
         _daily_backup(LP_WATCH_PATH, "lowpoint_watch", force=True, lock=_LP_WATCH_LOCK)       # v5.325 저점 관찰
+        _daily_backup(LP_INTEREST_PATH, "lowpoint_interest", force=True, lock=_LP_INTEREST_LOCK)   # v5.328 관심 추적
     except Exception as e:
         print(f"[journal-backup] 시작 백업 실패: {e}", flush=True)
     try:
@@ -20123,7 +20135,12 @@ async def lp_trade_put(rid: int, request: Request):
                                                   on_update=lambda rs, srv, r: overlap(rs, r, srv))
         if changed:
             _lp_trades_write(trades)
-        return JSONResponse(_clean_nan(payload), status_code=status)
+    # v5.328: 관심 추적 [기록]에서 온 저장 — 보유 기록이 실제로 저장됐을 때만(새 보유·추매) 그 관심 항목을 지운다
+    fi = body.get("from_interest")
+    if fi and status == 200 and not rec.get("sellDate"):
+        payload = {**payload, "interest_removed": fi if _lp_interest_remove(str(fi), rec.get("code"), request,
+                                                                             "converted_to_holding") else None}
+    return JSONResponse(_clean_nan(payload), status_code=status)
 
 
 @app.delete("/api/lowpoint/trades/{rid}")
@@ -20335,10 +20352,12 @@ def _lp_watch_job_blocking(tf: str, now: "datetime") -> dict:
           f"{summary['reached_new']}건 · 조회 실패 {len(summary['failed'])}건 · 갱신 {changed}건", flush=True)
     # v5.327: 같은 작업에서 보유 종목(매매 기록 중 종료 안 된 것)도 추적 — 그 종목만 조회
     prev = (_lp_hold_track_read() or {}).get("prices") or {}
-    prices, hold = w.track_holdings(_lp_trades_load(), today, now.astimezone(KST).isoformat(), prev)
+    prices, hold = w.track_holdings(_lp_trades_load(), today, now.astimezone(KST).isoformat(), prev,
+                                    interest=_rec_list_load(LP_INTEREST_PATH))   # v5.328: 관심 종목도 같은 조회
     _save_json_atomic(LP_HOLD_TRACK_PATH, {"checked_at": now.astimezone(KST).isoformat(), "prices": prices,
                                            "failed": hold["failed"]})
-    print(f"[lowpoint-watch] 보유 추적 — 보유 {hold['held']}종목 · 조회 {hold['fetched']} · 실패 {len(hold['failed'])}", flush=True)
+    print(f"[lowpoint-watch] 보유·관심 추적 — 보유 {hold['held']}종목 · 관심 {hold['interest']}종목 · 조회 {hold['fetched']} · "
+          f"실패 {len(hold['failed'])}", flush=True)
     return {"bar_date": today.isoformat(), "rows": summary["active"],
             "counts": {**summary, "seeded": seeded, "holdings": hold}}
 
@@ -20405,6 +20424,119 @@ async def lp_watch_delete(rid: str, request: Request):
         _rec_list_write(LP_WATCH_PATH, recs)
         _rev_store_delete_log(LP_WATCH_DELETE_LOG_PATH, rid, request, removed, "lowpoint-watch")
     return JSONResponse({"ok": True, "deleted": rid})
+
+
+# ── v5.328(사용자 지시) 저점 추적 — 관심 종목 ──────────────────────────────────
+# "추적 페이지가 보유 종목만 보여줌. 매수 전 종목도 같은 방식으로 추적하고 싶다." 레코드: {id(i_…), kind(단기|장기),
+# mkt(KR|US|UPBIT), code, name, basePrice(추가 시점 마지막 종가 — 사용자가 고칠 수 있음), baseDate, created_at, rev}.
+# 저장은 저점 매매 기록과 같은 규칙(_rec_list_*·_rev_store_put rev·삭제 로그·_daily_backup). 가격 추적은 보유와 같은
+# 작업(_lp_watch_job_blocking → lowpoint_watch.track_holdings의 interest 인자). [기록]으로 보유 기록이 실제로 저장되면
+# 그 관심 항목 하나를 서버가 지운다(lp_trade_put의 from_interest — 삭제 로그 사유 converted_to_holding).
+LP_INTEREST_PATH = _resolve_persistent_path("lowpoint_interest.json")
+LP_INTEREST_DELETE_LOG_PATH = os.path.join(os.path.dirname(LP_INTEREST_PATH), "lowpoint_interest_deletions.log")
+_LP_INTEREST_LOCK = _threading.RLock()
+
+
+def _lp_interest_invalid(rec: dict) -> "str | None":
+    import re as _re
+    if not _re.fullmatch(r"i_[A-Za-z0-9_-]{1,60}", str(rec.get("id") or "")):
+        return "id는 i_로 시작하는 영숫자"
+    if rec.get("kind") not in ("단기", "장기"):
+        return "kind는 단기|장기"
+    if rec.get("mkt") not in ("KR", "US", "UPBIT"):
+        return "mkt는 KR|US|UPBIT"
+    code = str(rec.get("code") or "").strip()
+    if not code:
+        return "code 필요"
+    if (rec.get("mkt") == "UPBIT") != upbit.is_upbit(code):
+        return "UPBIT 레코드의 code는 KRW-XXX 형식(그 외 시장은 KRW- 코드 불가)"
+    if (_lp_num(rec.get("basePrice")) or 0) <= 0:
+        return "기준가는 0보다 커야 해요"
+    d = rec.get("baseDate")
+    try:
+        if not isinstance(d, str) or datetime.strptime(d, "%Y-%m-%d").strftime("%Y-%m-%d") != d:
+            raise ValueError
+    except ValueError:
+        return "baseDate는 YYYY-MM-DD"
+    return None
+
+
+def _lp_interest_remove(rid: str, code: str, request, reason: str) -> bool:
+    """관심 항목 하나 제거(코드가 같을 때만 — 엉뚱한 항목을 지우지 않게). 삭제 로그에 사유를 남긴다."""
+    with _LP_INTEREST_LOCK:
+        recs = _rec_list_load(LP_INTEREST_PATH)
+        idx = next((i for i, r in enumerate(recs) if r.get("id") == rid and r.get("code") == code), None)
+        if idx is None:
+            return False
+        removed = recs.pop(idx)
+        _rec_list_write(LP_INTEREST_PATH, recs)
+        _rev_store_delete_log(LP_INTEREST_DELETE_LOG_PATH, rid, request, {**removed, "_reason": reason}, "lowpoint-interest")
+    return True
+
+
+@app.get("/api/lowpoint/interest")
+async def lp_interest_list():
+    try:
+        return JSONResponse(_clean_nan({"ok": True, "records": _rec_list_load(LP_INTEREST_PATH)}))
+    except (OSError, ValueError) as e:
+        return JSONResponse({"ok": False, "error": f"관심 추적 읽기 실패: {e}"}, status_code=500)
+
+
+@app.put("/api/lowpoint/interest/{rid}")
+async def lp_interest_put(rid: str, request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "JSON 본문 필요"}, status_code=400)
+    rec = body.get("record") if isinstance(body, dict) else None
+    if not isinstance(rec, dict) or rec.get("id") != rid:
+        return JSONResponse({"ok": False, "error": "record.id가 경로 id와 같아야 함"}, status_code=400)
+    bad = _lp_interest_invalid(rec)
+    if bad:
+        return JSONResponse({"ok": False, "error": bad}, status_code=400)
+    with _LP_INTEREST_LOCK:
+        try:
+            recs = _rec_list_load(LP_INTEREST_PATH)
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
+
+        def dup(records, r):   # 같은 종목·구분의 관심 항목은 1건(보유 1건 규칙과 같은 모양)
+            if any(x.get("code") == r.get("code") and x.get("kind") == r.get("kind") for x in records):
+                return f"같은 종목·구분({r.get('kind')})이 이미 관심 추적 중이에요"
+            return None
+        status, payload, changed = _rev_store_put(recs, rid, rec, body.get("base_rev"), on_create=dup)
+        if changed:
+            _rec_list_write(LP_INTEREST_PATH, recs)
+        return JSONResponse(_clean_nan(payload), status_code=status)
+
+
+@app.delete("/api/lowpoint/interest/{rid}")
+async def lp_interest_delete(rid: str, request: Request):
+    with _LP_INTEREST_LOCK:
+        try:
+            recs = _rec_list_load(LP_INTEREST_PATH)
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
+        idx = next((i for i, r in enumerate(recs) if r.get("id") == rid), None)
+        if idx is None:
+            return JSONResponse({"ok": True, "already_gone": True})
+        removed = recs.pop(idx)
+        _rec_list_write(LP_INTEREST_PATH, recs)
+        _rev_store_delete_log(LP_INTEREST_DELETE_LOG_PATH, rid, request, removed, "lowpoint-interest")
+    return JSONResponse({"ok": True, "deleted": rid})
+
+
+@app.get("/api/lowpoint/last-close")
+async def lp_last_close(code: str, mkt: str):
+    """관심 추가 폼의 기준가 자동 입력 — 그 종목 하나의 마지막 종가(추적과 같은 소스·같은 함수)."""
+    if mkt not in ("KR", "US", "UPBIT"):
+        return JSONResponse({"ok": False, "error": "mkt는 KR|US|UPBIT"}, status_code=400)
+    w = _lp_watch_mod()
+    got = await asyncio.get_event_loop().run_in_executor(
+        None, w.fetch_last_closes, [{"code": code, "mkt": mkt}], datetime.now(KST).date())
+    if code not in got:
+        return JSONResponse({"ok": False, "error": f"{code} 마지막 종가를 받지 못했어요"})
+    return JSONResponse(_clean_nan({"ok": True, "code": code, **got[code]}))
 
 
 # ── v5.322(사용자 지시) 홈 달력 — 사용자 등록 일정 ─────────────────────────────

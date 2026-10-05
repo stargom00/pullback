@@ -1391,7 +1391,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.327</span>
+      <span class="ver mono" id="verBadge">v5.328</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -7082,10 +7082,11 @@ async function onEnterLowpointTrackTab() {
   if (!_lpt.error) { await _lptPrices(); renderLowpointTrack(); }
 }
 // 레코드 한 건 저장. 409(다른 곳에서 먼저 바뀜/삭제됨)면 서버 목록을 다시 불러오고 알린다.
-async function _lptPut(rec, baseRev) {
+async function _lptPut(rec, baseRev, extra) {
   const res = await fetch('/api/lowpoint/trades/' + encodeURIComponent(rec.id), {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ record: rec, base_rev: baseRev == null ? null : baseRev }) });
+    // v5.328: extra = { from_interest: 관심 추적 id } — 보유가 실제로 저장되면 서버가 그 관심 항목을 지운다
+    body: JSON.stringify({ record: rec, base_rev: baseRev == null ? null : baseRev, ...(extra || {}) }) });
   const d = await apiParse(res, { allow: [409, 400] });
   if (res.status === 409) {
     await _lptLoad();
@@ -7126,13 +7127,16 @@ async function lptAdd(form) {
         + (t.hint ? ' — ' + t.hint : ''));
     }
     _lpt.pendingKr = null;
-    _lpt.prefill = null;   // v5.325: 관찰 [기록] 프리필은 저장되면 비운다
+    // v5.328: 관심 추적 [기록]에서 왔고 같은 종목이면 저장 요청에 그 관심 id를 싣는다(다른 종목으로 바꿨으면 안 싣는다)
+    const fi = lpFromInterest(_lpt.prefill, t.ticker);
+    const extra = fi ? { from_interest: fi } : null;
     const hold = _lpt.trades.find(r => !r.sellDate && r.code === t.ticker && r.kind === kind);
     if (hold) {
-      await _lptPut(lpMergeBuy(hold, buy), hold.rev);          // 추매 → 평단·수량 합침
+      await _lptPut(lpMergeBuy(hold, buy), hold.rev, extra);   // 추매 → 평단·수량 합침
     } else {
-      await _lptPut({ id: Date.now(), kind, mkt: t.mkt, code: t.ticker, name: t.name, ...buy }, null);
+      await _lptPut({ id: Date.now(), kind, mkt: t.mkt, code: t.ticker, name: t.name, ...buy }, null, extra);
     }
+    _lpt.prefill = null;   // v5.325: 관찰·관심 [기록] 프리필은 저장되면 비운다
     form.reset();
     await _lptLoad();
   });
@@ -7333,6 +7337,88 @@ function lpwRecord(id) {
 // 페이지". 대상은 매매 기록의 보유(종료 안 된) 기록 그대로(별도 입력 없음 — 기록을 추가·종료·수정하면 바로 반영). 가격은
 // 서버가 관찰과 같은 작업(매일 07:00 KST · 수동 갱신)에서 보유 종목만 조회해 둔 마지막 종가(/api/lowpoint/holdings-track).
 const _lpk = { prices: {}, checkedAt: null, failed: [], error: null, busy: false, msg: '' };
+// v5.328(사용자 지시 "매수 전 종목도 같은 방식으로 추적") — 관심 추적. 추가 폼 입력은 재렌더에 지워지지 않게 상태로 든다.
+const _lpi = { recs: [], error: null, busy: false, msg: '', q: '', kind: '단기', price: '', found: null };
+// [기록] 프리필이 관심 항목에서 왔고 저장하려는 종목이 그 종목일 때만 관심 id(그때만 서버가 그 항목을 지운다)
+function lpFromInterest(prefill, ticker) {
+  return (prefill && prefill.interestId && prefill.q === ticker) ? prefill.interestId : null;
+}
+// 관심 행 — 기준가 대비 등락·구분별 목표% 진행 바·경과일(기준일 = 기준가의 종가 날짜). 등락 내림차순(현재가 없으면 아래).
+function lpiRows(recs, prices, tp, today) {
+  return (recs || []).map(r => {
+    const p = (prices || {})[r.code] || null;
+    const cur = p && p.last_close != null ? Number(p.last_close) : null;
+    return { r, cur, curDate: p ? p.last_date : null, ret: lpReturnPct(cur, Number(r.basePrice)),
+             goal: Number((tp || {})[r.kind]) || 0, days: lpwDays(r.baseDate, today) };
+  }).sort((a, b) => (a.ret == null) - (b.ret == null) || (b.ret ?? 0) - (a.ret ?? 0) || String(a.r.name).localeCompare(String(b.r.name)));
+}
+async function lpiLoad() {
+  try { const d = await apiJson('/api/lowpoint/interest'); _lpi.recs = d.records || []; _lpi.error = null; }
+  catch (e) { _lpi.error = e; }
+}
+// 종목 해석(저점 resolve 그대로) + 그 종목 마지막 종가 → 기준가 칸 자동 입력(이미 적은 값은 그대로 — 수정 가능)
+async function lpiLookup(keepPrice) {
+  const q = String(_lpi.q || '').trim();
+  if (!q) throw new Error('종목을 입력하세요');
+  const t = await apiJson('/api/lowpoint/resolve/' + encodeURIComponent(q));
+  if (!t.ok) throw new Error(`'${q}'를 찾지 못했어요` + (t.hint ? ' — ' + t.hint : ''));
+  const c = await apiJson(`/api/lowpoint/last-close?code=${encodeURIComponent(t.ticker)}&mkt=${t.mkt}`);
+  if (!c.ok) throw new Error(c.error || '마지막 종가를 받지 못했어요');
+  _lpi.found = { q, ticker: t.ticker, name: t.name, mkt: t.mkt, close: c.last_close, date: c.last_date };
+  if (!keepPrice || !(Number(_lpi.price) > 0)) _lpi.price = String(c.last_close);
+}
+// 기준가는 종목에 딸린 값 — 종목 칸을 바꾸면 기준가·조회 결과를 비운다(앞 종목에 적은 기준가가 다음 종목에 붙지 않게.
+// 2026-10-06 로컬 확인: 하이딥 추가 실패 뒤 PEG를 추가하자 하이딥용 1,250이 PEG 기준가로 저장됐다).
+function lpiSetQuery(el) {
+  _lpi.q = el.value;
+  if (_lpi.price !== '' || _lpi.found) {
+    _lpi.price = ''; _lpi.found = null;
+    const p = el.form && el.form.querySelector('input[name=basePrice]');
+    if (p) p.value = '';
+  }
+}
+async function lpiFill() {
+  if (_lpi.busy) return;
+  _lpi.busy = true; _lpi.msg = ''; renderLowpointTrack();
+  try { await lpiLookup(false); } catch (e) { _lpi.msg = e.message; }
+  finally { _lpi.busy = false; renderLowpointTrack(); }
+}
+async function lpiAdd() {
+  if (_lpi.busy) return;
+  _lpi.busy = true; _lpi.msg = ''; renderLowpointTrack();
+  try {
+    if (!_lpi.found || _lpi.found.q !== String(_lpi.q || '').trim()) await lpiLookup(true);
+    const f = _lpi.found, price = Number(_lpi.price);
+    if (!(price > 0)) throw new Error('기준가는 0보다 커야 해요');
+    const rec = { id: 'i_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), kind: _lpi.kind, mkt: f.mkt,
+                  code: f.ticker, name: f.name, basePrice: price, baseDate: f.date || kstStr(), created_at: kstStr(new Date(), 19) };
+    const res = await fetch('/api/lowpoint/interest/' + encodeURIComponent(rec.id), { method: 'PUT',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ record: rec, base_rev: null }) });
+    const d = await apiParse(res, { allow: [400, 409] });
+    if (!d.ok) throw new Error(d.error || '추가 실패');
+    _lpi.q = ''; _lpi.price = ''; _lpi.found = null;
+    _lpi.msg = `${f.name} 관심 추적 시작 — 기준가 ${_lptFmt(price, f.mkt)}(${rec.baseDate} 종가 기준)`;
+    await lpiLoad();
+  } catch (e) { _lpi.msg = '추가 실패 — ' + e.message; }
+  finally { _lpi.busy = false; renderLowpointTrack(); }
+}
+async function lpiDelete(id) {
+  const r = _lpi.recs.find(x => x.id === id);
+  if (!r || !confirm(`관심 추적에서 '${lpDisplayName(r)}'을 삭제할까요?`)) return;
+  try { await apiJson('/api/lowpoint/interest/' + encodeURIComponent(id), { method: 'DELETE' }); }
+  catch (e) { alert('삭제 실패 — ' + e.message); }
+  await lpiLoad(); renderLowpointTrack();
+}
+// [기록] → 매매 기록 폼에 종목·구분 프리필. 보유 기록이 실제로 저장되면 서버가 이 관심 항목을 지운다(from_interest).
+function lpiRecord(id) {
+  const r = _lpi.recs.find(x => x.id === id);
+  if (!r) return;
+  _lpt.prefill = { q: r.code, kind: r.kind, interestId: r.id };
+  _lpt.view = 'trades';
+  renderLowpointTrack();
+  const inp = document.querySelector('#lowpointTrackView form.lpt-form input[name=buyPrice]');
+  if (inp) { inp.scrollIntoView({ block: 'center' }); inp.focus(); }
+}
 // 보유 행 → 구분(단기·장기)별 그룹, 수익률 내림차순(현재가 없는 행은 아래). 목표 도달(현재가 ≥ 목표가)은 매매 기록 보유
 // 행의 "목표 도달"과 같은 규칙(lpTargetPrice) — 종료 후보로 강조만 하고 자동 종료는 하지 않는다.
 function lpkGroups(trades, prices, tp, today) {
@@ -7352,6 +7438,7 @@ async function lpkLoad() {
     const d = await apiJson('/api/lowpoint/holdings-track');
     _lpk.prices = d.prices || {}; _lpk.checkedAt = d.checked_at || null; _lpk.failed = d.failed || []; _lpk.error = null;
   } catch (e) { _lpk.error = e; }
+  await lpiLoad();   // v5.328 관심 추적
 }
 async function lpkRefresh() {
   if (_lpk.busy) return;
@@ -7361,7 +7448,7 @@ async function lpkRefresh() {
     const d = await apiParse(res, { allow: [409, 500] });
     if (!d.ok) throw new Error(d.error || '갱신 실패');
     const h = (d.summary && d.summary.counts && d.summary.counts.holdings) || {};
-    _lpk.msg = `보유 ${h.held ?? '?'}종목 확인${(h.failed || []).length ? ` · 조회 실패 ${h.failed.join(', ')}(이전 값 표시)` : ''}`;
+    _lpk.msg = `보유 ${h.held ?? '?'}종목 · 관심 ${h.interest ?? 0}종목 확인${(h.failed || []).length ? ` · 조회 실패 ${h.failed.join(', ')}(이전 값 표시)` : ''}`;
   } catch (e) { _lpk.msg = '갱신 실패 — ' + e.message; }
   finally { _lpk.busy = false; await lpkLoad(); renderLowpointTrack(); }
 }
@@ -7387,19 +7474,51 @@ function renderLowpointHold() {
       return row + (_lpt.selling === r.id ? _lptSellFormHtml(r, x.cur, today, 6) : '');
     }).join('');
     return `<section class="n-card lpw-card">
-      <div class="lpw-h"><span class="n-h">${g.kind} · 보유 ${g.rows.length}${hits ? ` · 종료 후보 ${hits}` : ''}</span><span class="n-sub" style="font-size:11px">목표 +${Number(tp[g.kind]) || 0}%</span></div>
+      <div class="lpw-h"><span class="n-h">보유 ${g.kind} · ${g.rows.length}${hits ? ` · 종료 후보 ${hits}` : ''}</span><span class="n-sub" style="font-size:11px">목표 +${Number(tp[g.kind]) || 0}%</span></div>
       <div class="jr-table-wrap"><table class="jr-table lpt-table lpw-table"><thead><tr><th>종목</th><th class="r lpw-pxcell">평단 → 현재가</th><th class="r">수익률</th>
         <th>목표 +${Number(tp[g.kind]) || 0}%까지</th><th class="r">보유</th><th></th></tr></thead><tbody>${body}</tbody></table></div>
     </section>`;
   }).join('');
+  // v5.328 관심 추적 — 보유 단기 → 보유 장기 → 관심 추적 순
+  const irows = lpiRows(_lpi.recs, _lpk.prices, tp, today).map(x => {
+    const r = x.r;
+    const b = lpwBar(x.ret, x.goal);
+    const tip = x.ret == null ? '현재가 없음 — 지금 갱신' : `기준가 대비 ${x.ret >= 0 ? '+' : ''}${x.ret.toFixed(2)}% · ${r.kind} 목표 +${x.goal}%까지 ${(x.goal - x.ret).toFixed(2)}%p`;
+    return `<tr>
+        <td class="lpw-sym"><a class="name-link" href="${tvUrl(r.code, r.mkt)}" target="_blank" rel="noopener" title="${_escapeHtml(r.name || '')} — 트레이딩뷰">${_escapeHtml(lpDisplayName(r))}</a> <span class="chip lpw-hitchip">${r.kind}</span></td>
+        <td class="r lpw-pxcell"><span class="lpw-px" title="기준 ${_escapeHtml(r.baseDate)} 종가${x.curDate ? ' · 현재 ' + x.curDate + ' 종가' : ''}">${_lptFmt(r.basePrice, r.mkt)} → ${x.cur != null ? _lptFmt(x.cur, r.mkt) : '—'}</span></td>
+        <td class="r">${_lptPct(x.ret)}</td>
+        <td class="lpw-barcell"><div class="lpw-bar" title="${tip}" role="img" aria-label="${tip}">${b.side === 'none' ? '' : `<i class="${b.side}" style="width:${(b.width / 2).toFixed(1)}%"></i>`}</div></td>
+        <td class="num r">${x.days != null ? x.days + '일' : '—'}</td>
+        <td class="r" style="white-space:nowrap"><button type="button" class="n-btn sm" title="매매 기록 폼에 이 종목으로 — 보유로 저장되면 관심에서 빠져요" onclick="lpiRecord('${_escapeHtml(r.id)}')">기록</button><button type="button" class="n-btn sm" onclick="lpiDelete('${_escapeHtml(r.id)}')">삭제</button></td></tr>`;
+  }).join('');
+  const interest = `<section class="n-card lpw-card">
+      <div class="lpw-h"><span class="n-h">관심 추적 · ${_lpi.recs.length}</span><span class="n-sub" style="font-size:11px">매수 전 종목 — 기준가(추가 시점 종가) 대비 · 목표는 구분별 목표%</span></div>
+      ${_lpi.error ? `<div class="st-bad" style="font-size:12px">관심 추적을 불러오지 못했어요 — ${_escapeHtml(_lpi.error.message)}</div>` : ''}
+      ${irows ? `<div class="jr-table-wrap"><table class="jr-table lpt-table lpw-table"><thead><tr><th>종목</th><th class="r lpw-pxcell">기준가 → 현재가</th><th class="r">등락</th>
+        <th>목표까지</th><th class="r">경과</th><th></th></tr></thead><tbody>${irows}</tbody></table></div>` : '<div class="n-sub" style="font-size:12px">관심 추적 중인 종목이 없어요 — 위에서 추가</div>'}
+    </section>`;
+  const fd = _lpi.found && _lpi.found.q === String(_lpi.q || '').trim() ? _lpi.found : null;
+  const addForm = `<section class="n-card lpw-info">
+      <form class="lpt-form" style="flex:1 1 100%" onsubmit="event.preventDefault();lpiAdd()">
+        <label style="flex:1 1 180px">관심 종목 추가<input name="q" placeholder="종목명·코드·티커 또는 KRW-BTC" value="${_escapeHtml(_lpi.q)}" oninput="lpiSetQuery(this)" required></label>
+        <label>구분<select name="kind" onchange="_lpi.kind=this.value">${LPT_KINDS.map(k => `<option${_lpi.kind === k ? ' selected' : ''}>${k}</option>`).join('')}</select></label>
+        <label>기준가<input name="basePrice" inputmode="decimal" placeholder="마지막 종가 자동" value="${_escapeHtml(_lpi.price)}" oninput="_lpi.price=this.value"></label>
+        <button type="button" class="n-btn" onclick="lpiFill()" ${_lpi.busy ? 'disabled' : ''}>기준가 불러오기</button>
+        <button type="submit" class="n-btn primary" ${_lpi.busy ? 'disabled' : ''}>${_lpi.busy ? '처리 중…' : '추가'}</button>
+      </form>
+      <span class="n-sub" style="flex-basis:100%;font-size:12px">${fd ? `${_escapeHtml(fd.name)}(${_escapeHtml(fd.ticker)}) · ${_escapeHtml(fd.date)} 종가 ${_lptFmt(fd.close, fd.mkt)} — 기준가는 고칠 수 있어요` : '기준가를 비워 두면 추가할 때 마지막 종가로 채워요'}${_lpi.msg ? ' · ' + _escapeHtml(_lpi.msg) : ''}</span>
+    </section>`;
   const info = `마지막 확인 ${_lpk.checkedAt ? String(_lpk.checkedAt).replace('T', ' ').slice(5, 16) + ' KST' : '없음'} · 매일 07:00 KST 자동 갱신`
     + (_lpk.failed.length ? ` · <span class="st-bad">조회 실패 ${_escapeHtml(_lpk.failed.join(', '))}(이전 값)</span>` : '');
   return `<section class="n-card lpw-info">
-      <span class="n-sub" style="flex:1 1 260px">매매 기록의 보유 종목을 그대로 추적해요(기록을 추가·종료·수정하면 바로 반영) — 현재가 = 마지막 종가 · ${info}</span>
+      <span class="n-sub" style="flex:1 1 260px">매매 기록의 보유 종목(추가·종료·수정이 바로 반영)과 관심 종목을 추적해요 — 현재가 = 마지막 종가 · ${info}</span>
       <button type="button" class="n-btn sm" onclick="lpkRefresh()" ${_lpk.busy ? 'disabled' : ''}>${_lpk.busy ? '갱신 중…' : '지금 갱신'}</button>
       ${_lpk.msg ? `<span class="n-sub" style="flex-basis:100%">${_escapeHtml(_lpk.msg)}</span>` : ''}
     </section>
-    ${groups || '<section class="n-card" style="padding:18px 22px"><div class="n-sub">보유 중인 기록이 없어요 — 매매 기록에서 추가하면 여기 나타나요</div></section>'}`;
+    ${addForm}
+    ${groups || '<section class="n-card" style="padding:18px 22px"><div class="n-sub">보유 중인 기록이 없어요 — 매매 기록에서 추가하면 여기 나타나요</div></section>'}
+    ${interest}`;
 }
 function renderLowpointWatch() {
   if (_lpw.error) return `<section class="n-card" style="padding:18px 22px"><div class="st-dot st-bad">관찰 목록을 불러오지 못했어요 — ${_escapeHtml(_lpw.error.message)}</div></section>`;
@@ -7697,7 +7816,7 @@ function renderLowpointTrack() {
   const kr = _lpt.pendingKr;
   const addHtml = `<section class="n-card" style="padding:18px 22px">
     <form class="lpt-form" onsubmit="event.preventDefault();lptAdd(this)">
-      <label>구분<select name="kind">${LPT_KINDS.map(k => `<option>${k}</option>`).join('')}</select></label>
+      <label>구분<select name="kind">${LPT_KINDS.map(k => `<option${_lpt.prefill && _lpt.prefill.kind === k ? ' selected' : ''}>${k}</option>`).join('')}</select></label>
       <label style="flex:1 1 180px">종목<input name="q" placeholder="종목명·코드 또는 KRW-BTC" value="${kr ? _escapeHtml(kr.code) : (_lpt.prefill ? _escapeHtml(_lpt.prefill.q) : '')}" required></label>
       ${kr ? `<label>시장<select name="krMarket" required><option value="">선택</option><option value="KOSPI">코스피</option><option value="KOSDAQ">코스닥</option></select></label>
               <label>종목명<input name="krName" placeholder="직접 입력"></label>` : ''}

@@ -69,7 +69,7 @@ def test_track_holdings_fetches_only_open(monkeypatch):
                      "coin": [("KRW-XRP", "days", w.HOLD_LOOKBACK_DAYS)]}
     assert set(prices) == {"019680.KS", "AVA", "KRW-XRP"} and "005930.KS" not in prices
     assert prices["KRW-XRP"] == {"mkt": "UPBIT", "last_close": 3200.0, "last_date": "2026-10-05", "checked_at": "now"}
-    assert s == {"held": 3, "fetched": 3, "failed": []}
+    assert s == {"held": 3, "interest": 0, "fetched": 3, "failed": []}
 
 
 def test_failed_keeps_previous_and_drops_sold():
@@ -87,7 +87,7 @@ def test_job_writes_holdings_track_and_api(monkeypatch, tmp_path):
     monkeypatch.setattr(app, "LOWPOINT_STATE_PATH", str(tmp_path / "s.json"))
     app._rec_list_write(app.LP_TRADES_PATH, TRADES)
     fake = lambda items, today: {i["code"]: {"last_close": 10.0, "last_date": "2026-10-05"} for i in items}
-    monkeypatch.setattr(w.track_holdings, "__defaults__", (None, fake))
+    monkeypatch.setattr(w.track_holdings, "__defaults__", (None, None, fake))
     s = app._lp_watch_job_blocking("watch", datetime(2026, 10, 6, 7, 0, tzinfo=KST))
     assert s["counts"]["holdings"]["held"] == 3
     d = json.loads(asyncio.run(app.lp_holdings_track()).body)
@@ -142,15 +142,16 @@ def test_progress_bar_uses_target_scale(ret, goal, side, width):
 
 
 def _render_hold(pre=""):
-    fns = KFNS + ("_lptFmt", "_lptPct", "lpDisplayName", "_lptSellFormHtml", "renderLowpointHold")
+    fns = KFNS + ("_lptFmt", "_lptPct", "lpDisplayName", "_lptSellFormHtml", "lpiRows", "renderLowpointHold")
     state = (f"var _lpt = {{ trades: {json.dumps(TRADES)}, settings: {{ target_pct: {json.dumps(TP)} }}, selling: null, error: null }};\n"
-             f"var _lpk = {{ prices: {json.dumps(PRICES)}, checkedAt: '2026-10-06T07:00:30+09:00', failed: [], error: null, busy: false, msg: '' }};\n")
+             f"var _lpk = {{ prices: {json.dumps(PRICES)}, checkedAt: '2026-10-06T07:00:30+09:00', failed: [], error: null, busy: false, msg: '' }};\n"
+             "var _lpi = { recs: [], error: null, busy: false, msg: '', q: '', kind: '단기', price: '', found: null };\n")
     return _js("renderLowpointHold()", fns, state + pre)
 
 
 def test_render_hold_rows_and_end_button():
     html = _render_hold()
-    assert "단기 · 보유 2 · 종료 후보 1" in html and "장기 · 보유 1" in html
+    assert "보유 단기 · 2 · 종료 후보 1" in html and "보유 장기 · 1" in html   # v5.328 그룹 이름(보유 단기 → 보유 장기 → 관심 추적)
     assert html.count('class="lpt-hit"') == 1 and "종료 후보</span>" in html
     assert html.count("onclick=\"lptStartSell(") == 3 and ">AVA</a>" in html and ">엑스알피(리플)</a>" in html   # US는 티커(저점 화면 규칙)
     assert '<i class="pos" style="width:50.0%">' in html          # 대교 +4% = 목표 → 오른쪽 절반 꽉
