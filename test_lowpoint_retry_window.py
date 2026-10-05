@@ -187,10 +187,10 @@ def test_month_window_is_still_ten_years():
 
 
 def test_month_window_covers_burn_in():
-    """창을 더 줄이면 번인(MIN_BARS=36봉 + RSI14)이 깨져 결과가 조용히 달라진다.
-    요구 월수 = 36 + 14 = 50개월. 창이 그보다 길어야 한다."""
+    """창이 최소 봉수 + RSI14보다 길어야 한다(v5.329: 최소 봉수 = RSI 요구치 17 → 31개월 — 창 10년이면 넉넉하다.
+    창 길이 자체를 줄이면 안 되는 이유는 위 테스트 — 결과가 바뀐 2026-10-01 실측)."""
     need_months = lp.MIN_BARS["month"] + lp.RSI_PERIOD
-    assert need_months == 50
+    assert need_months == lp.MIN_BARS_RSI + lp.RSI_PERIOD
     us_years = int(re.fullmatch(r"(\d+)y", lp.US_PERIOD["month"]).group(1))
     assert us_years * 12 >= need_months, f"US {us_years}년 < 요구 {need_months}개월"
     kr_months = lp.KR_DAYS["month"] / 30.44

@@ -199,10 +199,11 @@ def test_month_in_progress_invariance():
 
 
 def test_short_history_reported_not_evaluated():
-    daily = _daily_from_weekly(_weekly_path()[:30])
+    n = lp.MIN_BARS["week"] - 1          # v5.329: 최소치 = RSI 계산 최소치(17) — 그보다 한 봉 적으면 short
+    daily = _daily_from_weekly(_weekly_path()[:n])
     fri = daily.index[-1] + pd.Timedelta(days=1)
     res = lp.evaluate(daily, "week", "kr", datetime(fri.year, fri.month, fri.day, tzinfo=KST))
-    assert res["status"] == "short" and res["n_bars"] == 30
+    assert res["status"] == "short" and res["n_bars"] == n
 
 
 def test_kr_confirm_time_matches_app():

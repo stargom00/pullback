@@ -470,7 +470,8 @@ def test_legacy_combined_manual_value_is_kept_but_not_counted(store):
 # ── v5.318 후속 (a): 데이터 시작 후 36개월 이후 신호만 인정 ───────────────
 def test_signal_warmup_reuses_lowpoint_min_bars():
     import lowpoint as lp
-    assert ev.SIGNAL_WARMUP_MONTHS == lp.MIN_BARS["month"] == 36
+    assert ev.SIGNAL_WARMUP_MONTHS == 36     # v5.329: 스크린 최소 봉수(lp.MIN_BARS — RSI 요구치)와 분리, 36개월 가드 유지
+    assert "lp.MIN_BARS" not in open(ev.__file__, encoding="utf-8").read().split("SIGNAL_WARMUP_MONTHS = ")[1].split("\n")[0]
 
 
 def test_warmup_boundary_36_months():

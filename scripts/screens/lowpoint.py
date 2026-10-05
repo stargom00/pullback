@@ -70,10 +70,20 @@ KR_CLOSE_CONFIRMED_HM = 20 * 60 + 10
 # (측정 근거 없음, yfinance 반영 지연 감안). ZoneInfo라 서머타임 자동 처리.
 US_CLOSE_CONFIRMED_HM = 17 * 60
 
-# 리샘플 봉 최소 개수(번인). Wilder RSI는 첫 봉부터 ewm으로 시작해 초기값
-# 영향이 (13/14)^n으로 줄어든다 — 주봉 52봉이면 ≈2%, 월봉 36봉이면 ≈7%.
-# AI 판단 어림값(재검토 필요). 미달 종목은 조용히 빼지 않고 끝에 목록으로 출력.
-MIN_BARS = {"week": 52, "month": 36}
+# 리샘플 봉 최소 개수 = **이 스크린이 계산하는 지표가 실제로 요구하는 최소치**(v5.329, 사용자 지시 "저점 스크린의 최소
+# 봉 수를 그 탭이 계산하는 지표가 실제로 요구하는 최소치로 … 매직넘버 금지, 산출 근거 주석"; 기준은 사용자 선택
+# "RSI14만 → 17봉", 월봉도 같은 기준).
+# 산출: 판정이 쓰는 건 RSI(RSI_PERIOD)의 마지막 3개 값(RSI[2]·RSI[1]·RSI[0])과 종가 2개뿐이다(evaluate·lowpoint_signal).
+#   고전 Wilder(rsi_wilder_sma)는 첫 RSI_PERIOD개 변화량의 평균으로 시작하므로 첫 RSI는 RSI_PERIOD+1번째 봉에 나온다
+#   (변화량 RSI_PERIOD개 = 봉 RSI_PERIOD+1개). RSI[2]까지 있어야 하므로 +2 → RSI_PERIOD + 3 = 17봉.
+# 예전 값(주봉 52·월봉 36)은 옛 ewm RSI(첫 봉부터 시작)의 초기값 영향을 줄이려던 "번인" 어림값이었다. v5.323부터 고전
+# Wilder라 상장 직후부터 이력이 시작되는 종목은 키움·트레이딩뷰와 **같은 시작점·같은 정의**로 계산된다 — 짧은 이력이
+# 오차 원인이 아니다(키움 10-02 주봉 KR 7/7 재현 조건도 "최소 봉 수 없음"이었다; 삼진식품 0013V0.KQ 주봉 41개가 52에
+# 걸려 키움과 어긋났던 사례). 긴 이력은 조회 창 시작점이 상장일과 달라도 시드 영향이 (13/14)^n으로 사라진다.
+# 5탭 스캐너의 min_bars(210·260 등 — 200일선·RS 12개월용)와는 별개다(이 상수는 저점 스크린 전용).
+# 미달 종목은 조용히 빼지 않고 끝에 목록으로 출력. 평가 페이지의 36개월 가드는 lowpoint_eval.SIGNAL_WARMUP_MONTHS(별도).
+MIN_BARS_RSI = RSI_PERIOD + 3
+MIN_BARS = {"week": MIN_BARS_RSI, "month": MIN_BARS_RSI}
 
 # fetch 창: 주봉 ≈5년(≈260봉), 월봉 ≈10년(≈120봉). 사용자 지시 "월봉은 RSI14 +
 # 번인 → 최소 3년 이상"보다 넉넉하게 — naver siseJson은 기간과 무관하게
@@ -88,7 +98,7 @@ MIN_BARS = {"week": 52, "month": 36}
 # 감쇠**한다 — 월봉 120봉(10년)이면 ≈0.02%지만 60봉(5년)이면 ≈1.3%가 남는다. 저점
 # 조건은 RSI 30 경계 판정이고 실제 히트가 28.9~31.0에 몰려 있어 이 정도 차이가 hit/miss를
 # 뒤집는다. 번인부족 제외 수는 거의 같았으므로(표본 문제가 아니라 **값 자체**의 차이다).
-# 함의: `MIN_BARS["month"]=36`은 "번인 충분" 보장이 아니다(그 지점의 잔존 영향 ≈7%).
+# 함의: 짧은 창은 ewm 시드 잔존 영향을 남겼다(그때 MIN_BARS["month"]=36 지점 ≈7%; v5.323부터 고전 Wilder).
 # 월봉 결과는 창 길이에 민감하므로 **창을 바꾸려면 반드시 같은 기준봉 재현 비교를 먼저**
 # 할 것. 메모리는 창 축소가 아닌 다른 수단(배치·동시성 축소 등)으로 다룬다.
 KR_DAYS = {"week": 1900, "month": 3700}
@@ -641,7 +651,7 @@ def exclusion_detail_lines(res: dict, tf: str) -> list:
                    + ", ".join(f"{t}({res['names'].get(t, '')}) {d}"
                                for t, d in sorted(res["stale"].items())))
     if res["short"]:
-        out.append(f"[{m}] 번인부족 제외 {len(res['short'])}종목(마감 봉 < {MIN_BARS[tf]}): "
+        out.append(f"[{m}] 봉수부족 제외 {len(res['short'])}종목(마감 봉 < {MIN_BARS[tf]} = RSI{RSI_PERIOD} 계산 최소치): "
                    + ", ".join(f"{t}({n})" for t, n in sorted(res["short"].items())))
     meta = res.get("meta") or {}
     if "admin_excluded" in meta:                       # KR(KIND)
@@ -694,7 +704,7 @@ def main(argv=None):
     for res in results:
         m = res["market"].upper()
         print(f"── {m}: 유니버스 {res['universe']} / 조회성공 {res['fetched']} / "
-              f"정지추정 제외 {len(res['stale'])} / 번인부족 제외 {len(res['short'])} / "
+              f"정지추정 제외 {len(res['stale'])} / 봉수부족 제외 {len(res['short'])} / "
               f"신호 {len(res['rows'])} ({res['elapsed']:.0f}s)")
         if res["meta"] and "admin_excluded" in res["meta"]:
             ex = res["meta"]["admin_excluded"]
