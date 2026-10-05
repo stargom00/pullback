@@ -5,6 +5,13 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.330 [현재 탭·하위 페이지를 URL 해시에 — 사용자 지시 "스캐너에서 새로고침하면 항상 홈 탭으로 돌아간다. 현재 탭/페이지가
+    URL에 없어서다"] static/index.html만(서버 불변). 형식 #tab=저점일지&page=관찰(탭 버튼 글자, 글자 없는 탭은 mode 키 — 읽을
+    때는 둘 다 받음). 쓰기: applyTabViewState 끝·저점일지 렌더(하위 페이지 전환) 때 history.replaceState(뒤로가기 기록 안
+    쌓음, 같은 해시면 안 씀). 읽기: 첫 로드에서 해시가 유효하면 그 탭 버튼 click()과 같은 경로(클릭 핸들러 → applyTabViewState)로
+    열고, 부트스트랩의 applyTabViewState를 대신한다(로딩 두 번 없음 — `if (!restoreTabFromHash()) applyTabViewState();`).
+    저점일지는 하위 페이지(매매 기록·평가·관찰·추적 — LPT_PAGES 한 곳)까지 복원(기존 lpSetView로 그 페이지 데이터 로드).
+    해시 없음·모르는 탭·깨진 해시 → 기존대로 홈. 클릭 핸들러 본문·데이터 로딩 순서는 그대로. 테스트: test_tab_hash.py.
 v5.329 [저점 스크린 최소 봉 수 = RSI14 계산 최소치 — 사용자 지시 "저점 스크린의 최소 봉 수를 그 탭이 계산하는 지표가
     실제로 요구하는 최소치로", 기준 선택 "RSI14만 → 17봉"·"월봉도 같은 기준으로"] 배경: 삼진식품(0013V0.KQ, 2025-12 상장)이
     키움 조건검색엔 잡히는데 저점 스크린에선 "주봉 41개 < 52"로 탈락. 원인 확인: 52·36은 5탭 전역값이 아니라 저점 전용
@@ -8828,7 +8835,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.329"
+VERSION = "v5.330"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

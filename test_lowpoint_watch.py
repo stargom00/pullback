@@ -288,7 +288,7 @@ def test_days_calendar():
 
 def test_ui_wiring():
     track = _fn("renderLowpointTrack")
-    assert "['watch', '관찰']" in track and "renderLowpointWatch()" in track
+    assert "LPT_PAGES.map(" in track and "['watch', '관찰']" in SRC.split("const LPT_PAGES = ")[1].split("\n")[0] and "renderLowpointWatch()" in track
     assert "lpwLoad().then(renderLowpointTrack)" in _fn("lpSetView")
     rec = _fn("lpwRecord")
     assert "_lpt.prefill = { q: r.code };" in rec and "_lpt.view = 'trades';" in rec

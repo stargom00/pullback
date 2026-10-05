@@ -1391,7 +1391,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.329</span>
+      <span class="ver mono" id="verBadge">v5.330</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -6399,6 +6399,59 @@ function applyMarketButtonsEnabled(curMode) {
   });
 }
 
+// ── v5.330(사용자 지시) 현재 탭·하위 페이지를 URL 해시에 — "새로고침하면 항상 홈 탭으로 돌아간다. 현재 탭/페이지가 URL에
+// 없어서다." 형식 #tab=저점일지&page=관찰(탭 버튼 글자 — 글자 없는 탭은 mode 키). 읽을 때는 글자·mode 키 둘 다 받는다.
+// 쓰기는 history.replaceState(뒤로가기 기록을 쌓지 않음). 기존 탭 전환 구조는 그대로 — 읽기·쓰기만 덧붙였다.
+const LPT_PAGES = [['trades', '매매 기록'], ['eval', '평가'], ['watch', '관찰'], ['hold', '추적']];   // 저점일지 하위 페이지
+function tabHashBuild(mode, label, page) {
+  const p = new URLSearchParams();
+  p.set('tab', label || mode);
+  if (mode === 'lowpoint_track' && page) {
+    const pg = LPT_PAGES.find(x => x[0] === page);
+    if (pg) p.set('page', pg[1]);
+  }
+  return '#' + p.toString();
+}
+// tabs = [[mode, 글자], …](화면의 [data-mode] 버튼). 모르는 탭·빈 해시는 null(→ 기존대로 홈).
+function tabHashParse(hash, tabs) {
+  const p = new URLSearchParams(String(hash || '').replace(/^#/, ''));
+  const t = p.get('tab');
+  if (!t) return null;
+  const hit = (tabs || []).find(([m, l]) => m === t || (l && l === t));
+  if (!hit) return null;
+  let page = null;
+  if (hit[0] === 'lowpoint_track') {
+    const pg = p.get('page');
+    const f = LPT_PAGES.find(([k, l]) => k === pg || l === pg);
+    page = f ? f[0] : null;
+  }
+  return { mode: hit[0], page };
+}
+function _tabHashTabs() {
+  const seen = new Map();
+  document.querySelectorAll('[data-mode]').forEach(b => {
+    if (!seen.has(b.dataset.mode)) seen.set(b.dataset.mode, (b.textContent || '').trim());
+  });
+  return [...seen.entries()];
+}
+function writeTabHash() {
+  const label = (_tabHashTabs().find(([m]) => m === mode) || [])[1];
+  const h = tabHashBuild(mode, label, mode === 'lowpoint_track' && typeof _lpt !== 'undefined' ? (_lpt.view || 'trades') : null);
+  if (location.hash !== h) { try { history.replaceState(null, '', h); } catch (e) { /* 해시 갱신 실패는 표시에 영향 없음 */ } }
+}
+// 첫 로드: 해시가 가리키는 탭 버튼을 **누른 것과 같은 경로**로 연다(클릭 핸들러가 applyTabViewState까지 부른다 — 부트스트랩의
+// applyTabViewState를 대신하므로 로딩이 두 번 일어나지 않는다). 저점일지 하위 페이지는 먼저 보기를 정하고, 그 페이지 전용
+// 데이터는 기존 lpSetView로 불러온다. 반환: 복원했으면 true(못 했으면 false — 호출부가 기존대로 홈).
+function restoreTabFromHash() {
+  const r = tabHashParse(location.hash, _tabHashTabs());
+  if (!r || r.mode === mode) return false;
+  const btn = document.querySelector(`[data-mode="${r.mode}"]`);
+  if (!btn) return false;
+  if (r.mode === 'lowpoint_track' && r.page) _lpt.view = r.page;
+  btn.click();
+  if (r.mode === 'lowpoint_track' && r.page && r.page !== 'trades') lpSetView(r.page);
+  return true;
+}
 const IDXBAR_HIDDEN_MODES = new Set(['calendar', 'journal', 'lowpoint_track', 'newlisting']);
 // v5.294(사용자 지시 — 일지 탭에 종가베팅 배너 2개가 뜨던 문제의 근본 수정):
 // [원인] 이 배너들의 표시/숨김은 renderCards() 안에서만 정해졌다. 일지·홈 같은
@@ -6446,6 +6499,7 @@ function applyTabViewState() {
   else if (isLpTrack) { onEnterLowpointTrackTab(); }
   else if (isNewlisting) { onEnterNewlistingTab(); }
   else { load(); }
+  writeTabHash();   // v5.330: 현재 탭을 URL에(새로고침 복원용)
 }
 document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click', () => {
   document.querySelectorAll('[data-mode]').forEach(x => x.classList.remove('active'));
@@ -7785,8 +7839,9 @@ function renderLowpointEval() {
 function renderLowpointTrack() {
   const wrap = document.getElementById('lowpointTrackView');
   if (!wrap || wrap.style.display === 'none') return;
+  if (mode === 'lowpoint_track') writeTabHash();   // v5.330: 하위 페이지(매매 기록·평가·관찰·추적)도 URL에
   const view = _lpt.view || 'trades';
-  const viewTabs = `<div class="lp-chips" role="tablist" aria-label="저점 탭 보기">${[['trades', '매매 기록'], ['eval', '평가'], ['watch', '관찰'], ['hold', '추적']].map(([k, l]) =>
+  const viewTabs = `<div class="lp-chips" role="tablist" aria-label="저점 탭 보기">${LPT_PAGES.map(([k, l]) =>
       `<button type="button" class="jr-pill${view === k ? ' on' : ''}" onclick="lpSetView('${k}')">${l}</button>`).join('')}</div>`;
   if (view === 'eval') {
     wrap.innerHTML = `<div class="jr-title"><h2>저점 평가</h2><span class="n-sub" style="font-size:13px">장기 체크리스트 · 단기 비교</span></div>`
@@ -11312,7 +11367,8 @@ hookCalcInputs();          // 진입 폼 사이즈 자동계산 훅
 loadHidden();              // 숨긴 종목 로드 (v5.72) — load()보다 가벼워 먼저 끝남
 // v5.108: load() 직접 호출 대신 applyTabViewState() — 기본 탭이 캘린더(custom
 // view)로 바뀌어서, 클릭 핸들러와 똑같이 뷰 전환 로직을 타야 정상 표시된다.
-applyTabViewState();
+// v5.330: URL 해시에 탭이 있으면 그 탭으로(복원이 탭 클릭 경로로 applyTabViewState를 부른다), 없거나 모르는 탭이면 기존대로.
+if (!restoreTabFromHash()) applyTabViewState();
 // v4.98: 진입종목 급락 알림 — 브라우저 알림 권한 요청 + 60초 자동 폴링 시작
 if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
   Notification.requestPermission().catch(() => {});

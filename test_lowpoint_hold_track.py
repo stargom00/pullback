@@ -168,7 +168,7 @@ def test_sell_form_shared_with_trades_page():
 
 def test_view_wiring():
     t = _fn("renderLowpointTrack")
-    assert "['hold', '추적']" in t and "renderLowpointHold()" in t
+    assert "LPT_PAGES.map(" in t and "['hold', '추적']" in SRC.split("const LPT_PAGES = ")[1].split("\n")[0] and "renderLowpointHold()" in t
     assert "lpkLoad().then(renderLowpointTrack)" in _fn("lpSetView")
     assert "fetch('/api/lowpoint/watch/refresh', { method: 'POST' })" in _fn("lpkRefresh")
 
