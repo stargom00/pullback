@@ -52,7 +52,8 @@ def _run(src: str, expr: str):
 
 
 FIN_SRC = _extract_function("abcFinCell")
-FILTER_SRC = _extract_function("abcFilteredHits")
+FILTER_SRC = (_extract_function("abcGradeInView") + "\n" + _extract_function("abcSortByBreakout") + "\n"
+              + _extract_function("abcFilteredHits"))   # v5.332: 등급 보기 판정·D+ 정렬 함수를 같이 쓴다
 
 
 def fin(**h):
@@ -122,7 +123,8 @@ HITS = [
 ]
 
 
-def test_filters_default_to_everything():
+def test_filters_all_view_shows_everything():
+    """v5.332: 기본 보기는 'A'(A급만)지만 '전체' 보기는 여전히 전부(서버 순서 — D+ 없음)."""
     assert _filtered(HITS) == ["A", "B", "C", "D"]
 
 
@@ -136,9 +138,11 @@ def test_stage_filter_matches_exactly_one_stage():
 
 
 def test_grade_and_stage_combine():
-    assert _filtered(HITS, grade="A급", stage="벽앞") == ["A"]
-    assert _filtered(HITS, grade="B급", stage="벽앞") == []
-    assert _filtered(HITS, grade="C급") == ["D"]
+    assert _filtered(HITS, grade="A", stage="벽앞") == ["A"]
+    assert _filtered(HITS, grade="AB", stage="벽앞") == ["A"]
+    assert _filtered(HITS, grade="A", stage="🩷 강돌파") == []
+    assert _filtered(HITS, grade="AB") == ["A", "B", "C"]
+    assert _filtered(HITS, grade="all", stage="이탈") == ["D"]
 
 
 def test_grade_chips_and_colors_cover_exactly_the_three_tiers():
@@ -151,10 +155,9 @@ def test_grade_chips_and_colors_cover_exactly_the_three_tiers():
     import abc_screener as _A
     for g in _A.GRADES:
         assert f"'{g}'" in table, f"{g} 색이 없다: {table}"
-    # 필터 칩은 A/B/C 셋만 — `A급 보류`는 칩이 없어 "전체"에서만 보인다
-    # (v5.292: 보류는 등급이 아니라 "아직 모른다"라 필터 축으로 안 뺐다).
-    for g in ("A급", "B급", "C급"):
-        assert f"setAbcGrade('{g}')" in TEXT, f"{g} 필터 칩이 없다"
+    # v5.332(사용자 지시): 칩은 [A급만] [A급+B급] [전체] — `A급 보류`는 A급 쪽 보기에 든다(실적이 오면 A급이 될 종목)
+    assert "const ABC_GRADE_VIEWS = [['A', 'A급만'], ['AB', 'A급+B급'], ['all', '전체']];" in TEXT
+    assert "grade === 'A급' || grade === 'A급 보류'" in TEXT
     assert "A급 근접" not in TEXT, "삭제된 라벨이 남아 있다"
     assert "단타만" not in TEXT and "trading_only" not in TEXT
 
@@ -180,7 +183,7 @@ def test_gate_break_column_is_rendered():
 
 
 def test_missing_stage_does_not_crash():
-    assert _filtered([{"ticker": "X", "grade": "B급", "c_stage": None}], stage="벽앞") == []
+    assert _filtered([{"ticker": "X", "grade": "B급", "c_stage": None}], grade="AB", stage="벽앞") == []
 
 
 # ── 3. 배선·경고 ───────────────────────────────────────────────────

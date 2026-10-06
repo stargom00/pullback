@@ -34,9 +34,10 @@ def _fn(name):
     raise AssertionError(name)
 
 
-PAGES_LINE = [l for l in SRC.splitlines() if l.startswith("const LPT_PAGES = ")][0]
+PAGES_LINE = ([l for l in SRC.splitlines() if l.startswith("const LPT_PAGES = ")][0] + "\n"
+              + [l for l in SRC.splitlines() if l.startswith("const ABC_GRADE_VIEWS = ")][0])   # v5.332 ABC 등급 보기
 TABS = [["calendar", "홈"], ["pullback", "US눌림목"], ["journal", "추추일지"], ["lowpoint_track", "저점일지"],
-        ["moneyflow", ""], ["newlisting", "신규상장"]]
+        ["moneyflow", ""], ["newlisting", "신규상장"], ["abc", "ABC"]]
 
 # 가짜 DOM — [data-mode] 버튼·location·history. 버튼 click()은 눌린 mode를 기록한다.
 FAKE = f"""
@@ -51,6 +52,7 @@ const location = {{ hash: '' }};
 const history = {{ replaceState: (a, b, h) => {{ replaced.push(h); location.hash = h; }}, pushState: (a, b, h) => pushed.push(h) }};
 var mode = 'calendar';
 var _lpt = {{ view: 'trades' }};
+var abcGradeFilter = 'A';
 function lpSetView(v) {{ setViews.push(v); }}
 """
 
@@ -58,7 +60,7 @@ function lpSetView(v) {{ setViews.push(v); }}
 def _js(expr, pre=""):
     if not shutil.which("node"):
         pytest.skip("node 미설치")
-    src = (FAKE + PAGES_LINE + "\n" + "\n".join(_fn(f) for f in ("tabHashBuild", "tabHashParse", "_tabHashTabs",
+    src = (FAKE + PAGES_LINE + "\n" + "\n".join(_fn(f) for f in ("_tabSubPages", "tabHashBuild", "tabHashParse", "_tabHashTabs",
                                                                   "writeTabHash", "restoreTabFromHash")) + "\n" + pre)
     p = subprocess.run(["node", "-e", src + f"\nconsole.log(JSON.stringify({expr}));"], capture_output=True, text=True, timeout=20)
     assert p.returncode == 0, p.stderr
@@ -128,3 +130,19 @@ def test_tab_switch_structure_unchanged():
     handler = SRC[SRC.index("document.querySelectorAll('[data-mode]').forEach(t => t.addEventListener('click', () => {"):]
     handler = handler[:handler.index("}));") + 4]
     assert "writeTabHash" not in handler and "restoreTabFromHash" not in handler and handler.count("applyTabViewState();") == 1
+
+
+# ── v5.332 ABC 등급 보기도 해시에 ─────────────────────────────────
+@pytest.mark.parametrize("view,label", [("A", "A급만"), ("AB", "A급+B급"), ("all", "전체")])
+def test_abc_grade_view_roundtrip(view, label):
+    h = _js(f"tabHashBuild('abc', 'ABC', '{view}')")
+    assert _js(f"Object.fromEntries(new URLSearchParams({json.dumps(h)}.slice(1)))") == {"tab": "ABC", "page": label}
+    assert _js(f"tabHashParse({json.dumps(h)}, _TABS)") == {"mode": "abc", "page": view}
+
+
+def test_restore_abc_grade_view():
+    got = _js("(() => { location.hash = '#tab=ABC&page=' + encodeURIComponent('A급+B급'); const r = restoreTabFromHash();"
+              " return [r, clicked, abcGradeFilter]; })()")
+    assert got == [True, ["abc"], "AB"]
+    assert _js("(() => { mode = 'abc'; abcGradeFilter = 'all'; writeTabHash(); return replaced; })()") == \
+        ["#tab=ABC&page=" + _js("encodeURIComponent('전체')")]

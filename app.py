@@ -5,6 +5,13 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.332 [ABC 등급 필터 칩 — 사용자 지시 "ABC 탭이 후보 729개를 전부 펼쳐서 실사용 불가. 등급 깔때기(A급 23개)가 화면에서
+    안 보임"] static/index.html만(서버·등급·판정 불변). 등급 칩 [A급만 (n)] [A급+B급 (n)] [전체 (n)], 기본 A급만
+    (ABC_GRADE_VIEWS 하나에서 칩·해시·판정이 나온다). A급만 = A급 + A급 보류(강돌파 + 기업축 통과인데 실적 미조회 — 실적이
+    오면 A급이 될 같은 종목). 건수 = 현재 C단계 필터 아래 그 보기의 실제 행 수(abcGradeCounts — 목록과 같은 판정
+    abcGradeInView). 정렬: 필터 뒤 MA600 첫 돌파 D+ 오름차순(최근 돌파 위), 돌파 없으면 아래·같으면 서버 순서.
+    보기가 0건이면 "A급 없음 — [전체 보기]". 선택은 v5.330 URL 해시의 하위 상태(#tab=ABC&page=A급만)로 유지(새로고침 복원).
+    기존 C단계 칩 그대로. 필터·건수·정렬은 서버 등급을 읽기만 한다(test_filter_never_changes_grades).
 v5.331 [ABC 표시 전용 3건 — 사용자 지시 "ABC 현황 보고 기준 확정 수정 3건 … 전부 표시 전용, 등급 반영 금지"] ① 매물대 교체:
     최근 250봉(a_lookback) 종가 범위를 가격 10구간(supply_profile_bins, 사용자 지시 값)으로 나눈 볼륨 프로파일 —
     현재가 위(구간 하단 ≥ 현재가) 거래량 최대 구간을 "N~M원"으로 표시(supply_profile, 수동 대조용 format_supply_bins ·
@@ -8847,7 +8854,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.331"
+VERSION = "v5.332"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
