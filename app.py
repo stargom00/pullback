@@ -5,6 +5,18 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.331 [ABC 표시 전용 3건 — 사용자 지시 "ABC 현황 보고 기준 확정 수정 3건 … 전부 표시 전용, 등급 반영 금지"] ① 매물대 교체:
+    최근 250봉(a_lookback) 종가 범위를 가격 10구간(supply_profile_bins, 사용자 지시 값)으로 나눈 볼륨 프로파일 —
+    현재가 위(구간 하단 ≥ 현재가) 거래량 최대 구간을 "N~M원"으로 표시(supply_profile, 수동 대조용 format_supply_bins ·
+    `python3 abc_screener.py 티커`). 예전 MA200~×1.3 체류 봉 수(supply_band·supply_min_bars·supply_above)는 제거.
+    ② B 품질 라벨(b_quality): 찾은 B 구간 전반/후반 **종가 최저**(사용자 선택 — 저가로 재면 B가 A 저점에서 시작해
+    "재하락"이 구조상 불가)·평균 거래량 비교 → 흡수(저점↑·거래량↓)/재하락 주의(저점↓)/중립, B 구간 없으면 "B 미형성".
+    ③ 진돌이/가돌이 라벨 복원: _find_breakout의 vol_mult에 기존 c2_vol_mult(3.0) 적용(≥ 진돌이) — 참조 0곳이던 죽은
+    상수 해소. vol배수 칸 설명이 MA600으로 잘못 적혀 있던 것도 MA200(실제 기준)으로 바로잡음. ④ ABC_CONFIG 주석·CLAUDE.md에
+    "와이코프 ②③⑤⑦ 미모델은 의도적" 기록. 등급 불변 검증: scripts/measurements/2026-10-06_abc_display_only_check.py —
+    KR 2,455종목, 수정 전(51343b9)·후 판정 필드·등급(기업축 통과/미달/실적 없음 3경우) 차이 0건(분포 동일: 통과 시 A 23 ·
+    B 427 · C 1,094 · 제외 911). 라벨 분포: 흡수 883 · 중립 440 · B 미형성 136 · 재하락 주의 85, 진돌이 202 · 가돌이 296.
+    테스트: test_abc_display_only.py(실종목 13개 픽스처 test_fixtures/abc_display_only.json.gz).
 v5.330 [현재 탭·하위 페이지를 URL 해시에 — 사용자 지시 "스캐너에서 새로고침하면 항상 홈 탭으로 돌아간다. 현재 탭/페이지가
     URL에 없어서다"] static/index.html만(서버 불변). 형식 #tab=저점일지&page=관찰(탭 버튼 글자, 글자 없는 탭은 mode 키 — 읽을
     때는 둘 다 받음). 쓰기: applyTabViewState 끝·저점일지 렌더(하위 페이지 전환) 때 history.replaceState(뒤로가기 기록 안
@@ -8835,7 +8847,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.330"
+VERSION = "v5.331"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -14044,7 +14056,10 @@ async def api_abc():
             "a_drop_pct": (r["a"] or {}).get("drop_pct"),
             "b_bars": (r["b"] or {}).get("bars"), "b_ok": (r["b"] or {}).get("ok"),
             "b_median_pct": (r["b"] or {}).get("median_vs_ma_pct"),
-            "supply_above": r["supply_above"],
+            # v5.331: 매물대 = 최근 250봉 10구간 볼륨 프로파일의 현재가 위 최대 구간(표시 전용, 예전 MA200×1.3 체류 봉 수 대체)
+            "supply_zone": r["supply_zone"],
+            "b_quality": r["b_quality"],                                    # v5.331 B 품질(표시 전용)
+            "breakout_label": (r["breakout"] or {}).get("label"),           # v5.331 진돌이/가돌이(표시 전용)
             # v5.271: 판정은 **B구간 평균**, 당일 값은 표시 전용(왜 바꿨는지가
             # 화면에서 바로 보이도록 둘 다 내보낸다).
             "b_turnover_eok": r["b_turnover_eok"],

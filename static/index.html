@@ -1391,7 +1391,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.330</span>
+      <span class="ver mono" id="verBadge">v5.331</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -3775,6 +3775,18 @@ function abcFinCell(h) {
 //   역배열 = MA200 < MA600. "정배열 회복이 진돌이 전제"(사용자 지시)라
 //            이 상태에서는 C2에 진돌이/가돌이를 안 매긴다.
 //   대형   = 거래대금이 상한 초과. A급을 B급으로 내리는 천장(미달이 아니다).
+// v5.331 표시 전용 셀 — B 품질 라벨·매물대 구간. 등급·정렬에 안 쓴다.
+function abcBQualityHtml(q) {
+  const l = q && q.label;
+  if (!l) return '';
+  const col = l === '흡수' ? 'var(--c-green-fg5)' : l === '재하락 주의' ? 'var(--px-down)' : 'var(--muted)';
+  const tip = q.low1 != null ? `전반 종가 최저 ${Number(q.low1).toLocaleString()} → 후반 ${Number(q.low2).toLocaleString()} · 평균 거래량 ${Number(q.vol1).toLocaleString()} → ${Number(q.vol2).toLocaleString()}` : '저점 직후 바닥 구간을 아직 못 만듦';
+  return `<div style="font-size:10px;color:${col}" title="${tip}">${l}</div>`;
+}
+function abcSupplyZoneHtml(z) {
+  if (!z) return '<span style="color:var(--muted)" title="현재가 위 구간에 거래량이 없다(최근 250봉 고점 근처)">—</span>';
+  return `<span title="최근 250봉 거래량의 ${z.vol_share_pct}%가 이 가격대">${Math.round(z.lo).toLocaleString()}~${Math.round(z.hi).toLocaleString()}원</span>`;
+}
 function _abcBadges(h) {
   const b = [];
   if (h.ma_inverted) b.push(`<span style="font-size:10px;color:var(--c-orange-fg4);border:1px solid var(--c-orange-bg6);border-radius:3px;padding:0 3px" title="MA200 < MA600 — 중기선이 장기선 아래입니다. 정보 표시일 뿐 등급에는 영향이 없습니다(v5.272).">장기&gt;중기 역전</span>`);
@@ -3852,10 +3864,10 @@ function abcRowHtml(h) {
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right;border-left:2px solid ${ABC_MA_COLOR}">${_abcMaPct(h.gate_pct)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${_abcMaPct(h.stage_pct)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right"
-        title="${h.breakout_bars_ago != null ? h.breakout_bars_ago + '봉 전 돌파봉 포함 3봉 중 최대 거래량' : ''}">${_abcNum(h.vol_mult, '배', 1)}</td>
+        title="${h.breakout_bars_ago != null ? h.breakout_bars_ago + '봉 전 ' + _abcStageLabel() + ' 돌파봉 포함 3봉 중 최대 거래량 ÷ 직전 5일 평균 — 3.0배 이상 진돌이' : ''}">${_abcNum(h.vol_mult, '배', 1)}${h.breakout_label ? `<div style="font-size:10px;color:${h.breakout_label === '진돌이' ? 'var(--px-up)' : 'var(--muted)'}">${h.breakout_label}</div>` : ''}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${_abcNum(h.a_drop_pct, '%', 0)}</td>
-    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${h.b_bars != null ? h.b_bars : '—'}</td>
-    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center">${h.supply_above ? '<span style="color:var(--px-down)" title="위에 매물대가 있다">있음</span>' : '<span style="color:var(--muted)">—</span>'}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${h.b_bars != null ? h.b_bars : '—'}${abcBQualityHtml(h.b_quality)}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;white-space:nowrap">${abcSupplyZoneHtml(h.supply_zone)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right"
         title="B구간(바닥 다지기) 앞 20봉 평균 — 돌파 당일이 아니라 평소 유동성입니다${h.turnover_today_eok != null ? '. 당일 ' + h.turnover_today_eok.toFixed(0) + '억' : ''}">${_abcNum(h.b_turnover_eok, '억', 0)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center">${abcFinCell(h)}</td>
@@ -3972,10 +3984,10 @@ function renderAbcPage() {
         <th style="text-align:right;padding:3px 8px;color:${ABC_MA_COLOR}"
             title="장기 추세 전환선 — C단계를 이 선 기준으로 가릅니다(v5.291). ⚠️ naver 수정주가는 액면분할·무상증자만 반영하고 현금배당은 미조정이라 TradingView(ADJ)와 2~3% 차이가 날 수 있습니다(계룡건설 실측: 스캐너 18,443 vs TV 18,014, 배당 소급조정 −3.1%p + 봉수 차이 +2.4%p).">${_abcMaLabel()}<span style="font-size:9px">(단계기준)</span></th>
         <th style="text-align:right;padding:3px 8px" title="B 중앙값 밴드·매물대·진돌이/가돌이 판정 기준선입니다(사용자 확정: MA200 유지). v5.291부터 C단계는 여기가 아니라 MA600이 정합니다 — 이 칸은 참고용.">${_abcStageLabel()}<span style="font-size:9px">(참고)</span></th>
-        <th style="text-align:right;padding:3px 8px" title="${_abcMaLabel()} 돌파봉 포함 3봉 중 최대 거래량 / 평균">vol배수</th>
+        <th style="text-align:right;padding:3px 8px" title="${_abcStageLabel()} 첫 상향돌파봉(최근 60봉) 포함 3봉 중 최대 거래량 ÷ 돌파 직전 5일 평균 — 3.0배 이상 진돌이, 미만 가돌이(표시 전용). v5.331 전엔 이 칸 설명이 ${_abcMaLabel()}로 잘못 적혀 있었다">vol배수</th>
         <th style="text-align:right;padding:3px 8px" title="A: 고점→저점 하락폭">A하락</th>
-        <th style="text-align:right;padding:3px 8px" title="B: 바닥 다지기 봉 수">B일수</th>
-        <th style="padding:3px 8px" title="현재가 위에 매물대가 있는가">매물대</th>
+        <th style="text-align:right;padding:3px 8px" title="B: 바닥 다지기 봉 수 · 품질(전반/후반 종가 최저·거래량 비교 — 흡수/재하락 주의/중립, 표시 전용)">B일수</th>
+        <th style="padding:3px 8px" title="최근 250봉 종가를 가격 10구간으로 나눈 거래량 분포에서, 현재가 위 구간 중 거래량 최대 구간(표시 전용)">매물대</th>
         <th style="text-align:right;padding:3px 8px" title="B구간 20봉 평균 거래대금(평소 유동성). 판정 기준입니다 — 당일 값이 아닙니다.">거래대금<span style="font-size:9px;color:var(--muted)">(B평균)</span></th>
         <th style="padding:3px 8px">매출·EPS</th>
         <th style="text-align:left;padding:3px 8px">섹터</th>

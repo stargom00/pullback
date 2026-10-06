@@ -13,6 +13,9 @@ from __future__ import annotations
 
 # ── 임계값 — 전부 한 곳에. 근거 없음(초기 임의값, 2026-09-18) ──────────
 ABC_CONFIG = {
+    # ⓦ 와이코프 매집 7단계 대응(v5.331 기록): ①클라이맥스는 A 저점 "위치"만, ④박스는 B 폭(+v5.331 B 품질 표시),
+    # ⑥박스 상단 돌파는 MA600 강돌파로 대신한다. **②자동반등·③2차테스트·⑤스프링·⑦되돌림은 의도적으로 모델링하지 않는다**
+    # (사용자 결정 2026-10-06 "와이코프 ②③⑤⑦ 상태기계는 만들지 않는다 — 탭 목적은 ⑥ 강돌파 발견").
     # ── 두 기준선: 역할이 다르다 (v5.272, 사용자 지시) ──────────────
     # v5.268에서 MA600이 **모든** 판정을 맡았더니 13종목 중 11개가 C3 이탈로
     # 쏠렸다(MA600은 2.4년 평균이라 그간 오른 종목은 기준선이 한참 아래 남는다).
@@ -48,7 +51,8 @@ ABC_CONFIG = {
     "strong_window": 20,      # 최근 N봉 내 첫 돌파만 강돌파로 본다
     "strong_day_pct": 0.07,   # 돌파봉 당일 등락률 하한 (+7%)
     "strong_vol_mult": 2.0,   # 돌파봉 거래량 ÷ 평균 (사용자 확정: **50일 평균**)
-    "c2_vol_mult": 3.0,       # 진돌이 기준 거래량 배수(돌파봉/직전 5일평균)
+    "c2_vol_mult": 3.0,       # 진돌이 기준 거래량 배수(돌파봉/직전 5일평균) — v5.331부터 _find_breakout이 실제로 쓴다
+                              # (≥ 진돌이 / 미만 가돌이, 표시 전용 — 그 전엔 참조 0곳인 죽은 상수였다)
     "vol_avg_bars": 5,
     # ── 🩷 MA600 첫 상향돌파 이벤트 (v5.276, 사용자 지시) ──────────
     # 양봉맨 정의 A급 = **게이트선(MA600) 첫 상향돌파(종가) + 돌파 3봉 내
@@ -65,9 +69,10 @@ ABC_CONFIG = {
                               # 터지는 형태가 흔해, 교차봉 하나만 보면 그걸
                               # "가돌이"로 잘못 부른다(LS에코 09-15 2.09배 →
                               # 09-16 13.01배).
-    # 매물대
-    "supply_band": (1.00, 1.30),   # **MA200** ~ MA200×1.3 (v5.267 기준 복귀)
-    "supply_min_bars": 30,         # 그 구간에 과거 250봉 중 ≥30봉
+    # 매물대 — v5.331(사용자 지시 "최근 250봉을 가격 10구간 볼륨 프로파일로 나눠, 현재가 위쪽에서 거래량 최대 구간을
+    # '매물대 N~M원'으로 카드 표시. 기존 MA200×1.3 체류 계산 제거"). 창은 A와 같은 a_lookback(250봉)을 쓴다.
+    # 예전 supply_band(MA200~×1.3)·supply_min_bars(30봉)는 가격대 매물이 아니라 "이동평균 근처 체류 봉 수"였다(삭제).
+    "supply_profile_bins": 10,     # 가격 구간 수(사용자 지시 값). 표시 전용 — 등급·판정에 안 쓴다
     # 다른 셋업(ABC 아님) 판정
     "other_above_ma_bars": 60,     # 게이트선 위 60봉 이상이면 박스/눌림
     # 기업 축
@@ -111,6 +116,14 @@ STAGE_EXIT = "이탈"            # MA600 +exit_min 이상 — C급 강등
 
 # 화면·정렬·우선순위가 쓰는 정렬된 순서(= 사용자 지시 우선순위).
 C_STAGES = (STAGE_STRONG, STAGE_WALL, STAGE_WEAK, STAGE_WAIT, STAGE_EXIT)
+
+# ── v5.331 표시 전용 라벨(등급·판정에 쓰지 않는다 — test_abc_display_only.py가 등급 분포 동일을 고정) ──
+B_ABSORB = "흡수"            # B 후반부 종가 최저 > 전반부 종가 최저 & 후반 평균 거래량 < 전반
+B_REDROP = "재하락 주의"      # B 후반부 종가 최저 < 전반부 종가 최저
+B_NEUTRAL = "중립"
+B_NONE = "B 미형성"           # 저점 직후 b_min_bars봉을 못 채움(B 구간 자체가 없다)
+BREAKOUT_TRUE = "진돌이"      # MA200 돌파 거래량 배수 ≥ c2_vol_mult
+BREAKOUT_FALSE = "가돌이"
 
 # ── 등급 라벨 (v5.292) ───────────────────────────────────────────────
 # `A급 보류` 신설: 🩷강돌파 + 기업축 통과인데 **기업축 판정에 쓸 실적이 없어**
@@ -181,9 +194,12 @@ def _find_breakout(close, vol, cfg: dict):
     seg = vol.iloc[found:min(n, found + w)]
     peak_rel = int(seg.values.argmax()) if len(seg) else 0
     peak_i = found + peak_rel
+    mult = round(float(vol.iloc[peak_i]) / avg, 2) if avg > 0 else None
+    # v5.331: 진돌이/가돌이 라벨 복원(표시 전용) — 기존 c2_vol_mult(3.0)를 이 배수에 그대로 적용
+    label = None if mult is None else (BREAKOUT_TRUE if mult >= cfg["c2_vol_mult"] else BREAKOUT_FALSE)
     return {"bars_ago": n - 1 - found,
             "vol_bar_ago": n - 1 - peak_i,
-            "vol_mult": round(float(vol.iloc[peak_i]) / avg, 2) if avg > 0 else None}
+            "vol_mult": mult, "label": label}
 
 
 def _find_gate_break(close, vol, cfg: dict, opn=None):
@@ -251,6 +267,70 @@ def _find_gate_break(close, vol, cfg: dict, opn=None):
             "strong": bool(vol_ok and day_ok)}
 
 
+def b_quality(close, vol, lo_idx: int, b: dict | None) -> dict:
+    """v5.331(사용자 지시) B 품질 — 찾은 B 구간을 전반부/후반부로 나눠 저점·거래량 추이. **표시 전용.**
+    저점 = **종가 최저**(사용자 선택). 저가로 재면 B가 A 저점 봉에서 시작하고 A 저점은 그 뒤 전체 저가의 최저라
+    후반부가 전반부보다 낮을 수 없어 "재하락 주의"가 구조상 안 나온다(2026-10-06 확인).
+      재하락 주의 = 후반 종가 최저 < 전반 종가 최저
+      흡수       = 후반 종가 최저 > 전반 종가 최저 그리고 후반 평균 거래량 < 전반 평균 거래량
+      중립       = 그 외
+      B 미형성   = B 구간이 없다(저점 직후 b_min_bars봉 미만 — 범위를 못 잼)
+    홀수 봉이면 가운데 봉은 후반부에 넣는다(n//2 기준)."""
+    if not b or b.get("range_pct") is None:
+        return {"label": B_NONE}
+    n = int(b["bars"])
+    seg_c = close.iloc[lo_idx:lo_idx + n]
+    seg_v = vol.iloc[lo_idx:lo_idx + n]
+    h = n // 2
+    c1, c2, v1, v2 = seg_c.iloc[:h], seg_c.iloc[h:], seg_v.iloc[:h], seg_v.iloc[h:]
+    low1, low2 = float(c1.min()), float(c2.min())
+    vol1, vol2 = float(v1.mean()), float(v2.mean())
+    if low2 < low1:
+        label = B_REDROP
+    elif low2 > low1 and vol2 < vol1:
+        label = B_ABSORB
+    else:
+        label = B_NEUTRAL
+    return {"label": label, "low1": round(low1, 2), "low2": round(low2, 2),
+            "vol1": round(vol1), "vol2": round(vol2), "bars": n}
+
+
+def supply_profile(close, vol, last: float, cfg: dict = ABC_CONFIG) -> dict:
+    """v5.331(사용자 지시) 매물대 — 최근 a_lookback(250)봉 종가 범위를 supply_profile_bins(10)개 같은 폭 구간으로
+    나누고 각 봉 거래량을 그 봉 **종가**가 속한 구간에 더한다(일봉 종가×거래량 근사 — 평가 페이지 매물대와 같은 근사).
+    "현재가 위쪽" = 구간 하단 ≥ 현재가인 구간. 그중 거래량 최대 구간이 매물대(거래량 0이면 없음). **표시 전용.**
+    반환 bins는 구간별 거래량 전부(수동 대조용 — format_supply_bins)."""
+    c = close.iloc[-cfg["a_lookback"]:]
+    v = vol.iloc[-cfg["a_lookback"]:].fillna(0)
+    lo, hi = float(c.min()), float(c.max())
+    nb = cfg["supply_profile_bins"]
+    if not (hi > lo) or len(c) == 0:
+        return {"zone": None, "bins": []}
+    w = (hi - lo) / nb
+    idx = ((c - lo) / w).astype(int).clip(0, nb - 1)
+    sums = v.groupby(idx.values).sum()
+    total = float(v.sum())
+    bins = [{"lo": round(lo + i * w, 2), "hi": round(lo + (i + 1) * w, 2), "vol": float(sums.get(i, 0.0))}
+            for i in range(nb)]
+    above = [b for b in bins if b["lo"] >= last and b["vol"] > 0]
+    zone = None
+    if above:
+        z = max(above, key=lambda b: b["vol"])
+        zone = {"lo": z["lo"], "hi": z["hi"], "vol_share_pct": round(z["vol"] / total * 100, 1) if total else None}
+    return {"zone": zone, "bins": bins}
+
+
+def format_supply_bins(prof: dict, last: float) -> list:
+    """매물대 수동 대조용 — 구간별 거래량 한 줄씩(높은 가격부터). ▲ = 현재가 위 구간, ★ = 고른 매물대."""
+    z = prof.get("zone") or {}
+    total = sum(b["vol"] for b in prof.get("bins") or []) or 1
+    out = []
+    for b in reversed(prof.get("bins") or []):
+        mark = ("★" if z and b["lo"] == z.get("lo") else " ") + ("▲" if b["lo"] >= last else " ")
+        out.append(f"{mark} {b['lo']:>12,.0f} ~ {b['hi']:>12,.0f}  거래량 {b['vol']:>16,.0f}  ({b['vol'] / total * 100:5.1f}%)")
+    return out
+
+
 def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
     """일봉 df → ABC 판정.
 
@@ -264,7 +344,7 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
     """
     out = {"verdict": "ABC 아님", "reason": None, "a": None, "b": None,
            "c_stage": None, "gate_pct": None, "stage_pct": None, "vol_mult": None,
-           "supply_above": False, "supply_bars": 0,
+           "supply_zone": None, "b_quality": {"label": B_NONE},
            "b_turnover_eok": None, "turnover_today_eok": None,
            "breakout": None, "close": None,
            "ma_gate": None, "ma_stage": None,
@@ -366,6 +446,7 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
             break
     out["b"] = best or {"bars": n_since, "range_pct": None,
                         "median_vs_ma_pct": None, "ok": False}
+    out["b_quality"] = b_quality(close, vol, lo_idx, out["b"])   # v5.331 표시 전용
 
     # ── 거래대금: **B구간 앞 N봉 평균**(사용자 지시 v5.271) ──────────
     # 판정일 거래대금을 쓰면 돌파 당일 급등 값이 잡혀 "평소 유동성"이 아니다.
@@ -413,13 +494,8 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
         out["c_stage"] = STAGE_WAIT
         out["reason"] = f"{_ma_label(cfg)} 아래 대기 ({d*100:+.1f}%)"
 
-    # ── 매물대: MA200 ~ MA200×1.3에 과거 250봉 중 몇 봉이 머물렀나 ──
-    # (v5.272에서 v5.267 기준으로 복귀 — 사용자 지시 "MA200 기준 유지")
-    lo_b, hi_b = ma_stage * cfg["supply_band"][0], ma_stage * cfg["supply_band"][1]
-    c_win = close.iloc[-cfg["a_lookback"]:]
-    n_in = int(((c_win >= lo_b) & (c_win <= hi_b)).sum())
-    out["supply_above"] = bool(n_in >= cfg["supply_min_bars"])
-    out["supply_bars"] = n_in
+    # ── 매물대(v5.331): 최근 250봉 가격 10구간 볼륨 프로파일, 현재가 위 최대 거래량 구간 — 표시 전용 ──
+    out["supply_zone"] = supply_profile(close, vol, last, cfg)["zone"]
     return out
 
 
@@ -517,3 +593,15 @@ def grade(res: dict, comp: dict) -> str | None:
     if comp.get("ok"):
         return GRADE_B
     return GRADE_C
+
+
+if __name__ == "__main__":   # 매물대 수동 대조: python3 abc_screener.py 365590.KQ
+    import sys
+    import naver_kr
+    from app import _downcast
+    tk = sys.argv[1]
+    df = _downcast(naver_kr.fetch(tk))
+    last = float(df["Close"].iloc[-1])
+    prof = supply_profile(df["Close"], df["Volume"], last)
+    print(f"{tk} 현재가 {last:,.0f} · 최근 {ABC_CONFIG['a_lookback']}봉 · 매물대 {prof['zone']}")
+    print("\n".join(format_supply_bins(prof, last)))

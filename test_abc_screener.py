@@ -208,12 +208,13 @@ def test_min_bars_follows_the_ma_period():
     assert A._min_bars({**CFG, "gate_ma_period": 900}) == 900
 
 
-def test_supply_band_flag():
-    """MA200~×1.3 구간 체류 봉수를 세고, 조기 반환 경로에서도 키가 있어야 한다."""
+def test_supply_zone_keys_present_on_every_path():
+    """v5.331: 매물대는 볼륨 프로파일 구간(supply_zone) — 조기 반환 경로에서도 키가 있어야 호출부가 KeyError를 안 낸다
+    (예전 supply_above/supply_bars = MA200~×1.3 체류 봉 수는 삭제)."""
     r = A.analyze_abc(make(abc_shape()))
-    assert isinstance(r["supply_above"], bool) and r["supply_bars"] >= 0
+    assert "supply_zone" in r and "supply_above" not in r and "supply_bars" not in r
     short = A.analyze_abc(make([100.0] * 100))
-    assert short["supply_bars"] == 0, "조기 반환에서 키가 빠지면 호출부가 KeyError"
+    assert short["supply_zone"] is None and short["b_quality"] == {"label": A.B_NONE}
 
 
 # ── 기업 축·등급 ──────────────────────────────────────────────────────
@@ -516,9 +517,11 @@ def test_gate_and_stage_roles_are_separated():
     import inspect
     src = inspect.getsource(A.analyze_abc)
     assert "d = last / ma_gate - 1" in src, "C단계가 MA600을 안 쓴다"
-    for axis, needle in (("B 밴드", "med / ma_stage - 1"),
-                         ("매물대", "lo_b, hi_b = ma_stage *")):
+    for axis, needle in (("B 밴드", "med / ma_stage - 1"),):
         assert needle in src, f"{axis}가 MA200을 안 쓴다"
+    # v5.331: 매물대는 이동평균이 아니라 가격대 볼륨 프로파일(supply_profile) — MA를 읽지 않는다
+    assert "supply_profile(close, vol, last, cfg)" in src
+    assert "ma_" not in inspect.getsource(A.supply_profile).split('"""')[2]
     # C단계 판정 구간에서 MA200을 읽으면 안 된다(역할 역전 방지)
     body = src[src.index("d = last / ma_gate - 1"):src.index("# ── 매물대")]
     assert "ma_stage" not in body, f"C단계가 MA200을 읽는다: {body[:200]}"
@@ -539,13 +542,13 @@ def test_every_judgement_axis_uses_the_config_period():
     assert base["b"]["median_vs_ma_pct"] != other["b"]["median_vs_ma_pct"]
 
 
-def test_supply_band_is_anchored_to_the_config_ma():
-    """매물대 밴드가 기준선을 따라가는지 — 리터럴 MA200에 묶이면 안 된다."""
+def test_supply_profile_window_and_bins_from_config():
+    """v5.331: 매물대 창·구간 수는 설정값(a_lookback·supply_profile_bins) — 리터럴 250·10 금지."""
     import inspect
-    src = inspect.getsource(A.analyze_abc)
-    i = src.index("lo_b, hi_b =")
-    line = src[i:src.index("\n", i)]
-    assert "ma_stage *" in line and "200" not in line, line
+    body = inspect.getsource(A.supply_profile).split('"""')[2]
+    assert 'cfg["a_lookback"]' in body and 'cfg["supply_profile_bins"]' in body
+    import re as _re
+    assert not _re.search(r"\b250\b", body) and not _re.search(r"\b10\b", body), "창·구간 수 리터럴"
 
 
 def test_config_has_no_ma200_named_keys():
