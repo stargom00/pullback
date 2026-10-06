@@ -358,6 +358,31 @@ def theme_companions(themes: dict, changes: dict, cfg: dict = ABC_CONFIG) -> dic
     return out
 
 
+def _find_box_break(close, high, vol, cfg: dict):
+    """v5.335(사용자 지시) 📦 박스돌파 **사건** — 등급과 독립(🩷 MA600 첫 돌파 표시처럼). **표시 전용.**
+    최근 strong_window(20)봉 안에서 "직전 b_max_bars(60)봉 최고가"를 종가로 **처음** 넘은 봉을 찾고, 그 봉이
+    당일 ≥ strong_day_pct(+7%) · 거래량 ≥ strong_vol_mult(2.0) × 직전 gate_break_vol_avg(50)일 평균 · 지금도 그 상단 위면 ok.
+    상수는 강돌파·B 최대 길이를 재사용(새 상수 없음). 2026-10-07 보고의 "60봉 + 7%" 변형과 같은 정의다."""
+    n = len(close)
+    nb = cfg["b_max_bars"]
+    for i in range(n - cfg["strong_window"], n):
+        if i < nb + 1:
+            continue
+        top = float(high.iloc[i - nb:i].max())
+        if float(close.iloc[i - 1]) <= top < float(close.iloc[i]):
+            prev = vol.iloc[max(0, i - cfg["gate_break_vol_avg"]):i]
+            avg = float(prev.mean()) if len(prev) else 0.0
+            mult = float(vol.iloc[i]) / avg if avg > 0 else None
+            day = float(close.iloc[i]) / float(close.iloc[i - 1]) - 1
+            # 판정은 **반올림 전 원값**으로(반올림 후 비교하면 1.996배가 2.0으로 통과하고, +7.01%가 7.0 vs 0.07×100
+            # =7.000000000000001로 탈락한다 — 10-06 KR 실측 107640·432720). 반올림은 표시용으로만.
+            ok = bool(mult is not None and mult >= cfg["strong_vol_mult"] and day >= cfg["strong_day_pct"]
+                      and float(close.iloc[-1]) > top)
+            return {"bars_ago": n - 1 - i, "top": round(top, 2), "day_pct": round(day * 100, 1),
+                    "vol_mult": round(mult, 2) if mult is not None else None, "ok": ok}
+    return None
+
+
 def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
     """일봉 df → ABC 판정.
 
@@ -377,7 +402,7 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
            "ma_gate": None, "ma_stage": None,
            "gate_ma_period": cfg["gate_ma_period"],
            "stage_ma_period": cfg["stage_ma_period"], "ma_inverted": None,
-           "gate_break": None}
+           "gate_break": None, "box_break": None}
     n_bars = 0 if df is None or getattr(df, "empty", True) else len(df)
     need = _min_bars(cfg)
     if n_bars < need:
@@ -498,6 +523,7 @@ def analyze_abc(df, cfg: dict = ABC_CONFIG) -> dict:
     out["breakout"] = _find_breakout(close, vol, cfg)
     # MA600 첫 돌파 + 강돌파 판정. 이게 `🩷 강돌파` 단계를 결정한다.
     out["gate_break"] = _find_gate_break(close, vol, cfg, opn=df["Open"])
+    out["box_break"] = _find_box_break(close, high, vol, cfg)   # v5.335 📦 박스돌파 사건(표시 전용 — 단계·등급 무관)
     gb = out["gate_break"]
     d = last / ma_gate - 1                 # ← 단계는 **MA600** 기준
     if gb is not None and gb["strong"] and last > ma_gate:

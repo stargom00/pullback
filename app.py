@@ -5,6 +5,16 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.335 [ABC 📦 박스돌파 사건 표시 + [📦박스돌파만] 칩 — 사용자 지시, 표시 전용(등급·판정 불변)] abc_screener._find_box_break:
+    최근 strong_window(20)봉 안에서 직전 b_max_bars(60)봉 최고가를 종가로 **처음** 넘은 봉 → 그 봉 등락 ≥ strong_day_pct(+7%) ·
+    거래량 ≥ strong_vol_mult(2.0) × 직전 gate_break_vol_avg(50)일 평균 · 지금도 그 상단 위면 ok("상수는 강돌파 것과 B 최대 길이
+    (60)를 재사용. 새 상수 금지"). 판정은 반올림 전 원값 — 반올림 후 비교하면 경계 종목이 갈린다(10-06 KR 107640 1.996배→2.0
+    통과, 432720 +7.01%→7.0 탈락; 강돌파 _find_gate_break도 같은 반올림 비교지만 등급 로직이라 미변경). 10-06 KR 전체 대조:
+    10-07 보고의 "60봉 + 7%" 변형과 ok 집합 완전 일치(ABC 후보 93 = 93, 강돌파 아닌 종목 67). 상신이디피 📦(2.42배 · +11.4%),
+    포스코퓨처엠 미표시(1.90배). grade()는 box_break를 보지 않는다 — KR 2,454종목 등급·판정 전후 불일치 0
+    (scripts/measurements/2026-10-06_abc_display_only_check.py). 화면: 돌파봉 칸에 "📦 박스돌파 D+n", C단계 칩 줄에
+    [📦박스돌파만](등급 보기와 AND, 검색은 칩 무시 — v5.334 규칙 유지). themes_kr.json "이차전지"에 상신이디피(091580.KQ) 추가
+    (사용자 지시) — 이차전지 24종목.
 v5.334 [ABC 검색칸 · 테마 동반 표시 — 사용자 지시, 전부 표시 전용(등급·판정 불변)] ① 검색칸: 종목명·코드 일부(대소문자
     무시)로 찾는다 — 검색어가 있으면 등급·C단계 칩과 상관없이 전체에서(abcFilteredHitsBase), 칩 상태는 건드리지 않아 지우면 그대로
     복원. 행에 등급 칸 그대로. 다시 그려도 입력칸 포커스·커서 유지(abcSetQuery). ② 테마 동반: themes_kr.json(코드 없이 이름만
@@ -8874,7 +8884,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.334"
+VERSION = "v5.335"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -14129,6 +14139,7 @@ async def api_abc():
             "gate_break": r["gate_break"],
             "sector": si.get("sector"),
             "themes": theme_comp.get(t) or [],        # v5.334 테마·동반 수(표시 전용)
+            "box_break": r["box_break"],                # v5.335 📦 박스돌파 사건(표시 전용)
         })
 
     # v5.291: 정렬 순서를 `_ABC_STAGE_PRIORITY` **하나로 통합**했다. 예전엔

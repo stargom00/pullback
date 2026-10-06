@@ -54,7 +54,7 @@ def _run(src: str, expr: str):
 FIN_SRC = _extract_function("abcFinCell")
 FILTER_SRC = ("let abcQuery = '';\n" + _extract_function("abcSearchMatch") + "\n"   # v5.334 검색(비어 있으면 칩대로)
               + _extract_function("abcGradeInView") + "\n" + _extract_function("abcSortByBreakout") + "\n"
-              + "let abcSortTheme = false;\n" + _extract_function("abcThemeUpMax") + "\n" + _extract_function("abcSortByTheme") + "\n"
+              + "let abcSortTheme = false;\nlet abcBoxOnly = false;\n" + _extract_function("abcThemeUpMax") + "\n" + _extract_function("abcSortByTheme") + "\n"
               + _extract_function("abcFilteredHitsBase") + "\n"
               + _extract_function("abcFilteredHits"))   # v5.332: 등급 보기 판정·D+ 정렬 함수를 같이 쓴다(v5.334 검색·테마 정렬)
 

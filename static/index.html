@@ -1391,7 +1391,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.334</span>
+      <span class="ver mono" id="verBadge">v5.335</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -3736,6 +3736,14 @@ let abcStageFilter = 'all';      // 'all' | 'C0' | 'C1' | 'C2' | 'C3'
 let abcQuery = '';
 // v5.334(사용자 지시 "테마 동반 수 내림차순 정렬 옵션 추가(기본 정렬은 그대로)") — false = 기본(D+ 순)
 let abcSortTheme = false;
+// v5.335(사용자 지시 "박스돌파 필터 칩 하나 추가: [📦박스돌파만]") — 표시 필터, 등급 무관
+let abcBoxOnly = false;
+// 📦 박스돌파 사건(서버 abc_screener._find_box_break — 등급과 독립)
+function abcBoxBreakHtml(h) {
+  const b = h && h.box_break;
+  if (!b || !b.ok) return '';
+  return `<br><span style="font-size:11px" title="최근 20봉 안에 직전 60봉 최고가(${Number(b.top).toLocaleString()})를 종가로 처음 넘은 봉 — 당일 ${b.day_pct}% · 거래량 ${b.vol_mult}배(50일 평균) · 지금도 그 위. 등급과 무관한 표시입니다.">📦 박스돌파 D+${b.bars_ago}</span>`;
+}
 // 행의 테마 중 가장 큰 동반 수(테마 없으면 −1 — 맨 아래)
 function abcThemeUpMax(h) {
   const ts = (h && h.themes) || [];
@@ -3889,7 +3897,7 @@ function abcRowHtml(h) {
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;color:${gcol};font-size:11px${h.grade === 'A급 보류' ? ';border:1px dashed var(--c-green-fg5)' : ''}"
         title="${gradeTitle(h, fails)}">${h.grade}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;font-size:11px">${stage}${_abcBadges(h)}</td>
-    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;white-space:nowrap">${abcGateBreakHtml(h)}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center;white-space:nowrap">${abcGateBreakHtml(h)}${abcBoxBreakHtml(h)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right;border-left:2px solid ${ABC_MA_COLOR}">${_abcMaPct(h.gate_pct)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right">${_abcMaPct(h.stage_pct)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:right"
@@ -3923,7 +3931,8 @@ function abcFilteredHitsBase() {
     // v5.291: `startsWith` → **정확 일치**. 새 라벨은 접두어 체계가 아니라
     // 독립 문자열이고, 부분일치를 남겨두면 '대기'가 '약돌파'에 안 걸리는 대신
     // 다른 라벨이 생길 때 조용히 겹친다. gateBreak 토글은 강돌파 단계로 흡수됨.
-    (abcStageFilter === 'all' || h.c_stage === abcStageFilter)));
+    (abcStageFilter === 'all' || h.c_stage === abcStageFilter) &&
+    (!abcBoxOnly || !!(h.box_break && h.box_break.ok))));
 }
 // 칩 건수 — 지금 C단계 필터 아래에서 각 등급 보기가 보여줄 행 수(목록과 같은 판정 함수)
 function abcGradeCounts() {
@@ -3947,6 +3956,7 @@ function _abcChip(label, active, onclick) {
 function setAbcGrade(g) { abcGradeFilter = g; renderAbcPage(); writeTabHash(); }   // v5.332: 선택은 URL 해시(page)에
 function setAbcStage(s) { abcStageFilter = s; renderAbcPage(); }
 function setAbcSortTheme(on) { abcSortTheme = !!on; renderAbcPage(); }
+function toggleAbcBoxOnly() { abcBoxOnly = !abcBoxOnly; renderAbcPage(); }
 // 검색어 입력 — 다시 그린 뒤 입력칸 포커스·커서를 되돌린다(content가 통째로 다시 그려져도 타이핑이 끊기지 않게)
 function abcSetQuery(v) {
   abcQuery = v;
@@ -4019,6 +4029,7 @@ function renderAbcPage() {
     _abcChip('약돌파', abcStageFilter === '약돌파', "setAbcStage('약돌파')"),
     _abcChip('대기', abcStageFilter === '대기', "setAbcStage('대기')"),
     _abcChip('이탈', abcStageFilter === '이탈', "setAbcStage('이탈')"),
+    _abcChip('📦박스돌파만', abcBoxOnly, 'toggleAbcBoxOnly()'),
   ].join('');
   const searching = !!String(abcQuery || '').trim();
   const search = `<div class="abc-chiprow"><span class="abc-lbl">검색</span>

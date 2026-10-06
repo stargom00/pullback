@@ -50,7 +50,7 @@ def _node(expr, pre):
     if not shutil.which("node"):
         pytest.skip("node 미설치")
     views = [l for l in HTML.splitlines() if l.startswith("const ABC_GRADE_VIEWS = ")][0]
-    src = ("const _escapeHtml = s => String(s);\n" + views + "\nlet _abcData, abcGradeFilter = 'A', abcStageFilter = 'all', abcQuery = '', abcSortTheme = false;\n"
+    src = ("const _escapeHtml = s => String(s);\n" + views + "\nlet _abcData, abcGradeFilter = 'A', abcStageFilter = 'all', abcQuery = '', abcSortTheme = false, abcBoxOnly = false;\n"
            + "\n".join(_fn(n) for n in ("abcSearchMatch", "abcGradeInView", "abcSortByBreakout", "abcThemeUpMax", "abcSortByTheme",
                                         "abcFilteredHitsBase", "abcFilteredHits", "abcThemesHtml")) + "\n" + pre)
     p = subprocess.run(["node", "-e", src + f"\nconsole.log(JSON.stringify({expr}));"], capture_output=True, text=True, timeout=20)
@@ -110,7 +110,8 @@ def test_theme_companions_pure():
 
 
 def test_api_rows_carry_themes_on_real_data(monkeypatch):
-    """10-06 실데이터: 포스코퓨처엠 = 이차전지 14/23(등락 모름 1 — 유니버스 밖), 상신이디피 = 테마 없음(—)."""
+    """10-06 실데이터: 포스코퓨처엠·상신이디피 = 이차전지 15/24(v5.335 사용자 지시로 상신이디피를 이차전지에 추가 — 그 전엔
+    14/23·테마 없음). 등락 모름 1 — 유니버스 밖."""
     data = {t: _df(t) for t in FX["frames"]}
     bundle = {"data": data, "universe": FX["names"], "sector_info": {}, "ts": None}
     monkeypatch.setattr(app, "_peek_market_bundle", lambda m: bundle)
@@ -125,11 +126,14 @@ def test_api_rows_carry_themes_on_real_data(monkeypatch):
     d = asyncio.run(app.api_abc())
     d = json.loads(d.body) if hasattr(d, "body") else d
     by = {h["ticker"]: h for h in d["hits"]}
-    assert by["003670.KS"]["themes"] == [{"theme": "이차전지", "up": 14, "total": 23, "no_data": 1}]
-    assert by["091580.KQ"]["themes"] == []
+    assert by["003670.KS"]["themes"] == [{"theme": "이차전지", "up": 15, "total": 24, "no_data": 1}]
+    assert by["091580.KQ"]["themes"] == by["003670.KS"]["themes"]
     assert (by["003670.KS"]["grade"], by["091580.KQ"]["grade"]) == ("B급", "C급")   # 등급 불변(표시 전용)
     html = _node(f"[abcThemesHtml({json.dumps(by['003670.KS']['themes'], ensure_ascii=False)}), abcThemesHtml([])]", "")
-    assert "이차전지 <b class=\"num\">14/23</b>" in html[0] and ">—<" in html[1]
+    assert "이차전지 <b class=\"num\">15/24</b>" in html[0] and ">—<" in html[1]
+    # 📦 박스돌파(v5.335): 상신이디피 표시(거래량 2.42배), 포스코퓨처엠 미표시(1.90배 < 2.0)
+    assert by["091580.KQ"]["box_break"]["ok"] is True and by["091580.KQ"]["box_break"]["vol_mult"] == 2.42
+    assert by["003670.KS"]["box_break"]["ok"] is False and by["003670.KS"]["box_break"]["vol_mult"] == 1.9
 
 
 def test_theme_sort_option_keeps_default():

@@ -59,10 +59,10 @@ def test_chip_count_and_values_unchanged():
     assert "const ABC_GRADE_VIEWS = [['A', 'A급만'], ['AB', 'A급+B급'], ['all', '전체']];" in HTML
     calls = re.findall(r'"(setAbcStage\([^"]*\))"', body)
     assert calls == STAGE_CALLS, calls
-    # 칩 개수 고정 — 하나 지워도 통과하는 `in` 검사는 쓰지 않는다(등급 1회(map) + C단계 6 + v5.334 정렬 2)
-    assert body.count("_abcChip(") == 9, body.count("_abcChip(")
+    # 칩 개수 고정 — 하나 지워도 통과하는 `in` 검사는 쓰지 않는다(등급 1회(map) + C단계 6 + v5.335 📦 1 + v5.334 정렬 2)
+    assert body.count("_abcChip(") == 10, body.count("_abcChip(")
     labels = re.findall(r"_abcChip\('([^']*)'", body)
-    assert labels == ["전체", "🩷 강돌파", "벽앞", "약돌파", "대기", "이탈", "기본(D+ 순)", "테마 동반순"], labels
+    assert labels == ["전체", "🩷 강돌파", "벽앞", "약돌파", "대기", "이탈", "📦박스돌파만", "기본(D+ 순)", "테마 동반순"], labels
     # v5.291: 흡수된 토글이 되살아나면 실패(같은 사건을 두 곳에서 거르면 어긋난다)
     # ⚠️ `code_only()`로 감싼다 — 제거를 설명하는 **주석**에 이름이 들어 있어
     # HTML 전체를 보면 오탐한다(CLAUDE.md 패턴 1, 이 세션에서 네 번째).
@@ -139,7 +139,7 @@ def _node(script):
     return json.loads(proc.stdout)
 
 
-FILTER_SRC = "let abcQuery = '';\nlet abcSortTheme = false;\n" + "\n".join(_block(f"function {n}(") for n in (
+FILTER_SRC = "let abcQuery = '';\nlet abcSortTheme = false;\nlet abcBoxOnly = false;\n" + "\n".join(_block(f"function {n}(") for n in (
     "abcSearchMatch", "abcGradeInView", "abcSortByBreakout", "abcThemeUpMax", "abcSortByTheme", "abcFilteredHitsBase",
     "abcFilteredHits", "abcGradeCounts"))
 VIEWS_LINE = [l for l in HTML.splitlines() if l.startswith("const ABC_GRADE_VIEWS = ")][0]
