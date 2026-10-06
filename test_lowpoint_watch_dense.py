@@ -42,7 +42,7 @@ def _state_line():
 
 
 FNS = ("lpwBar", "lpwSortRows", "lpwDays", "lpwGroups", "lpReturnPct", "lpDisplayName", "_lptFmt", "_lptPct",
-       "_lptCode", "renderLowpointWatch")
+       "_lptCode", "lpwPendingHtml", "renderLowpointWatch")
 
 
 def _js(expr, recs=None, extra=""):

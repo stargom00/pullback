@@ -13,9 +13,9 @@
   status      active | reached;  reached_date·reached_days(기준일 → 도달일 달력 일수)
   last_close·last_date·checked_at — 마지막 추적 결과(활성 종목만 갱신)
 
-판정: 기준일 **이후** 일봉 고가 ≥ 기준가 × (1 + REACH_PCT/100) → 도달(정확히 1.05배도 도달). 기준일 당일·이전 고가는
-보지 않는다. 가격 소스는 저점 스크린과 같다 — KR naver 통합 시세(naver_kr.fetch_history), US yfinance 배당 미조정
-(lowpoint.US_AUTO_ADJUST) — 기준가와 고가가 같은 기준이어야 비교가 맞는다.
+판정(v5.333): 기준일 **이후** 거래일의 **정규장 고가** ≥ 기준가 × (1 + REACH_PCT/100) → 도달(정확히 1.05배도 도달).
+기준일 당일·이전은 보지 않는다. KR 정규장 고가 = naver 분봉 09:00~15:30 최고가(장외 체결 제외 — 아래 REACH_RULE 주석,
+꿈비 사례), US = yfinance 일봉 고가(정규장만). 기준가는 스캔 기준일 통합 종가 그대로. 현재가 표시는 통합 일봉 종가.
 조회는 **관찰 중(active) 종목만**(수십 건) — 유니버스 전수 조회 없음.
 """
 from __future__ import annotations
@@ -77,6 +77,87 @@ def reach_info(base_price: float, base_date: str, daily: "pd.DataFrame | None", 
     return out
 
 
+# ── v5.333(사용자 결정) KR 도달 판정 = 정규장 고가 ─────────────────────────────────────────────
+# 경위: 꿈비(407400.KQ) 10-02 주봉 코호트(기준가 1,969 = 10-02 통합 종가)가 10-06 "도달"로 분류됐는데, 그 고가 2,115는
+# 넥스트레이드 애프터마켓 16:04의 **1주 체결**이었다(정규장 최고 2,010 = +2.1%, 실제로는 미도달). naver 통합 일봉 고가는
+# 장외 체결을 포함한다 — **고가 한 번을 보는 규칙은 장외 얇은 체결에 취약하다.** 사용자 결정: "정규장 장중 고가는 인정하고,
+# 장외(프리·애프터) 체결은 판정에서 뺀다. 정규장 고가는 naver 분봉 09:00~15:30 최고가 … yfinance 사용 금지 … 분봉을 못
+# 받은 날은 판정하지 않고 다음 실행 때 다시 시도. 통합 일봉 고가로 대체하는 폴백은 금지." 기준가 정의(스캔 기준일 통합 종가)는
+# 그대로다.
+# naver 분봉 보존: 최근 6거래일뿐(2026-10-07 실측 — 1·3·5·10·30·60분봉 모두 같음). 그래서 레코드마다 "어느 거래일까지
+# 판정했나"(regular_checked_through)를 저장하고 그 다음 거래일만 받는다. 분봉이 빈 거래일에서 멈춘다(판정 보류 —
+# 뒷날을 먼저 보면 도달일이 틀어진다). 서버가 6거래일 넘게 추적을 못 돌리면 그 날은 영영 못 받아 보류가 풀리지 않는다 —
+# 화면에 "판정 보류(분봉 없음 MM-DD)"로 드러난다(조용히 넘기지 않는다).
+# US는 그대로 yfinance 일봉 고가다(yfinance 일봉은 정규장만 담는다 — 장외 문제 없음).
+REACH_RULE = "regular_high"                   # 이 규칙으로 판정한 레코드 표시 — 없는 도달 레코드는 다음 추적 때 재판정
+KR_REGULAR_HM = ("090000", "153000")          # KRX 정규장(시장 시간 — 임계값 아님). 15:30 종가 단일가 봉까지 포함
+MINUTE_URL = "https://api.stock.naver.com/chart/domestic/item/{code}/minute"
+
+
+def fetch_minutes(code: str, day: date) -> "list | None":
+    """naver 1분봉(그날 08:00~20:00 — 통합). 실패면 None, 빈 응답이면 [](보존 기간 밖·거래 없음)."""
+    import requests
+    import naver_kr
+    d = day.strftime("%Y%m%d")
+    try:
+        r = requests.get(MINUTE_URL.format(code=naver_kr.to_code(code)),
+                         params={"startDateTime": d + "0800", "endDateTime": d + "2000"},
+                         headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        if r.status_code != 200:
+            return None
+        j = r.json()
+        return j if isinstance(j, list) else None
+    except Exception:
+        return None
+
+
+def regular_high(bars: list) -> "float | None":
+    """분봉 중 정규장(09:00:00~15:30:00) 봉의 최고가. 정규장 봉이 없으면 None."""
+    lo, hi = KR_REGULAR_HM
+    vals = [float(b["highPrice"]) for b in bars or []
+            if lo <= str(b.get("localDateTime", ""))[8:14] <= hi and b.get("highPrice") is not None]
+    return max(vals) if vals else None
+
+
+def judge_kr_regular(rec: dict, daily: "pd.DataFrame | None", today: date, session_done_today: bool,
+                     fetch_min=fetch_minutes, pct: float = REACH_PCT) -> dict:
+    """KR 레코드 한 건 — 기준일 다음 거래일부터, 아직 판정 안 한 거래일을 순서대로 정규장 고가로 판정.
+    거래일 목록은 naver 일봉 날짜(거래량 0인 날은 정규장 체결이 없으니 넘긴다). 반환 필드:
+      reached·reached_date·reached_days·reached_high(정규장 고가)·reached_pct(기준가 대비 %)
+      regular_checked_through(끝까지 판정한 마지막 거래일) · pending_day(분봉을 못 받아 멈춘 거래일, 없으면 None)
+    오늘 봉은 정규장이 끝나기 전이면 넘어서 도달한 경우만 인정하고, 아니면 판정 완료로 치지 않는다."""
+    out = {"reached": False, "regular_checked_through": rec.get("regular_checked_through"), "pending_day": None}
+    if daily is None or daily.empty:
+        return out
+    d = daily.copy()
+    d.index = pd.to_datetime(d.index).normalize()
+    start = max(pd.Timestamp(rec["base_date"]), pd.Timestamp(out["regular_checked_through"] or rec["base_date"]))
+    thr = reach_threshold(float(rec["base_price"]), pct)
+    for ts, row in d[d.index > start].iterrows():
+        day = ts.date()
+        done = day < today or session_done_today
+        if "Volume" in d.columns and float(row.get("Volume") or 0) <= 0:
+            if done:
+                out["regular_checked_through"] = str(day)
+            continue                                   # 정규장 체결 없음(거래정지 등)
+        bars = fetch_min(rec["code"], day)
+        if not bars:                                   # None(실패)·[](없음) — 판정 보류, 다음 실행에 다시
+            if done:
+                out["pending_day"] = str(day)
+            break
+        hi = regular_high(bars)
+        if hi is not None and hi >= thr * (1 - 1e-12):
+            out.update(reached=True, reached_date=str(day),
+                       reached_days=(day - date.fromisoformat(rec["base_date"])).days,
+                       reached_high=hi, reached_pct=round((hi / float(rec["base_price"]) - 1) * 100, 2),
+                       regular_checked_through=str(day))
+            break
+        if not done:
+            break                                      # 오늘 정규장 진행 중 — 아직 미도달, 내일 다시
+        out["regular_checked_through"] = str(day)
+    return out
+
+
 def _us_period(earliest: str, today: date) -> str:
     """기준일을 덮는 가장 짧은 yfinance period(기준일 이후 일봉만 필요)."""
     days = (today - date.fromisoformat(earliest)).days
@@ -109,23 +190,57 @@ def fetch_daily(records: list, today: date) -> dict:
     return out
 
 
-def track(records: list, today: date, now_iso: str, fetch=fetch_daily) -> tuple[dict, dict]:
-    """활성 레코드만 추적 → ({id: 바뀔 필드}, 집계). 도달한 레코드는 다시 조회하지 않는다."""
-    active = [r for r in records if r.get("status") == "active"]
-    data = fetch(active, today) if active else {}
-    updates, failed, reached = {}, [], 0
-    for r in active:
-        info = reach_info(float(r["base_price"]), r["base_date"], data.get(r["code"]))
-        if info["last_close"] is None:
+def _session_done_today(now_iso: str) -> bool:
+    try:
+        from datetime import datetime, timedelta, timezone
+        n = datetime.fromisoformat(now_iso).astimezone(timezone(timedelta(hours=9)))
+        return n.strftime("%H%M%S") > KR_REGULAR_HM[1]
+    except (TypeError, ValueError):
+        return False
+
+
+def track(records: list, today: date, now_iso: str, fetch=fetch_daily, fetch_min=fetch_minutes) -> tuple[dict, dict]:
+    """활성 레코드 + **정규장 규칙으로 판정되지 않은 옛 도달 레코드**(reach_rule 없음)만 추적 → ({id: 바뀔 필드}, 집계).
+    KR = 정규장 고가(judge_kr_regular), US = yfinance 일봉 고가(정규장만 담김). 옛 도달 레코드는 기준일부터 다시 판정해
+    미도달이면 관찰로 되돌린다(reverted). 새 규칙으로 도달한 레코드는 다시 조회하지 않는다."""
+    old_reached = [r for r in records if r.get("status") == "reached" and r.get("reach_rule") != REACH_RULE]
+    targets = [r for r in records if r.get("status") == "active"] + old_reached
+    data = fetch(targets, today) if targets else {}
+    done_today = _session_done_today(now_iso)
+    updates, failed, reached, reverted, pending = {}, [], 0, [], []
+    for r in targets:
+        was_reached = r.get("status") == "reached"
+        daily = data.get(r["code"])
+        last = reach_info(float(r["base_price"]), r["base_date"], daily)      # 현재가(통합 종가) 표시용
+        if last["last_close"] is None:
             failed.append(r["code"])
             continue
-        u = {"last_close": info["last_close"], "last_date": info["last_date"], "checked_at": now_iso}
-        if info["reached"]:
-            u.update(status="reached", reached_date=info["reached_date"], reached_days=info["reached_days"])
-            reached += 1
+        u = {"last_close": last["last_close"], "last_date": last["last_date"], "checked_at": now_iso, "reach_rule": REACH_RULE}
+        if r.get("mkt") == "US":
+            hit = {"reached": last["reached"], "reached_date": last["reached_date"], "reached_days": last["reached_days"]}
+            if last["reached"]:
+                d = daily.copy()
+                d.index = pd.to_datetime(d.index).normalize()
+                hi = float(d.loc[pd.Timestamp(last["reached_date"]), "High"])
+                hit.update(reached_high=hi, reached_pct=round((hi / float(r["base_price"]) - 1) * 100, 2))
+            u["pending_day"] = None
+        else:
+            base = {**r, "regular_checked_through": None} if was_reached else r   # 옛 도달은 기준일부터 다시
+            hit = judge_kr_regular(base, daily, today, done_today, fetch_min)
+            u.update(regular_checked_through=hit["regular_checked_through"], pending_day=hit["pending_day"])
+            if hit["pending_day"]:
+                pending.append(f"{r['code']}@{hit['pending_day']}")
+        if hit["reached"]:
+            u.update(status="reached", reached_date=hit["reached_date"], reached_days=hit["reached_days"],
+                     reached_high=hit.get("reached_high"), reached_pct=hit.get("reached_pct"))
+            if not was_reached:
+                reached += 1
+        elif was_reached:
+            u.update(status="active", reached_date=None, reached_days=None, reached_high=None, reached_pct=None)
+            reverted.append(f"{r['code']}({r.get('label')} {r.get('tf')})")
         updates[r["id"]] = u
-    return updates, {"active": len(active), "fetched": len(data), "reached_new": reached,
-                     "failed": sorted(set(failed))}
+    return updates, {"active": len(targets) - len(old_reached), "rejudged": len(old_reached), "fetched": len(data),
+                     "reached_new": reached, "reverted": reverted, "pending": pending, "failed": sorted(set(failed))}
 
 
 # ── v5.327(사용자 지시) 보유 추적 — "매매 기록의 보유 종목 수익률을 매일 자동 추적 — 관찰(진입 전)과 짝이 되는

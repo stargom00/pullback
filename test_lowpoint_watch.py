@@ -133,10 +133,14 @@ def test_daily_track_fetches_only_active_codes(monkeypatch):
     monkeypatch.setattr(harness, "_fetch_us_batch", yf)
     recs = w.records_from_entry(_entry("2026-10-02", rows_kr=[KR_ROW], rows_us=[US_ROW]), "week")
     recs.append({**recs[0], "id": "w_done", "code": "005930.KS", "status": "reached"})     # 도달 — 다시 안 본다
-    updates, summary = w.track(recs, date(2026, 10, 5), "now")
+    recs[-1]["reach_rule"] = w.REACH_RULE                          # 정규장 규칙으로 이미 도달 — 다시 안 본다
+    minutes = []
+    fm = lambda code, day: minutes.append((code, str(day))) or [{"localDateTime": day.strftime("%Y%m%d") + "100000", "highPrice": 16400.0}]
+    updates, summary = w.track(recs, date(2026, 10, 5), "2026-10-05T16:00:00+09:00", fetch_min=fm)
     assert asked["kr"] == [("002320.KS", 13)] and asked["us"] == [(("AVA",), "1mo", lp.US_AUTO_ADJUST)]
+    assert minutes == [("002320.KS", "2026-10-05")]                # 분봉도 관찰 종목·필요한 거래일만
     assert set(updates) == {r["id"] for r in recs if r["status"] == "active"}
-    assert updates[recs[0]["id"]]["status"] == "reached"          # 16400 ≥ 15560×1.05 = 16338
+    assert updates[recs[0]["id"]]["status"] == "reached"          # 정규장 16400 ≥ 15560×1.05 = 16338
     assert "status" not in updates[recs[1]["id"]]                  # 36 < 35.31×1.05 = 37.08
     assert summary["active"] == 2 and summary["reached_new"] == 1
 
@@ -193,7 +197,8 @@ def test_job_updates_only_active_with_rev_and_persists(store, monkeypatch):
         seen.append(sorted(r["code"] for r in records))
         return {"002320.KS": _daily([("2026-10-06", 16400, 16200)]), "AVA": _daily([("2026-10-06", 36, 35.5)])}
     monkeypatch.setattr(w, "fetch_daily", fake_fetch)
-    monkeypatch.setattr(w.track, "__defaults__", (fake_fetch,))
+    fake_min = lambda code, day: [{"localDateTime": day.strftime("%Y%m%d") + "100000", "highPrice": 16400.0}]
+    monkeypatch.setattr(w.track, "__defaults__", (fake_fetch, fake_min))
     s = app._lp_watch_job_blocking("watch", _k("2026-10-07 07:00"))
     assert s["counts"]["reached_new"] == 1 and s["counts"]["seeded"] == {"week": 2, "month": 0}
     recs = {r["code"]: r for r in _load()}

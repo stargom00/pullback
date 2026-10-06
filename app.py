@@ -5,6 +5,17 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.333 [저점 관찰 KR 도달 판정 = 정규장 고가 — 사용자 결정 "정규장 장중 고가는 인정하고, 장외(프리·애프터) 체결은 판정에서
+    뺀다"] 경위: 꿈비(407400.KQ) 10-02 주봉 코호트(기준가 1,969)가 10-06 "도달"로 분류됐는데 그 고가 2,115는 넥스트레이드
+    애프터마켓 16:04의 1주 체결(정규장 최고 2,010 = +2.1%). ① KR 판정 = 기준일 다음 거래일부터 naver 분봉 09:00~15:30 최고가 ≥
+    기준가 × (1 + SHORT_GOAL_PCT)(lowpoint_watch.judge_kr_regular · regular_high · fetch_minutes) — yfinance·통합 일봉 고가
+    폴백 없음. US는 yfinance 일봉 고가 그대로(정규장만). 기준가 정의 불변. ② naver 분봉 보존 = 최근 6거래일(2026-10-07 실측,
+    1~60분봉 동일) → 레코드별 regular_checked_through 저장, 다음 거래일만 조회, 분봉 없는 거래일에서 멈춤(pending_day —
+    "판정 보류 MM-DD" 칩·⚠️ 로그). 오늘은 정규장이 끝나야(15:30 후) 판정 완료로 친다(넘으면 장중에도 인정). ③ 도달 레코드에
+    reached_high(정규장 고가)·reached_pct 저장, 도달 완료 섹션에 표시, 안내문 "정규장 고가 기준(장외 체결 제외)". ④ reach_rule
+    없는 옛 도달 레코드는 다음 추적(07:00·지금 갱신)에서 정상 경로로 재판정 — 미도달이면 관찰 복귀, 로그 "정규장 고가 재판정 →
+    관찰 복귀 N건: …"(0건이어도 남김). /data 직접 수정 없음. 꿈비 실제 분봉은 test_fixtures/kumbi_20261006_minutes.json.gz.
+    테스트: test_lowpoint_watch_regular.py.
 v5.332 [ABC 등급 필터 칩 — 사용자 지시 "ABC 탭이 후보 729개를 전부 펼쳐서 실사용 불가. 등급 깔때기(A급 23개)가 화면에서
     안 보임"] static/index.html만(서버·등급·판정 불변). 등급 칩 [A급만 (n)] [A급+B급 (n)] [전체 (n)], 기본 A급만
     (ABC_GRADE_VIEWS 하나에서 칩·해시·판정이 나온다). A급만 = A급 + A급 보류(강돌파 + 기업축 통과인데 실적 미조회 — 실적이
@@ -8854,7 +8865,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.332"
+VERSION = "v5.333"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -20380,15 +20391,23 @@ def _lp_watch_job_blocking(tf: str, now: "datetime") -> dict:
         changed = 0
         for r in recs:
             u = updates.get(r.get("id"))
-            if not u or r.get("status") != "active":
+            # 활성 레코드 + v5.333 정규장 규칙 전에 도달로 저장된 레코드(재판정 대상)만 고친다
+            if not u or not (r.get("status") == "active" or r.get("reach_rule") != w.REACH_RULE):
                 continue
             r.update(u)
             _journal_bump(r)
             changed += 1
         if changed:
             _rec_list_write(LP_WATCH_PATH, recs)
-    print(f"[lowpoint-watch] 추적 — 활성 {summary['active']}건 · 조회 {summary['fetched']}종목 · 새 도달 "
-          f"{summary['reached_new']}건 · 조회 실패 {len(summary['failed'])}건 · 갱신 {changed}건", flush=True)
+    print(f"[lowpoint-watch] 추적 — 활성 {summary['active']}건 · 재판정 {summary['rejudged']}건 · 조회 {summary['fetched']}종목 · "
+          f"새 도달 {summary['reached_new']}건 · 판정 보류 {len(summary['pending'])}건 · 조회 실패 {len(summary['failed'])}건 · "
+          f"갱신 {changed}건", flush=True)
+    # v5.333: 정규장 고가로 다시 판정해 미도달이라 관찰로 되돌린 목록 — 0건이어도 남긴다(침묵 ≠ 성공)
+    print(f"[lowpoint-watch] 정규장 고가 재판정 → 관찰 복귀 {len(summary['reverted'])}건: "
+          f"{', '.join(summary['reverted']) or '없음'}", flush=True)
+    if summary["pending"]:
+        print(f"[lowpoint-watch] ⚠️ 분봉 없음 → 판정 보류: {', '.join(summary['pending'])} (naver 분봉은 최근 6거래일만 — "
+              f"그 안에 다시 받지 못하면 보류가 풀리지 않는다)", flush=True)
     # v5.327: 같은 작업에서 보유 종목(매매 기록 중 종료 안 된 것)도 추적 — 그 종목만 조회
     prev = (_lp_hold_track_read() or {}).get("prices") or {}
     prices, hold = w.track_holdings(_lp_trades_load(), today, now.astimezone(KST).isoformat(), prev,

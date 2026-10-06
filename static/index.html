@@ -1391,7 +1391,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.332</span>
+      <span class="ver mono" id="verBadge">v5.333</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -7422,6 +7422,12 @@ async function lpwDelete(id) {
   catch (e) { alert('삭제 실패 — ' + e.message); }
   await lpwLoad(); renderLowpointTrack();
 }
+// v5.333: 분봉을 못 받아 판정이 멈춘 레코드 표시(조용히 넘기지 않는다 — naver 분봉은 최근 6거래일만 남는다)
+function lpwPendingHtml(r) {
+  return r.pending_day
+    ? ` <span class="chip lpw-hitchip" style="color:var(--px-down)" title="${_escapeHtml(r.pending_day)} 정규장 분봉을 못 받아 판정을 멈췄어요 — 다음 추적 때 다시 시도(분봉은 최근 6거래일만 남아요)">판정 보류 ${_escapeHtml(String(r.pending_day).slice(5))}</span>`
+    : '';
+}
 // [기록] → 매매 기록 폼에 종목 프리필(구분 단기, 매수일 오늘 — 매수가·수량은 직접)
 function lpwRecord(id) {
   const r = _lpw.recs.find(x => x.id === id);
@@ -7641,7 +7647,7 @@ function renderLowpointWatch() {
     const act = lpwSortRows(g.active, _lpw.sortKey, _lpw.sortDir, today).map(r => {
       const p = lpReturnPct(r.last_close, Number(r.base_price));
       return `<tr>
-        <td class="lpw-sym">${name(r)}</td>
+        <td class="lpw-sym">${name(r)}${lpwPendingHtml(r)}</td>
         <td class="r lpw-pxcell"><span class="lpw-px">${_lptFmt(r.base_price, r.mkt)} → ${r.last_close != null ? _lptFmt(r.last_close, r.mkt) : '—'}</span></td>
         <td class="r">${_lptPct(p)}</td>
         <td class="lpw-barcell">${bar(p)}</td>
@@ -7652,6 +7658,8 @@ function renderLowpointWatch() {
         <td class="lpw-sym">${name(r)}</td>
         <td class="r lpw-pxcell"><span class="lpw-px">${_lptFmt(r.base_price, r.mkt)}</span></td>
         <td class="num r">${_escapeHtml(r.reached_date || '')}</td>
+        <td class="num r" title="도달일의 정규장 고가(장외 체결 제외)">${r.reached_high != null ? _lptFmt(r.reached_high, r.mkt) : '—'}</td>
+        <td class="r">${_lptPct(r.reached_pct)}</td>
         <td class="num r">${r.reached_days != null ? r.reached_days + '일' : '—'}</td>
         <td class="r"><button type="button" class="n-btn sm" title="관찰에서 삭제" aria-label="삭제" onclick="lpwDelete('${_escapeHtml(r.id)}')">✕</button></td></tr>`).join('');
     return `<section class="n-card lpw-card">
@@ -7661,11 +7669,11 @@ function renderLowpointWatch() {
           <th class="r lpw-sort" onclick="lpwSort('days')">경과${arrow('days')}</th><th></th></tr></thead><tbody>${act}</tbody></table></div>`
             : '<div class="n-sub">관찰 중인 종목 없음 — 모두 도달</div>'}
       ${rch ? `<details style="margin-top:6px"><summary class="n-sub" style="cursor:pointer;font-size:12px">도달 완료 (${g.reached.length})</summary>
-        <div class="jr-table-wrap"><table class="jr-table lpt-table lpw-table"><thead><tr><th>종목</th><th class="r lpw-pxcell">기준가</th><th class="r">도달일</th><th class="r">도달까지</th><th></th></tr></thead><tbody>${rch}</tbody></table></div></details>` : ''}
+        <div class="jr-table-wrap"><table class="jr-table lpt-table lpw-table"><thead><tr><th>종목</th><th class="r lpw-pxcell">기준가</th><th class="r">도달일</th><th class="r">정규장 고가</th><th class="r">기준 대비</th><th class="r">도달까지</th><th></th></tr></thead><tbody>${rch}</tbody></table></div></details>` : ''}
     </section>`;
   }).join('');
   return `<section class="n-card lpw-info">
-      <span class="n-sub" style="flex:1 1 260px">저점 히트 종가(기준가) 대비 <b>+${pct}%</b> 도달을 추적해요 — 기준일 다음 거래일부터 일봉 고가로 판정, 매일 07:00 KST 자동 갱신 · ${runInfo}</span>
+      <span class="n-sub" style="flex:1 1 260px">저점 히트 종가(기준가) 대비 <b>+${pct}%</b> 도달을 추적해요 — 기준일 다음 거래일부터 <b>정규장 고가 기준(장외 체결 제외)</b>, 매일 07:00 KST 자동 갱신 · ${runInfo}</span>
       <button type="button" class="n-btn sm" onclick="lpwRefresh()" ${_lpw.busy ? 'disabled' : ''}>${_lpw.busy ? '갱신 중…' : '지금 갱신'}</button>
       ${_lpw.msg ? `<span class="n-sub" style="flex-basis:100%">${_escapeHtml(_lpw.msg)}</span>` : ''}
     </section>
