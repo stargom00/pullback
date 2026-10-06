@@ -250,9 +250,11 @@ def _find_gate_break(close, vol, cfg: dict, opn=None):
     prev = vol.iloc[max(0, found - k):found]
     avg = float(prev.mean()) if len(prev) else 0.0
     bar_vol = float(vol.iloc[found])
-    mult = round(bar_vol / avg, 2) if avg > 0 else None
+    mult_raw = bar_vol / avg if avg > 0 else None
     prev_c = float(close.iloc[found - 1])
-    day_pct = round((float(close.iloc[found]) / prev_c - 1) * 100, 1) if prev_c else None
+    day_raw = float(close.iloc[found]) / prev_c - 1 if prev_c else None
+    mult = round(mult_raw, 2) if mult_raw is not None else None          # 표시용
+    day_pct = round(day_raw * 100, 1) if day_raw is not None else None   # 표시용
     open_pct = None
     if opn is not None:
         o = float(opn.iloc[found])
@@ -261,8 +263,10 @@ def _find_gate_break(close, vol, cfg: dict, opn=None):
     for step in (1, 2, 3):
         j = found + step
         dplus.append(round(float(vol.iloc[j]) / avg, 2) if (j < n and avg > 0) else None)
-    vol_ok = bool(mult is not None and mult >= cfg["strong_vol_mult"])
-    day_ok = bool(day_pct is not None and day_pct >= cfg["strong_day_pct"] * 100)
+    # v5.336(사용자 지시 "반올림 전 원래 값으로 판정하고, 반올림은 표시에만") — 반올림 후 비교하면 1.996배가 2.0으로
+    # 통과하고, +7.01%가 7.0 vs 0.07×100(=7.000000000000001)으로 탈락했다(_find_box_break v5.335와 같은 방식).
+    vol_ok = bool(mult_raw is not None and mult_raw >= cfg["strong_vol_mult"])
+    day_ok = bool(day_raw is not None and day_raw >= cfg["strong_day_pct"])
     return {"bars_ago": n - 1 - found,
             "vol_mult": mult, "vol_ok": vol_ok,
             "day_pct": day_pct, "day_ok": day_ok, "open_pct": open_pct,

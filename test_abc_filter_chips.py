@@ -79,7 +79,10 @@ def test_default_filter_values_unchanged():
 # ── 2) 레이아웃: 두 줄 칩 행, 전폭 버튼 금지 ──────────────────────
 def test_chips_are_two_rows_and_not_full_width_buttons():
     body = _render_page_body()
-    assert body.count('class="abc-chiprow"') == 4, "검색/등급/C단계/정렬 각각 한 줄이어야 함(v5.334 검색·정렬 줄 추가)"
+    # v5.336: 등급·C단계 줄은 검색 중 흐림을 목록만 갱신할 때도 바꾸려고 abc-fade-row 클래스가 붙었다
+    assert body.count('class="abc-chiprow"') + body.count('class="abc-chiprow abc-fade-row"') == 4, \
+        "검색/등급/C단계/정렬 각각 한 줄이어야 함(v5.334 검색·정렬 줄 추가)"
+    assert body.count('class="abc-chiprow abc-fade-row"') == 2
     assert "journal-btn" not in code_only(_block("function _abcChip(")), (
         ".journal-btn은 width:100%라 칩이 전폭 블록이 된다 — 이 회귀가 v5.290의 수정 대상이다."
     )
@@ -200,6 +203,6 @@ def test_filter_never_changes_grades():
 
 
 def test_empty_view_offers_full_list():
-    body = _render_page_body()
+    body = _block("function abcListHtml(")          # v5.336: 목록·빈 안내는 abcListHtml(검색 때 목록만 갱신)
     assert "없음 — <button type=\"button\" class=\"abc-chip\" onclick=\"setAbcGrade('all')\">전체 보기</button>" in body
     assert "setAbcGrade(g) { abcGradeFilter = g; renderAbcPage(); writeTabHash(); }" in HTML     # 선택은 URL 해시에

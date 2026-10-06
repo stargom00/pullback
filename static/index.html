@@ -1391,7 +1391,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.335</span>
+      <span class="ver mono" id="verBadge">v5.336</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -3958,11 +3958,69 @@ function setAbcStage(s) { abcStageFilter = s; renderAbcPage(); }
 function setAbcSortTheme(on) { abcSortTheme = !!on; renderAbcPage(); }
 function toggleAbcBoxOnly() { abcBoxOnly = !abcBoxOnly; renderAbcPage(); }
 // 검색어 입력 — 다시 그린 뒤 입력칸 포커스·커서를 되돌린다(content가 통째로 다시 그려져도 타이핑이 끊기지 않게)
-function abcSetQuery(v) {
-  abcQuery = v;
-  renderAbcPage();
+// v5.336 ABC 검색 — 한글 IME 자모 분리 수정. 원인: 글자마다 renderAbcPage()가 content.innerHTML을 통째로 다시 써서
+// 입력칸 요소를 새로 만들고(value 재설정 + focus 이동) 조합 중인 IME 세션을 끊었다. 이제 ① 조합 중(compositionstart~end,
+// event.isComposing)엔 필터·렌더를 하지 않고 compositionend에서 한 번 적용 ② 적용은 목록·안내·칩 흐림 영역만 갱신(입력칸 그대로).
+// 지연(debounce) 없음.
+const ABC_SEARCH_FADE = 'opacity:max(.45,var(--fade-floor))';
+let _abcComposing = false;
+function abcSearching() { return !!String(abcQuery || '').trim(); }
+function abcSearchNoteHtml(rows) {
+  return abcSearching() ? `<span style="font-size:11px;color:var(--muted)">검색 중 — 등급·C단계 칩과 상관없이 전체에서 ${rows.length}건 · 지우면 칩 상태로 돌아가요</span>` : '';
+}
+function abcListHtml(rows) {
+  const searching = abcSearching();
+  return rows.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="color:var(--muted);font-size:11px">
+        <th style="text-align:left;padding:3px 8px">종목</th>
+        <th style="padding:3px 8px">등급</th>
+        <th style="padding:3px 8px" title="🩷 강돌파 / 벽앞 / 약돌파 / 대기 / 이탈 — v5.291부터 MA600 기준이고, 강돌파(거래량 동반 장대양봉 돌파)를 밴드보다 먼저 판정합니다. A급 후보는 강돌파뿐입니다.">C단계</th>
+        <th style="padding:3px 8px;color:${ABC_MA_COLOR}" title="${_abcMaLabel()}을 종가로 처음 넘은 봉(최근 20봉 내) — 등락률·거래량배수·이후 D+1/2/3 거래량. 강돌파 판정의 근거입니다.">돌파봉</th>
+        <th style="text-align:right;padding:3px 8px;color:${ABC_MA_COLOR}"
+            title="장기 추세 전환선 — C단계를 이 선 기준으로 가릅니다(v5.291). ⚠️ naver 수정주가는 액면분할·무상증자만 반영하고 현금배당은 미조정이라 TradingView(ADJ)와 2~3% 차이가 날 수 있습니다(계룡건설 실측: 스캐너 18,443 vs TV 18,014, 배당 소급조정 −3.1%p + 봉수 차이 +2.4%p).">${_abcMaLabel()}<span style="font-size:9px">(단계기준)</span></th>
+        <th style="text-align:right;padding:3px 8px" title="B 중앙값 밴드·매물대·진돌이/가돌이 판정 기준선입니다(사용자 확정: MA200 유지). v5.291부터 C단계는 여기가 아니라 MA600이 정합니다 — 이 칸은 참고용.">${_abcStageLabel()}<span style="font-size:9px">(참고)</span></th>
+        <th style="text-align:right;padding:3px 8px" title="${_abcStageLabel()} 첫 상향돌파봉(최근 60봉) 포함 3봉 중 최대 거래량 ÷ 돌파 직전 5일 평균 — 3.0배 이상 진돌이, 미만 가돌이(표시 전용). v5.331 전엔 이 칸 설명이 ${_abcMaLabel()}로 잘못 적혀 있었다">vol배수</th>
+        <th style="text-align:right;padding:3px 8px" title="A: 고점→저점 하락폭">A하락</th>
+        <th style="text-align:right;padding:3px 8px" title="B: 바닥 다지기 봉 수 · 품질(전반/후반 종가 최저·거래량 비교 — 흡수/재하락 주의/중립, 표시 전용)">B일수</th>
+        <th style="padding:3px 8px" title="최근 250봉 종가를 가격 10구간으로 나눈 거래량 분포에서, 현재가 위 구간 중 거래량 최대 구간(표시 전용)">매물대</th>
+        <th style="text-align:right;padding:3px 8px" title="B구간 20봉 평균 거래대금(평소 유동성). 판정 기준입니다 — 당일 값이 아닙니다.">거래대금<span style="font-size:9px;color:var(--muted)">(B평균)</span></th>
+        <th style="padding:3px 8px">매출·EPS</th>
+        <th style="text-align:left;padding:3px 8px">섹터</th>
+        <th style="text-align:left;padding:3px 8px" title="themes_kr.json 테마 · 같은 테마 종목 중 당일 +5% 이상 오른 수 / 테마 종목 수(표시 전용)">테마 동반</th>
+      </tr></thead>
+      <tbody>${rows.map(abcRowHtml).join('')}</tbody></table></div>`
+    : (searching ? `<div class="empty">'${_escapeHtml(abcQuery.trim())}' — ABC 후보에 없어요(차트 판정에서 ABC가 아니거나 MA600 불가)</div>`
+      : abcGradeFilter !== 'all'
+        ? `<div class="empty">${(ABC_GRADE_VIEWS.find(v => v[0] === abcGradeFilter) || [])[1].replace('만', '')} 없음 — <button type="button" class="abc-chip" onclick="setAbcGrade('all')">전체 보기</button></div>`
+        : '<div class="empty">조건에 맞는 종목이 없습니다.</div>');
+}
+function abcRefreshList() {
+  const list = document.getElementById('abcList');
+  if (!list) { renderAbcPage(); return; }
+  const rows = abcFilteredHits();
+  list.innerHTML = abcListHtml(rows);
+  const note = document.getElementById('abcSearchNote');
+  if (note) note.innerHTML = abcSearchNoteHtml(rows);
+  document.querySelectorAll('.abc-fade-row').forEach(el => { el.style.cssText = abcSearching() ? ABC_SEARCH_FADE : ''; });
+}
+function abcOnSearchCompStart() { _abcComposing = true; }
+function abcOnSearchCompEnd(e) { _abcComposing = false; abcSetQuery(e.target.value); }
+// composition 이벤트는 HTML 인라인 속성(oncompositionend=…)이 없다 — addEventListener로만 붙는다(브라우저 실측: 인라인이면 무시됨)
+function abcBindSearch() {
   const el = document.getElementById('abcSearch');
-  if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+  if (!el || el._abcBound) return;
+  el._abcBound = true;
+  el.addEventListener('compositionstart', abcOnSearchCompStart);
+  el.addEventListener('compositionend', abcOnSearchCompEnd);
+}
+function abcOnSearchInput(e) {
+  if (_abcComposing || (e && e.isComposing)) return;      // 조합 중 — compositionend에서 한 번 적용
+  abcSetQuery(e.target.value);
+}
+function abcSetQuery(v) {
+  if (abcQuery === v) return;
+  abcQuery = v;
+  abcRefreshList();                                         // 입력칸은 다시 만들지 않는다(값·포커스·조합 그대로)
 }
 // v5.291: `toggleAbcGateBreak()`/`abcGateBreakOnly` 제거 — 🩷600돌파 토글이
 // `🩷 강돌파` 단계로 흡수됐다(사용자 지시). 죽은 토글을 남겨두면 "왜 안 먹나"를
@@ -4031,15 +4089,18 @@ function renderAbcPage() {
     _abcChip('이탈', abcStageFilter === '이탈', "setAbcStage('이탈')"),
     _abcChip('📦박스돌파만', abcBoxOnly, 'toggleAbcBoxOnly()'),
   ].join('');
-  const searching = !!String(abcQuery || '').trim();
+  const searching = abcSearching();
+  // v5.336: 입력칸은 이 전체 렌더에서만 만든다 — 타이핑 중엔 abcRefreshList()가 목록 영역만 바꾼다(IME 조합 보존)
   const search = `<div class="abc-chiprow"><span class="abc-lbl">검색</span>
-      <input id="abcSearch" type="search" placeholder="종목명·코드 일부" value="${_escapeHtml(abcQuery)}" oninput="abcSetQuery(this.value)"
+      <input id="abcSearch" type="search" placeholder="종목명·코드 일부" value="${_escapeHtml(abcQuery)}"
+        oninput="abcOnSearchInput(event)"
         style="min-height:28px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:12px;width:min(220px,60vw)">
-      ${searching ? `<span style="font-size:11px;color:var(--muted)">검색 중 — 등급·C단계 칩과 상관없이 전체에서 ${rows.length}건 · 지우면 칩 상태로 돌아가요</span>` : ''}</div>`;
+      <span id="abcSearchNote">${abcSearchNoteHtml(rows)}</span></div>`;
   const sortRow = ['<span class="abc-lbl">정렬</span>',
     _abcChip('기본(D+ 순)', !abcSortTheme, 'setAbcSortTheme(false)'),
     _abcChip('테마 동반순', abcSortTheme, 'setAbcSortTheme(true)')].join('');
-  const chips = `${search}<div class="abc-chiprow"${searching ? ' style="opacity:max(.45,var(--fade-floor))"' : ''}>${gradeRow}</div><div class="abc-chiprow"${searching ? ' style="opacity:max(.45,var(--fade-floor))"' : ''}>${stageRow}</div><div class="abc-chiprow">${sortRow}</div>`;
+  const fade = searching ? ABC_SEARCH_FADE : '';
+  const chips = `${search}<div class="abc-chiprow abc-fade-row" style="${fade}">${gradeRow}</div><div class="abc-chiprow abc-fade-row" style="${fade}">${stageRow}</div><div class="abc-chiprow">${sortRow}</div>`;
 
   content.innerHTML = `
     <div style="margin:0 0 10px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--c-orange-bg7)">
@@ -4053,34 +4114,14 @@ function renderAbcPage() {
     ${clusters ? `<div style="margin-bottom:8px;font-size:11px;color:var(--muted)">섹터 묶음: ${clusters}</div>` : ''}
     ${_abcFlowSourceHtml(d.flow_source)}
     ${_abcEarningsSourceHtml(d.earnings_source)}
-    ${rows.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
-      <thead><tr style="color:var(--muted);font-size:11px">
-        <th style="text-align:left;padding:3px 8px">종목</th>
-        <th style="padding:3px 8px">등급</th>
-        <th style="padding:3px 8px" title="🩷 강돌파 / 벽앞 / 약돌파 / 대기 / 이탈 — v5.291부터 MA600 기준이고, 강돌파(거래량 동반 장대양봉 돌파)를 밴드보다 먼저 판정합니다. A급 후보는 강돌파뿐입니다.">C단계</th>
-        <th style="padding:3px 8px;color:${ABC_MA_COLOR}" title="${_abcMaLabel()}을 종가로 처음 넘은 봉(최근 20봉 내) — 등락률·거래량배수·이후 D+1/2/3 거래량. 강돌파 판정의 근거입니다.">돌파봉</th>
-        <th style="text-align:right;padding:3px 8px;color:${ABC_MA_COLOR}"
-            title="장기 추세 전환선 — C단계를 이 선 기준으로 가릅니다(v5.291). ⚠️ naver 수정주가는 액면분할·무상증자만 반영하고 현금배당은 미조정이라 TradingView(ADJ)와 2~3% 차이가 날 수 있습니다(계룡건설 실측: 스캐너 18,443 vs TV 18,014, 배당 소급조정 −3.1%p + 봉수 차이 +2.4%p).">${_abcMaLabel()}<span style="font-size:9px">(단계기준)</span></th>
-        <th style="text-align:right;padding:3px 8px" title="B 중앙값 밴드·매물대·진돌이/가돌이 판정 기준선입니다(사용자 확정: MA200 유지). v5.291부터 C단계는 여기가 아니라 MA600이 정합니다 — 이 칸은 참고용.">${_abcStageLabel()}<span style="font-size:9px">(참고)</span></th>
-        <th style="text-align:right;padding:3px 8px" title="${_abcStageLabel()} 첫 상향돌파봉(최근 60봉) 포함 3봉 중 최대 거래량 ÷ 돌파 직전 5일 평균 — 3.0배 이상 진돌이, 미만 가돌이(표시 전용). v5.331 전엔 이 칸 설명이 ${_abcMaLabel()}로 잘못 적혀 있었다">vol배수</th>
-        <th style="text-align:right;padding:3px 8px" title="A: 고점→저점 하락폭">A하락</th>
-        <th style="text-align:right;padding:3px 8px" title="B: 바닥 다지기 봉 수 · 품질(전반/후반 종가 최저·거래량 비교 — 흡수/재하락 주의/중립, 표시 전용)">B일수</th>
-        <th style="padding:3px 8px" title="최근 250봉 종가를 가격 10구간으로 나눈 거래량 분포에서, 현재가 위 구간 중 거래량 최대 구간(표시 전용)">매물대</th>
-        <th style="text-align:right;padding:3px 8px" title="B구간 20봉 평균 거래대금(평소 유동성). 판정 기준입니다 — 당일 값이 아닙니다.">거래대금<span style="font-size:9px;color:var(--muted)">(B평균)</span></th>
-        <th style="padding:3px 8px">매출·EPS</th>
-        <th style="text-align:left;padding:3px 8px">섹터</th>
-        <th style="text-align:left;padding:3px 8px" title="themes_kr.json 테마 · 같은 테마 종목 중 당일 +5% 이상 오른 수 / 테마 종목 수(표시 전용)">테마 동반</th>
-      </tr></thead>
-      <tbody>${rows.map(abcRowHtml).join('')}</tbody></table></div>`
-    : (searching ? `<div class="empty">'${_escapeHtml(abcQuery.trim())}' — ABC 후보에 없어요(차트 판정에서 ABC가 아니거나 MA600 불가)</div>`
-      : abcGradeFilter !== 'all'
-        ? `<div class="empty">${(ABC_GRADE_VIEWS.find(v => v[0] === abcGradeFilter) || [])[1].replace('만', '')} 없음 — <button type="button" class="abc-chip" onclick="setAbcGrade('all')">전체 보기</button></div>`
-        : '<div class="empty">조건에 맞는 종목이 없습니다.</div>')}
+    <div id="abcList">${abcListHtml(rows)}</div>
     <div style="margin-top:10px;font-size:11px;color:var(--muted)">
       차트 판정: ABC ${counts['ABC'] || 0} · 다른 셋업 ${counts['다른 셋업'] || 0} · ABC 아님 ${counts['ABC 아님'] || 0}
       ${counts[_abcMaLabel() + ' 불가'] ? ` · <span title="봉이 ${_abcMaLabel()} 기간보다 짧아 기준선을 못 그립니다 — 등급에서 제외">${_abcMaLabel()} 불가 ${counts[_abcMaLabel() + ' 불가']}</span>` : ''}
       ${d.flags_loaded ? ` · 수동 플래그 ${d.flags_loaded}건` : ''}
     </div>`;
+  _abcComposing = false;                                    // 입력칸을 새로 만들었으니 조합 상태도 새로
+  abcBindSearch();
 }
 
 async function loadAbc() {

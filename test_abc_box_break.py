@@ -153,3 +153,27 @@ def test_box_break_cell():
     assert "📦 박스돌파 D+2" in got[0] and got[1] == "" and got[2] == ""
     assert HTML.count("${abcGateBreakHtml(h)}${abcBoxBreakHtml(h)}") == 1
     assert HTML.count("_abcChip('📦박스돌파만', abcBoxOnly, 'toggleAbcBoxOnly()')") == 1
+
+
+# ── v5.336 강돌파(_find_gate_break)도 원값 비교 ─────────────────────────
+def _gate_series(day_ratio, bar_vol):
+    """700봉 평평(100, 거래량 1000) → 마지막 3봉 전 95로 눌렸다가 MA600을 종가로 첫 돌파."""
+    n = 700
+    close = [100.0] * n; vol = [1000.0] * n
+    i = n - 3
+    close[i - 1] = 95.0; close[i] = 95.0 * day_ratio; vol[i] = bar_vol
+    for k in range(i + 1, n):
+        close[k] = close[i]
+    return pd.Series(close), pd.Series(vol), i
+
+
+def test_gate_break_threshold_compares_raw_values():
+    """사용자 지시: "경계 테스트(1.996배 탈락, +7.01% 통과) 추가"."""
+    c, v, _ = _gate_series(1.08, 1996.0)
+    g = A._find_gate_break(c, v, A.ABC_CONFIG)
+    assert g["vol_mult"] == 2.0 and g["vol_ok"] is False and g["strong"] is False      # 표시 2.0이어도 1.996배는 탈락
+    c, v, _ = _gate_series(1.0701, 3000.0)
+    g = A._find_gate_break(c, v, A.ABC_CONFIG)
+    assert g["day_pct"] == 7.0 and g["day_ok"] is True and g["strong"] is True        # 표시 7.0이어도 +7.01%는 통과
+    c, v, _ = _gate_series(1.0699, 3000.0)
+    assert A._find_gate_break(c, v, A.ABC_CONFIG)["day_ok"] is False                   # +6.99%는 탈락(표시도 7.0)

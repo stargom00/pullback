@@ -87,9 +87,10 @@ def test_clearing_query_restores_chip_state():
 
 def test_search_ui_wiring():
     body = _fn("renderAbcPage")
-    assert 'id="abcSearch"' in body and 'oninput="abcSetQuery(this.value)"' in body
+    assert 'id="abcSearch"' in body and 'oninput="abcOnSearchInput(event)"' in body
     s = _fn("abcSetQuery")
-    assert "abcQuery = v;" in s and "el.focus()" in s and "abcGradeFilter" not in s and "abcStageFilter" not in s   # 칩 상태는 안 건드림
+    # 칩 상태는 안 건드림. v5.336: 입력칸을 다시 만들지 않으므로 focus 복원도 없다(test_abc_search_ime.py)
+    assert "abcQuery = v;" in s and "abcGradeFilter" not in s and "abcStageFilter" not in s
     assert "${h.grade}" in _fn("abcRowHtml")                                      # 검색 결과 행에도 등급 칸
 
 

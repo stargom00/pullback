@@ -5,6 +5,16 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.336 [ABC 강돌파 원값 판정 + 검색칸 한글 IME 수정 — 사용자 지시] ① abc_screener._find_gate_break: "반올림 전 원래 값으로
+    판정하고, 반올림은 표시에만"(v5.335 _find_box_break와 같은 방식) — 예전엔 거래량 1.996배가 2.0으로 반올림돼 통과하고,
+    +7.01%가 7.0 vs 0.07×100(=7.000000000000001)으로 탈락할 수 있었다. 10-06 KR 2,454종목(ABC 1,543) 수정 전후 판정·등급
+    바뀐 종목 0건(지금 경계에 걸린 돌파봉 없음). 경계 테스트(1.996배 탈락·+7.01% 통과·+6.99% 탈락). ② ABC 검색칸 한글 자모
+    분리("상신" → "ㅅ사상상ㅅ시신신", v5.334에서 생김) — 원인: 입력 이벤트마다 renderAbcPage()가 content.innerHTML을 통째로
+    다시 써서 입력칸 요소를 새로 만들고(value 재설정 + focus 이동) 조합 중인 IME 세션을 끊었다. 수정: 조합 중
+    (compositionstart~end 또는 event.isComposing)엔 필터·렌더 안 함, compositionend에서 한 번 적용, 적용은 목록·검색 안내·칩
+    흐림 영역만 갱신(abcRefreshList — 입력칸 그대로), 지연(debounce) 없음. composition 이벤트는 인라인 속성이 없어
+    addEventListener로 붙인다(abcBindSearch — 인라인으로 달면 브라우저가 무시해 조합 끝에도 필터가 안 걸렸다, 실측).
+    Chromium CDP 자모 단위 조합으로 "상신"·"포스코퓨처엠" 입력·필터, 숫자·영문·지우기·칩 복원 확인.
 v5.335 [ABC 📦 박스돌파 사건 표시 + [📦박스돌파만] 칩 — 사용자 지시, 표시 전용(등급·판정 불변)] abc_screener._find_box_break:
     최근 strong_window(20)봉 안에서 직전 b_max_bars(60)봉 최고가를 종가로 **처음** 넘은 봉 → 그 봉 등락 ≥ strong_day_pct(+7%) ·
     거래량 ≥ strong_vol_mult(2.0) × 직전 gate_break_vol_avg(50)일 평균 · 지금도 그 상단 위면 ok("상수는 강돌파 것과 B 최대 길이
@@ -8884,7 +8894,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.335"
+VERSION = "v5.336"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
