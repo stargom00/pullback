@@ -1391,7 +1391,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.333</span>
+      <span class="ver mono" id="verBadge">v5.334</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -3731,6 +3731,31 @@ let _abcData = null;
 const ABC_GRADE_VIEWS = [['A', 'A급만'], ['AB', 'A급+B급'], ['all', '전체']];
 let abcGradeFilter = 'A';
 let abcStageFilter = 'all';      // 'all' | 'C0' | 'C1' | 'C2' | 'C3'
+// v5.334(사용자 지시 "ABC 탭은 종목이 많아서 특정 종목을 찾기 어렵다 → 검색칸 … 검색어가 있으면 등급 칩·C단계 칩 설정과 상관없이
+// 전체에서 찾는다 … 검색어를 지우면 원래 칩 상태로"): 칩 값은 건드리지 않고 검색어만 따로 든다 — 지우면 칩 상태 그대로 복원.
+let abcQuery = '';
+// v5.334(사용자 지시 "테마 동반 수 내림차순 정렬 옵션 추가(기본 정렬은 그대로)") — false = 기본(D+ 순)
+let abcSortTheme = false;
+// 행의 테마 중 가장 큰 동반 수(테마 없으면 −1 — 맨 아래)
+function abcThemeUpMax(h) {
+  const ts = (h && h.themes) || [];
+  return ts.length ? Math.max(...ts.map(x => x.up || 0)) : -1;
+}
+// 테마 동반순 — 동반 수 내림차순, 같으면 들어온 순서(= 기본 D+ 정렬) 유지
+function abcSortByTheme(rows) {
+  return rows.map((h, i) => [h, i]).sort(([a, i], [b, j]) => (abcThemeUpMax(b) - abcThemeUpMax(a)) || (i - j)).map(([h]) => h);
+}
+// 테마 칸 — "이차전지 6/18"(당일 +5% 이상 종목 수 / 테마 종목 수), 테마 없으면 —
+function abcThemesHtml(ts) {
+  if (!ts || !ts.length) return '<span style="color:var(--muted)">—</span>';
+  return ts.map(x => `<span title="${_escapeHtml(x.theme)} — 당일 +5% 이상 ${x.up}종목 / 테마 ${x.total}종목${x.no_data ? ` (등락 모름 ${x.no_data} — 스캔 유니버스 밖)` : ''}">${_escapeHtml(x.theme)} <b class="num">${x.up}/${x.total}</b></span>`).join('<br>');
+}
+// 종목명 일부 또는 코드 일부(대소문자 무시, '.KQ' 같은 접미사 포함 티커 전체에서) — 순수 판정
+function abcSearchMatch(h, q) {
+  const s = String(q || '').trim().toLowerCase();
+  if (!s) return true;
+  return String(h.name || '').toLowerCase().includes(s) || String(h.ticker || '').toLowerCase().includes(s);
+}
 
 function _abcNum(v, suffix = '', digits = 1) {
   if (v == null) return '<span style="color:var(--muted)">—</span>';
@@ -3876,6 +3901,7 @@ function abcRowHtml(h) {
         title="B구간(바닥 다지기) 앞 20봉 평균 — 돌파 당일이 아니라 평소 유동성입니다${h.turnover_today_eok != null ? '. 당일 ' + h.turnover_today_eok.toFixed(0) + '억' : ''}">${_abcNum(h.b_turnover_eok, '억', 0)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);text-align:center">${abcFinCell(h)}</td>
     <td style="padding:4px 8px;border-bottom:1px solid var(--line);font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${h.sector || '—'}</td>
+    <td style="padding:4px 8px;border-bottom:1px solid var(--line);font-size:11px;white-space:nowrap">${abcThemesHtml(h.themes)}</td>
   </tr>`;
 }
 
@@ -3886,7 +3912,12 @@ function abcGradeInView(grade, view) {
   return view === 'A' ? a : (view === 'AB' ? (a || grade === 'B급') : false);
 }
 function abcFilteredHits() {
+  const rows = abcFilteredHitsBase();
+  return abcSortTheme ? abcSortByTheme(rows) : rows;
+}
+function abcFilteredHitsBase() {
   const hits = (_abcData && _abcData.hits) || [];
+  if (String(abcQuery || '').trim()) return abcSortByBreakout(hits.filter(h => abcSearchMatch(h, abcQuery)));   // 검색 = 칩 무시
   return abcSortByBreakout(hits.filter(h =>
     abcGradeInView(h.grade, abcGradeFilter) &&
     // v5.291: `startsWith` → **정확 일치**. 새 라벨은 접두어 체계가 아니라
@@ -3915,6 +3946,14 @@ function _abcChip(label, active, onclick) {
 
 function setAbcGrade(g) { abcGradeFilter = g; renderAbcPage(); writeTabHash(); }   // v5.332: 선택은 URL 해시(page)에
 function setAbcStage(s) { abcStageFilter = s; renderAbcPage(); }
+function setAbcSortTheme(on) { abcSortTheme = !!on; renderAbcPage(); }
+// 검색어 입력 — 다시 그린 뒤 입력칸 포커스·커서를 되돌린다(content가 통째로 다시 그려져도 타이핑이 끊기지 않게)
+function abcSetQuery(v) {
+  abcQuery = v;
+  renderAbcPage();
+  const el = document.getElementById('abcSearch');
+  if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+}
 // v5.291: `toggleAbcGateBreak()`/`abcGateBreakOnly` 제거 — 🩷600돌파 토글이
 // `🩷 강돌파` 단계로 흡수됐다(사용자 지시). 죽은 토글을 남겨두면 "왜 안 먹나"를
 // 나중에 또 조사하게 된다.
@@ -3981,7 +4020,15 @@ function renderAbcPage() {
     _abcChip('대기', abcStageFilter === '대기', "setAbcStage('대기')"),
     _abcChip('이탈', abcStageFilter === '이탈', "setAbcStage('이탈')"),
   ].join('');
-  const chips = `<div class="abc-chiprow">${gradeRow}</div><div class="abc-chiprow">${stageRow}</div>`;
+  const searching = !!String(abcQuery || '').trim();
+  const search = `<div class="abc-chiprow"><span class="abc-lbl">검색</span>
+      <input id="abcSearch" type="search" placeholder="종목명·코드 일부" value="${_escapeHtml(abcQuery)}" oninput="abcSetQuery(this.value)"
+        style="min-height:28px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:12px;width:min(220px,60vw)">
+      ${searching ? `<span style="font-size:11px;color:var(--muted)">검색 중 — 등급·C단계 칩과 상관없이 전체에서 ${rows.length}건 · 지우면 칩 상태로 돌아가요</span>` : ''}</div>`;
+  const sortRow = ['<span class="abc-lbl">정렬</span>',
+    _abcChip('기본(D+ 순)', !abcSortTheme, 'setAbcSortTheme(false)'),
+    _abcChip('테마 동반순', abcSortTheme, 'setAbcSortTheme(true)')].join('');
+  const chips = `${search}<div class="abc-chiprow"${searching ? ' style="opacity:max(.45,var(--fade-floor))"' : ''}>${gradeRow}</div><div class="abc-chiprow"${searching ? ' style="opacity:max(.45,var(--fade-floor))"' : ''}>${stageRow}</div><div class="abc-chiprow">${sortRow}</div>`;
 
   content.innerHTML = `
     <div style="margin:0 0 10px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--c-orange-bg7)">
@@ -4011,9 +4058,11 @@ function renderAbcPage() {
         <th style="text-align:right;padding:3px 8px" title="B구간 20봉 평균 거래대금(평소 유동성). 판정 기준입니다 — 당일 값이 아닙니다.">거래대금<span style="font-size:9px;color:var(--muted)">(B평균)</span></th>
         <th style="padding:3px 8px">매출·EPS</th>
         <th style="text-align:left;padding:3px 8px">섹터</th>
+        <th style="text-align:left;padding:3px 8px" title="themes_kr.json 테마 · 같은 테마 종목 중 당일 +5% 이상 오른 수 / 테마 종목 수(표시 전용)">테마 동반</th>
       </tr></thead>
       <tbody>${rows.map(abcRowHtml).join('')}</tbody></table></div>`
-    : (abcGradeFilter !== 'all'
+    : (searching ? `<div class="empty">'${_escapeHtml(abcQuery.trim())}' — ABC 후보에 없어요(차트 판정에서 ABC가 아니거나 MA600 불가)</div>`
+      : abcGradeFilter !== 'all'
         ? `<div class="empty">${(ABC_GRADE_VIEWS.find(v => v[0] === abcGradeFilter) || [])[1].replace('만', '')} 없음 — <button type="button" class="abc-chip" onclick="setAbcGrade('all')">전체 보기</button></div>`
         : '<div class="empty">조건에 맞는 종목이 없습니다.</div>')}
     <div style="margin-top:10px;font-size:11px;color:var(--muted)">

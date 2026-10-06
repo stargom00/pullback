@@ -5,6 +5,15 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.334 [ABC 검색칸 · 테마 동반 표시 — 사용자 지시, 전부 표시 전용(등급·판정 불변)] ① 검색칸: 종목명·코드 일부(대소문자
+    무시)로 찾는다 — 검색어가 있으면 등급·C단계 칩과 상관없이 전체에서(abcFilteredHitsBase), 칩 상태는 건드리지 않아 지우면 그대로
+    복원. 행에 등급 칸 그대로. 다시 그려도 입력칸 포커스·커서 유지(abcSetQuery). ② 테마 동반: themes_kr.json(코드 없이 이름만
+    적힌 종목은 유니버스에서 이름으로 찾음 — /api/themes와 같은 규칙) 테마별로 "당일 +5% 이상 종목 수 / 테마 종목 수"(ABC_CONFIG
+    theme_up_pct 5.0 = 사용자 지시 값, abc_screener.day_change_pct·theme_companions — 번들 마지막 봉 기준, 일봉 없는 종목은
+    분모엔 넣고 "등락 모름"으로 따로 셈). 테마 없으면 "—". 정렬 칩 [기본(D+ 순)] [테마 동반순](동반 수 내림차순, 같으면 기본 순).
+    10-06 실데이터: 포스코퓨처엠 = 이차전지 14/23, 상신이디피 = 테마 없음. KR 전체 등급 불변 재확인(2,454종목 차이 0건,
+    scripts/measurements/2026-10-06_abc_display_only_check.py). 테스트: test_abc_search_theme.py(실데이터 픽스처
+    test_fixtures/abc_theme_20261006.json.gz).
 v5.333 [저점 관찰 KR 도달 판정 = 정규장 고가 — 사용자 결정 "정규장 장중 고가는 인정하고, 장외(프리·애프터) 체결은 판정에서
     뺀다"] 경위: 꿈비(407400.KQ) 10-02 주봉 코호트(기준가 1,969)가 10-06 "도달"로 분류됐는데 그 고가 2,115는 넥스트레이드
     애프터마켓 16:04의 1주 체결(정규장 최고 2,010 = +2.1%). ① KR 판정 = 기준일 다음 거래일부터 naver 분봉 09:00~15:30 최고가 ≥
@@ -8865,7 +8874,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.333"
+VERSION = "v5.334"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -13945,6 +13954,27 @@ def _abc_quarterly_axes(ticker: str) -> dict:
                 "reason": f"{type(e).__name__}: {e}"}
 
 
+def _abc_theme_map(uni: dict) -> dict:
+    """themes_kr.json → {테마명: [티커…]}. 코드 없이 이름만 적힌 종목은 유니버스에서 같은 이름을 찾아 붙인다(/api/themes와 같은
+    파일 규칙). 파일이 없거나 깨지면 {} — ABC 판정과 무관한 표시라 탭을 막지 않되 로그를 남긴다."""
+    try:
+        with open(_THEMES_FILE, encoding="utf-8") as f:
+            doc = _json.load(f)
+    except Exception as e:
+        print(f"[abc-themes] themes_kr.json 읽기 실패 — 테마 표시 생략: {type(e).__name__}: {e}", flush=True)
+        return {}
+    by_name = {n: t for t, n in (uni or {}).items()}
+    out = {}
+    for theme, body in (doc.get("themes") or {}).items():
+        ms = []
+        for item in (body.get("tickers") or []):
+            t = (item.get("t") or "").strip() or by_name.get(item.get("n") or "")
+            if t:
+                ms.append(t)
+        out[theme] = ms
+    return out
+
+
 @app.get("/api/abc")
 async def api_abc():
     """🔺 ABC 탭 — 번들 캐시만 읽어 종목별 A/B/C를 판정한다(새 fetch 0건).
@@ -14048,6 +14078,11 @@ async def api_abc():
     flow_targets = [t for t, r in cands if r["c_stage"] in _FLOW_STAGES]
     flow = await _flow_fill(flow_targets)
 
+    # v5.334 테마 동반(표시 전용) — themes_kr.json 테마별 당일 +5% 종목 수. 파일이 없거나 깨지면 빈 값(fail-open, 로그 남김)
+    abc_themes = _abc_theme_map(uni)
+    _changes = {t: abc_screener.day_change_pct(df) for t, df in (bundle.get("data") or {}).items()}
+    theme_comp = abc_screener.theme_companions(abc_themes, _changes)
+
     hits = []
     for t, r in cands:
         f = fin.get(t) or {"rev_yoy_pos": None, "rev_yoy_of": 0,
@@ -14093,6 +14128,7 @@ async def api_abc():
             # v5.276: 🩷 MA600 첫 돌파 **사건**(C 단계와 독립).
             "gate_break": r["gate_break"],
             "sector": si.get("sector"),
+            "themes": theme_comp.get(t) or [],        # v5.334 테마·동반 수(표시 전용)
         })
 
     # v5.291: 정렬 순서를 `_ABC_STAGE_PRIORITY` **하나로 통합**했다. 예전엔

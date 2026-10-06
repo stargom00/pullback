@@ -73,6 +73,9 @@ ABC_CONFIG = {
     # '매물대 N~M원'으로 카드 표시. 기존 MA200×1.3 체류 계산 제거"). 창은 A와 같은 a_lookback(250봉)을 쓴다.
     # 예전 supply_band(MA200~×1.3)·supply_min_bars(30봉)는 가격대 매물이 아니라 "이동평균 근처 체류 봉 수"였다(삭제).
     "supply_profile_bins": 10,     # 가격 구간 수(사용자 지시 값). 표시 전용 — 등급·판정에 안 쓴다
+    # 테마 동반(v5.334, 사용자 지시 "같은 테마 종목 중 당일 +5% 이상 오른 종목 수 / 테마 전체 종목 수") — 사용자 지시 값.
+    # 표시 전용 — 등급·판정에 안 쓴다.
+    "theme_up_pct": 5.0,
     # 다른 셋업(ABC 아님) 판정
     "other_above_ma_bars": 60,     # 게이트선 위 60봉 이상이면 박스/눌림
     # 기업 축
@@ -328,6 +331,30 @@ def format_supply_bins(prof: dict, last: float) -> list:
     for b in reversed(prof.get("bins") or []):
         mark = ("★" if z and b["lo"] == z.get("lo") else " ") + ("▲" if b["lo"] >= last else " ")
         out.append(f"{mark} {b['lo']:>12,.0f} ~ {b['hi']:>12,.0f}  거래량 {b['vol']:>16,.0f}  ({b['vol'] / total * 100:5.1f}%)")
+    return out
+
+
+def day_change_pct(df) -> "float | None":
+    """당일 등락률(%) = 마지막 봉 종가 ÷ 그 전 봉 종가 − 1. 봉이 2개 미만·전일 종가 0이면 None. (v5.334 테마 동반 — 표시 전용)"""
+    if df is None or len(df) < 2:
+        return None
+    c = df["Close"]
+    prev, last = float(c.iloc[-2]), float(c.iloc[-1])
+    return round((last / prev - 1) * 100, 2) if prev > 0 else None
+
+
+def theme_companions(themes: dict, changes: dict, cfg: dict = ABC_CONFIG) -> dict:
+    """v5.334 테마 동반 — {테마명: [티커…]}와 {티커: 당일 등락률 %|None} → {티커: [{theme, up, total, no_data}]}.
+    up = 그 테마 종목 중 당일 등락률 ≥ theme_up_pct(+5%)인 수(자기 자신 포함), total = 테마 종목 수 전체,
+    no_data = 등락률을 모르는 종목 수(번들에 일봉 없음 — total엔 포함, up엔 안 셈). **표시 전용.**"""
+    out = {}
+    for name, members in (themes or {}).items():
+        ms = list(dict.fromkeys(members))
+        chg = [changes.get(m) for m in ms]
+        up = sum(1 for c in chg if c is not None and c >= cfg["theme_up_pct"])
+        info = {"theme": name, "up": up, "total": len(ms), "no_data": sum(1 for c in chg if c is None)}
+        for m in ms:
+            out.setdefault(m, []).append(info)
     return out
 
 
