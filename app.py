@@ -5,6 +5,15 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.338 [버그수정 — POST /api/prices 500(저점일지 매매 기록 [현재가 갱신] 보유 6건 전부 "조회 실패")] 원인(운영 로그 확정):
+    batch_prices의 JSONResponse가 `ValueError: Out of range float values are not JSON compliant: nan`. yfinance가 장 마감 뒤
+    집계 전 당일 봉을 OHLC = NaN·Volume만 채워 준다(JBGS·RDW 10-06 봉 실측) — US 분기가 그 NaN 고가를 highs에 넣어 KR·UPBIT
+    종목까지 요청 전체가 실패. v5.337과 무관(이 경로는 관찰 단계·일봉 조회 확대 코드를 안 거친다 — 배포 직후 발견은 시점
+    우연, 같은 봉 모양이면 v5.336에서도 났다). 수정: _one_price가 비유한 값을 내보내지 않는다(_finite) — US 당일 고가·거래량은
+    당일 봉 값이 유한할 때만(고가 결측이면 기존 규칙대로 현재가로 대신 + [prices] 로그), 현재가가 없으면 마지막 유효 봉 하나에서
+    종가·고가·거래량을 같이. KR도 종가 결측이면 그 종목만 실패. 영향 범위: /api/prices를 쓰는 일지 페이퍼 추적·현재가 갱신·
+    수동 추가와 저점 매매 기록. 저점 관찰·추적·관심·평가는 harness._fetch_us_batch(_downcast가 Close NaN 봉 제거)라 영향 없음.
+    테스트: test_prices_nan_row.py(실데이터 픽스처 test_fixtures/yf_nan_ohlc_20261006.json.gz).
 v5.337 [저점 관찰 출발 이후 단계 + 출발일 모양 + "+직접 추가" 종목코드 한글 IME — 사용자 지시] ① 단계(관심 신호 · 측정 전,
     새 임계값 없음): "WSI처럼 바닥에서 1차 출발한 뒤 숨고르기하는 종목은 도달 이후가 진입 자리다" — 관찰 → 출발 → 숨고르기 →
     재출발 / 무효(lowpoint_watch.stage_info). 출발 = v5.333 도달 판정 그대로(출발일 = 도달일, 출발 고가 = reached_high). 무효선 =
@@ -8915,7 +8924,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.337"
+VERSION = "v5.338"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -20936,6 +20945,14 @@ async def batch_prices(request: Request):
         return JSONResponse({"prices": {}})
     tickers = tickers[:50]   # 안전 상한
 
+    def _finite(x):
+        """NaN·inf·None·변환 불가 → None. 응답에 비유한 실수가 섞이면 JSONResponse가 요청 전체를 500으로 만든다(v5.338)."""
+        try:
+            v = float(x)
+        except (TypeError, ValueError):
+            return None
+        return v if math.isfinite(v) else None
+
     def _one_price(tk: str):
         try:
             if upbit.is_upbit(tk):
@@ -20953,20 +20970,29 @@ async def batch_prices(request: Request):
                 df = naver_kr.fetch_history(tk, days=10)
                 if df is not None and not df.empty:
                     row = df.iloc[-1]
-                    return tk, float(df["Close"].iloc[-1]), float(row.get("High", row["Close"])), float(row.get("Volume", 0) or 0)
+                    c = _finite(row["Close"])
+                    if c is not None:
+                        hi = _finite(row.get("High"))
+                        return tk, c, (hi if hi is not None else c), (_finite(row.get("Volume")) or 0.0)
             else:
+                # v5.338: yfinance는 장 마감 뒤 집계 전 당일 봉을 OHLC = NaN, Volume만 채워 준다(2026-10-07 JBGS·RDW
+                # 10-06 봉 실측). 예전엔 그 NaN 고가가 highs에 들어가 JSON 직렬화가 요청 전체를 500으로 만들었다(보유 6건
+                # 전부 "조회 실패"). 당일 고가·거래량은 당일 봉 값이 유한할 때만, 없으면 기존 규칙대로 현재가로 대신한다.
                 info = yf.Ticker(tk).fast_info
-                p = getattr(info, "last_price", None)
+                p = _finite(getattr(info, "last_price", None))
                 df = yf.Ticker(tk).history(period="5d", interval="1d")
-                hi, vol = None, None
-                if df is not None and not df.empty:
-                    row = df.iloc[-1]
-                    hi = float(row.get("High", row["Close"]))
-                    vol = float(row.get("Volume", 0) or 0)
-                if p and p > 0:
-                    return tk, float(p), (hi if hi is not None else float(p)), (vol or 0.0)
-                if df is not None and not df.empty:
-                    return tk, float(df["Close"].iloc[-1]), hi, vol
+                has = df is not None and not df.empty
+                if p is not None and p > 0:
+                    row = df.iloc[-1] if has else {}
+                    hi, vol = _finite(row.get("High")), _finite(row.get("Volume"))
+                    if has and hi is None:
+                        print(f"[prices] {tk} yfinance 마지막 봉({df.index[-1].date()}) 고가 결측 — 고가는 현재가로 대신",
+                              flush=True)
+                    return tk, p, (hi if hi is not None else p), (vol or 0.0)
+                valid = df.dropna(subset=["Close"]) if has else None
+                if valid is not None and not valid.empty:   # 현재가 없음 — 마지막 유효 봉 하나에서 종가·고가·거래량을 같이
+                    row = valid.iloc[-1]
+                    return tk, float(row["Close"]), _finite(row.get("High")), _finite(row.get("Volume"))
         except Exception:
             pass
         return tk, None, None, None
