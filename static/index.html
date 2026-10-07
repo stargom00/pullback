@@ -1395,7 +1395,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.339</span>
+      <span class="ver mono" id="verBadge">v5.340</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -7541,10 +7541,11 @@ function lpwRestPos(r) {
 }
 // 출발일 대비 최근(마지막 확정 봉) 거래량 배수
 function lpwVolRatio(r) { return (r.last_volume != null && r.departure_volume > 0) ? r.last_volume / r.departure_volume : null; }
-// v5.337 "추가 2" 출발일 모양(표시 전용 — 단계 판정에 안 씀): "출발 vol 2.4× · 윗꼬리 60%". 값 없으면 —
+// v5.337 "추가 2" 출발일 모양(표시 전용 — 단계 판정에 안 씀): "출발 1.8 ATR · vol 2.4× · 윗꼬리 60%"(v5.340 출발 크기 =
+// (출발 고가 − 전일 종가) / ATR(14)). 값 없으면 —
 function lpwShapeText(r) {
-  const v = r.departure_vol_mult, wk = r.departure_upper_wick;
-  return `출발 vol ${v != null ? Number(v).toFixed(1) + '×' : '—'} · 윗꼬리 ${wk != null ? Math.round(wk * 100) + '%' : '—'}`;
+  const a = r.departure_atr_mult, v = r.departure_vol_mult, wk = r.departure_upper_wick;
+  return `출발 ${a != null ? Number(a).toFixed(1) + ' ATR' : '—'} · vol ${v != null ? Number(v).toFixed(1) + '×' : '—'} · 윗꼬리 ${wk != null ? Math.round(wk * 100) + '%' : '—'}`;
 }
 // 출발 레코드 → 숨고르기(출발·숨고르기·분류 전 — 무효선에 가까운 순, 거리 모르면 아래)와 종료(재출발·무효 — 전환일 최근 위)
 function lpwStageSplit(recs) {
@@ -7816,7 +7817,7 @@ function renderLowpointWatch() {
         <td class="num r" title="출발일 ${_escapeHtml(r.reached_date || '')} ${r.mkt === 'US' ? '일봉 고가' : '정규장 고가'}">${hi != null ? _lptFmt(hi, r.mkt) : '—'}</td>
         <td class="num r" title="${r.last_date ? '종가 ' + _escapeHtml(r.last_date) : ''}">${r.last_close != null ? _lptFmt(r.last_close, r.mkt) : '—'}</td>
         <td class="lpw-barcell"><div class="lpw-rbar" title="${tip}" role="img" aria-label="${tip}">${rp.pos == null ? '' : `<i style="left:${rp.pos.toFixed(1)}%"></i>`}</div></td>
-        <td class="num r" title="출발일 거래량 ÷ 직전 50거래일 평균 · 윗꼬리 = (고가−max(시가,종가))/(고가−저가) · 종가 위치 ${r.departure_close_pos != null ? Math.round(r.departure_close_pos * 100) + '%' : '—'} (일봉 — KR은 장외 체결 포함) · 표시 전용">${lpwShapeText(r)}</td>
+        <td class="num r" title="출발 크기 = (출발 고가 − 전일 종가) ÷ 출발일 기준 ATR(14, 중앙값 TR) · 출발일 거래량 ÷ 직전 50거래일 평균 · 윗꼬리 = (고가−max(시가,종가))/(고가−저가) · 종가 위치 ${r.departure_close_pos != null ? Math.round(r.departure_close_pos * 100) + '%' : '—'} (일봉 — KR은 장외 체결 포함) · 표시 전용">${lpwShapeText(r)}</td>
         <td class="num r" title="최근 거래량 ÷ 출발일 거래량${r.last_checked_date ? ' (' + _escapeHtml(r.last_checked_date) + ')' : ''}">${vr != null ? vr.toFixed(2) + '×' : '—'}</td>
         <td class="r"><button type="button" class="n-btn sm" title="매매 기록에 이 종목으로 기록" aria-label="기록" onclick="lpwRecord('${_escapeHtml(r.id)}')">✎</button><button type="button" class="n-btn sm" title="관찰에서 삭제" aria-label="삭제" onclick="lpwDelete('${_escapeHtml(r.id)}')">✕</button></td></tr>`;
   }).join('');

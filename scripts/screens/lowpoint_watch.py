@@ -14,7 +14,7 @@
   last_close·last_date·checked_at — 마지막 추적 결과(활성 종목만 갱신)
   stage       v5.337 watch | departed | resting | restart | invalid — 출발 이후 단계(stage_info), 종료(restart·invalid)면 고정
   invalid_line·departure_high·stage_date·stage_close·last_checked_date·departure_volume·last_volume·stage_warning
-  departure_vol_mult·departure_close_pos·departure_upper_wick — 출발일 모양(표시 전용, departure_shape)
+  departure_vol_mult·departure_close_pos·departure_upper_wick·departure_atr_mult — 출발일 모양(표시 전용, departure_shape)
 
 판정(v5.333): 기준일 **이후** 거래일의 **정규장 고가** ≥ 기준가 × (1 + REACH_PCT/100) → 도달(정확히 1.05배도 도달).
 기준일 당일·이전은 보지 않는다. KR 정규장 고가 = naver 분봉 09:00~15:30 최고가(장외 체결 제외 — 아래 REACH_RULE 주석,
@@ -317,8 +317,12 @@ def shape_lookback_days() -> int:
     return -(-_vol_avg_bars() * 7 // 5)
 
 
-def departure_shape(daily: "pd.DataFrame | None", reached_date: str, through: "str | None") -> dict:
-    out = {"departure_vol_mult": None, "departure_close_pos": None, "departure_upper_wick": None}
+def departure_shape(daily: "pd.DataFrame | None", reached_date: str, through: "str | None",
+                    departure_high: "float | None" = None) -> dict:
+    """v5.340 출발 크기(departure_atr_mult, 사용자 지시 "출발 크기 = (출발일 판정 고가 − 전일 종가) / 출발일 기준 ATR(14) …
+    ATR은 기존 atr() 함수와 기존 기간 그대로") = scanner.atr(중앙값 TR) · lowpoint_eval.ATR_DAYS(14) — 평가 페이지 ATR과 같은
+    호출·같은 가드(봉 > ATR_DAYS). ATR 봉은 출발일까지(포함). 봉 부족·ATR 0이면 None. 표시 전용."""
+    out = {"departure_vol_mult": None, "departure_close_pos": None, "departure_upper_wick": None, "departure_atr_mult": None}
     if daily is None or daily.empty or through is None or reached_date > through:
         return out                                               # 출발일 봉 미확정 — 다음 추적 때 다시
     d = daily.copy()
@@ -331,6 +335,13 @@ def departure_shape(daily: "pd.DataFrame | None", reached_date: str, through: "s
     if h > l:                                                    # 고가 = 저가(또는 열 없음 — nan 비교는 False)면 None
         out["departure_close_pos"] = (c - l) / (h - l)
         out["departure_upper_wick"] = (h - max(o, c)) / (h - l)
+    upto = d[d.index <= dep].dropna(subset=["Close"])
+    if departure_high is not None and len(upto) > ev.ATR_DAYS and {"High", "Low"} <= set(upto.columns):
+        import scanner
+        a = scanner.atr(upto["High"], upto["Low"], upto["Close"], ev.ATR_DAYS)
+        prev_close = float(upto["Close"].iloc[-2])
+        if a > 0:
+            out["departure_atr_mult"] = (float(departure_high) - prev_close) / a
     n = _vol_avg_bars()
     prev = d[d.index < dep]["Volume"].iloc[-n:] if "Volume" in d.columns else []
     if len(prev) == n:
@@ -448,7 +459,7 @@ def track(records: list, today: date, now_iso: str, fetch=fetch_daily, fetch_min
                 reached += 1
             si = stage_info(r["base_date"], hit["reached_date"], hit.get("reached_high"), daily, thru)
             u.update(si)
-            u.update(departure_shape(daily, hit["reached_date"], thru))      # 표시 전용 — 판정은 위 si에서 끝났다
+            u.update(departure_shape(daily, hit["reached_date"], thru, hit.get("reached_high")))      # 표시 전용 — 판정은 위 si에서 끝났다
             if si["stage_warning"]:
                 warnings.append(f"{tag} {si['stage_warning']}")
             prev = r.get("stage") if was_reached else "watch"
@@ -459,7 +470,7 @@ def track(records: list, today: date, now_iso: str, fetch=fetch_daily, fetch_min
         else:
             u.update(stage="watch", invalid_line=None, departure_high=None, stage_date=None, stage_close=None,
                      departure_volume=None, last_volume=None, stage_warning=None, last_checked_date=last["last_date"],
-                     departure_vol_mult=None, departure_close_pos=None, departure_upper_wick=None)
+                     departure_vol_mult=None, departure_close_pos=None, departure_upper_wick=None, departure_atr_mult=None)
             if was_reached:
                 u.update(status="active", reached_date=None, reached_days=None, reached_high=None, reached_pct=None)
                 if rc is None:

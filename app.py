@@ -5,6 +5,12 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.340 [저점 관찰 숨고르기 행 출발 크기 — 사용자 지시, 표시 전용(판정 반영 금지)] "출발 크기 = (출발일 판정 고가 − 전일 종가) /
+    출발일 기준 ATR(14). ATR은 기존 atr() 함수와 기존 기간 그대로. 새 상수 금지." lowpoint_watch.departure_shape에
+    departure_atr_mult — scanner.atr(중앙값 TR) · lowpoint_eval.ATR_DAYS(14), 평가 페이지 ATR과 같은 호출·같은 가드(봉 > 14).
+    판정 고가 = reached_high(KR 정규장 고가·US 일봉 고가), ATR 봉 = 확정 일봉 출발일까지(포함), 전일 종가 = 출발 직전 거래일 통합 종가.
+    봉 부족·ATR 0이면 None → 화면 "—". 출발일 모양 칸 "출발 1.8 ATR · vol 2.4× · 윗꼬리 60%". stage_info는 이 값을 보지 않는다.
+    기존 출발 레코드는 다음 추적에서 채워진다(종료 단계는 조회 안 하므로 비어 있음). 테스트: test_lowpoint_watch_stage.py.
 v5.339 [저점 관찰 출발 판정 = 확정 봉만 + 관찰 페이지 섹션 순서 — 사용자 지시] 경위: "꿈비가 10-07 장중 정규장 고가 2,085(기준
     2,067)를 터치해 '출발'로 기록됨. 장중 2,030까지 밀린 상태. 출발 판정만 장중 봉을 즉시 인정하고, 숨고르기·재출발·무효는 확정
     종가만 쓰고 있어 기준이 어긋남." ① 출발(도달) 판정은 확정 봉만 — KR app.KR_CLOSE_CONFIRMED_HM(20:10 KST) 뒤, US 뉴욕 16:00 뒤
@@ -8935,7 +8941,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.339"
+VERSION = "v5.340"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

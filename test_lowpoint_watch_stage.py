@@ -13,6 +13,7 @@
 ② 판정에 종가 대신 고가(after["High"]) → test_judged_on_close_not_high · test_transitions FAIL
 ③ 경계 비교 바꿔치기(`c > dep` → `>=`, `c < inv` → `<=`) → 각각 test_boundaries FAIL
 ④ (추가 2 출발일 모양) 윗꼬리를 max(시가,종가) 대신 min(시가,종가)부터 → test_shape_values · test_shape_boundaries FAIL
+⑤ (v5.340 출발 크기) 판정 고가(reached_high) 대신 출발일 일봉 고가 → test_departure_atr_size FAIL
 """
 from __future__ import annotations
 
@@ -322,7 +323,8 @@ def _ohlcv(n_prev, prev_vol, dep_bar, after=()):
 def test_shape_values():
     # 시가 100 · 고가 110 · 저가 95 · 종가 104 → 위치 (104−95)/15 = 0.6, 윗꼬리 (110−104)/15 = 0.4, 거래량 600/250 = 2.4
     s = w.departure_shape(_ohlcv(50, 250, (100, 110, 95, 104, 600)), "2026-10-05", THRU)
-    assert s == {"departure_vol_mult": 2.4, "departure_close_pos": pytest.approx(0.6), "departure_upper_wick": pytest.approx(0.4)}
+    assert s == {"departure_vol_mult": 2.4, "departure_close_pos": pytest.approx(0.6), "departure_upper_wick": pytest.approx(0.4),
+                 "departure_atr_mult": None}                           # 출발 고가를 안 넘기면 출발 크기 없음
     # 음봉(시가 > 종가)이면 윗꼬리는 시가부터: (110−108)/15
     s = w.departure_shape(_ohlcv(50, 250, (108, 110, 95, 104, 600)), "2026-10-05", THRU)
     assert s["departure_upper_wick"] == pytest.approx(2 / 15) and s["departure_close_pos"] == pytest.approx(0.6)
@@ -342,7 +344,7 @@ def test_shape_boundaries():
     assert w.departure_shape(d, "2026-10-05", THRU)["departure_vol_mult"] == 2.4
     # 출발일 봉 미확정(오늘 장중 출발) → 전부 None
     assert w.departure_shape(_ohlcv(50, 250, (100, 110, 95, 104, 600)), "2026-10-05", "2026-10-04") == \
-        {"departure_vol_mult": None, "departure_close_pos": None, "departure_upper_wick": None}
+        {"departure_vol_mult": None, "departure_close_pos": None, "departure_upper_wick": None, "departure_atr_mult": None}
     assert w._vol_avg_bars() == 50                                     # abc_screener.ABC_CONFIG["gate_break_vol_avg"] 재사용
 
 
@@ -365,10 +367,54 @@ def test_shape_does_not_affect_stage():
 
 
 def test_shape_text_and_column():
-    got = _js("[lpwShapeText({departure_vol_mult: 2.4, departure_upper_wick: 0.6}),"
-              " lpwShapeText({departure_vol_mult: null, departure_upper_wick: null}),"
-              " lpwShapeText({departure_vol_mult: 2.44, departure_upper_wick: 0.004})]")
-    assert got == ["출발 vol 2.4× · 윗꼬리 60%", "출발 vol — · 윗꼬리 —", "출발 vol 2.4× · 윗꼬리 0%"]
+    got = _js("[lpwShapeText({departure_atr_mult: 1.8, departure_vol_mult: 2.4, departure_upper_wick: 0.6}),"
+              " lpwShapeText({departure_atr_mult: null, departure_vol_mult: null, departure_upper_wick: null}),"
+              " lpwShapeText({departure_atr_mult: 1.84, departure_vol_mult: 2.44, departure_upper_wick: 0.004})]")
+    assert got == ["출발 1.8 ATR · vol 2.4× · 윗꼬리 60%", "출발 — · vol — · 윗꼬리 —", "출발 1.8 ATR · vol 2.4× · 윗꼬리 0%"]
     body = _fn("renderLowpointWatch")
     assert '<th class="r">출발일 모양</th><th class="r" title="최근 거래량 ÷ 출발일 거래량">거래량</th>' in body   # 나란히
     assert body.count("${lpwShapeText(r)}") == 1
+
+
+# ── v5.340 출발 크기 = (출발일 판정 고가 − 전일 종가) / 출발일 기준 ATR(14) — 표시 전용 ─────────────
+def _atr_frame(n_prev):
+    """출발일(2026-10-05) 앞 n_prev봉: 고 102 · 저 98 · 종 100(TR 4) + 출발 봉 시 100 · 고 110 · 저 95 · 종 104(TR 15)."""
+    days = pd.bdate_range(end="2026-10-02", periods=n_prev)
+    rows = [(d, 100.0, 102.0, 98.0, 100.0, 250.0) for d in days] + [(pd.Timestamp("2026-10-05"), 100.0, 110.0, 95.0, 104.0, 600.0)]
+    return pd.DataFrame({k: [r[i + 1] for r in rows] for i, k in enumerate(("Open", "High", "Low", "Close", "Volume"))},
+                        index=pd.DatetimeIndex([r[0] for r in rows]))
+
+
+def test_departure_atr_size():
+    """ATR = 중앙값 TR(최근 14봉: 4 × 13 + 출발일 15) = 4. 판정 고가 108(KR 정규장 — 일봉 고가 110과 다를 수 있다) − 전일 종가 100
+    → 2.0 ATR. 일봉 고가를 쓰면 2.5가 된다."""
+    import scanner
+    d = _atr_frame(20)
+    assert scanner.atr(d["High"], d["Low"], d["Close"], 14) == 4.0                 # 기존 atr()·기존 기간 그대로
+    assert w.departure_shape(d, "2026-10-05", THRU, 108.0)["departure_atr_mult"] == pytest.approx(2.0)
+    assert w.departure_shape(d, "2026-10-05", THRU, None)["departure_atr_mult"] is None
+    # 출발일 뒤 봉은 ATR에 안 들어간다
+    d2 = pd.concat([d, pd.DataFrame({"Open": [100.0], "High": [200.0], "Low": [50.0], "Close": [100.0], "Volume": [1.0]},
+                                    index=pd.DatetimeIndex(["2026-10-06"]))])
+    assert w.departure_shape(d2, "2026-10-05", THRU, 108.0)["departure_atr_mult"] == pytest.approx(2.0)
+
+
+def test_departure_atr_insufficient_bars():
+    """봉 수 > ATR_DAYS(14)일 때만 — 평가 페이지 short_metrics와 같은 가드. 모자라면 None(화면 "—")."""
+    assert w.departure_shape(_atr_frame(13), "2026-10-05", THRU, 108.0)["departure_atr_mult"] is None    # 14봉
+    assert w.departure_shape(_atr_frame(14), "2026-10-05", THRU, 108.0)["departure_atr_mult"] is not None  # 15봉
+    flat = _ohlcv(50, 250, (100, 100, 100, 100, 600))                                # TR 전부 0 → ATR 0 → None
+    assert w.departure_shape(flat, "2026-10-05", THRU, 100.0)["departure_atr_mult"] is None
+    assert _js("lpwShapeText({departure_atr_mult: null, departure_vol_mult: 2.4, departure_upper_wick: 0.6})") == \
+        "출발 — · vol 2.4× · 윗꼬리 60%"
+
+
+def test_departure_atr_wired_into_track_and_not_judgement():
+    d = _atr_frame(20)
+    rec = {**_rec("S2.KS", "KR", status="reached", reach_rule=w.REACH_RULE, reached_date="2026-10-05",
+                  reached_high=108.0), "base_date": "2026-10-02", "base_price": 100.0}
+    up, _ = w.track([rec], date(2026, 10, 8), "2026-10-08T07:00:00+09:00", fetch=lambda r, t: {"S2.KS": d},
+                    fetch_min=lambda c, dd: [])
+    assert up[rec["id"]]["departure_atr_mult"] == pytest.approx(2.0)
+    import inspect
+    assert "atr" not in inspect.getsource(w.stage_info).lower()
