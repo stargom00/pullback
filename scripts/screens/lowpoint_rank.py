@@ -5,11 +5,16 @@
 
 레코드(서버 /data/lowpoint_rankings.json, 저장 규칙은 app.py — 저점 매매 기록과 같은 레코드 단위 rev·삭제 로그·날짜별 사본):
   id          r_{tf}_{label} — 관찰 코호트(주·월봉 기준봉 라벨) 하나에 한 건
-  tf·label    관찰 레코드와 같은 값 · deadline = 라벨 다음 KR 거래일 09:00 KST(이후 확정 불가 — 사후 편향 방지)
+  tf·label    관찰 레코드와 같은 값 · scan_at = 코호트가 스캔으로 등록된 시각
+  deadline    스캔 실행일(scan_at의 KST 날짜) **다음** KR 거래일 09:00 KST — 이후 확정 불가(사후 편향 방지). v5.341 수정(사용자
+              지시 "라벨 기준이 아니라 스캔 실행일의 다음 KR 거래일 09:00 KST") — 월봉은 1일 08:00 스캔이라 라벨(월말) 기준이면 1일
+              09:00에 닫혀 1시간뿐이었다. 주봉(토요일 스캔)은 라벨 기준과 같은 날이 나온다.
   items       [{watch_id, code, name, mkt, base_date, base_price}] — 관찰 레코드 그대로(확정 전까지 새 히트를 합친다)
   picks       {watch_id: {pick: first|normal|no, reasons: [칩 0~2개]}} — 없는 종목은 보통·칩 없음
   confirmed_at  확정 시각(이후 picks·snapshot 수정 불가) · snapshot {watch_id: 지표} — 확정 시점 값, 표시·리뷰 전용
-  results     {watch_id: {d5|d10|d20: {date, close, pct}}} — 매일 07:00 추적이 확정 종가로 채운다(분류와 무관 — 미분류도)
+  results     {watch_id: {anchor: {date, close}, d5|d10|d20: {date, close, pct}}} — 매일 07:00 추적이 확정 종가로 채운다(분류와
+              무관 — 미분류도). 기준점 = **기한 시각에 확정돼 있던 마지막 봉의 종가**(lowpoint_watch.confirmed_through(시장, 기한) —
+              KR 20:10 KST·US 뉴욕 16:00, 새 상수 없음), D+N = 그 다음 거래일부터 N번째 확정 봉. 스냅샷의 기준가 대비 %는 그대로(표시용).
 
 채점: 확정 안 된 코호트(기한 지남)는 전 종목 "미분류". 출발 여부·출발일·단계는 관찰 레코드를 그대로 참조한다(여기서 판정 안 함).
 """
@@ -39,9 +44,9 @@ def rank_id(tf: str, label: str) -> str:
     return f"r_{tf}_{label}"
 
 
-def deadline(label: str, is_trading_day) -> str:
-    """라벨(기준봉 날짜) **다음** KR 거래일 09:00 KST — ISO 문자열. is_trading_day(market, 'YYYY-MM-DD') → bool."""
-    d = date.fromisoformat(label)
+def deadline(scan_day: str, is_trading_day) -> str:
+    """스캔 실행일(KST 날짜) **다음** KR 거래일 09:00 KST — ISO 문자열. is_trading_day(market, 'YYYY-MM-DD') → bool."""
+    d = date.fromisoformat(scan_day)
     for _ in range(15):
         d += timedelta(days=1)
         if is_trading_day("kr", d.isoformat()):
@@ -63,8 +68,9 @@ def cohort_items(watch_records: list, tf: str, label: str) -> list:
     return sorted(out, key=lambda x: x["code"])
 
 
-def new_record(tf: str, label: str, items: list, is_trading_day, now_iso: str) -> dict:
-    return {"id": rank_id(tf, label), "tf": tf, "label": label, "deadline": deadline(label, is_trading_day),
+def new_record(tf: str, label: str, items: list, is_trading_day, now_iso: str, scan_at: str) -> dict:
+    scan_day = datetime.fromisoformat(scan_at).astimezone(KST).date().isoformat()
+    return {"id": rank_id(tf, label), "tf": tf, "label": label, "scan_at": scan_at, "deadline": deadline(scan_day, is_trading_day),
             "items": items, "picks": {}, "confirmed_at": None, "snapshot": {}, "results": {}, "created_at": now_iso}
 
 
@@ -146,20 +152,26 @@ def snapshot_item(item: dict, daily: "pd.DataFrame | None", through: "str | None
 
 
 # ── 결과(확정 종가만) ────────────────────────────────────────────────────────────────────
-def returns_for(item: dict, daily: "pd.DataFrame | None", through: "str | None", horizons) -> dict:
-    """기준일 다음 거래일부터 센 N번째 **확정** 봉(휴장일은 봉이 없으니 저절로 건너뜀)의 종가 수익률. 아직 N봉이 안 됐으면 그
-    키는 없다. 반환 {"d5": {"date", "close", "pct"}, …}."""
+def returns_for(item: dict, daily: "pd.DataFrame | None", through: "str | None", horizons,
+                anchor_through: "str | None") -> dict:
+    """기준점 = anchor_through(기한 시각의 확정일)까지의 마지막 봉 종가. 그 다음 거래일부터 센 N번째 **확정** 봉(through까지 —
+    휴장일은 봉이 없으니 저절로 건너뜀)의 종가 수익률. 아직 N봉이 안 됐으면 그 키는 없다.
+    반환 {"anchor": {"date", "close"}, "d5": {"date", "close", "pct"}, …} — 기준점 봉이 없으면 {}."""
     out = {}
     d = w._confirmed_daily(daily, through)
-    if d is None or d.empty:
+    if d is None or d.empty or anchor_through is None:
         return out
     d = d.dropna(subset=["Close"])
-    after = d[d.index > pd.Timestamp(item["base_date"])]
+    upto = d[d.index <= pd.Timestamp(anchor_through)]
+    if upto.empty:
+        return out
+    a_ts, a_close = upto.index[-1], float(upto["Close"].iloc[-1])
+    out["anchor"] = {"date": str(a_ts.date()), "close": a_close}
+    after = d[d.index > a_ts]
     for n in horizons:
         if len(after) >= n:
             c = float(after["Close"].iloc[n - 1])
-            out[f"d{n}"] = {"date": str(after.index[n - 1].date()), "close": c,
-                            "pct": round((c / item["base_price"] - 1) * 100, 2)}
+            out[f"d{n}"] = {"date": str(after.index[n - 1].date()), "close": c, "pct": round((c / a_close - 1) * 100, 2)}
     return out
 
 

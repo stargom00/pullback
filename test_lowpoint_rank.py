@@ -9,6 +9,8 @@
 ① 기한 이후 확정 허용(lowpoint_rank.is_open이 기한을 안 봄) → test_deadline_boundary · test_confirm_after_deadline_rejected_and_unclassified FAIL
 ② 스냅샷을 현재 값으로 갱신(결과 기록 작업이 snapshot을 다시 계산) → test_snapshot_frozen_at_confirm FAIL
 ③ 수익률에 장중 가격(returns_for가 확정 봉 자르기 없이 전체 일봉) → test_returns_skip_holidays_and_use_confirmed_close_only FAIL
+④ (기한·기준점 수정) 기준점을 라벨 종가(기준일 봉·base_price)로 되돌림 → test_month_deadline_and_anchor_from_scan_day FAIL,
+   주봉 test_returns_… 는 그대로 통과(주봉은 기준점이 라벨 종가와 같은 날)
 """
 from __future__ import annotations
 
@@ -42,9 +44,10 @@ def _k(s):
 
 # ── 기한 ─────────────────────────────────────────────────────────────────
 def test_deadline_next_kr_trading_day_0900():
-    assert rk.deadline("2026-10-02", app.is_trading_day) == "2026-10-06T09:00:00+09:00"   # 10-05 개천절 대체 휴장 건너뜀
-    assert rk.deadline("2026-10-08", app.is_trading_day) == "2026-10-12T09:00:00+09:00"   # 10-09 한글날 + 주말
-    assert rk.deadline("2026-09-30", app.is_trading_day) == "2026-10-01T09:00:00+09:00"   # 월봉 — 1일 08:00 스캔 뒤 1시간
+    """기한 = **스캔 실행일** 다음 KR 거래일 09:00(v5.341 수정 — 라벨 기준 아님)."""
+    assert rk.deadline("2026-10-03", app.is_trading_day) == "2026-10-06T09:00:00+09:00"   # 토 스캔 · 10-05 개천절 대체 휴장
+    assert rk.deadline("2026-10-10", app.is_trading_day) == "2026-10-12T09:00:00+09:00"   # 주봉 10-08 라벨(10-09 한글날) 토 스캔
+    assert rk.deadline("2026-10-01", app.is_trading_day) == "2026-10-02T09:00:00+09:00"   # 월봉 — 1일(거래일) 08:00 스캔 → 2번째 거래일
 
 
 def test_deadline_boundary():
@@ -80,6 +83,9 @@ class _Req:
 @pytest.fixture
 def store(tmp_path, monkeypatch):
     app._rec_list_write(app.LP_WATCH_PATH, [dict(r) for r in W])
+    monkeypatch.setattr(app, "LOWPOINT_STATE_PATH", str(tmp_path / "state.json"))      # 러너 상태 — 주봉 10-08 라벨을 토요일에 스캔
+    (tmp_path / "state.json").write_text(json.dumps({"week": {"target": "2026-10-08", "status": "ok",
+                                                              "finished_at": "2026-10-10T09:05:00+09:00"}}))
     clock = {"now": _k("2026-10-10 10:00")}
     monkeypatch.setattr(app, "_lp_rank_now", lambda: clock["now"])
     pre = pd.bdate_range(end="2026-10-08", periods=80)
@@ -112,8 +118,9 @@ def test_ensure_creates_only_open_cohorts_and_merges(store):
     app._lp_rank_ensure(_k("2026-10-10 10:00"))
     (rec,) = _recs()
     assert rec["id"] == "r_week_2026-10-08" and rec["deadline"] == "2026-10-12T09:00:00+09:00" and rec["rev"] == 1
+    assert rec["scan_at"] == "2026-10-10T09:05:00+09:00"                                    # 러너 상태의 같은 라벨 성공 시각
     assert [i["code"] for i in rec["items"]] == ["111111.KQ", "222222.KS", "AAA"] and rec["confirmed_at"] is None
-    # 지난 코호트(기한 지남)는 만들지 않는다 — 소급 미분류 없음
+    # 지난 코호트(스캔 시각을 모름 · 기한 지남)는 만들지 않는다 — 소급 미분류 없음
     app._rec_list_write(app.LP_WATCH_PATH, W + [{**W[0], "id": "w_week_2026-09-25_x", "label": "2026-09-25", "code": "X"}])
     app._lp_rank_ensure(_k("2026-10-10 10:00"))
     assert [r["id"] for r in _recs()] == ["r_week_2026-10-08"]
@@ -188,12 +195,15 @@ def test_returns_skip_holidays_and_use_confirmed_close_only():
     days = ["2026-10-08", "2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16", "2026-10-19",
             "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23"]
     d = _daily(days, [100.0, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110])
-    got = rk.returns_for(item, d, "2026-10-23", (5, 10))
-    assert got == {"d5": {"date": "2026-10-16", "close": 105.0, "pct": 5.0}, "d10": {"date": "2026-10-23", "close": 110.0, "pct": 10.0}}
+    anchor = w.confirmed_through("KR", "2026-10-12T09:00:00+09:00")                         # 기한(월 09:00) 시각의 확정일
+    assert anchor == "2026-10-11"
+    got = rk.returns_for(item, d, "2026-10-23", (5, 10), anchor)
+    assert got == {"anchor": {"date": "2026-10-08", "close": 100.0},                         # 주봉 — 기준점 = 라벨 종가와 같은 날
+                   "d5": {"date": "2026-10-16", "close": 105.0, "pct": 5.0}, "d10": {"date": "2026-10-23", "close": 110.0, "pct": 10.0}}
     # 10-16 장중(확정 전) — 그 봉 종가가 있어도 D+5는 아직 없다
     thru = w.confirmed_through("KR", "2026-10-16T15:00:00+09:00")
-    assert thru == "2026-10-15" and rk.returns_for(item, d, thru, (5, 10)) == {}
-    assert rk.returns_for(item, d, None, (5,)) == {}
+    assert thru == "2026-10-15" and set(rk.returns_for(item, d, thru, (5, 10), anchor)) == {"anchor"}
+    assert rk.returns_for(item, d, None, (5,), anchor) == {} and rk.returns_for(item, d, "2026-10-23", (5,), None) == {}
     assert rk.HORIZONS == {"week": (5, 10), "month": (20,)}
 
 
@@ -205,9 +215,33 @@ def test_results_job_fills_without_confirm_and_no_minutes(store):
     rec = _recs()[0]
     assert out["changed"] == ["r_week_2026-10-08"] and rec["confirmed_at"] is None          # 미분류도 채점
     assert rec["results"][W[0]["id"]]["d5"]["pct"] == 10.0 and rec["results"][W[0]["id"]]["d10"]["pct"] == 10.0
-    assert W[1]["id"] not in rec["results"]                                                 # 이후 봉 없음 — 비움
+    assert set(rec["results"][W[1]["id"]]) == {"anchor"}                                   # 이후 봉 없음 — 기준점만
     import inspect
     assert "fetch_min" not in inspect.getsource(app._lp_rank_results_blocking)
+
+
+def test_month_deadline_and_anchor_from_scan_day(store, monkeypatch):
+    """월봉 09-30 라벨 · 1일(거래일) 08:05 스캔 → 기한 = 2번째 거래일(10-02) 09:00, 기준점 = 1일 확정 종가, D+1 = 10-02."""
+    mw = [{**W[0], "id": "w_month_2026-09-30_111111.KQ", "tf": "month", "label": "2026-09-30", "base_date": "2026-09-30",
+           "base_price": 100.0},
+          {**W[2], "id": "w_month_2026-09-30_AAA", "tf": "month", "label": "2026-09-30", "base_date": "2026-09-30", "base_price": 10.0}]
+    app._rec_list_write(app.LP_WATCH_PATH, mw)
+    entry = {"bar_date": "2026-09-30", "rows": []}
+    store["clock"]["now"] = _k("2026-10-01 08:05")
+    app._lp_watch_register(entry, "month", "scan")                         # 스캔 직후 등록 경로 — 그 시각이 스캔 시각
+    (rec,) = _recs()
+    assert (rec["scan_at"][:16], rec["deadline"]) == ("2026-10-01T08:05", "2026-10-02T09:00:00+09:00")
+    assert rk.is_open(rec, "2026-10-01T09:30:00+09:00") and not rk.is_open(rec, "2026-10-02T09:00:00+09:00")
+    days = ["2026-09-30", "2026-10-01"] + [str(x.date()) for x in pd.bdate_range(start="2026-10-02", periods=25)
+                                           if app.is_trading_day("kr", str(x.date()))][:21]
+    closes = [100.0, 110.0] + [110.0 + i + 1 for i in range(len(days) - 2)]
+    store["state"]["data"] = {"111111.KQ": _daily(days, closes), "AAA": _daily(days, [c / 10 for c in closes])}
+    app._lp_rank_results_blocking(_k("2026-11-30 07:00"))
+    res = _recs()[0]["results"]
+    kr, us = res[mw[0]["id"]], res[mw[1]["id"]]
+    assert kr["anchor"] == {"date": "2026-10-01", "close": 110.0}                            # 라벨(09-30) 종가 100이 아니다
+    assert kr["d20"] == {"date": days[21], "close": closes[21], "pct": round((closes[21] / 110.0 - 1) * 100, 2)}
+    assert days[2] == "2026-10-02" and us["anchor"]["date"] == "2026-10-01"                 # US도 기한 시각(뉴욕 10-01 20:00) 확정일
 
 
 # ── 리뷰 ─────────────────────────────────────────────────────────────────

@@ -11,12 +11,16 @@ v5.341 [저점일지 "순위" 페이지 — 코호트 분류 학습, 사용자 �
     전인 코호트만** — 지난 코호트를 소급해 미분류로 채우지 않는다, 삭제한 id는 다시 안 만듦, 확정 전엔 새 히트를 합침). ② 분류: 종목마다
     [먼저 간다/보통/안 간다](기본 보통) + 이유 칩 0~2개(거래량 폭발 이력/박스 상단 근접/위가 비어 있음/테마/수급/이평 수렴/그냥
     느낌), "먼저 간다" 3~7개 안내(저장은 막지 않음). 임시 저장 PUT /api/lowpoint/rankings/{id}(picks만), [분류 확정] POST …/confirm —
-    확정 시각 저장·이후 수정 불가(409 confirmed). 기한 = 라벨 다음 KR 거래일 09:00 KST(is_trading_day — 휴장 건너뜀), 기한 정각부터
-    확정·임시 저장 거부(409 deadline) → 미분류로 채점. ③ 확정 시점 스냅샷(표시·리뷰 전용, 이후 불변): 확정 종가·기준가 대비 %·ATR%
+    확정 시각 저장·이후 수정 불가(409 confirmed). 기한 = **스캔 실행일** 다음 KR 거래일 09:00 KST(is_trading_day — 휴장 건너뜀;
+    사용자 수정 지시 "라벨 기준이 아니라 스캔 실행일의 다음 KR 거래일 09:00 KST" — 월봉은 1일 08:00 스캔이라 라벨 기준이면 1시간뿐
+    이었다, 주봉은 같은 날이 나온다). 스캔 시각 = 스캔 직후 등록 시각, 아니면 러너 상태가 같은 라벨을 성공한 시각 — 모르면 레코드를
+    안 만든다(관찰에 남은 지난 코호트가 열리지 않게). 기한 정각부터 확정·임시 저장 거부(409 deadline) → 미분류로 채점. ③ 확정 시점 스냅샷(표시·리뷰 전용, 이후 불변): 확정 종가·기준가 대비 %·ATR%
     (lowpoint_eval.short_metrics)·최근 60봉 최대 거래량 배수(직전 50일 평균 — abc ABC_CONFIG b_max_bars·gate_break_vol_avg 재사용,
     50봉 못 채운 봉은 안 셈)·관찰 단계·무효선까지 거리·테마·테마 동반(themes_kr.json · theme_companions, 등락은 확정 봉)·기관/외국인
     5일 순매수 일수(investor_flow, KR만 — US는 소스 없어 비움). ④ 결과: 07:00 추적 작업이 이어서(_lp_rank_results_blocking) 주봉
-    D+5·D+10, 월봉 D+20 확정 종가 수익률(기준일 다음 거래일부터 N번째 확정 봉 — 휴장일은 봉이 없어 건너뜀, 일봉만·분봉 조회 없음),
+    D+5·D+10, 월봉 D+20 확정 종가 수익률 — 기준점 = **기한 시각에 확정돼 있던 마지막 봉 종가**(confirmed_through(시장, 기한), 새
+    상수 없음 — 월봉은 1일 종가, 주봉은 라벨 종가와 같은 날), D+N = 그 다음 거래일부터 N번째 확정 봉(휴장일은 봉이 없어 건너뜀,
+    일봉만·분봉 조회 없음). 스냅샷의 기준가 대비 %는 그대로(표시용),
     분류와 무관하게 채점(미분류 포함). 출발 여부·출발일·단계는 관찰 레코드를 그대로 참조(판정 로직 불변). ⑤ 리뷰 4표: 분류별 성적
     (평균 수익률·출발률, 코호트 전체 대비) / 오른 종목 vs 안 오른 종목(스냅샷 지표 평균, 출발 기준) / 놓친 것(보통·안 간다 중 출발 —
     스냅샷·이유 칩) / 이유 칩별 적중률, 상단 "코호트 4주(월봉은 3개월) 쌓이기 전에는 결론 내지 않음". ⑥ 저장 /data/lowpoint_rankings.json
@@ -20486,7 +20490,8 @@ def _lp_watch_register(entry: dict, tf: str, source: str) -> int:
     print(f"[lowpoint-watch] {source} {tf} {(entry or {}).get('bar_date')} — 히트 {len(new)}건 중 {len(added)}건 등록",
           flush=True)
     try:
-        _lp_rank_ensure(_lp_rank_now())            # v5.341 순위 — 새 코호트가 생기면 분류 레코드(기한 전만)
+        now_r = _lp_rank_now()                     # v5.341 순위 — 새 코호트가 생기면 분류 레코드(기한 전만)
+        _lp_rank_ensure(now_r, {tf: ((entry or {}).get("bar_date"), now_r.astimezone(KST).isoformat())} if source == "scan" else None)
     except Exception as e:
         print(f"[lowpoint-rank] ⚠️ 코호트 생성 실패: {type(e).__name__}: {e}", flush=True)
     return len(added)
@@ -20765,9 +20770,23 @@ def _lp_rank_deleted_ids() -> set:
     return out
 
 
-def _lp_rank_ensure(now: "datetime") -> dict:
+def _lp_rank_scan_at(tf: str, label: str, scan_at: "dict | None") -> "str | None":
+    """코호트 스캔 실행 시각 — ① 스캔 직후 등록(scan_at = {tf: (라벨, 시각)})이면 그 시각 ② 아니면 저점 러너 상태가 **같은 라벨**을
+    성공으로 끝낸 시각(finished_at · 서버 재시작 시드 등). 모르면 None → 레코드를 만들지 않는다("지금"으로 대신하면 관찰에 남은
+    지난 코호트가 방금 스캔된 것처럼 열린다). 레코드를 만들 때 한 번만 정하고 다시 계산하지 않는다."""
+    hit = (scan_at or {}).get(tf)
+    if hit and hit[0] == label:
+        return hit[1]
+    st = (_lowpoint_load_state().get(tf) or {})
+    if st.get("target") == label and st.get("status") == "ok":
+        return st.get("finished_at") or st.get("last_ok_at")
+    return None
+
+
+def _lp_rank_ensure(now: "datetime", scan_at: "dict | None" = None) -> dict:   # scan_at = {tf: (라벨, 스캔 시각 ISO)}
     """관찰 코호트(주·월봉 라벨)마다 순위 레코드를 만든다 — **기한 전인 코호트만**(지난 코호트를 소급해 미분류로 채우지 않는다).
-    이미 있으면 확정 전에 한해 새로 들어온 관찰 종목을 합친다. 삭제한 id는 다시 안 만든다. 0건이어도 로그."""
+    기한 = 스캔 실행일 다음 KR 거래일 09:00 KST. 이미 있으면 확정 전에 한해 새로 들어온 관찰 종목을 합친다(기한은 그대로).
+    삭제한 id는 다시 안 만든다. 0건이어도 로그."""
     rk = _lp_rank_mod()
     now_iso = now.astimezone(KST).isoformat()
     watch = _rec_list_load(LP_WATCH_PATH)
@@ -20789,7 +20808,10 @@ def _lp_rank_ensure(now: "datetime") -> dict:
                 continue
             if rid in deleted:
                 continue
-            new = rk.new_record(tf, label, items, is_trading_day, now_iso)
+            sa = _lp_rank_scan_at(tf, label, scan_at)
+            if sa is None:
+                continue
+            new = rk.new_record(tf, label, items, is_trading_day, now_iso, sa)
             if not rk.is_open(new, now_iso):
                 continue
             new["rev"] = 1
@@ -20864,7 +20886,8 @@ def _lp_rank_results_blocking(now: "datetime") -> dict:
     for r in todo:
         res = {}
         for i in r.get("items") or []:
-            got = rk.returns_for(i, data.get(i["code"]), w.confirmed_through(i["mkt"], now_iso), rk.HORIZONS[r["tf"]])
+            got = rk.returns_for(i, data.get(i["code"]), w.confirmed_through(i["mkt"], now_iso), rk.HORIZONS[r["tf"]],
+                                 w.confirmed_through(i["mkt"], r["deadline"]))   # 기준점 = 기한 시각의 마지막 확정 봉
             if got:
                 res[i["watch_id"]] = got
         new_res[r["id"]] = res
