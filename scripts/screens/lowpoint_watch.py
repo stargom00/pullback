@@ -92,7 +92,12 @@ def reach_info(base_price: float, base_date: str, daily: "pd.DataFrame | None", 
 # 뒷날을 먼저 보면 도달일이 틀어진다). 서버가 6거래일 넘게 추적을 못 돌리면 그 날은 영영 못 받아 보류가 풀리지 않는다 —
 # 화면에 "판정 보류(분봉 없음 MM-DD)"로 드러난다(조용히 넘기지 않는다).
 # US는 그대로 yfinance 일봉 고가다(yfinance 일봉은 정규장만 담는다 — 장외 문제 없음).
-REACH_RULE = "regular_high"                   # 이 규칙으로 판정한 레코드 표시 — 없는 도달 레코드는 다음 추적 때 재판정
+# v5.339(사용자 지시) "출발 판정은 확정된 봉만 사용 … 장중 즉시 인정 로직 제거" — 꿈비 10-07이 장중 정규장 고가 2,085(기준 2,067)
+# 터치로 "출발"이 됐는데, 숨고르기·재출발·무효는 확정 종가만 써서 기준이 어긋났다(출발일 모양도 확정 봉이 있어야 계산된다).
+# 확정 = confirmed_through(KR app.KR_CLOSE_CONFIRMED_HM 20:10 KST · US 뉴욕 16:00) — 단계 판정과 같은 함수. 판정 값은 그대로
+# (KR 정규장 분봉 고가, US 일봉 고가). 규칙 이름을 올려, v5.333 규칙(장중 인정 가능)으로 도달한 레코드를 다음 추적에서 다시 본다.
+REACH_RULE = "regular_high_confirmed"         # 이 규칙으로 판정한 레코드 표시
+PREV_REACH_RULE = "regular_high"              # v5.333~v5.338 — 장중 봉으로 도달했을 수 있다 → recheck_reached
 KR_REGULAR_HM = ("090000", "153000")          # KRX 정규장(시장 시간 — 임계값 아님). 15:30 종가 단일가 봉까지 포함
 MINUTE_URL = "https://api.stock.naver.com/chart/domestic/item/{code}/minute"
 
@@ -122,31 +127,29 @@ def regular_high(bars: list) -> "float | None":
     return max(vals) if vals else None
 
 
-def judge_kr_regular(rec: dict, daily: "pd.DataFrame | None", today: date, session_done_today: bool,
+def judge_kr_regular(rec: dict, daily: "pd.DataFrame | None", through: "str | None",
                      fetch_min=fetch_minutes, pct: float = REACH_PCT) -> dict:
-    """KR 레코드 한 건 — 기준일 다음 거래일부터, 아직 판정 안 한 거래일을 순서대로 정규장 고가로 판정.
+    """KR 레코드 한 건 — 기준일 다음 거래일부터, 아직 판정 안 한 **확정** 거래일(≤ through)을 순서대로 정규장 고가로 판정.
     거래일 목록은 naver 일봉 날짜(거래량 0인 날은 정규장 체결이 없으니 넘긴다). 반환 필드:
       reached·reached_date·reached_days·reached_high(정규장 고가)·reached_pct(기준가 대비 %)
       regular_checked_through(끝까지 판정한 마지막 거래일) · pending_day(분봉을 못 받아 멈춘 거래일, 없으면 None)
-    오늘 봉은 정규장이 끝나기 전이면 넘어서 도달한 경우만 인정하고, 아니면 판정 완료로 치지 않는다."""
+    through 이후(확정 전) 봉은 넘어도 판정하지 않는다(v5.339 — 장중 즉시 인정 제거). through가 None이면 아무것도 안 본다."""
     out = {"reached": False, "regular_checked_through": rec.get("regular_checked_through"), "pending_day": None}
-    if daily is None or daily.empty:
+    if daily is None or daily.empty or through is None:
         return out
     d = daily.copy()
     d.index = pd.to_datetime(d.index).normalize()
     start = max(pd.Timestamp(rec["base_date"]), pd.Timestamp(out["regular_checked_through"] or rec["base_date"]))
+    d = d[(d.index > start) & (d.index <= pd.Timestamp(through))]
     thr = reach_threshold(float(rec["base_price"]), pct)
-    for ts, row in d[d.index > start].iterrows():
+    for ts, row in d.iterrows():
         day = ts.date()
-        done = day < today or session_done_today
         if "Volume" in d.columns and float(row.get("Volume") or 0) <= 0:
-            if done:
-                out["regular_checked_through"] = str(day)
+            out["regular_checked_through"] = str(day)
             continue                                   # 정규장 체결 없음(거래정지 등)
         bars = fetch_min(rec["code"], day)
         if not bars:                                   # None(실패)·[](없음) — 판정 보류, 다음 실행에 다시
-            if done:
-                out["pending_day"] = str(day)
+            out["pending_day"] = str(day)
             break
         hi = regular_high(bars)
         if hi is not None and hi >= thr * (1 - 1e-12):
@@ -155,10 +158,48 @@ def judge_kr_regular(rec: dict, daily: "pd.DataFrame | None", today: date, sessi
                        reached_high=hi, reached_pct=round((hi / float(rec["base_price"]) - 1) * 100, 2),
                        regular_checked_through=str(day))
             break
-        if not done:
-            break                                      # 오늘 정규장 진행 중 — 아직 미도달, 내일 다시
         out["regular_checked_through"] = str(day)
     return out
+
+
+def _confirmed_daily(daily: "pd.DataFrame | None", through: "str | None") -> "pd.DataFrame | None":
+    """확정 봉(≤ through)만. through가 None이면 빈 표(판정 안 함)."""
+    if daily is None or daily.empty:
+        return daily
+    d = daily.copy()
+    d.index = pd.to_datetime(d.index).normalize()
+    return d.iloc[0:0] if through is None else d[d.index <= pd.Timestamp(through)]
+
+
+def recheck_reached(rec: dict, daily: "pd.DataFrame | None", through: "str | None", fetch_min=fetch_minutes,
+                    pct: float = REACH_PCT) -> dict:
+    """v5.333 규칙(장중 인정 가능)으로 도달한 레코드 한 건을 확정 봉 기준으로 다시 본다.
+    - 도달일 봉이 아직 확정 전(> through) → {"revert": True, "resume_from": 도달일 직전 거래일} — 관찰로 되돌리고, 확정 뒤
+      그 날부터 다시 판정한다(그 앞 거래일들은 이미 미도달로 판정됐다 — judge는 날짜 순으로 처음 넘은 날에서 멈춘다).
+    - 확정됐으면 그 날의 확정 판정 고가를 다시 읽는다(KR 정규장 분봉 / US 일봉). ≥ 기준이면 도달 유지(고가·%는 확정값으로),
+      < 기준이면 되돌림. KR 분봉을 못 받으면(보존 6거래일 밖) 판정 보류 — 저장값 유지, refetch_failed=True로 보고.
+    반환: {"revert", "resume_from", "reached_high", "reached_pct", "refetch_failed"}"""
+    rd = rec.get("reached_date")
+    out = {"revert": False, "resume_from": None, "reached_high": rec.get("reached_high"),
+           "reached_pct": rec.get("reached_pct"), "refetch_failed": False}
+    prev_days = []
+    if daily is not None and not daily.empty:
+        idx = pd.to_datetime(daily.index).normalize()
+        prev_days = [str(t.date()) for t in idx if pd.Timestamp(rec["base_date"]) < t < pd.Timestamp(rd)]
+    resume = prev_days[-1] if prev_days else None
+    if through is None or rd > through:
+        return {**out, "revert": True, "resume_from": resume}
+    if rec.get("mkt") == "US":
+        d = _confirmed_daily(daily, through)
+        hi = float(d.loc[pd.Timestamp(rd), "High"]) if d is not None and pd.Timestamp(rd) in d.index else None
+    else:
+        bars = fetch_min(rec["code"], date.fromisoformat(rd))
+        hi = regular_high(bars) if bars else None
+    if hi is None or hi != hi:
+        return {**out, "refetch_failed": True}
+    if hi >= reach_threshold(float(rec["base_price"]), pct) * (1 - 1e-12):
+        return {**out, "reached_high": hi, "reached_pct": round((hi / float(rec["base_price"]) - 1) * 100, 2)}
+    return {**out, "revert": True, "resume_from": resume}
 
 
 # ── v5.337(사용자 지시) 출발 이후 단계 — 관찰 → 출발 → 숨고르기 → 재출발 / 무효 ─────────────────────────────────────
@@ -333,26 +374,18 @@ def fetch_daily(records: list, today: date) -> dict:
     return out
 
 
-def _session_done_today(now_iso: str) -> bool:
-    try:
-        from datetime import datetime, timedelta, timezone
-        n = datetime.fromisoformat(now_iso).astimezone(timezone(timedelta(hours=9)))
-        return n.strftime("%H%M%S") > KR_REGULAR_HM[1]
-    except (TypeError, ValueError):
-        return False
-
-
 def track(records: list, today: date, now_iso: str, fetch=fetch_daily, fetch_min=fetch_minutes) -> tuple[dict, dict]:
     """활성 레코드 + **정규장 규칙으로 판정되지 않은 옛 도달 레코드**(reach_rule 없음)만 추적 → ({id: 바뀔 필드}, 집계).
     KR = 정규장 고가(judge_kr_regular), US = yfinance 일봉 고가(정규장만 담김). 옛 도달 레코드는 기준일부터 다시 판정해
     미도달이면 관찰로 되돌린다(reverted). 새 규칙으로 도달한 레코드는 다시 조회하지 않는다."""
-    old_reached = [r for r in records if r.get("status") == "reached" and r.get("reach_rule") != REACH_RULE]
+    old_reached = [r for r in records if r.get("status") == "reached" and r.get("reach_rule") not in (REACH_RULE, PREV_REACH_RULE)]
+    rechecks = [r for r in records if r.get("status") == "reached" and r.get("reach_rule") == PREV_REACH_RULE]
     staging = [r for r in records if r.get("status") == "reached" and r.get("reach_rule") == REACH_RULE and is_target(r)]
-    targets = [r for r in records if r.get("status") == "active"] + old_reached + staging
+    targets = [r for r in records if r.get("status") == "active"] + old_reached + rechecks + staging
     data = fetch(targets, today) if targets else {}
-    done_today = _session_done_today(now_iso)
     updates, failed, reached, reverted, pending = {}, [], 0, [], []
     transitions, first_staged, warnings = [], [], []
+    unconfirmed_reverted, recheck_kept_stored = [], []
     for r in targets:
         was_reached = r.get("status") == "reached"
         daily = data.get(r["code"])
@@ -361,31 +394,58 @@ def track(records: list, today: date, now_iso: str, fetch=fetch_daily, fetch_min
             failed.append(r["code"])
             continue
         u = {"last_close": last["last_close"], "last_date": last["last_date"], "checked_at": now_iso, "reach_rule": REACH_RULE}
-        if was_reached and r.get("reach_rule") == REACH_RULE:
+        thru = confirmed_through(r.get("mkt"), now_iso)
+        tag = f"{r['code']}({r.get('label')} {r.get('tf')})"
+        rc = None
+        if was_reached and r.get("reach_rule") == PREV_REACH_RULE:
+            rc = recheck_reached(r, daily, thru, fetch_min)
+            if rc["refetch_failed"]:
+                recheck_kept_stored.append(f"{tag}@{r.get('reached_date')}")
+            if rc["revert"]:
+                unconfirmed_reverted.append(f"{tag} 출발 {r.get('reached_date')}")
+        if rc is not None and rc["revert"]:
+            # 관찰로 되돌린 뒤 같은 실행에서 확정 봉으로 이어서 판정(확정됐으면 그 날 다시 볼 수 있다 — 대개 아직 확정 전)
+            base = {**r, "regular_checked_through": rc["resume_from"]}
+            if r.get("mkt") == "US":
+                ri = reach_info(float(r["base_price"]), r["base_date"], _confirmed_daily(daily, thru))
+                hit = {"reached": ri["reached"], "reached_date": ri["reached_date"], "reached_days": ri["reached_days"]}
+                if ri["reached"]:
+                    hi = float(_confirmed_daily(daily, thru).loc[pd.Timestamp(ri["reached_date"]), "High"])
+                    hit.update(reached_high=hi, reached_pct=round((hi / float(r["base_price"]) - 1) * 100, 2))
+                u["pending_day"] = None
+            else:
+                hit = judge_kr_regular(base, daily, thru, fetch_min)
+                u.update(regular_checked_through=hit["regular_checked_through"], pending_day=hit["pending_day"])
+            was_reached = False                                         # 되돌린 뒤의 판정은 "새 출발"로 센다
+            u.update(status="active", reached_date=None, reached_days=None, reached_high=None, reached_pct=None)
+        elif rc is not None:
+            hit = {"reached": True, "reached_date": r.get("reached_date"), "reached_days": r.get("reached_days"),
+                   "reached_high": rc["reached_high"], "reached_pct": rc["reached_pct"]}
+            if rc["refetch_failed"]:
+                u["reach_rule"] = PREV_REACH_RULE                       # 확정 고가를 못 읽음 — 다음 실행에 다시
+        elif was_reached and r.get("reach_rule") == REACH_RULE:
             # 정규장 규칙으로 이미 출발 — 도달 판정은 다시 안 하고(분봉 조회 없음) 단계만 일봉 종가로
             hit = {"reached": True, "reached_date": r.get("reached_date"), "reached_days": r.get("reached_days"),
                    "reached_high": r.get("reached_high"), "reached_pct": r.get("reached_pct")}
         elif r.get("mkt") == "US":
-            hit = {"reached": last["reached"], "reached_date": last["reached_date"], "reached_days": last["reached_days"]}
-            if last["reached"]:
-                d = daily.copy()
-                d.index = pd.to_datetime(d.index).normalize()
-                hi = float(d.loc[pd.Timestamp(last["reached_date"]), "High"])
+            cd = _confirmed_daily(daily, thru)                          # v5.339: 확정 봉만(장중 일봉 고가 인정 안 함)
+            ri = reach_info(float(r["base_price"]), r["base_date"], cd)
+            hit = {"reached": ri["reached"], "reached_date": ri["reached_date"], "reached_days": ri["reached_days"]}
+            if ri["reached"]:
+                hi = float(cd.loc[pd.Timestamp(ri["reached_date"]), "High"])
                 hit.update(reached_high=hi, reached_pct=round((hi / float(r["base_price"]) - 1) * 100, 2))
             u["pending_day"] = None
         else:
             base = {**r, "regular_checked_through": None} if was_reached else r   # 옛 도달은 기준일부터 다시
-            hit = judge_kr_regular(base, daily, today, done_today, fetch_min)
+            hit = judge_kr_regular(base, daily, thru, fetch_min)
             u.update(regular_checked_through=hit["regular_checked_through"], pending_day=hit["pending_day"])
             if hit["pending_day"]:
                 pending.append(f"{r['code']}@{hit['pending_day']}")
-        tag = f"{r['code']}({r.get('label')} {r.get('tf')})"
         if hit["reached"]:
             u.update(status="reached", reached_date=hit["reached_date"], reached_days=hit["reached_days"],
                      reached_high=hit.get("reached_high"), reached_pct=hit.get("reached_pct"))
             if not was_reached:
                 reached += 1
-            thru = confirmed_through(r.get("mkt"), now_iso)
             si = stage_info(r["base_date"], hit["reached_date"], hit.get("reached_high"), daily, thru)
             u.update(si)
             u.update(departure_shape(daily, hit["reached_date"], thru))      # 표시 전용 — 판정은 위 si에서 끝났다
@@ -402,9 +462,12 @@ def track(records: list, today: date, now_iso: str, fetch=fetch_daily, fetch_min
                      departure_vol_mult=None, departure_close_pos=None, departure_upper_wick=None)
             if was_reached:
                 u.update(status="active", reached_date=None, reached_days=None, reached_high=None, reached_pct=None)
-                reverted.append(tag)
+                if rc is None:
+                    reverted.append(tag)
         updates[r["id"]] = u
-    return updates, {"active": len(targets) - len(old_reached) - len(staging), "rejudged": len(old_reached),
+    return updates, {"active": len(targets) - len(old_reached) - len(rechecks) - len(staging), "rejudged": len(old_reached),
+                     "rechecked": len(rechecks), "unconfirmed_reverted": unconfirmed_reverted,
+                     "recheck_kept_stored": recheck_kept_stored,
                      "staged": len(staging), "fetched": len(data), "reached_new": reached, "reverted": reverted,
                      "pending": pending, "failed": sorted(set(failed)), "transitions": transitions,
                      "first_staged": first_staged, "stage_warnings": warnings}

@@ -5,6 +5,17 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.339 [저점 관찰 출발 판정 = 확정 봉만 + 관찰 페이지 섹션 순서 — 사용자 지시] 경위: "꿈비가 10-07 장중 정규장 고가 2,085(기준
+    2,067)를 터치해 '출발'로 기록됨. 장중 2,030까지 밀린 상태. 출발 판정만 장중 봉을 즉시 인정하고, 숨고르기·재출발·무효는 확정
+    종가만 쓰고 있어 기준이 어긋남." ① 출발(도달) 판정은 확정 봉만 — KR app.KR_CLOSE_CONFIRMED_HM(20:10 KST) 뒤, US 뉴욕 16:00 뒤
+    (lowpoint_watch.confirmed_through, 단계 판정과 같은 함수). 판정 값은 그대로(KR 정규장 분봉 09:00~15:30 고가, US 일봉 고가).
+    v5.333의 장중 즉시 인정(정규장 15:30 전이라도 넘으면 도달)과 _session_done_today 제거 — judge_kr_regular는 확정일(through)까지만
+    보고 그 뒤 봉은 분봉도 안 받는다. US는 확정 봉만으로 도달을 보고(현재가 표시는 최신 그대로). ② 이미 v5.333~v5.338 규칙
+    (reach_rule "regular_high")으로 출발 처리된 레코드는 다음 추적(07:00·지금 갱신)에서 recheck_reached — 도달일 봉이 확정 전이면
+    관찰로 되돌려 그 전 거래일부터 이어서 판정(로그 "출발 확정 재확인 N건 · 확정 전 출발 → 관찰 복귀 N건: …", 0건이어도 남김),
+    확정이면 그 날 확정 고가로 다시 판정(기준 미만이면 되돌림, KR 분봉을 못 받으면 저장값 유지 + ⚠️ 로그 + 다음 실행에 다시).
+    규칙 이름 REACH_RULE = "regular_high_confirmed". 새 임계값·장대양봉 조건 없음. ③ 관찰 페이지 섹션 순서 숨고르기 → 관찰 중 →
+    종료(접힘) — 내용·정렬·접힘 그대로. 출발 정의 줄에 "확정된 봉만". 테스트: test_lowpoint_watch_confirmed.py.
 v5.338 [버그수정 — POST /api/prices 500(저점일지 매매 기록 [현재가 갱신] 보유 6건 전부 "조회 실패")] 원인(운영 로그 확정):
     batch_prices의 JSONResponse가 `ValueError: Out of range float values are not JSON compliant: nan`. yfinance가 장 마감 뒤
     집계 전 당일 봉을 OHLC = NaN·Volume만 채워 준다(JBGS·RDW 10-06 봉 실측) — US 분기가 그 NaN 고가를 highs에 넣어 KR·UPBIT
@@ -8924,7 +8935,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.338"
+VERSION = "v5.339"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -20492,6 +20503,12 @@ def _lp_watch_job_blocking(tf: str, now: "datetime") -> dict:
     # v5.333: 정규장 고가로 다시 판정해 미도달이라 관찰로 되돌린 목록 — 0건이어도 남긴다(침묵 ≠ 성공)
     print(f"[lowpoint-watch] 정규장 고가 재판정 → 관찰 복귀 {len(summary['reverted'])}건: "
           f"{', '.join(summary['reverted']) or '없음'}", flush=True)
+    # v5.339: 장중(확정 전) 봉으로 출발했던 레코드 — 확정 기준 재확인 결과(0건이어도 남긴다)
+    print(f"[lowpoint-watch] 출발 확정 재확인 {summary['rechecked']}건 · 확정 전 출발 → 관찰 복귀 "
+          f"{len(summary['unconfirmed_reverted'])}건: {', '.join(summary['unconfirmed_reverted']) or '없음'}", flush=True)
+    if summary["recheck_kept_stored"]:
+        print(f"[lowpoint-watch] ⚠️ 출발일 확정 고가 재조회 불가(분봉 보존 밖) → 저장값 유지·다음 실행에 다시: "
+              f"{', '.join(summary['recheck_kept_stored'])}", flush=True)
     # v5.337: 출발 이후 단계 — 전환·첫 분류·판정 보류를 0건이어도 남긴다(침묵 ≠ 성공)
     print(f"[lowpoint-watch] 단계 — 출발 레코드 {summary['staged']}건 확인 · 전환 {len(summary['transitions'])}건: "
           f"{', '.join(summary['transitions']) or '없음'}", flush=True)

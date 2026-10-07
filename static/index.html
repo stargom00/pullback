@@ -1395,7 +1395,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.338</span>
+      <span class="ver mono" id="verBadge">v5.339</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -7841,7 +7841,7 @@ function renderLowpointWatch() {
       <span class="n-sub" style="flex:1 1 260px">저점 히트 종가(기준가) 대비 <b>+${pct}%</b> 도달을 추적해요 — 기준일 다음 거래일부터 <b>정규장 고가 기준(장외 체결 제외)</b>, 매일 07:00 KST 자동 갱신 · ${runInfo} · <b>관심 신호 · 측정 전</b></span>
       <button type="button" class="n-btn sm" onclick="lpwRefresh()" ${_lpw.busy ? 'disabled' : ''}>${_lpw.busy ? '갱신 중…' : '지금 갱신'}</button>
       <ul class="n-sub lpw-defs">
-        <li><b>출발</b> — +${pct}% 도달(위 판정 그대로). 출발 고가 = 그날 판정 고가</li>
+        <li><b>출발</b> — +${pct}% 도달(위 판정 그대로, <b>확정된 봉만</b> — KR 20:10 KST·US 뉴욕 16:00 이후). 출발 고가 = 그날 판정 고가</li>
         <li><b>무효선</b> — 기준일부터 출발 전날까지 종가 최고값(기준일 포함)</li>
         <li><b>숨고르기</b> — 출발 다음 거래일부터 종가가 무효선 이상 · 출발 고가 이하</li>
         <li><b>재출발</b> — 처음으로 종가 &gt; 출발 고가 → 종료</li>
@@ -7849,8 +7849,8 @@ function renderLowpointWatch() {
       </ul>
       ${_lpw.msg ? `<span class="n-sub" style="flex-basis:100%">${_escapeHtml(_lpw.msg)}</span>` : ''}
     </section>
-    ${groups || '<section class="n-card" style="padding:18px 22px"><div class="n-sub">관찰 중인 종목이 없어요 — 주봉·월봉 스캔이 돌면 히트 종목이 자동으로 들어와요</div></section>'}
     ${restCard}
+    ${groups || '<section class="n-card" style="padding:18px 22px"><div class="n-sub">관찰 중인 종목이 없어요 — 주봉·월봉 스캔이 돌면 히트 종목이 자동으로 들어와요</div></section>'}
     ${endCard}`;
 }
 async function lpeLoad() {

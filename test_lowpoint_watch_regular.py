@@ -55,7 +55,7 @@ def test_kumbi_reproduction():
     assert max(b["highPrice"] for b in FX["minutes"]["2026-10-06"]) == 2115.0          # 전제: 통합으로는 넘었다
     daily = _daily(FX["daily"])
     assert float(daily.loc["2026-10-06", "High"]) == 2115.0
-    got = w.judge_kr_regular(_rec(), daily, date(2026, 10, 7), False, fetch_min=lambda c, d: FX["minutes"][str(d)])
+    got = w.judge_kr_regular(_rec(), daily, "2026-10-06", fetch_min=lambda c, d: FX["minutes"][str(d)])
     assert got["reached"] is False and got["regular_checked_through"] == "2026-10-06" and got["pending_day"] is None
 
 
@@ -63,7 +63,7 @@ def test_intraday_over_then_close_below_counts():
     rows = {"2026-10-02": dict(Open=1940, High=1987, Low=1940, Close=1969, Volume=1),
             "2026-10-06": dict(Open=1970, High=2080, Low=1969, Close=2000, Volume=1)}
     bars = [_bar("2026-10-06", "090100", 1975), _bar("2026-10-06", "110000", 2070), _bar("2026-10-06", "153000", 2000)]
-    got = w.judge_kr_regular(_rec(), _daily(rows), date(2026, 10, 7), False, fetch_min=lambda c, d: bars)
+    got = w.judge_kr_regular(_rec(), _daily(rows), "2026-10-06", fetch_min=lambda c, d: bars)
     assert got["reached"] and got["reached_date"] == "2026-10-06" and got["reached_high"] == 2070
     assert got["reached_pct"] == round((2070 / 1969 - 1) * 100, 2) and got["reached_days"] == 4
 
@@ -72,14 +72,14 @@ def test_after_hours_single_share_not_counted():
     rows = {"2026-10-06": dict(Open=1970, High=2115, Low=1969, Close=2045, Volume=1)}
     bars = [_bar("2026-10-06", "090000", 1970), _bar("2026-10-06", "152900", 2010), _bar("2026-10-06", "153000", 2005),
             _bar("2026-10-06", "160400", 2115), _bar("2026-10-06", "083000", 2100)]          # 프리 08:30 · 애프터 16:04
-    got = w.judge_kr_regular(_rec(), _daily(rows), date(2026, 10, 7), False, fetch_min=lambda c, d: bars)
+    got = w.judge_kr_regular(_rec(), _daily(rows), "2026-10-06", fetch_min=lambda c, d: bars)
     assert got["reached"] is False and got["regular_checked_through"] == "2026-10-06"
 
 
 @pytest.mark.parametrize("hi,reached", [(1969 * 1.05, True), (2066.45, False)])
 def test_boundary_exact_threshold(hi, reached):
     rows = {"2026-10-06": dict(Open=1, High=3000, Low=1, Close=1, Volume=1)}
-    got = w.judge_kr_regular(_rec(), _daily(rows), date(2026, 10, 7), False,
+    got = w.judge_kr_regular(_rec(), _daily(rows), "2026-10-06",
                              fetch_min=lambda c, d: [_bar("2026-10-06", "100000", hi)])
     assert got["reached"] is reached
 
@@ -94,12 +94,12 @@ def test_missing_minutes_withhold_judgement(missing):
     def fm(code, day):
         asked.append(str(day))
         return missing if str(day) == "2026-10-06" else [_bar(str(day), "100000", 2200)]
-    got = w.judge_kr_regular(_rec(regular_checked_through="2026-10-02"), _daily(rows), date(2026, 10, 8), False, fetch_min=fm)
+    got = w.judge_kr_regular(_rec(regular_checked_through="2026-10-02"), _daily(rows), "2026-10-07", fetch_min=fm)
     assert got["reached"] is False and got["pending_day"] == "2026-10-06"
     assert got["regular_checked_through"] == "2026-10-02" and asked == ["2026-10-06"]
     # 다음 실행에 분봉이 오면 그 날부터 이어서 판정
-    got2 = w.judge_kr_regular(_rec(regular_checked_through=got["regular_checked_through"]), _daily(rows), date(2026, 10, 8),
-                              False, fetch_min=lambda c, d: [_bar(str(d), "100000", 2010 if str(d) == "2026-10-06" else 2200)])
+    got2 = w.judge_kr_regular(_rec(regular_checked_through=got["regular_checked_through"]), _daily(rows), "2026-10-07",
+                              fetch_min=lambda c, d: [_bar(str(d), "100000", 2010 if str(d) == "2026-10-06" else 2200)])
     assert got2["reached"] and got2["reached_date"] == "2026-10-07" and got2["pending_day"] is None
 
 
@@ -108,20 +108,20 @@ def test_base_day_and_checked_days_not_refetched():
             "2026-10-06": dict(Open=1, High=1, Low=1, Close=1, Volume=1),
             "2026-10-07": dict(Open=1, High=1, Low=1, Close=1, Volume=1)}
     asked = []
-    w.judge_kr_regular(_rec(regular_checked_through="2026-10-06"), _daily(rows), date(2026, 10, 8), False,
+    w.judge_kr_regular(_rec(regular_checked_through="2026-10-06"), _daily(rows), "2026-10-07",
                        fetch_min=lambda c, d: asked.append(str(d)) or [_bar(str(d), "100000", 1990)])
     assert asked == ["2026-10-07"]                         # 기준일(10-02)·이미 판정한 10-06은 안 본다
 
 
 def test_today_counts_only_after_regular_close():
+    """v5.339: 확정 전 봉은 넘어도 판정하지 않는다(장중 즉시 인정 제거) — KR 확정 = app.KR_CLOSE_CONFIRMED_HM(20:10 KST)."""
     rows = {"2026-10-07": dict(Open=1, High=1, Low=1, Close=1, Volume=1)}
-    fm = lambda c, d: [_bar("2026-10-07", "100000", 2000)]
-    during = w.judge_kr_regular(_rec(), _daily(rows), date(2026, 10, 7), False, fetch_min=fm)
-    after = w.judge_kr_regular(_rec(), _daily(rows), date(2026, 10, 7), True, fetch_min=fm)
-    assert during["regular_checked_through"] is None and after["regular_checked_through"] == "2026-10-07"
-    hit = w.judge_kr_regular(_rec(), _daily(rows), date(2026, 10, 7), False, fetch_min=lambda c, d: [_bar("2026-10-07", "100000", 2100)])
-    assert hit["reached"]                                    # 장중이라도 정규장에서 넘었으면 인정
-    assert w._session_done_today("2026-10-07T15:31:00+09:00") and not w._session_done_today("2026-10-07T15:29:00+09:00")
+    hit_bars = lambda c, d: [_bar("2026-10-07", "100000", 2100)]
+    during = w.judge_kr_regular(_rec(), _daily(rows), w.confirmed_through("KR", "2026-10-07T15:31:00+09:00"), fetch_min=hit_bars)
+    assert during["reached"] is False and during["regular_checked_through"] is None and during["pending_day"] is None
+    after = w.judge_kr_regular(_rec(), _daily(rows), w.confirmed_through("KR", "2026-10-07T20:10:00+09:00"), fetch_min=hit_bars)
+    assert after["reached"] and after["reached_date"] == "2026-10-07"
+    assert w.judge_kr_regular(_rec(), _daily(rows), None, fetch_min=hit_bars)["reached"] is False
 
 
 def test_old_reached_records_rejudged_and_reverted():
@@ -163,7 +163,7 @@ def test_app_job_reverts_and_logs(monkeypatch, tmp_path, capsys):
 def test_us_still_uses_daily_high():
     rec = {**_rec(code="AVA"), "mkt": "US", "base_price": 35.0}
     daily = _daily({"2026-10-06": dict(Open=35, High=36.75, Low=35, Close=35.5, Volume=1)})
-    up, _ = w.track([rec], date(2026, 10, 7), "x", fetch=lambda recs, t: {"AVA": daily},
+    up, _ = w.track([rec], date(2026, 10, 7), "2026-10-07T07:00:00+09:00", fetch=lambda recs, t: {"AVA": daily},
                     fetch_min=lambda c, d: (_ for _ in ()).throw(AssertionError("US는 분봉을 안 받는다")))
     u = up[rec["id"]]
     assert u["status"] == "reached" and u["reached_high"] == 36.75 and u["reached_pct"] == 5.0

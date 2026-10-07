@@ -296,8 +296,8 @@ def test_rest_position_and_volume():
 
 def test_page_sections_and_definitions():
     body = _fn("renderLowpointWatch")
-    order = [body.index(s) for s in ("${groups ||", "${restCard}", "${endCard}")]
-    assert order == sorted(order)                                        # 관찰 중 → 숨고르기 → 종료
+    order = [body.index(s) for s in ("${restCard}", "${groups ||", "${endCard}")]
+    assert order == sorted(order)                                        # v5.339: 숨고르기 → 관찰 중 → 종료
     assert "<details><summary" in body and "종료 · 재출발" in body          # 종료는 접힘
     assert body.count("<details") == 1                                    # 숨고르기는 펼침(접힘은 종료뿐)
     for col in ("경과", "무효선", "출발 고가", "현재가", "무효선 ~ 출발 고가", "거래량"):

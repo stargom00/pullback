@@ -137,7 +137,7 @@ def test_daily_track_fetches_only_active_codes(monkeypatch):
     recs[-1]["stage"] = "restart"                                  # v5.337: 종료(재출발·무효)된 출발만 다시 안 본다
     minutes = []
     fm = lambda code, day: minutes.append((code, str(day))) or [{"localDateTime": day.strftime("%Y%m%d") + "100000", "highPrice": 16400.0}]
-    updates, summary = w.track(recs, date(2026, 10, 5), "2026-10-05T16:00:00+09:00", fetch_min=fm)
+    updates, summary = w.track(recs, date(2026, 10, 5), "2026-10-05T20:10:00+09:00", fetch_min=fm)   # v5.339: KR 10-05 확정 후
     # 기준일(10-02)부터 + 휴장 여유 10일 + v5.337 출발일 모양용 직전 50거래일(달력 70일)
     assert asked["kr"] == [("002320.KS", 13 + w.shape_lookback_days())] and w.shape_lookback_days() == 70
     assert asked["us"] == [(("AVA",), "3mo", lp.US_AUTO_ADJUST)]

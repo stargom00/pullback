@@ -90,24 +90,30 @@ def test_sort_rows():
     assert ids("days", "desc")[0] == "f"                             # 기준일 09-30 → 경과 7일이 가장 김
 
 
+def _cohorts(html):
+    """관찰 중(코호트) 카드만 — v5.339부터 숨고르기 카드가 맨 위라 "첫 표"가 코호트가 아니다."""
+    return [x for x in html.split('<section class="n-card lpw-card">')[1:] if "봉 · 관찰 " in x]
+
+
 def test_render_default_sort_and_group_counts():
     html = _js("renderLowpointWatch()", RECS)
     sections = html.split('<section class="n-card lpw-card">')[1:]
-    assert len(sections) == 3                                          # 코호트 2 + v5.337 숨고르기 1(종료 0건이면 카드 없음)
-    wk = sections[0]
-    assert "10-02 주봉 · 관찰 5 / 출발 1" in wk and "09-30 월봉 · 관찰 1 / 출발 0" in sections[1]
+    assert len(sections) == 3                                          # v5.339: 숨고르기 1(맨 위) + 코호트 2(종료 0건이면 카드 없음)
+    assert "숨고르기 · 1" in sections[0] and _cohorts(html) == sections[1:]
+    wk = sections[1]
+    assert "10-02 주봉 · 관찰 5 / 출발 1" in wk and "09-30 월봉 · 관찰 1 / 출발 0" in sections[2]
     assert "기준일 2026-09-30, 2026-10-02" in wk                       # 기준일은 그룹 헤더에만
     body = wk.split("<tbody>")[1].split("</tbody>")[0]
     assert [m for m in re.findall(r">(AAA|BBB|CCC|DDD|FFF)</a>", body)] == ["BBB", "FFF", "AAA", "CCC", "DDD"]
     assert body.count("2026-10-02") == 0, "기준일이 행마다 반복된다"
     # 바: +4.5% → 오른쪽 절반의 90% = 트랙의 45%, −3% → 왼쪽 30%
     assert '<i class="pos" style="width:45.0%">' in body and '<i class="neg" style="width:30.0%">' in body
-    assert "<details" not in wk and "숨고르기 · 1" in sections[2]     # v5.337: 출발(도달)은 코호트 밖 숨고르기 섹션으로
+    assert "<details" not in wk                                         # v5.337: 출발(도달)은 코호트 밖 숨고르기 섹션으로
 
 
 def test_render_sort_toggle_by_header():
     html = _js("renderLowpointWatch()", RECS, extra="_lpw.sortKey = 'pct'; _lpw.sortDir = 'asc';")
-    body = html.split("<tbody>")[1].split("</tbody>")[0]
+    body = _cohorts(html)[0].split("<tbody>")[1].split("</tbody>")[0]
     assert re.findall(r">(AAA|BBB|CCC|DDD|FFF)</a>", body) == ["CCC", "AAA", "FFF", "BBB", "DDD"]
     assert "lpwSort('pct')" in html and "lpwSort('days')" in html
     s = _fn("lpwSort")
@@ -116,7 +122,7 @@ def test_render_sort_toggle_by_header():
 
 def test_columns_and_icon_buttons():
     html = _js("renderLowpointWatch()", RECS)
-    head = html.split("<thead>")[1].split("</thead>")[0]
+    head = _cohorts(html)[0].split("<thead>")[1].split("</thead>")[0]
     cols = [re.sub(r"<[^>]+>|[▲▼]", "", c).strip() for c in re.findall(r"<th[^>]*>(.*?)</th>", head)]
     assert cols == ["종목", "기준가 → 현재가", "등락", "+5%까지", "경과", ""]
     assert 'aria-label="기록"' in html and 'aria-label="삭제"' in html and ">기록</button>" not in html
