@@ -21,4 +21,7 @@ def _isolate_lowpoint_watch_store(tmp_path, monkeypatch):
     if app is not None and hasattr(app, "LP_INTEREST_PATH"):   # v5.328 관심 추적
         monkeypatch.setattr(app, "LP_INTEREST_PATH", str(tmp_path / "lowpoint_interest.json"))
         monkeypatch.setattr(app, "LP_INTEREST_DELETE_LOG_PATH", str(tmp_path / "lowpoint_interest_deletions.log"))
+    if app is not None and hasattr(app, "LP_RANK_PATH"):   # v5.341 순위
+        monkeypatch.setattr(app, "LP_RANK_PATH", str(tmp_path / "lowpoint_rankings.json"))
+        monkeypatch.setattr(app, "LP_RANK_DELETE_LOG_PATH", str(tmp_path / "lowpoint_rankings_deletions.log"))
     yield

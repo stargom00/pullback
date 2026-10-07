@@ -1245,6 +1245,11 @@ table.jr-table.lpw-table th.lpw-sort{cursor:pointer;user-select:none}
 .lpw-info .lpw-defs{flex-basis:100%;margin:0;padding-left:16px;font-size:11.5px;line-height:1.5}
 @media (max-width:480px){.lpw-table .lpw-pxcell{display:none}.lpw-table .lpw-hitchip{display:none}}   /* v5.327: 좁은 화면은 종료 후보 칩 대신 행 강조만 */
 /* /v5.326 */
+/* v5.341 저점 순위 분류 표 — .lpr-table 아래로 한정 */
+.lpr-table .lpr-seg,.lpr-table .lpr-chips{display:inline-flex;flex-wrap:wrap;gap:3px}
+.lpr-table .jr-pill{padding:1px 7px;font-size:11px;min-height:20px}
+.lpr-table .jr-pill[disabled]{cursor:default;opacity:max(.75,var(--fade-floor))}
+.lpr-table .lpr-chips .jr-pill{font-size:10.5px}
 /* v5.327 평가 카드 접기 — .lpe-card 아래로 한정 */
 .lpe-card .lpe-sumline{cursor:pointer;padding-bottom:0}
 .lpe-card.lpe-closed{padding-block:8px}
@@ -1395,7 +1400,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.340</span>
+      <span class="ver mono" id="verBadge">v5.341</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -6541,7 +6546,7 @@ function applyMarketButtonsEnabled(curMode) {
 // ── v5.330(사용자 지시) 현재 탭·하위 페이지를 URL 해시에 — "새로고침하면 항상 홈 탭으로 돌아간다. 현재 탭/페이지가 URL에
 // 없어서다." 형식 #tab=저점일지&page=관찰(탭 버튼 글자 — 글자 없는 탭은 mode 키). 읽을 때는 글자·mode 키 둘 다 받는다.
 // 쓰기는 history.replaceState(뒤로가기 기록을 쌓지 않음). 기존 탭 전환 구조는 그대로 — 읽기·쓰기만 덧붙였다.
-const LPT_PAGES = [['trades', '매매 기록'], ['eval', '평가'], ['watch', '관찰'], ['hold', '추적']];   // 저점일지 하위 페이지
+const LPT_PAGES = [['trades', '매매 기록'], ['eval', '평가'], ['watch', '관찰'], ['hold', '추적'], ['rank', '순위']];   // 저점일지 하위 페이지
 // 탭별 하위 상태(page) — 저점일지 하위 페이지, v5.332 ABC 등급 보기. 정의가 탭 쪽 상수 하나(사본 없음).
 function _tabSubPages(mode) {
   if (mode === 'lowpoint_track') return LPT_PAGES;
@@ -7452,7 +7457,81 @@ function lpSetView(v) {
   if (v === 'eval') { lpeLoad().then(renderLowpointTrack); }
   if (v === 'watch') { lpwLoad().then(renderLowpointTrack); }
   if (v === 'hold') { lpkLoad().then(renderLowpointTrack); }
+  if (v === 'rank') { lprLoad().then(renderLowpointTrack); }
   renderLowpointTrack();
+}
+// ── v5.341(사용자 지시) 저점 순위 — "사용자가 저점 종목을 고르는 '눈'을 키우는 학습 시스템. 예측(분류) → 결과 → 비교를
+// 기록·채점한다." 레코드·기한·스냅샷·결과·리뷰 집계는 서버(lowpoint_rank.py), 화면은 분류 입력·표시만(순수 함수는 node 테스트).
+// 관심 신호 학습용 — 측정 결론 아님.
+const _lpr = { recs: [], open: {}, watch: {}, review: null, meta: null, draft: {}, busy: false, msg: '', error: null };
+// 코호트별 최신 레코드(주·월 각각 라벨이 가장 늦은 것)
+function lprLatest(recs) {
+  const out = {};
+  for (const r of recs || []) if (!out[r.tf] || String(r.label) > String(out[r.tf].label)) out[r.tf] = r;
+  return ['week', 'month'].map(tf => out[tf]).filter(Boolean);
+}
+// 화면 분류 — 확정이면 서버 값, 아니면 임시(draft) → 서버 임시 저장 → 기본 보통
+function lprPicksOf(rec, draft) { return rec.confirmed_at ? (rec.picks || {}) : (draft || rec.picks || {}); }
+function lprPickOf(picks, wid) { return ((picks || {})[wid] || {}).pick || 'normal'; }
+function lprWithPick(picks, wid, pick) {
+  const cur = (picks || {})[wid] || { pick: 'normal', reasons: [] };
+  return { ...(picks || {}), [wid]: { pick, reasons: (cur.reasons || []).slice() } };
+}
+// 이유 칩 토글 — 이미 있으면 빼고, 없으면 최대 개수 안에서만 넣는다(넘으면 그대로)
+function lprWithReason(picks, wid, chip, max) {
+  const cur = (picks || {})[wid] || { pick: 'normal', reasons: [] };
+  const rs = (cur.reasons || []).slice();
+  const i = rs.indexOf(chip);
+  if (i >= 0) rs.splice(i, 1); else if (rs.length < max) rs.push(chip); else return picks || {};
+  return { ...(picks || {}), [wid]: { pick: cur.pick || 'normal', reasons: rs } };
+}
+// "먼저 간다" 개수 안내 — 3~7개 밖이면 경고(저장은 막지 않는다)
+function lprFirstGuide(items, picks, guide) {
+  const n = (items || []).filter(i => lprPickOf(picks, i.watch_id) === 'first').length;
+  const [lo, hi] = guide || [3, 7];
+  return { n, ok: n >= lo && n <= hi, text: `먼저 간다 ${n}개 — 권장 ${lo}~${hi}개${n < lo || n > hi ? ' (범위 밖 — 저장은 돼요)' : ''}` };
+}
+function lprStatusText(rec, open) {
+  const t = s => String(s || '').replace('T', ' ').slice(5, 16);
+  if (rec.confirmed_at) return { cls: 'st-good', text: `확정 ${t(rec.confirmed_at)} KST — 수정 불가` };
+  if (open) return { cls: '', text: `확정 기한 ${t(rec.deadline)} KST(다음 거래일 장 시작 전)` };
+  return { cls: 'st-bad', text: `기한(${t(rec.deadline)} KST) 지남 — 미분류로 채점` };
+}
+async function lprLoad() {
+  try {
+    const d = await apiJson('/api/lowpoint/rankings');
+    _lpr.recs = d.records || []; _lpr.open = d.open || {}; _lpr.watch = d.watch || {}; _lpr.review = d.review || null;
+    _lpr.meta = { picks: d.picks, label: d.pick_label, reasons: d.reasons, max: d.max_reasons, guide: d.first_guide };
+    _lpr.error = null;
+  } catch (e) { _lpr.error = e; }
+}
+function lprSetPick(rid, wid, pick) {
+  const rec = _lpr.recs.find(r => r.id === rid); if (!rec || rec.confirmed_at || !_lpr.open[rid]) return;
+  _lpr.draft[rid] = lprWithPick(lprPicksOf(rec, _lpr.draft[rid]), wid, pick); renderLowpointTrack();
+}
+function lprToggleReason(rid, wid, chip) {
+  const rec = _lpr.recs.find(r => r.id === rid); if (!rec || rec.confirmed_at || !_lpr.open[rid]) return;
+  _lpr.draft[rid] = lprWithReason(lprPicksOf(rec, _lpr.draft[rid]), wid, chip, (_lpr.meta || {}).max || 2); renderLowpointTrack();
+}
+async function _lprSend(rid, url, method) {
+  const rec = _lpr.recs.find(r => r.id === rid); if (!rec) return;
+  _lpr.busy = true; _lpr.msg = ''; renderLowpointTrack();
+  try {
+    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ picks: lprPicksOf(rec, _lpr.draft[rid]), base_rev: rec.rev }) });
+    const d = await apiParse(res, { allow: [400, 404, 409] });
+    if (!d.ok) throw new Error(d.error || '저장 실패');
+    delete _lpr.draft[rid];
+    _lpr.msg = method === 'POST' ? '분류를 확정했어요 — 확정 시점 지표를 저장했어요' : '임시 저장했어요';
+  } catch (e) { _lpr.msg = '실패 — ' + e.message; }
+  finally { _lpr.busy = false; await lprLoad(); renderLowpointTrack(); }
+}
+function lprSave(rid) { return _lprSend(rid, '/api/lowpoint/rankings/' + encodeURIComponent(rid), 'PUT'); }
+function lprConfirm(rid) {
+  const rec = _lpr.recs.find(r => r.id === rid); if (!rec) return;
+  const g = lprFirstGuide(rec.items, lprPicksOf(rec, _lpr.draft[rid]), (_lpr.meta || {}).guide);
+  if (!confirm(`${rec.label} ${rec.tf === 'week' ? '주봉' : '월봉'} 분류를 확정할까요? 확정하면 수정할 수 없어요.\n${g.text}`)) return;
+  return _lprSend(rid, '/api/lowpoint/rankings/' + encodeURIComponent(rid) + '/confirm', 'POST');
 }
 // ── v5.325(사용자 지시) 저점 관찰 — "히트 시점 종가를 기준가로 기록하고 이후 +5% 도달 여부를 자동 추적 — 도달한
 // 종목은 활성 목록에서 빠지고, 미도달 종목만 진입 후보로 남는 관찰 페이지." 레코드·판정은 서버(lowpoint_watch.py,
@@ -7854,6 +7933,80 @@ function renderLowpointWatch() {
     ${groups || '<section class="n-card" style="padding:18px 22px"><div class="n-sub">관찰 중인 종목이 없어요 — 주봉·월봉 스캔이 돌면 히트 종목이 자동으로 들어와요</div></section>'}
     ${endCard}`;
 }
+// v5.341 저점 순위 화면 — 최신 주봉·월봉 코호트 분류 + 리뷰 4표
+function renderLowpointRank() {
+  if (_lpr.error) return `<section class="n-card" style="padding:18px 22px"><div class="st-dot st-bad">순위를 불러오지 못했어요 — ${_escapeHtml(_lpr.error.message)}</div></section>`;
+  const m = _lpr.meta || { picks: ['first', 'normal', 'no'], label: {}, reasons: [], max: 2, guide: [3, 7] };
+  const rv = _lpr.review;
+  const pct = v => _lptPct(v);
+  const stageLbl = { watch: '관찰', departed: '출발', resting: '숨고르기', restart: '재출발', invalid: '무효' };
+  const cohorts = lprLatest(_lpr.recs).map(rec => {
+    const open = !!_lpr.open[rec.id] && !rec.confirmed_at;
+    const picks = lprPicksOf(rec, _lpr.draft[rec.id]);
+    const st = lprStatusText(rec, !!_lpr.open[rec.id]);
+    const g = lprFirstGuide(rec.items, picks, m.guide);
+    const hk = rec.tf === 'week' ? ['d5', 'd10'] : ['d20'];
+    const rows = (rec.items || []).map(it => {
+      const wid = it.watch_id, p = (picks[wid] || {}), pk = lprPickOf(picks, wid), wr = _lpr.watch[wid] || {};
+      const sn = (rec.snapshot || {})[wid], res = (rec.results || {})[wid] || {};
+      const seg = m.picks.map(k => `<button type="button" class="jr-pill${pk === k ? ' on' : ''}" ${open ? '' : 'disabled'} onclick="lprSetPick('${_escapeHtml(rec.id)}','${_escapeHtml(wid)}','${k}')">${_escapeHtml(m.label[k] || k)}</button>`).join('');
+      const chips = m.reasons.map(c => {
+        const on = (p.reasons || []).includes(c);
+        return `<button type="button" class="jr-pill lpr-chip${on ? ' on' : ''}" ${open ? '' : 'disabled'} onclick="lprToggleReason('${_escapeHtml(rec.id)}','${_escapeHtml(wid)}','${_escapeHtml(c)}')">${_escapeHtml(c)}</button>`;
+      }).join('');
+      const snapCells = sn ? `<td class="r">${pct(sn.pct_vs_base)}</td><td class="num r">${sn.atr_pct != null ? sn.atr_pct + '%' : '—'}</td>
+          <td class="num r">${sn.max_vol_mult != null ? Number(sn.max_vol_mult).toFixed(1) + '×' : '—'}</td>
+          <td class="n-sub" style="font-size:11px">${sn.flow && sn.flow.ok ? `기관 +${sn.flow.organ}/${sn.flow.of} · 외국인 +${sn.flow.foreign}/${sn.flow.of}` : '—'}</td>
+          <td class="n-sub" style="font-size:11px">${(sn.themes || []).map(t => `${_escapeHtml(t.theme)} ${t.up}/${t.total}`).join(', ') || '—'}</td>` : '';
+      return `<tr>
+        <td class="lpw-sym"><a class="name-link" href="${tvUrl(it.code, it.mkt)}" target="_blank" rel="noopener">${_escapeHtml(lpDisplayName(it))}</a>
+          <span class="chip lpw-hitchip">${_escapeHtml(stageLbl[wr.stage] || (wr.status === 'reached' ? '출발' : '관찰'))}</span></td>
+        <td><span class="lpr-seg">${seg}</span></td>
+        <td><span class="lpr-chips">${chips}</span></td>
+        ${snapCells}
+        ${hk.map(k => `<td class="r">${res[k] ? pct(res[k].pct) : '<span class="n-sub">—</span>'}</td>`).join('')}</tr>`;
+    }).join('');
+    const snapHead = rec.confirmed_at ? '<th class="r">기준 대비</th><th class="r">ATR%</th><th class="r" title="최근 60봉 중 최대 거래량 ÷ 직전 50일 평균">최대 vol</th><th>수급 5일</th><th>테마 동반</th>' : '';
+    return `<section class="n-card lpw-card">
+      <div class="lpw-h"><span class="n-h">${String(rec.label).slice(5)} ${rec.tf === 'week' ? '주봉' : '월봉'} 코호트 · ${(rec.items || []).length}종목</span>
+        <span class="n-sub ${st.cls}" style="font-size:11px">${_escapeHtml(st.text)}</span></div>
+      <div class="n-sub" style="font-size:12px;margin:2px 0 6px;${g.ok ? '' : 'color:var(--px-down)'}">${_escapeHtml(g.text)} · 이유 칩은 종목당 0~${m.max}개</div>
+      <div class="jr-table-wrap"><table class="jr-table lpt-table lpw-table lpr-table"><thead><tr><th>종목</th><th>분류</th><th>이유</th>${snapHead}${hk.map(k => `<th class="r">${k.toUpperCase().replace('D', 'D+')}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>
+      ${open ? `<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button type="button" class="n-btn sm" ${_lpr.busy ? 'disabled' : ''} onclick="lprSave('${_escapeHtml(rec.id)}')">임시 저장</button>
+        <button type="button" class="n-btn sm primary" ${_lpr.busy ? 'disabled' : ''} onclick="lprConfirm('${_escapeHtml(rec.id)}')">분류 확정</button></div>` : ''}
+    </section>`;
+  }).join('');
+  const reviewHtml = rv ? renderLowpointRankReview(rv, m) : '';
+  return `<section class="n-card lpw-info"><span class="n-sub" style="flex:1 1 260px"><b>관심 신호 학습용 · 측정 결론 아님.</b> 주봉 히트는 매주, 월봉 히트는 매월 — 다음 거래일 09:00 KST 전까지 분류를 확정하세요(지나면 미분류). 결과는 매일 07:00 확정 종가로 기록돼요.</span>
+      ${_lpr.msg ? `<span class="n-sub" style="flex-basis:100%">${_escapeHtml(_lpr.msg)}</span>` : ''}</section>
+    ${cohorts || '<section class="n-card" style="padding:18px 22px"><div class="n-sub">분류할 코호트가 아직 없어요 — 다음 주봉·월봉 스캔 뒤 생겨요(기한이 지난 코호트는 만들지 않아요)</div></section>'}
+    ${reviewHtml}`;
+}
+function renderLowpointRankReview(rv, m) {
+  const pct = v => _lptPct(v), keys = rv.horizon_keys || [];
+  const kh = keys.map(k => `<th class="r">${k.toUpperCase().replace('D', 'D+')} 평균</th>`).join('');
+  const line = (lbl, a) => `<tr><td>${lbl}</td><td class="num r">${a.n}</td><td class="num r">${a.departed_rate != null ? a.departed_rate + '%' : '—'}</td>${keys.map(k => `<td class="r">${pct(a.avg[k])}${a.n_ret[k] ? `<span class="n-sub" style="font-size:10px"> n${a.n_ret[k]}</span>` : ''}</td>`).join('')}</tr>`;
+  const t1 = ['first', 'normal', 'no', 'unclassified'].map(p => line(_escapeHtml(m.label[p] || p), rv.by_pick[p])).join('') + line('<b>코호트 전체</b>', rv.total);
+  const sm = ['pct_vs_base', 'atr_pct', 'max_vol_mult', 'invalid_dist_pct', 'flow_organ', 'flow_foreign', 'theme_share'];
+  const sl = { pct_vs_base: '기준 대비 %', atr_pct: 'ATR%', max_vol_mult: '최근 60봉 최대 vol×', invalid_dist_pct: '무효선까지 %', flow_organ: '기관 순매수 일수', flow_foreign: '외국인 순매수 일수', theme_share: '테마 있는 비율 %' };
+  const a = rv.rose_vs_not.departed, b = rv.rose_vs_not.not_departed;
+  const fmt = v => v == null ? '—' : Number(v).toFixed(2);
+  const t2 = sm.map(k => `<tr><td>${sl[k]}</td><td class="num r">${fmt(a[k])}</td><td class="num r">${fmt(b[k])}</td></tr>`).join('');
+  const t3 = (rv.missed || []).map(r => `<tr><td>${_escapeHtml(lpDisplayName(r))} <span class="n-sub" style="font-size:11px">${_escapeHtml(String(r.label).slice(5))} ${r.tf === 'week' ? '주' : '월'}</span></td>
+      <td>${_escapeHtml(m.label[r.pick] || r.pick)}</td><td class="num r">${_escapeHtml(r.departed_date || '')}</td>
+      <td class="n-sub" style="font-size:11px">${_escapeHtml((r.reasons || []).join(', ') || '—')}</td>
+      <td class="n-sub" style="font-size:11px">${r.snapshot ? `기준 ${fmt(r.snapshot.pct_vs_base)}% · ATR ${fmt(r.snapshot.atr_pct)}% · vol ${fmt(r.snapshot.max_vol_mult)}×` : '—'}</td></tr>`).join('');
+  const t4 = Object.entries(rv.chips || {}).map(([c, v]) => `<tr><td>${_escapeHtml(c)}</td><td class="num r">${v.n}</td><td class="num r">${v.departed}</td><td class="num r">${v.rate != null ? v.rate + '%' : '—'}</td></tr>`).join('');
+  const tbl = (head, body) => `<div class="jr-table-wrap"><table class="jr-table lpt-table lpw-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  const c = rv.cohorts || {}, mc = rv.min_cohorts || {};
+  return `<section class="n-card lpw-card"><div class="lpw-h"><span class="n-h">리뷰</span>
+      <span class="n-sub" style="font-size:11px;color:var(--px-down)">코호트 4주(월봉은 3개월) 쌓이기 전에는 결론 내지 않음 — 지금 주봉 ${c.week || 0}/${mc.week || 4} · 월봉 ${c.month || 0}/${mc.month || 3}</span></div>
+      <div class="n-sub" style="font-size:12px;margin:6px 0 2px">① 분류별 성적(출발률 = 관찰에서 출발한 비율)</div>${tbl(`<th>분류</th><th class="r">종목</th><th class="r">출발률</th>${kh}`, t1)}
+      <div class="n-sub" style="font-size:12px;margin:10px 0 2px">② 오른 종목 vs 안 오른 종목 — 확정 시점 지표 평균(출발 ${a.n} · 미출발 ${b.n} · 스냅샷 없음 ${rv.rose_vs_not.no_snapshot})</div>${tbl('<th>지표</th><th class="r">출발</th><th class="r">미출발</th>', t2)}
+      <div class="n-sub" style="font-size:12px;margin:10px 0 2px">③ 놓친 것 — 보통·안 간다로 둔 종목 중 출발(${(rv.missed || []).length})</div>${t3 ? tbl('<th>종목</th><th>내 분류</th><th class="r">출발일</th><th>이유 칩</th><th>확정 시점</th>', t3) : '<div class="n-sub">없음</div>'}
+      <div class="n-sub" style="font-size:12px;margin:10px 0 2px">④ 이유 칩별 적중률 — 칩을 고른 종목 중 출발 비율</div>${tbl('<th>이유</th><th class="r">고른 종목</th><th class="r">출발</th><th class="r">적중률</th>', t4)}
+    </section>`;
+}
 async function lpeLoad() {
   try {
     const d = await apiJson('/api/lowpoint/evals');
@@ -8079,6 +8232,11 @@ function renderLowpointTrack() {
   if (view === 'hold') {
     wrap.innerHTML = `<div class="jr-title"><h2>저점 추적</h2><span class="n-sub" style="font-size:13px">보유 종목 수익률 · 목표가까지 진행</span></div>`
       + viewTabs + renderLowpointHold();
+    return;
+  }
+  if (view === 'rank') {
+    wrap.innerHTML = `<div class="jr-title"><h2>저점 순위</h2><span class="n-sub" style="font-size:13px">코호트 분류 → 결과 → 비교 · 관심 신호 학습용</span></div>`
+      + viewTabs + renderLowpointRank();
     return;
   }
   if (view === 'watch') {

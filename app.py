@@ -5,6 +5,22 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.341 [저점일지 "순위" 페이지 — 코호트 분류 학습, 사용자 지시 "사용자가 저점 종목을 고르는 '눈'을 키우는 학습 시스템. 예측(분류)
+    → 결과 → 비교를 기록·채점한다 … 관심 신호 학습용이며 측정 결론이 아님. 새 판정 임계값 금지."] (매매 기록 | 평가 | 관찰 | 추적 |
+    순위). ① 코호트 = 관찰 코호트 그대로(주봉·월봉 라벨), 레코드는 서버가 만든다(_lp_rank_ensure — 관찰 등록 직후·07:00 추적, **기한
+    전인 코호트만** — 지난 코호트를 소급해 미분류로 채우지 않는다, 삭제한 id는 다시 안 만듦, 확정 전엔 새 히트를 합침). ② 분류: 종목마다
+    [먼저 간다/보통/안 간다](기본 보통) + 이유 칩 0~2개(거래량 폭발 이력/박스 상단 근접/위가 비어 있음/테마/수급/이평 수렴/그냥
+    느낌), "먼저 간다" 3~7개 안내(저장은 막지 않음). 임시 저장 PUT /api/lowpoint/rankings/{id}(picks만), [분류 확정] POST …/confirm —
+    확정 시각 저장·이후 수정 불가(409 confirmed). 기한 = 라벨 다음 KR 거래일 09:00 KST(is_trading_day — 휴장 건너뜀), 기한 정각부터
+    확정·임시 저장 거부(409 deadline) → 미분류로 채점. ③ 확정 시점 스냅샷(표시·리뷰 전용, 이후 불변): 확정 종가·기준가 대비 %·ATR%
+    (lowpoint_eval.short_metrics)·최근 60봉 최대 거래량 배수(직전 50일 평균 — abc ABC_CONFIG b_max_bars·gate_break_vol_avg 재사용,
+    50봉 못 채운 봉은 안 셈)·관찰 단계·무효선까지 거리·테마·테마 동반(themes_kr.json · theme_companions, 등락은 확정 봉)·기관/외국인
+    5일 순매수 일수(investor_flow, KR만 — US는 소스 없어 비움). ④ 결과: 07:00 추적 작업이 이어서(_lp_rank_results_blocking) 주봉
+    D+5·D+10, 월봉 D+20 확정 종가 수익률(기준일 다음 거래일부터 N번째 확정 봉 — 휴장일은 봉이 없어 건너뜀, 일봉만·분봉 조회 없음),
+    분류와 무관하게 채점(미분류 포함). 출발 여부·출발일·단계는 관찰 레코드를 그대로 참조(판정 로직 불변). ⑤ 리뷰 4표: 분류별 성적
+    (평균 수익률·출발률, 코호트 전체 대비) / 오른 종목 vs 안 오른 종목(스냅샷 지표 평균, 출발 기준) / 놓친 것(보통·안 간다 중 출발 —
+    스냅샷·이유 칩) / 이유 칩별 적중률, 상단 "코호트 4주(월봉은 3개월) 쌓이기 전에는 결론 내지 않음". ⑥ 저장 /data/lowpoint_rankings.json
+    — rev(_rev_store_put)·삭제 로그·날짜별 사본 14개. 테스트: test_lowpoint_rank.py.
 v5.340 [저점 관찰 숨고르기 행 출발 크기 — 사용자 지시, 표시 전용(판정 반영 금지)] "출발 크기 = (출발일 판정 고가 − 전일 종가) /
     출발일 기준 ATR(14). ATR은 기존 atr() 함수와 기존 기간 그대로. 새 상수 금지." lowpoint_watch.departure_shape에
     departure_atr_mult — scanner.atr(중앙값 TR) · lowpoint_eval.ATR_DAYS(14), 평가 페이지 ATR과 같은 호출·같은 가드(봉 > 14).
@@ -8941,7 +8957,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.340"
+VERSION = "v5.341"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -13282,6 +13298,7 @@ async def _scheduler_loop():
             _daily_backup(USER_EVENTS_PATH, "user_events", lock=_USER_EVENTS_LOCK)   # v5.322 홈 달력
             _daily_backup(LP_WATCH_PATH, "lowpoint_watch", lock=_LP_WATCH_LOCK)       # v5.325 저점 관찰
             _daily_backup(LP_INTEREST_PATH, "lowpoint_interest", lock=_LP_INTEREST_LOCK)   # v5.328 관심 추적
+            _daily_backup(LP_RANK_PATH, "lowpoint_rankings", lock=_LP_RANK_LOCK)   # v5.341 순위
             asyncio.create_task(_maybe_run_lowpoint())   # v5.301: 저점종목 토요일 자동 실행(백그라운드)
         except Exception as e:
             print(f"[scheduler] loop error: {e}")
@@ -13341,6 +13358,7 @@ async def _start_scheduler():
         _daily_backup(USER_EVENTS_PATH, "user_events", force=True, lock=_USER_EVENTS_LOCK)   # v5.322 홈 달력
         _daily_backup(LP_WATCH_PATH, "lowpoint_watch", force=True, lock=_LP_WATCH_LOCK)       # v5.325 저점 관찰
         _daily_backup(LP_INTEREST_PATH, "lowpoint_interest", force=True, lock=_LP_INTEREST_LOCK)   # v5.328 관심 추적
+        _daily_backup(LP_RANK_PATH, "lowpoint_rankings", force=True, lock=_LP_RANK_LOCK)   # v5.341 순위
     except Exception as e:
         print(f"[journal-backup] 시작 백업 실패: {e}", flush=True)
     try:
@@ -20467,6 +20485,10 @@ def _lp_watch_register(entry: dict, tf: str, source: str) -> int:
             _rec_list_write(LP_WATCH_PATH, recs)
     print(f"[lowpoint-watch] {source} {tf} {(entry or {}).get('bar_date')} — 히트 {len(new)}건 중 {len(added)}건 등록",
           flush=True)
+    try:
+        _lp_rank_ensure(_lp_rank_now())            # v5.341 순위 — 새 코호트가 생기면 분류 레코드(기한 전만)
+    except Exception as e:
+        print(f"[lowpoint-rank] ⚠️ 코호트 생성 실패: {type(e).__name__}: {e}", flush=True)
     return len(added)
 
 
@@ -20537,8 +20559,11 @@ def _lp_watch_job_blocking(tf: str, now: "datetime") -> dict:
                                            "failed": hold["failed"]})
     print(f"[lowpoint-watch] 보유·관심 추적 — 보유 {hold['held']}종목 · 관심 {hold['interest']}종목 · 조회 {hold['fetched']} · "
           f"실패 {len(hold['failed'])}", flush=True)
+    # v5.341: 순위 결과(확정 종가 D+N 수익률) — 관찰 단계를 다 갱신한 뒤에(리뷰가 같은 관찰 레코드를 참조)
+    _lp_rank_ensure(now)
+    rank = _lp_rank_results_blocking(now)
     return {"bar_date": today.isoformat(), "rows": summary["active"],
-            "counts": {**summary, "seeded": seeded, "holdings": hold}}
+            "counts": {**summary, "seeded": seeded, "holdings": hold, "rank": rank}}
 
 
 def _lp_hold_track_read() -> "dict | None":
@@ -20702,6 +20727,285 @@ async def lp_interest_delete(rid: str, request: Request):
         removed = recs.pop(idx)
         _rec_list_write(LP_INTEREST_PATH, recs)
         _rev_store_delete_log(LP_INTEREST_DELETE_LOG_PATH, rid, request, removed, "lowpoint-interest")
+    return JSONResponse({"ok": True, "deleted": rid})
+
+
+# ── v5.341(사용자 지시) 저점 순위 — 코호트 분류 학습(예측 → 결과 → 비교) ──────────────────────────────
+# "사용자가 저점 종목을 고르는 '눈'을 키우는 학습 시스템. 예측(분류) → 결과 → 비교를 기록·채점한다. … 관심 신호 학습용이며
+# 측정 결론이 아님. 새 판정 임계값 금지." 계산은 scripts/screens/lowpoint_rank.py(순수), 여기는 저장·코호트 생성·확정·결과·API.
+# 저장은 저점 매매 기록과 같은 규칙(_rev_store_put rev·삭제 로그·_daily_backup 14개). 레코드는 서버가 만든다(관찰 코호트가
+# 생기면, 기한 전인 것만) — 사용자는 분류(picks)를 임시 저장하고 확정만 한다. 확정 뒤엔 picks·snapshot이 바뀌지 않는다.
+LP_RANK_PATH = _resolve_persistent_path("lowpoint_rankings.json")
+LP_RANK_DELETE_LOG_PATH = os.path.join(os.path.dirname(LP_RANK_PATH), "lowpoint_rankings_deletions.log")
+_LP_RANK_LOCK = _threading.RLock()
+
+
+def _lp_rank_now() -> "datetime":
+    """순위 기한·확정 시각의 "지금" — 한 곳(테스트가 시각을 고정한다)."""
+    return datetime.now(KST)
+
+
+def _lp_rank_mod():
+    _lp_watch_mod()                       # scripts/screens 경로 등록
+    import lowpoint_rank
+    return lowpoint_rank
+
+
+def _lp_rank_deleted_ids() -> set:
+    out = set()
+    try:
+        with open(LP_RANK_DELETE_LOG_PATH, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    out.add(_json.loads(line).get("id"))
+                except ValueError:
+                    continue
+    except OSError:
+        pass
+    return out
+
+
+def _lp_rank_ensure(now: "datetime") -> dict:
+    """관찰 코호트(주·월봉 라벨)마다 순위 레코드를 만든다 — **기한 전인 코호트만**(지난 코호트를 소급해 미분류로 채우지 않는다).
+    이미 있으면 확정 전에 한해 새로 들어온 관찰 종목을 합친다. 삭제한 id는 다시 안 만든다. 0건이어도 로그."""
+    rk = _lp_rank_mod()
+    now_iso = now.astimezone(KST).isoformat()
+    watch = _rec_list_load(LP_WATCH_PATH)
+    cohorts = sorted({(r.get("tf"), r.get("label")) for r in watch if r.get("tf") in rk.HORIZONS and r.get("label")})
+    created, merged = [], []
+    with _LP_RANK_LOCK:
+        recs = _rec_list_load(LP_RANK_PATH)
+        by = {r.get("id"): r for r in recs}
+        deleted = _lp_rank_deleted_ids()
+        changed = False
+        for tf, label in cohorts:
+            rid = rk.rank_id(tf, label)
+            items = rk.cohort_items(watch, tf, label)
+            if rid in by:
+                if rk.is_open(by[rid], now_iso) and rk.merge_items(by[rid], items):
+                    _journal_bump(by[rid])
+                    merged.append(rid)
+                    changed = True
+                continue
+            if rid in deleted:
+                continue
+            new = rk.new_record(tf, label, items, is_trading_day, now_iso)
+            if not rk.is_open(new, now_iso):
+                continue
+            new["rev"] = 1
+            new["updated_at"] = _now_iso()
+            recs.append(new)
+            created.append(rid)
+            changed = True
+        if changed:
+            _rec_list_write(LP_RANK_PATH, recs)
+    print(f"[lowpoint-rank] 코호트 확인 {len(cohorts)}개 — 새 순위 {len(created)}건({', '.join(created) or '없음'}) · "
+          f"종목 합침 {len(merged)}건", flush=True)
+    return {"created": created, "merged": merged}
+
+
+def _lp_rank_snapshot_blocking(items: list, now_iso: str) -> dict:
+    """확정 시점 지표 스냅샷 {watch_id: 지표} — 스레드풀에서 돈다. 일봉은 관찰과 같은 조회(lowpoint_watch.fetch_daily — KR naver
+    통합·US yfinance 배당 미조정), 확정 봉만. 표시·리뷰 전용."""
+    import abc_screener
+    from concurrent.futures import ThreadPoolExecutor
+    w, rk = _lp_watch_mod(), _lp_rank_mod()
+    today = datetime.fromisoformat(now_iso).astimezone(KST).date()
+    data = w.fetch_daily([{**i, "mkt": i["mkt"]} for i in items], today)
+    watch_by = {r.get("id"): r for r in _rec_list_load(LP_WATCH_PATH)}
+    kr = [i["code"] for i in items if i["mkt"] != "US"]
+    # 테마·테마 동반 — ABC와 같은 파일·같은 함수(themes_kr.json · theme_companions), 등락은 확정 봉 기준
+    bundle = _peek_market_bundle("kr") or {}
+    try:
+        uni = bundle.get("universe") or get_universe("kr")
+    except Exception:
+        uni = {}
+    themes = _abc_theme_map(uni)
+    mine = {n: ms for n, ms in themes.items() if any(c in ms for c in kr)}
+    members = sorted({m for ms in mine.values() for m in ms})
+    thru_kr = w.confirmed_through("KR", now_iso)
+    bdata = bundle.get("data") or {}
+
+    def chg(t):
+        df = bdata.get(t)
+        if df is None:
+            try:
+                df = naver_kr.fetch_history(t, days=10)
+            except Exception:
+                df = None
+        df = w._confirmed_daily(df, thru_kr)
+        return t, abc_screener.day_change_pct(df.dropna(subset=["Close"]) if df is not None and not df.empty else df)
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        changes = dict(ex.map(chg, members))
+        flows = dict(zip(kr, ex.map(_flow_fetch_one, kr)))
+    comp = abc_screener.theme_companions(mine, changes)
+    cfg = abc_screener.ABC_CONFIG
+    out = {}
+    for i in items:
+        th = [{"theme": x["theme"], "up": x["up"], "total": x["total"], "no_data": x["no_data"]} for x in comp.get(i["code"], [])]
+        f = flows.get(i["code"])
+        flow = ({"organ": f.get("organ"), "foreign": f.get("foreign"), "of": f.get("of"), "asof": f.get("asof"),
+                 "ok": f.get("ok"), "reason": f.get("reason")} if f is not None else None)
+        out[i["watch_id"]] = rk.snapshot_item(i, data.get(i["code"]), w.confirmed_through(i["mkt"], now_iso),
+                                              watch_by.get(i["watch_id"]), th, flow, cfg["b_max_bars"], cfg["gate_break_vol_avg"])
+    return out
+
+
+def _lp_rank_results_blocking(now: "datetime") -> dict:
+    """매일 07:00 관찰 추적 작업이 이어서 부른다 — 결과(D+5·D+10 / D+20 확정 종가 수익률)가 다 차지 않은 코호트의 종목만 일봉
+    조회(분봉 없음). 확정 여부와 무관(미분류도 채점). picks·snapshot은 건드리지 않는다. 0건이어도 로그."""
+    w, rk = _lp_watch_mod(), _lp_rank_mod()
+    now_iso = now.astimezone(KST).isoformat()
+    recs = _rec_list_load(LP_RANK_PATH)
+    todo = [r for r in recs if not rk.results_done(r)]
+    items = {i["code"]: i for r in todo for i in r.get("items") or []}
+    data = w.fetch_daily(list(items.values()), now.astimezone(KST).date()) if items else {}
+    new_res = {}
+    for r in todo:
+        res = {}
+        for i in r.get("items") or []:
+            got = rk.returns_for(i, data.get(i["code"]), w.confirmed_through(i["mkt"], now_iso), rk.HORIZONS[r["tf"]])
+            if got:
+                res[i["watch_id"]] = got
+        new_res[r["id"]] = res
+    changed = []
+    with _LP_RANK_LOCK:
+        cur = _rec_list_load(LP_RANK_PATH)
+        for r in cur:
+            res = new_res.get(r.get("id"))
+            if res is None:
+                continue
+            merged = {**(r.get("results") or {})}
+            for wid, v in res.items():
+                merged[wid] = {**(merged.get(wid) or {}), **v}
+            if merged != (r.get("results") or {}):
+                r["results"] = merged
+                _journal_bump(r)
+                changed.append(r["id"])
+        if changed:
+            _rec_list_write(LP_RANK_PATH, cur)
+    print(f"[lowpoint-rank] 결과 기록 — 대상 코호트 {len(todo)}개 · 조회 {len(data)}/{len(items)}종목 · 갱신 {len(changed)}건"
+          f"({', '.join(changed) or '없음'})", flush=True)
+    return {"cohorts": len(todo), "fetched": len(data), "changed": changed}
+
+
+@app.get("/api/lowpoint/rankings")
+async def lp_rank_list():
+    rk = _lp_rank_mod()
+    try:
+        recs = _rec_list_load(LP_RANK_PATH)
+        watch = _rec_list_load(LP_WATCH_PATH)
+    except (OSError, ValueError) as e:
+        return JSONResponse({"ok": False, "error": f"순위 읽기 실패: {e}"}, status_code=500)
+    now_iso = _lp_rank_now().isoformat()
+    watch_by = {r.get("id"): r for r in watch}
+    return JSONResponse(_clean_nan({
+        "ok": True, "now": now_iso, "records": recs,
+        "open": {r["id"]: rk.is_open(r, now_iso) for r in recs},
+        "watch": {wid: {k: wr.get(k) for k in ("status", "stage", "reached_date", "last_close", "last_date", "invalid_line")}
+                  for r in recs for wid in [i["watch_id"] for i in r.get("items") or []] for wr in [watch_by.get(wid) or {}]},
+        "review": rk.review(recs, watch_by),
+        "picks": list(rk.PICKS), "pick_label": rk.PICK_LABEL, "reasons": list(rk.REASONS), "max_reasons": rk.MAX_REASONS,
+        "first_guide": list(rk.FIRST_GUIDE)}))
+
+
+def _lp_rank_body(body) -> "tuple[dict | None, object, str | None]":
+    if not isinstance(body, dict):
+        return None, None, "JSON 본문 필요"
+    return body.get("picks"), body.get("base_rev"), None
+
+
+def _lp_rank_guard(rk, srv: "dict | None", now_iso: str) -> "tuple[int, dict] | None":
+    if srv is None:
+        return 404, {"ok": False, "code": "gone", "error": "없는 코호트예요"}
+    if srv.get("confirmed_at"):
+        return 409, {"ok": False, "code": "confirmed", "record": srv, "error": "확정한 분류는 수정할 수 없어요"}
+    if not rk.is_open(srv, now_iso):
+        return 409, {"ok": False, "code": "deadline", "record": srv,
+                     "error": f"기한({srv['deadline'][:16].replace('T', ' ')} KST)이 지나 확정할 수 없어요 — 미분류로 채점돼요"}
+    return None
+
+
+@app.put("/api/lowpoint/rankings/{rid}")
+async def lp_rank_put(rid: str, request: Request):
+    """확정 전 분류 임시 저장 — picks만 바뀐다(종목·기한·스냅샷·결과는 서버 값 그대로). 확정 뒤·기한 뒤는 거부."""
+    rk = _lp_rank_mod()
+    try:
+        picks, base_rev, err = _lp_rank_body(await request.json())
+    except Exception:
+        picks, base_rev, err = None, None, "JSON 본문 필요"
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
+    with _LP_RANK_LOCK:
+        recs = _rec_list_load(LP_RANK_PATH)
+        srv = next((r for r in recs if r.get("id") == rid), None)
+        g = _lp_rank_guard(rk, srv, _lp_rank_now().isoformat())
+        if g:
+            return JSONResponse(_clean_nan(g[1]), status_code=g[0])
+        bad = rk.validate_picks(picks, srv.get("items") or [])
+        if bad:
+            return JSONResponse({"ok": False, "error": bad}, status_code=400)
+        status, payload, changed = _rev_store_put(recs, rid, {**srv, "picks": rk.clean_picks(picks)}, base_rev)
+        if changed:
+            _rec_list_write(LP_RANK_PATH, recs)
+    return JSONResponse(_clean_nan(payload), status_code=status)
+
+
+@app.post("/api/lowpoint/rankings/{rid}/confirm")
+async def lp_rank_confirm(rid: str, request: Request):
+    """분류 확정 — 확정 시각·picks·확정 시점 지표 스냅샷을 저장하고 이후 수정 불가. 기한(라벨 다음 KR 거래일 09:00 KST) 이후 거부.
+    스냅샷 조회(일봉·수급·테마 등락)는 잠금 밖 스레드에서, 쓰기 직전에 rev·기한·확정 여부를 **다시** 확인한다."""
+    rk = _lp_rank_mod()
+    try:
+        picks, base_rev, err = _lp_rank_body(await request.json())
+    except Exception:
+        picks, base_rev, err = None, None, "JSON 본문 필요"
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
+    srv = next((r for r in _rec_list_load(LP_RANK_PATH) if r.get("id") == rid), None)
+    g = _lp_rank_guard(rk, srv, _lp_rank_now().isoformat())
+    if g:
+        return JSONResponse(_clean_nan(g[1]), status_code=g[0])
+    bad = rk.validate_picks(picks, srv.get("items") or [])
+    if bad:
+        return JSONResponse({"ok": False, "error": bad}, status_code=400)
+    if int(base_rev or 0) != int(srv.get("rev") or 0):
+        return JSONResponse(_clean_nan({"ok": False, "code": "conflict", "record": srv, "error": "다른 곳에서 먼저 바뀐 기록이에요"}),
+                            status_code=409)
+    snap_at = _lp_rank_now().isoformat()
+    loop = asyncio.get_event_loop()
+    snap = await loop.run_in_executor(_LOWPOINT_EXECUTOR, _lp_rank_snapshot_blocking, srv.get("items") or [], snap_at)
+    with _LP_RANK_LOCK:
+        recs = _rec_list_load(LP_RANK_PATH)
+        cur = next((r for r in recs if r.get("id") == rid), None)
+        now_iso = _lp_rank_now().isoformat()
+        g = _lp_rank_guard(rk, cur, now_iso)
+        if g:
+            return JSONResponse(_clean_nan(g[1]), status_code=g[0])
+        if int(base_rev or 0) != int(cur.get("rev") or 0) or cur.get("items") != srv.get("items"):
+            return JSONResponse(_clean_nan({"ok": False, "code": "conflict", "record": cur,
+                                            "error": "확정하는 사이 코호트가 바뀌었어요 — 다시 확인해 주세요"}), status_code=409)
+        cur.update(picks=rk.clean_picks(picks), confirmed_at=now_iso, snapshot=snap, snapshot_at=snap_at)
+        _journal_bump(cur)
+        _rec_list_write(LP_RANK_PATH, recs)
+    print(f"[lowpoint-rank] 확정 {rid} — {len(cur.get('items') or [])}종목 · 먼저 간다 "
+          f"{sum(1 for p in cur['picks'].values() if p['pick'] == 'first')}개", flush=True)
+    return JSONResponse(_clean_nan({"ok": True, "record": cur}))
+
+
+@app.delete("/api/lowpoint/rankings/{rid}")
+async def lp_rank_delete(rid: str, request: Request):
+    with _LP_RANK_LOCK:
+        try:
+            recs = _rec_list_load(LP_RANK_PATH)
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
+        idx = next((i for i, r in enumerate(recs) if r.get("id") == rid), None)
+        if idx is None:
+            return JSONResponse({"ok": True, "already_gone": True})
+        removed = recs.pop(idx)
+        _rec_list_write(LP_RANK_PATH, recs)
+        _rev_store_delete_log(LP_RANK_DELETE_LOG_PATH, rid, request, removed, "lowpoint-rank")
     return JSONResponse({"ok": True, "deleted": rid})
 
 
