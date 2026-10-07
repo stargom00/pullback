@@ -12,6 +12,9 @@
   code·name·market(KOSPI|KOSDAQ|US)·mkt(KR|US)
   status      active | reached;  reached_date·reached_days(기준일 → 도달일 달력 일수)
   last_close·last_date·checked_at — 마지막 추적 결과(활성 종목만 갱신)
+  stage       v5.337 watch | departed | resting | restart | invalid — 출발 이후 단계(stage_info), 종료(restart·invalid)면 고정
+  invalid_line·departure_high·stage_date·stage_close·last_checked_date·departure_volume·last_volume·stage_warning
+  departure_vol_mult·departure_close_pos·departure_upper_wick — 출발일 모양(표시 전용, departure_shape)
 
 판정(v5.333): 기준일 **이후** 거래일의 **정규장 고가** ≥ 기준가 × (1 + REACH_PCT/100) → 도달(정확히 1.05배도 도달).
 기준일 당일·이전은 보지 않는다. KR 정규장 고가 = naver 분봉 09:00~15:30 최고가(장외 체결 제외 — 아래 REACH_RULE 주석,
@@ -158,6 +161,144 @@ def judge_kr_regular(rec: dict, daily: "pd.DataFrame | None", today: date, sessi
     return out
 
 
+# ── v5.337(사용자 지시) 출발 이후 단계 — 관찰 → 출발 → 숨고르기 → 재출발 / 무효 ─────────────────────────────────────
+# 지시 요지: "저점일지 관찰은 지금 +5% 도달을 '이미 올라버림 → 종료'로 처리한다. 그런데 WSI처럼 바닥에서 1차 출발한 뒤
+# 숨고르기하는 종목은 도달 이후가 진입 자리다. … 관심 신호이고 측정 전이다. 새 임계값은 만들지 않는다."
+#   출발      = 지금의 도달 판정 그대로(v5.333 — KR 정규장 고가, US 일봉 고가). 출발일 = 도달일(reached_date).
+#   출발 고가 = 출발일의 판정 고가(레코드에 저장된 reached_high).
+#   무효선    = 기준일부터 출발 전날까지 **통합 종가** 최고값(기준일 종가 포함, 출발일 종가 제외).
+#   숨고르기  = 출발 다음 거래일부터 무효선 ≤ 종가 ≤ 출발 고가.
+#   재출발    = 출발 다음 거래일 이후 처음으로 종가 > 출발 고가 → 종료.
+#   무효      = 출발 다음 거래일 이후 처음으로 종가 < 무효선 → 종료.
+# 판정은 **확정된 일봉 종가만**(KR naver 통합 종가, US yfinance 종가 — 분봉 사용 금지). 시간 제한 없음.
+# 무효선 > 출발 고가(KR은 출발 고가가 정규장 고가라 출발 전 장외 종가가 더 높을 수 있다)면 판정하지 않고 경고로 보고한다.
+STAGES = ("watch", "departed", "resting", "restart", "invalid")
+TERMINAL_STAGES = ("restart", "invalid")
+STAGE_FIELDS = ("stage", "invalid_line", "departure_high", "stage_date", "last_checked_date", "stage_close",
+                "departure_volume", "last_volume", "stage_warning")
+
+
+def is_target(r: dict) -> bool:
+    """추적 대상 — 관찰 중, v5.333 규칙 전 도달(재판정), 또는 종료(재출발·무효) 전 단계의 출발 레코드."""
+    if r.get("status") == "active":
+        return True
+    if r.get("status") != "reached":
+        return False
+    return r.get("reach_rule") != REACH_RULE or r.get("stage") not in TERMINAL_STAGES
+
+
+def _kr_close_confirmed_hm() -> int:
+    from app import KR_CLOSE_CONFIRMED_HM      # 애프터마켓 종료 후 일봉 확정 시각(KST 분) — 사본 금지(CLAUDE.md)
+    return KR_CLOSE_CONFIRMED_HM
+
+
+def confirmed_through(mkt: str, now_iso: str) -> "str | None":
+    """지금 시각에 **종가가 확정된** 마지막 날짜(그 날짜까지의 일봉만 단계 판정에 쓴다). 장중·애프터 중 오늘 봉은 종가가
+    아직 움직이므로 제외 — 종료(재출발·무효)는 되돌리지 않는 판정이라 미확정 종가로 내리면 안 된다.
+    KR = KST 오늘, app.KR_CLOSE_CONFIRMED_HM(20:10) 전이면 어제까지. US = 뉴욕 오늘, 정규장 마감 16:00 전이면 어제까지.
+    시각을 못 읽으면 None(제한 없음이 아니라 판정 보류 — 호출부가 단계를 계산하지 않는다)."""
+    from datetime import datetime, timedelta, timezone
+    try:
+        n = datetime.fromisoformat(now_iso)
+        if n.tzinfo is None:
+            return None
+    except (TypeError, ValueError):
+        return None
+    if mkt == "US":
+        from zoneinfo import ZoneInfo
+        t = n.astimezone(ZoneInfo("America/New_York"))
+        done = t.hour * 60 + t.minute >= 16 * 60          # NYSE 정규장 마감(시장 시간 — 임계값 아님)
+    else:
+        t = n.astimezone(timezone(timedelta(hours=9)))
+        done = t.hour * 60 + t.minute >= _kr_close_confirmed_hm()
+    day = t.date() if done else t.date() - timedelta(days=1)
+    return str(day)
+
+
+def stage_info(base_date: str, reached_date: str, departure_high: "float | None", daily: "pd.DataFrame | None",
+               through: "str | None") -> dict:
+    """출발 레코드 한 건의 단계 — 확정 일봉(through까지) 종가로 처음부터 다시 계산한다(상태 없음 → 같은 데이터면 같은 답).
+    반환: stage(departed|resting|restart|invalid)·invalid_line·departure_high·stage_date·stage_close·last_checked_date·
+    departure_volume·last_volume·stage_warning(판정 못 함 사유 — 있으면 stage는 departed로 두고 판정하지 않는다)."""
+    out = {"stage": "departed", "invalid_line": None, "departure_high": departure_high, "stage_date": reached_date,
+           "stage_close": None, "last_checked_date": None, "departure_volume": None, "last_volume": None,
+           "stage_warning": None}
+    if daily is None or daily.empty or through is None:
+        out["stage_warning"] = "일봉 없음" if through is not None else "확정 시각 판정 불가"
+        return out
+    d = daily.dropna(subset=["Close"]).copy()
+    d.index = pd.to_datetime(d.index).normalize()
+    d = d[d.index <= pd.Timestamp(through)]
+    if len(d):
+        out["last_checked_date"] = str(d.index[-1].date())
+    base, dep = pd.Timestamp(base_date), pd.Timestamp(reached_date)
+    if base not in d.index:
+        out["stage_warning"] = f"기준일 {base_date} 일봉 없음"
+        return out
+    pre = d[(d.index >= base) & (d.index < dep)]["Close"]
+    inv = float(pre.max())
+    out["invalid_line"] = inv
+    if dep in d.index and "Volume" in d.columns:
+        out["departure_volume"] = float(d.loc[dep, "Volume"])
+    if departure_high is None:
+        out["stage_warning"] = "출발 고가 없음"
+        return out
+    if inv > float(departure_high):
+        out["stage_warning"] = f"무효선 {inv:g} > 출발 고가 {float(departure_high):g}"
+        return out
+    after = d[d.index > dep]
+    if not len(after):
+        return out                                               # 출발 — 숨고르기 0일
+    if "Volume" in after.columns:
+        out["last_volume"] = float(after["Volume"].iloc[-1])
+    for ts, c in after["Close"].items():
+        c = float(c)
+        if c > float(departure_high):
+            return {**out, "stage": "restart", "stage_date": str(ts.date()), "stage_close": c}
+        if c < inv:
+            return {**out, "stage": "invalid", "stage_date": str(ts.date()), "stage_close": c}
+    first = after.index[0]
+    return {**out, "stage": "resting", "stage_date": str(first.date()), "stage_close": float(after["Close"].iloc[-1])}
+
+
+# ── v5.337(사용자 지시 "추가 2") 출발일 모양 — 기록·표시 전용, **단계 판정에 쓰지 않는다** ─────────────────────────────
+# "출발일 거래량 배수(50일 평균 대비), 출발일 종가 위치 = (종가−저가)/(고가−저가), 윗꼬리 비율 = (고가−max(시가,종가))/
+# (고가−저가). … 기존 상수만 사용, 새 임계값 금지." 50일 = abc_screener.ABC_CONFIG["gate_break_vol_avg"](ABC 돌파봉 거래량 ÷
+# 직전 50일 평균과 같은 정의 — 출발일 제외 직전 N거래일). 봉은 단계 판정과 같은 확정 일봉(KR naver 통합 OHLC — 고가·저가에
+# 장외 체결 포함, US yfinance). 직전 봉이 N개 미만이면 배수는 None(짧은 평균으로 대신하지 않는다). 고가 = 저가면 위치·꼬리 None.
+def _vol_avg_bars() -> int:
+    import abc_screener
+    return int(abc_screener.ABC_CONFIG["gate_break_vol_avg"])
+
+
+def shape_lookback_days() -> int:
+    """출발일 직전 N거래일 평균을 위해 기준일 앞으로 더 받을 달력 일수(주 5거래일 환산 — 휴장 여유는 fetch_daily의 +10)."""
+    return -(-_vol_avg_bars() * 7 // 5)
+
+
+def departure_shape(daily: "pd.DataFrame | None", reached_date: str, through: "str | None") -> dict:
+    out = {"departure_vol_mult": None, "departure_close_pos": None, "departure_upper_wick": None}
+    if daily is None or daily.empty or through is None or reached_date > through:
+        return out                                               # 출발일 봉 미확정 — 다음 추적 때 다시
+    d = daily.copy()
+    d.index = pd.to_datetime(d.index).normalize()
+    dep = pd.Timestamp(reached_date)
+    if dep not in d.index:
+        return out
+    row = d.loc[dep]
+    o, h, l, c = (float(row[k]) if k in d.columns else float("nan") for k in ("Open", "High", "Low", "Close"))
+    if h > l:                                                    # 고가 = 저가(또는 열 없음 — nan 비교는 False)면 None
+        out["departure_close_pos"] = (c - l) / (h - l)
+        out["departure_upper_wick"] = (h - max(o, c)) / (h - l)
+    n = _vol_avg_bars()
+    prev = d[d.index < dep]["Volume"].iloc[-n:] if "Volume" in d.columns else []
+    if len(prev) == n:
+        avg = float(prev.mean())
+        if avg > 0:
+            out["departure_vol_mult"] = float(row["Volume"]) / avg
+    return out
+
+
 def _us_period(earliest: str, today: date) -> str:
     """기준일을 덮는 가장 짧은 yfinance period(기준일 이후 일봉만 필요)."""
     days = (today - date.fromisoformat(earliest)).days
@@ -173,7 +314,9 @@ def fetch_daily(records: list, today: date) -> dict:
     import naver_kr
     if not records:
         return {}
-    earliest = min(r["base_date"] for r in records)
+    # v5.337: 출발일 모양(직전 50거래일 평균 거래량)을 위해 기준일 앞으로 더 받는다
+    from datetime import timedelta
+    earliest = str(date.fromisoformat(min(r["base_date"] for r in records)) - timedelta(days=shape_lookback_days()))
     kr = sorted({r["code"] for r in records if r.get("mkt") != "US"})
     us = sorted({r["code"] for r in records if r.get("mkt") == "US"})
     out = {}
@@ -204,10 +347,12 @@ def track(records: list, today: date, now_iso: str, fetch=fetch_daily, fetch_min
     KR = 정규장 고가(judge_kr_regular), US = yfinance 일봉 고가(정규장만 담김). 옛 도달 레코드는 기준일부터 다시 판정해
     미도달이면 관찰로 되돌린다(reverted). 새 규칙으로 도달한 레코드는 다시 조회하지 않는다."""
     old_reached = [r for r in records if r.get("status") == "reached" and r.get("reach_rule") != REACH_RULE]
-    targets = [r for r in records if r.get("status") == "active"] + old_reached
+    staging = [r for r in records if r.get("status") == "reached" and r.get("reach_rule") == REACH_RULE and is_target(r)]
+    targets = [r for r in records if r.get("status") == "active"] + old_reached + staging
     data = fetch(targets, today) if targets else {}
     done_today = _session_done_today(now_iso)
     updates, failed, reached, reverted, pending = {}, [], 0, [], []
+    transitions, first_staged, warnings = [], [], []
     for r in targets:
         was_reached = r.get("status") == "reached"
         daily = data.get(r["code"])
@@ -216,7 +361,11 @@ def track(records: list, today: date, now_iso: str, fetch=fetch_daily, fetch_min
             failed.append(r["code"])
             continue
         u = {"last_close": last["last_close"], "last_date": last["last_date"], "checked_at": now_iso, "reach_rule": REACH_RULE}
-        if r.get("mkt") == "US":
+        if was_reached and r.get("reach_rule") == REACH_RULE:
+            # 정규장 규칙으로 이미 출발 — 도달 판정은 다시 안 하고(분봉 조회 없음) 단계만 일봉 종가로
+            hit = {"reached": True, "reached_date": r.get("reached_date"), "reached_days": r.get("reached_days"),
+                   "reached_high": r.get("reached_high"), "reached_pct": r.get("reached_pct")}
+        elif r.get("mkt") == "US":
             hit = {"reached": last["reached"], "reached_date": last["reached_date"], "reached_days": last["reached_days"]}
             if last["reached"]:
                 d = daily.copy()
@@ -230,17 +379,35 @@ def track(records: list, today: date, now_iso: str, fetch=fetch_daily, fetch_min
             u.update(regular_checked_through=hit["regular_checked_through"], pending_day=hit["pending_day"])
             if hit["pending_day"]:
                 pending.append(f"{r['code']}@{hit['pending_day']}")
+        tag = f"{r['code']}({r.get('label')} {r.get('tf')})"
         if hit["reached"]:
             u.update(status="reached", reached_date=hit["reached_date"], reached_days=hit["reached_days"],
                      reached_high=hit.get("reached_high"), reached_pct=hit.get("reached_pct"))
             if not was_reached:
                 reached += 1
-        elif was_reached:
-            u.update(status="active", reached_date=None, reached_days=None, reached_high=None, reached_pct=None)
-            reverted.append(f"{r['code']}({r.get('label')} {r.get('tf')})")
+            thru = confirmed_through(r.get("mkt"), now_iso)
+            si = stage_info(r["base_date"], hit["reached_date"], hit.get("reached_high"), daily, thru)
+            u.update(si)
+            u.update(departure_shape(daily, hit["reached_date"], thru))      # 표시 전용 — 판정은 위 si에서 끝났다
+            if si["stage_warning"]:
+                warnings.append(f"{tag} {si['stage_warning']}")
+            prev = r.get("stage") if was_reached else "watch"
+            if was_reached and r.get("stage") is None:
+                first_staged.append((si["stage"], tag))
+            elif si["stage"] != prev:
+                transitions.append(f"{tag} {prev}→{si['stage']}")
+        else:
+            u.update(stage="watch", invalid_line=None, departure_high=None, stage_date=None, stage_close=None,
+                     departure_volume=None, last_volume=None, stage_warning=None, last_checked_date=last["last_date"],
+                     departure_vol_mult=None, departure_close_pos=None, departure_upper_wick=None)
+            if was_reached:
+                u.update(status="active", reached_date=None, reached_days=None, reached_high=None, reached_pct=None)
+                reverted.append(tag)
         updates[r["id"]] = u
-    return updates, {"active": len(targets) - len(old_reached), "rejudged": len(old_reached), "fetched": len(data),
-                     "reached_new": reached, "reverted": reverted, "pending": pending, "failed": sorted(set(failed))}
+    return updates, {"active": len(targets) - len(old_reached) - len(staging), "rejudged": len(old_reached),
+                     "staged": len(staging), "fetched": len(data), "reached_new": reached, "reverted": reverted,
+                     "pending": pending, "failed": sorted(set(failed)), "transitions": transitions,
+                     "first_staged": first_staged, "stage_warnings": warnings}
 
 
 # ── v5.327(사용자 지시) 보유 추적 — "매매 기록의 보유 종목 수익률을 매일 자동 추적 — 관찰(진입 전)과 짝이 되는

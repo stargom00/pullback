@@ -5,6 +5,27 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.337 [저점 관찰 출발 이후 단계 + 출발일 모양 + "+직접 추가" 종목코드 한글 IME — 사용자 지시] ① 단계(관심 신호 · 측정 전,
+    새 임계값 없음): "WSI처럼 바닥에서 1차 출발한 뒤 숨고르기하는 종목은 도달 이후가 진입 자리다" — 관찰 → 출발 → 숨고르기 →
+    재출발 / 무효(lowpoint_watch.stage_info). 출발 = v5.333 도달 판정 그대로(출발일 = 도달일, 출발 고가 = reached_high). 무효선 =
+    기준일~출발 전날 통합 종가 최고(기준일 포함·출발일 제외). 출발 다음 거래일부터 처음 종가 > 출발 고가 → 재출발, 종가 < 무효선 →
+    무효(둘 다 종료, 이후 조회 안 함), 그 사이 = 숨고르기. 일봉 종가만(분봉 금지), 시간 제한 없음. **확정 종가만** —
+    confirmed_through: KR은 app.KR_CLOSE_CONFIRMED_HM(20:10 KST) 전이면 오늘 봉 제외, US는 뉴욕 16:00 전이면 제외(종료는
+    되돌리지 않는 판정이라 장중 종가로 내리지 않는다). 무효선 > 출발 고가(KR 출발 고가 = 정규장 고가라 출발 전 장외 종가가 더
+    높을 수 있음)면 판정 안 함 + ⚠️ 로그 + 화면 "판정 보류". 레코드 필드 stage·invalid_line·departure_high·stage_date·
+    stage_close·last_checked_date·departure_volume·last_volume·stage_warning, 기존 추적(07:00·지금 갱신)에서 매일 갱신.
+    출발한 레코드는 종료 전까지 단계용 일봉만 다시 조회(분봉 재조회 없음, is_target). 기존 도달 레코드는 다음 추적에서 정상
+    경로로 분류 — 로그 "기존 도달 레코드 단계 분류 N건 — 출발·숨고르기·재출발·무효별 종목"·"단계 — 전환 N건"(0건이어도 남김).
+    /data 직접 수정 없음. ② 출발일 모양(추가 2 — 기록·표시 전용, 판정 반영 금지): 거래량 배수(직전 50거래일 평균 =
+    abc_screener.ABC_CONFIG["gate_break_vol_avg"] 재사용, 50봉 미만이면 None)·종가 위치 (종가−저가)/(고가−저가)·윗꼬리
+    (고가−max(시가,종가))/(고가−저가)(고가 = 저가면 None) — 확정 일봉(KR 통합 OHLC). 50일 평균용으로 일봉 조회를 기준일 앞
+    70일(달력) 더 받는다. ③ 관찰 화면: 관찰 중(코호트, 그대로) → 숨고르기(펼침 — 종목·경과일(출발일부터)·무효선·출발 고가·
+    현재가·무효선~출발 고가 위치 바·"출발 vol 2.4× · 윗꼬리 60%"·출발일 대비 최근 거래량, 무효선에 가까운 순) → 종료(접힘 —
+    재출발/무효·전환일·전환일 종가). 상단에 단계 정의 5줄 + "관심 신호 · 측정 전". ④ "+직접 추가" 종목코드 칸 한글 IME(ABC
+    v5.336과 같은 방식): 조합 중엔 조회 안 함·compositionend에서 한 번, 조회 순번(_maLookupSeq)으로 마지막 조회만 반영하고 낡은
+    결과(입력이 바뀜·다시 조합 중)는 칸 값을 덮어쓰지 않는다. 옛 _maNameResolving 잠금은 진행 중 조회가 있으면 새 조회를 버려
+    "상신"이 조회되지 않았다. headless Chrome CDP 자모 조합 확인(사보타주 시 "999999.KQ세ㅋ"로 깨짐 재현). 테스트:
+    test_lowpoint_watch_stage.py · test_ma_ticker_ime.py.
 v5.336 [ABC 강돌파 원값 판정 + 검색칸 한글 IME 수정 — 사용자 지시] ① abc_screener._find_gate_break: "반올림 전 원래 값으로
     판정하고, 반올림은 표시에만"(v5.335 _find_box_break와 같은 방식) — 예전엔 거래량 1.996배가 2.0으로 반올림돼 통과하고,
     +7.01%가 7.0 vs 0.07×100(=7.000000000000001)으로 탈락할 수 있었다. 10-06 KR 2,454종목(ABC 1,543) 수정 전후 판정·등급
@@ -8894,7 +8915,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.336"
+VERSION = "v5.337"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -20448,8 +20469,8 @@ def _lp_watch_job_blocking(tf: str, now: "datetime") -> dict:
         changed = 0
         for r in recs:
             u = updates.get(r.get("id"))
-            # 활성 레코드 + v5.333 정규장 규칙 전에 도달로 저장된 레코드(재판정 대상)만 고친다
-            if not u or not (r.get("status") == "active" or r.get("reach_rule") != w.REACH_RULE):
+            # 추적 대상(관찰 중 · v5.333 규칙 전 도달 · v5.337 종료 전 단계의 출발)만 고친다 — 잠금 안에서 다시 확인
+            if not u or not w.is_target(r):
                 continue
             r.update(u)
             _journal_bump(r)
@@ -20462,6 +20483,17 @@ def _lp_watch_job_blocking(tf: str, now: "datetime") -> dict:
     # v5.333: 정규장 고가로 다시 판정해 미도달이라 관찰로 되돌린 목록 — 0건이어도 남긴다(침묵 ≠ 성공)
     print(f"[lowpoint-watch] 정규장 고가 재판정 → 관찰 복귀 {len(summary['reverted'])}건: "
           f"{', '.join(summary['reverted']) or '없음'}", flush=True)
+    # v5.337: 출발 이후 단계 — 전환·첫 분류·판정 보류를 0건이어도 남긴다(침묵 ≠ 성공)
+    print(f"[lowpoint-watch] 단계 — 출발 레코드 {summary['staged']}건 확인 · 전환 {len(summary['transitions'])}건: "
+          f"{', '.join(summary['transitions']) or '없음'}", flush=True)
+    fs = summary["first_staged"]
+    by = {st: [t for s_, t in fs if s_ == st] for st in ("departed", "resting", "restart", "invalid")}
+    print(f"[lowpoint-watch] 기존 도달 레코드 단계 분류 {len(fs)}건 — " + " · ".join(
+        f"{lbl} {len(by[st])}건({', '.join(by[st]) or '없음'})" for st, lbl in
+        (("departed", "출발"), ("resting", "숨고르기"), ("restart", "재출발"), ("invalid", "무효"))), flush=True)
+    if summary["stage_warnings"]:
+        print(f"[lowpoint-watch] ⚠️ 단계 판정 보류 {len(summary['stage_warnings'])}건: "
+              f"{'; '.join(summary['stage_warnings'])}", flush=True)
     if summary["pending"]:
         print(f"[lowpoint-watch] ⚠️ 분봉 없음 → 판정 보류: {', '.join(summary['pending'])} (naver 분봉은 최근 6거래일만 — "
               f"그 안에 다시 받지 못하면 보류가 풀리지 않는다)", flush=True)

@@ -42,7 +42,8 @@ def _state_line():
 
 
 FNS = ("lpwBar", "lpwSortRows", "lpwDays", "lpwGroups", "lpReturnPct", "lpDisplayName", "_lptFmt", "_lptPct",
-       "_lptCode", "lpwPendingHtml", "renderLowpointWatch")
+       "_lptCode", "lpwPendingHtml", "lpwEndedLabel", "lpwDepHigh", "lpwRestPos", "lpwVolRatio", "lpwStageSplit",
+       "lpwShapeText", "renderLowpointWatch")
 
 
 def _js(expr, recs=None, extra=""):
@@ -92,16 +93,16 @@ def test_sort_rows():
 def test_render_default_sort_and_group_counts():
     html = _js("renderLowpointWatch()", RECS)
     sections = html.split('<section class="n-card lpw-card">')[1:]
-    assert len(sections) == 2
+    assert len(sections) == 3                                          # 코호트 2 + v5.337 숨고르기 1(종료 0건이면 카드 없음)
     wk = sections[0]
-    assert "10-02 주봉 · 활성 5 / 도달 1" in wk and "09-30 월봉 · 활성 1 / 도달 0" in sections[1]
+    assert "10-02 주봉 · 관찰 5 / 출발 1" in wk and "09-30 월봉 · 관찰 1 / 출발 0" in sections[1]
     assert "기준일 2026-09-30, 2026-10-02" in wk                       # 기준일은 그룹 헤더에만
     body = wk.split("<tbody>")[1].split("</tbody>")[0]
     assert [m for m in re.findall(r">(AAA|BBB|CCC|DDD|FFF)</a>", body)] == ["BBB", "FFF", "AAA", "CCC", "DDD"]
     assert body.count("2026-10-02") == 0, "기준일이 행마다 반복된다"
     # 바: +4.5% → 오른쪽 절반의 90% = 트랙의 45%, −3% → 왼쪽 30%
     assert '<i class="pos" style="width:45.0%">' in body and '<i class="neg" style="width:30.0%">' in body
-    assert "도달 완료 (1)" in wk and "<details" in wk                  # 도달은 접힘
+    assert "<details" not in wk and "숨고르기 · 1" in sections[2]     # v5.337: 출발(도달)은 코호트 밖 숨고르기 섹션으로
 
 
 def test_render_sort_toggle_by_header():

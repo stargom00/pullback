@@ -1239,6 +1239,10 @@ table.jr-table.lpw-table th.lpw-sort{cursor:pointer;user-select:none}
 .lpw-bar>i{position:absolute;top:0;bottom:0;display:block}
 .lpw-bar>i.pos{left:50%;background:var(--c-red-fg3)}
 .lpw-bar>i.neg{right:50%;background:var(--c-blue-fg4)}
+/* v5.337 숨고르기 위치 바 — 왼쪽 끝 = 무효선, 오른쪽 끝 = 출발 고가, 표시 = 현재가 */
+.lpw-rbar{position:relative;height:8px;border-radius:4px;background:var(--n-chip)}
+.lpw-rbar>i{position:absolute;top:-2px;bottom:-2px;width:3px;margin-left:-1.5px;border-radius:2px;background:var(--n-text)}
+.lpw-info .lpw-defs{flex-basis:100%;margin:0;padding-left:16px;font-size:11.5px;line-height:1.5}
 @media (max-width:480px){.lpw-table .lpw-pxcell{display:none}.lpw-table .lpw-hitchip{display:none}}   /* v5.327: 좁은 화면은 종료 후보 칩 대신 행 강조만 */
 /* /v5.326 */
 /* v5.327 평가 카드 접기 — .lpe-card 아래로 한정 */
@@ -1391,7 +1395,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.336</span>
+      <span class="ver mono" id="verBadge">v5.337</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -1676,7 +1680,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
     <h3 class="drag-handle">➕ 수동 종목 추가 <span style="font-size:11px;color:var(--muted);font-weight:400">스캐너에 없는 종목 직접 담기</span></h3>
     <div class="sub" style="color:var(--muted);font-size:12px;margin-bottom:8px">스캐너에 없는 종목을 직접 담아요. <b>대기</b>는 피벗 돌파 알림, <b>진입</b>은 R·손절 알림, <b>관찰</b>은 통계 제외.</div>
     <div class="row">
-      <div><label>종목코드 *</label><input id="maTicker" oninput="onMaTickerOrTabChange()" placeholder="예: V, AAPL, 005930.KS"></div>
+      <div><label>종목코드 *</label><input id="maTicker" oninput="maOnTickerInput(event)" placeholder="예: V, AAPL, 005930.KS"></div>
       <div><label>종목명</label><input id="maName" placeholder="예: 비자"></div>
     </div>
     <div class="row">
@@ -7512,7 +7516,7 @@ async function lpwRefresh() {
     const d = await apiParse(res, { allow: [409, 500] });
     if (!d.ok) throw new Error(d.error || '갱신 실패');
     const c = (d.summary && d.summary.counts) || {};
-    _lpw.msg = `활성 ${c.active ?? '?'}건 확인 · 새 도달 ${c.reached_new ?? 0}건${(c.failed || []).length ? ` · 조회 실패 ${c.failed.length}건(${c.failed.join(', ')})` : ''}`;
+    _lpw.msg = `관찰 ${c.active ?? '?'}건 확인 · 새 출발 ${c.reached_new ?? 0}건 · 단계 전환 ${(c.transitions || []).length}건${(c.failed || []).length ? ` · 조회 실패 ${c.failed.length}건(${c.failed.join(', ')})` : ''}`;
   } catch (e) { _lpw.msg = '갱신 실패 — ' + e.message; }
   finally { _lpw.busy = false; await lpwLoad(); renderLowpointTrack(); }
 }
@@ -7522,6 +7526,41 @@ async function lpwDelete(id) {
   try { await apiJson('/api/lowpoint/watch/' + encodeURIComponent(id), { method: 'DELETE' }); }
   catch (e) { alert('삭제 실패 — ' + e.message); }
   await lpwLoad(); renderLowpointTrack();
+}
+// v5.337(사용자 지시) 출발 이후 단계 — 관찰 → 출발 → 숨고르기 → 재출발 / 무효. 단계는 서버(lowpoint_watch.stage_info —
+// 확정 일봉 종가)가 정하고, 화면은 나누고·정렬하고·위치만 계산한다(순수 함수 — node 테스트 test_lowpoint_watch_stage.py).
+function lpwEndedLabel(stage) { return stage === 'restart' ? '재출발' : stage === 'invalid' ? '무효' : null; }
+// 출발 고가 — 단계 분류 전(배포 직후 첫 추적 전) 레코드는 도달 판정 고가(reached_high)로 같은 값을 쓴다
+function lpwDepHigh(r) { return r.departure_high != null ? Number(r.departure_high) : (r.reached_high != null ? Number(r.reached_high) : null); }
+// 현재가의 무효선~출발 고가 사이 위치(0~100%, 밖이면 끝에 붙임)와 무효선까지 거리 %(음수 = 무효선 아래 — 미확정 종가)
+function lpwRestPos(r) {
+  const inv = Number(r.invalid_line), hi = lpwDepHigh(r), c = r.last_close;
+  if (c == null || !(inv > 0) || hi == null || !(hi >= inv)) return { pos: null, dist: null };
+  const pos = hi > inv ? Math.min(Math.max((c - inv) / (hi - inv), 0), 1) * 100 : 0;
+  return { pos, dist: (c - inv) / inv * 100 };
+}
+// 출발일 대비 최근(마지막 확정 봉) 거래량 배수
+function lpwVolRatio(r) { return (r.last_volume != null && r.departure_volume > 0) ? r.last_volume / r.departure_volume : null; }
+// v5.337 "추가 2" 출발일 모양(표시 전용 — 단계 판정에 안 씀): "출발 vol 2.4× · 윗꼬리 60%". 값 없으면 —
+function lpwShapeText(r) {
+  const v = r.departure_vol_mult, wk = r.departure_upper_wick;
+  return `출발 vol ${v != null ? Number(v).toFixed(1) + '×' : '—'} · 윗꼬리 ${wk != null ? Math.round(wk * 100) + '%' : '—'}`;
+}
+// 출발 레코드 → 숨고르기(출발·숨고르기·분류 전 — 무효선에 가까운 순, 거리 모르면 아래)와 종료(재출발·무효 — 전환일 최근 위)
+function lpwStageSplit(recs) {
+  const rest = [], ended = [];
+  for (const r of recs || []) {
+    if (r.status !== 'reached') continue;
+    (lpwEndedLabel(r.stage) ? ended : rest).push(r);
+  }
+  const code = (a, b) => String(a.code).localeCompare(String(b.code));
+  rest.sort((a, b) => {
+    const x = lpwRestPos(a).dist, y = lpwRestPos(b).dist;
+    if (x == null || y == null) return (x == null) - (y == null) || code(a, b);
+    return x - y || code(a, b);
+  });
+  ended.sort((a, b) => String(b.stage_date).localeCompare(String(a.stage_date)) || code(a, b));
+  return { rest, ended };
 }
 // v5.333: 분봉을 못 받아 판정이 멈춘 레코드 표시(조용히 넘기지 않는다 — naver 분봉은 최근 6거래일만 남는다)
 function lpwPendingHtml(r) {
@@ -7742,8 +7781,8 @@ function renderLowpointWatch() {
     const tip = p == null ? '현재가 없음' : `기준가 대비 ${p >= 0 ? '+' : ''}${p.toFixed(2)}% · 목표 +${goal}%까지 ${(goal - p).toFixed(2)}%p`;
     return `<div class="lpw-bar" title="${tip}" role="img" aria-label="${tip}">${b.side === 'none' ? '' : `<i class="${b.side}" style="width:${(b.width / 2).toFixed(1)}%"></i>`}</div>`;
   };
-  const groups = lpwGroups(_lpw.recs).map(g => {
-    const title = `${String(g.label).slice(5)} ${g.tf === 'week' ? '주봉' : '월봉'} · 활성 ${g.active.length} / 도달 ${g.reached.length}`;
+  const groups = lpwGroups(_lpw.recs).filter(g => g.active.length).map(g => {
+    const title = `${String(g.label).slice(5)} ${g.tf === 'week' ? '주봉' : '월봉'} · 관찰 ${g.active.length} / 출발 ${g.reached.length}`;
     const dates = [...new Set([...g.active, ...g.reached].map(r => r.base_date))].sort().join(', ');
     const act = lpwSortRows(g.active, _lpw.sortKey, _lpw.sortDir, today).map(r => {
       const p = lpReturnPct(r.last_close, Number(r.base_price));
@@ -7755,30 +7794,64 @@ function renderLowpointWatch() {
         <td class="num r">${lpwDays(r.base_date, today)}일</td>
         <td class="r"><button type="button" class="n-btn sm" title="매매 기록에 이 종목으로 기록" aria-label="기록" onclick="lpwRecord('${_escapeHtml(r.id)}')">✎</button><button type="button" class="n-btn sm" title="관찰에서 삭제" aria-label="삭제" onclick="lpwDelete('${_escapeHtml(r.id)}')">✕</button></td></tr>`;
     }).join('');
-    const rch = g.reached.map(r => `<tr>
-        <td class="lpw-sym">${name(r)}</td>
-        <td class="r lpw-pxcell"><span class="lpw-px">${_lptFmt(r.base_price, r.mkt)}</span></td>
-        <td class="num r">${_escapeHtml(r.reached_date || '')}</td>
-        <td class="num r" title="도달일의 정규장 고가(장외 체결 제외)">${r.reached_high != null ? _lptFmt(r.reached_high, r.mkt) : '—'}</td>
-        <td class="r">${_lptPct(r.reached_pct)}</td>
-        <td class="num r">${r.reached_days != null ? r.reached_days + '일' : '—'}</td>
-        <td class="r"><button type="button" class="n-btn sm" title="관찰에서 삭제" aria-label="삭제" onclick="lpwDelete('${_escapeHtml(r.id)}')">✕</button></td></tr>`).join('');
     return `<section class="n-card lpw-card">
       <div class="lpw-h"><span class="n-h">${title}</span><span class="n-sub" style="font-size:11px">기준일 ${_escapeHtml(dates)}</span></div>
-      ${act ? `<div class="jr-table-wrap"><table class="jr-table lpt-table lpw-table"><thead><tr><th>종목</th><th class="r lpw-pxcell">기준가 → 현재가</th>
+      <div class="jr-table-wrap"><table class="jr-table lpt-table lpw-table"><thead><tr><th>종목</th><th class="r lpw-pxcell">기준가 → 현재가</th>
           <th class="r lpw-sort" onclick="lpwSort('pct')">등락${arrow('pct')}</th><th>+${goal}%까지</th>
-          <th class="r lpw-sort" onclick="lpwSort('days')">경과${arrow('days')}</th><th></th></tr></thead><tbody>${act}</tbody></table></div>`
-            : '<div class="n-sub">관찰 중인 종목 없음 — 모두 도달</div>'}
-      ${rch ? `<details style="margin-top:6px"><summary class="n-sub" style="cursor:pointer;font-size:12px">도달 완료 (${g.reached.length})</summary>
-        <div class="jr-table-wrap"><table class="jr-table lpt-table lpw-table"><thead><tr><th>종목</th><th class="r lpw-pxcell">기준가</th><th class="r">도달일</th><th class="r">정규장 고가</th><th class="r">기준 대비</th><th class="r">도달까지</th><th></th></tr></thead><tbody>${rch}</tbody></table></div></details>` : ''}
+          <th class="r lpw-sort" onclick="lpwSort('days')">경과${arrow('days')}</th><th></th></tr></thead><tbody>${act}</tbody></table></div>
     </section>`;
   }).join('');
+  // v5.337 숨고르기(펼침)·종료(접힘) — 출발한 레코드만. 코호트(주·월봉 기준일)는 행의 작은 칩으로
+  const coh = r => `<span class="chip lpw-hitchip" title="기준일 ${_escapeHtml(r.base_date || '')} · 기준가 ${_lptFmt(r.base_price, r.mkt)}">${_escapeHtml(String(r.label).slice(5))} ${r.tf === 'week' ? '주' : '월'}</span>`;
+  const warn = r => r.stage_warning ? ` <span class="chip lpw-hitchip" style="color:var(--px-down)" title="${_escapeHtml(r.stage_warning)} — 판정하지 않았어요">판정 보류</span>` : '';
+  const { rest, ended } = lpwStageSplit(_lpw.recs);
+  const restRows = rest.map(r => {
+    const hi = lpwDepHigh(r), rp = lpwRestPos(r), vr = lpwVolRatio(r);
+    const st = r.stage === 'resting' ? '' : ` <span class="chip lpw-hitchip" title="${r.stage ? '출발 다음 거래일 종가가 아직 없어요 — 숨고르기 0일' : '다음 추적 때 단계를 분류해요'}">${r.stage ? '출발' : '분류 전'}</span>`;
+    const tip = rp.pos == null ? '현재가·무효선 없음' : `무효선 ${_lptFmt(r.invalid_line, r.mkt)} ~ 출발 고가 ${_lptFmt(hi, r.mkt)} 사이 ${rp.pos.toFixed(0)}% · 무효선까지 ${rp.dist >= 0 ? '+' : ''}${rp.dist.toFixed(2)}%`;
+    return `<tr>
+        <td class="lpw-sym">${name(r)} ${coh(r)}${st}${warn(r)}${lpwPendingHtml(r)}</td>
+        <td class="num r" title="출발일 ${_escapeHtml(r.reached_date || '')}부터">${lpwDays(r.reached_date, today) ?? '—'}일</td>
+        <td class="num r">${r.invalid_line != null ? _lptFmt(r.invalid_line, r.mkt) : '—'}</td>
+        <td class="num r" title="출발일 ${_escapeHtml(r.reached_date || '')} ${r.mkt === 'US' ? '일봉 고가' : '정규장 고가'}">${hi != null ? _lptFmt(hi, r.mkt) : '—'}</td>
+        <td class="num r" title="${r.last_date ? '종가 ' + _escapeHtml(r.last_date) : ''}">${r.last_close != null ? _lptFmt(r.last_close, r.mkt) : '—'}</td>
+        <td class="lpw-barcell"><div class="lpw-rbar" title="${tip}" role="img" aria-label="${tip}">${rp.pos == null ? '' : `<i style="left:${rp.pos.toFixed(1)}%"></i>`}</div></td>
+        <td class="num r" title="출발일 거래량 ÷ 직전 50거래일 평균 · 윗꼬리 = (고가−max(시가,종가))/(고가−저가) · 종가 위치 ${r.departure_close_pos != null ? Math.round(r.departure_close_pos * 100) + '%' : '—'} (일봉 — KR은 장외 체결 포함) · 표시 전용">${lpwShapeText(r)}</td>
+        <td class="num r" title="최근 거래량 ÷ 출발일 거래량${r.last_checked_date ? ' (' + _escapeHtml(r.last_checked_date) + ')' : ''}">${vr != null ? vr.toFixed(2) + '×' : '—'}</td>
+        <td class="r"><button type="button" class="n-btn sm" title="매매 기록에 이 종목으로 기록" aria-label="기록" onclick="lpwRecord('${_escapeHtml(r.id)}')">✎</button><button type="button" class="n-btn sm" title="관찰에서 삭제" aria-label="삭제" onclick="lpwDelete('${_escapeHtml(r.id)}')">✕</button></td></tr>`;
+  }).join('');
+  const restCard = `<section class="n-card lpw-card">
+      <div class="lpw-h"><span class="n-h">숨고르기 · ${rest.length}</span><span class="n-sub" style="font-size:11px">관심 신호 · 측정 전 — 무효선에 가까운 순</span></div>
+      ${restRows ? `<div class="jr-table-wrap"><table class="jr-table lpt-table lpw-table"><thead><tr><th>종목</th><th class="r">경과</th><th class="r">무효선</th><th class="r">출발 고가</th><th class="r">현재가</th><th>무효선 ~ 출발 고가</th><th class="r">출발일 모양</th><th class="r" title="최근 거래량 ÷ 출발일 거래량">거래량</th><th></th></tr></thead><tbody>${restRows}</tbody></table></div>`
+        : '<div class="n-sub">숨고르기 중인 종목 없음</div>'}
+    </section>`;
+  const endRows = ended.map(r => `<tr>
+        <td class="lpw-sym">${name(r)} ${coh(r)}</td>
+        <td><span class="chip lpw-hitchip" style="color:${r.stage === 'restart' ? 'var(--c-red-fg3)' : 'var(--c-blue-fg4)'}">${lpwEndedLabel(r.stage)}</span></td>
+        <td class="num r">${_escapeHtml(r.stage_date || '')}</td>
+        <td class="num r" title="전환일 종가">${r.stage_close != null ? _lptFmt(r.stage_close, r.mkt) : '—'}</td>
+        <td class="num r">${_escapeHtml(r.reached_date || '')}</td>
+        <td class="num r" title="출발일 ${r.mkt === 'US' ? '일봉 고가' : '정규장 고가(장외 체결 제외)'} · 기준 대비 ${r.reached_pct != null ? r.reached_pct + '%' : '—'}">${lpwDepHigh(r) != null ? _lptFmt(lpwDepHigh(r), r.mkt) : '—'}</td>
+        <td class="num r">${r.invalid_line != null ? _lptFmt(r.invalid_line, r.mkt) : '—'}</td>
+        <td class="r"><button type="button" class="n-btn sm" title="관찰에서 삭제" aria-label="삭제" onclick="lpwDelete('${_escapeHtml(r.id)}')">✕</button></td></tr>`).join('');
+  const endCard = ended.length ? `<section class="n-card lpw-card"><details><summary class="n-h" style="cursor:pointer">종료 · 재출발 ${ended.filter(r => r.stage === 'restart').length} / 무효 ${ended.filter(r => r.stage === 'invalid').length}</summary>
+      <div class="jr-table-wrap"><table class="jr-table lpt-table lpw-table"><thead><tr><th>종목</th><th>결과</th><th class="r">전환일</th><th class="r">전환일 종가</th><th class="r">출발일</th><th class="r">출발 고가</th><th class="r">무효선</th><th></th></tr></thead><tbody>${endRows}</tbody></table></div></details>
+    </section>` : '';
   return `<section class="n-card lpw-info">
-      <span class="n-sub" style="flex:1 1 260px">저점 히트 종가(기준가) 대비 <b>+${pct}%</b> 도달을 추적해요 — 기준일 다음 거래일부터 <b>정규장 고가 기준(장외 체결 제외)</b>, 매일 07:00 KST 자동 갱신 · ${runInfo}</span>
+      <span class="n-sub" style="flex:1 1 260px">저점 히트 종가(기준가) 대비 <b>+${pct}%</b> 도달을 추적해요 — 기준일 다음 거래일부터 <b>정규장 고가 기준(장외 체결 제외)</b>, 매일 07:00 KST 자동 갱신 · ${runInfo} · <b>관심 신호 · 측정 전</b></span>
       <button type="button" class="n-btn sm" onclick="lpwRefresh()" ${_lpw.busy ? 'disabled' : ''}>${_lpw.busy ? '갱신 중…' : '지금 갱신'}</button>
+      <ul class="n-sub lpw-defs">
+        <li><b>출발</b> — +${pct}% 도달(위 판정 그대로). 출발 고가 = 그날 판정 고가</li>
+        <li><b>무효선</b> — 기준일부터 출발 전날까지 종가 최고값(기준일 포함)</li>
+        <li><b>숨고르기</b> — 출발 다음 거래일부터 종가가 무효선 이상 · 출발 고가 이하</li>
+        <li><b>재출발</b> — 처음으로 종가 &gt; 출발 고가 → 종료</li>
+        <li><b>무효</b> — 처음으로 종가 &lt; 무효선 → 종료 · 판정은 확정 일봉 종가만, 시간 제한 없음</li>
+      </ul>
       ${_lpw.msg ? `<span class="n-sub" style="flex-basis:100%">${_escapeHtml(_lpw.msg)}</span>` : ''}
     </section>
-    ${groups || '<section class="n-card" style="padding:18px 22px"><div class="n-sub">관찰 중인 종목이 없어요 — 주봉·월봉 스캔이 돌면 히트 종목이 자동으로 들어와요</div></section>'}`;
+    ${groups || '<section class="n-card" style="padding:18px 22px"><div class="n-sub">관찰 중인 종목이 없어요 — 주봉·월봉 스캔이 돌면 히트 종목이 자동으로 들어와요</div></section>'}
+    ${restCard}
+    ${endCard}`;
 }
 async function lpeLoad() {
   try {
@@ -9041,6 +9114,7 @@ function openManualAdd() {
   onMaStatusChange();
   _maSnapshotFound = false;
   const hintEl = document.getElementById('maSnapHint'); if (hintEl) hintEl.textContent = '';
+  maBindTicker();
   document.getElementById('manualModal').classList.add('open');
 }
 function closeManualAdd() {
@@ -9090,14 +9164,38 @@ function _isKrCodeBody(s) {
 }
 // v5.280: 한글 종목명 → 코드. 후보가 여러 개면 **고르게 하고 멋대로 정하지
 // 않는다**(서버가 candidates를 준다). 실패도 조용히 넘기지 않는다.
-let _maNameResolving = false;
+// v5.337(사용자 지시) 종목코드 칸 한글 IME — ABC 검색칸(v5.336)과 같은 방식: 조합 중(compositionstart~end ·
+// event.isComposing)엔 조회하지 않고 compositionend에서 한 번. 예전엔 자모 입력마다 조회했고, 조회 결과(티커)가 조합 중인
+// 칸 값을 덮어써 IME 세션이 끊겼다. 낡은 조회 결과(그 사이 입력이 바뀜·다시 조합 중)는 값을 덮어쓰지 않는다(_maLookupCurrent).
+// 예전 _maNameResolving 잠금은 진행 중 조회가 있으면 새 조회를 **버려서** "상"을 조회하는 사이 "상신"이 끝나면 "상신"은 영영
+// 조회되지 않았다 — 순번(_maLookupSeq)으로 바꿔 마지막 조회만 반영한다. 지연(debounce) 없음.
+let _maComposing = false;
+let _maLookupSeq = 0;
+function maOnTickerCompStart() { _maComposing = true; }
+function maOnTickerCompEnd() { _maComposing = false; onMaTickerOrTabChange(); }
+// composition 이벤트는 인라인 속성이 없다 — addEventListener로만 붙는다(v5.336 ABC 실측)
+function maBindTicker() {
+  const el = document.getElementById('maTicker');
+  if (!el || el._maBound) return;
+  el._maBound = true;
+  el.addEventListener('compositionstart', maOnTickerCompStart);
+  el.addEventListener('compositionend', maOnTickerCompEnd);
+}
+function maOnTickerInput(e) {
+  if (_maComposing || (e && e.isComposing)) return;        // 조합 중 — compositionend에서 한 번
+  onMaTickerOrTabChange();
+}
+function _maLookupCurrent(seq, query) {
+  const el = document.getElementById('maTicker');
+  return seq === _maLookupSeq && !_maComposing && !!el && (el.value || '').trim().toUpperCase() === query;
+}
 async function _maResolveName(query) {
-  if (_maNameResolving) return;
-  _maNameResolving = true;
+  const seq = ++_maLookupSeq;
   const hintEl = document.getElementById('maSnapHint');
   if (hintEl) hintEl.textContent = `🔎 '${query}' 코드 찾는 중…`;
   try {
     const d = await apiJson('/api/lookup/' + encodeURIComponent(query));
+    if (!_maLookupCurrent(seq, query)) return;               // 낡은 결과 — 칸 값·안내를 건드리지 않는다
     if (d.ticker) {
       _maApplyTicker(d.ticker, d.name);
     } else if (d.candidates && d.candidates.length) {
@@ -9106,9 +9204,7 @@ async function _maResolveName(query) {
       hintEl.textContent = `⚠️ '${query}' 못 찾음 — ${d.error || '코드로 입력해 주세요'}`;
     }
   } catch (e) {
-    if (hintEl) hintEl.textContent = '⚠️ 코드 조회 실패 — 코드로 입력해 주세요';
-  } finally {
-    _maNameResolving = false;
+    if (hintEl && _maLookupCurrent(seq, query)) hintEl.textContent = '⚠️ 코드 조회 실패 — 코드로 입력해 주세요';
   }
 }
 

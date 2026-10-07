@@ -134,10 +134,13 @@ def test_daily_track_fetches_only_active_codes(monkeypatch):
     recs = w.records_from_entry(_entry("2026-10-02", rows_kr=[KR_ROW], rows_us=[US_ROW]), "week")
     recs.append({**recs[0], "id": "w_done", "code": "005930.KS", "status": "reached"})     # 도달 — 다시 안 본다
     recs[-1]["reach_rule"] = w.REACH_RULE                          # 정규장 규칙으로 이미 도달 — 다시 안 본다
+    recs[-1]["stage"] = "restart"                                  # v5.337: 종료(재출발·무효)된 출발만 다시 안 본다
     minutes = []
     fm = lambda code, day: minutes.append((code, str(day))) or [{"localDateTime": day.strftime("%Y%m%d") + "100000", "highPrice": 16400.0}]
     updates, summary = w.track(recs, date(2026, 10, 5), "2026-10-05T16:00:00+09:00", fetch_min=fm)
-    assert asked["kr"] == [("002320.KS", 13)] and asked["us"] == [(("AVA",), "1mo", lp.US_AUTO_ADJUST)]
+    # 기준일(10-02)부터 + 휴장 여유 10일 + v5.337 출발일 모양용 직전 50거래일(달력 70일)
+    assert asked["kr"] == [("002320.KS", 13 + w.shape_lookback_days())] and w.shape_lookback_days() == 70
+    assert asked["us"] == [(("AVA",), "3mo", lp.US_AUTO_ADJUST)]
     assert minutes == [("002320.KS", "2026-10-05")]                # 분봉도 관찰 종목·필요한 거래일만
     assert set(updates) == {r["id"] for r in recs if r["status"] == "active"}
     assert updates[recs[0]["id"]]["status"] == "reached"          # 정규장 16400 ≥ 15560×1.05 = 16338
@@ -205,9 +208,13 @@ def test_job_updates_only_active_with_rev_and_persists(store, monkeypatch):
     hj, ava = recs["002320.KS"], recs["AVA"]
     assert (hj["status"], hj["reached_date"], hj["reached_days"], hj["rev"]) == ("reached", "2026-10-06", 4, 2)
     assert (ava["status"], ava["last_close"], ava["rev"]) == ("active", 35.5, 2)
+    asked = []
+    monkeypatch.setattr(w.track, "__defaults__", (fake_fetch, lambda c, d: asked.append(c) or fake_min(c, d)))
     app._lp_watch_job_blocking("watch", _k("2026-10-08 07:00"))
-    assert seen[-1] == ["AVA"], "도달 종목은 다음 추적에서 조회하지 않는다"
-    assert _load()[[r["code"] for r in _load()].index("002320.KS")]["rev"] == 2       # 도달 레코드는 그대로
+    # v5.337: 출발(도달) 종목은 단계(숨고르기·재출발·무효) 판정용 일봉만 다시 조회 — 도달 판정(분봉)은 다시 안 한다
+    assert seen[-1] == ["002320.KS", "AVA"] and asked == []
+    hj2 = _load()[[r["code"] for r in _load()].index("002320.KS")]
+    assert (hj2["status"], hj2["reached_date"], hj2["rev"]) == ("reached", "2026-10-06", 3)
 
 
 def test_runner_daily_slot_at_0700():
@@ -299,7 +306,7 @@ def test_ui_wiring():
     assert "_lpt.prefill = { q: r.code };" in rec and "_lpt.view = 'trades';" in rec
     assert "_lpt.prefill ? _escapeHtml(_lpt.prefill.q)" in track and "_lpt.prefill = null;" in _fn("lptAdd")
     body = _fn("renderLowpointWatch")
-    for s in ("<details", "도달 완료", "reached_days", "lpwRecord(", "lpwDelete(", "tvUrl(r.code, r.mkt)",
+    for s in ("<details", "종료 · 재출발", "숨고르기 · ${rest.length}", "lpwStageSplit(_lpw.recs)", "lpwRecord(", "lpwDelete(", "tvUrl(r.code, r.mkt)",
               "lpwDays(r.base_date, today)", "lpReturnPct(r.last_close, Number(r.base_price))", "lpwRefresh()"):
         assert s in body, s
     assert "fetch('/api/lowpoint/watch/refresh', { method: 'POST' })" in _fn("lpwRefresh")

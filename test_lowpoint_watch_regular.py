@@ -135,9 +135,14 @@ def test_old_reached_records_rejudged_and_reverted():
     assert u["status"] == "active" and u["reached_date"] is None and u["reach_rule"] == w.REACH_RULE
     assert s["reverted"] == ["407400.KQ(2026-10-02 week)"] and s["rejudged"] == 1
     again = {**old, **u}
-    up2, s2 = w.track([{**again, "status": "reached", "reach_rule": w.REACH_RULE}], date(2026, 10, 7), "x", fetch=fetch,
-                      fetch_min=lambda c, d: (_ for _ in ()).throw(AssertionError("새 규칙 도달은 다시 안 본다")))
-    assert up2 == {} and s2["rejudged"] == 0
+    no_min = lambda c, d: (_ for _ in ()).throw(AssertionError("새 규칙 도달은 다시 안 본다"))
+    up2, s2 = w.track([{**again, "status": "reached", "reach_rule": w.REACH_RULE, "stage": "invalid"}], date(2026, 10, 7),
+                      "x", fetch=fetch, fetch_min=no_min)
+    assert up2 == {} and s2["rejudged"] == 0                    # v5.337: 종료(재출발·무효)는 조회 자체를 안 한다
+    up3, s3 = w.track([{**again, "status": "reached", "reach_rule": w.REACH_RULE, "stage": "resting",
+                        "reached_date": "2026-10-06", "reached_high": 2070.0}], date(2026, 10, 7),
+                      "2026-10-07T07:00:00+09:00", fetch=fetch, fetch_min=no_min)
+    assert s3["rejudged"] == 0 and s3["staged"] == 1 and up3[old["id"]]["status"] == "reached"   # 단계만 — 분봉 없음
 
 
 def test_app_job_reverts_and_logs(monkeypatch, tmp_path, capsys):
@@ -175,5 +180,6 @@ def test_no_yfinance_or_daily_high_in_kr_judgement():
 def test_ui_shows_rule_and_reach_evidence():
     html = open(os.path.join(ROOT, "static", "index.html"), encoding="utf-8").read()
     assert "정규장 고가 기준(장외 체결 제외)" in html and "기준일 다음 거래일부터 일봉 고가로 판정" not in html
-    assert "<th class=\"r\">정규장 고가</th><th class=\"r\">기준 대비</th>" in html
-    assert "r.reached_high" in html and "_lptPct(r.reached_pct)" in html and "lpwPendingHtml(r)" in html
+    # v5.337: 도달 고가는 "출발 고가"(숨고르기·종료 표) — KR은 정규장 고가임을 툴팁으로 남긴다
+    assert html.count('<th class="r">출발 고가</th>') == 2 and "'정규장 고가(장외 체결 제외)'" in html
+    assert "r.reached_high" in html and "r.reached_pct" in html and html.count("lpwPendingHtml(r)") >= 2
