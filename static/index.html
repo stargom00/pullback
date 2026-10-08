@@ -1400,7 +1400,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.341</span>
+      <span class="ver mono" id="verBadge">v5.342</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -7626,6 +7626,16 @@ function lpwShapeText(r) {
   const a = r.departure_atr_mult, v = r.departure_vol_mult, wk = r.departure_upper_wick;
   return `출발 ${a != null ? Number(a).toFixed(1) + ' ATR' : '—'} · vol ${v != null ? Number(v).toFixed(1) + '×' : '—'} · 윗꼬리 ${wk != null ? Math.round(wk * 100) + '%' : '—'}`;
 }
+// v5.342 재출발 이후(표시 전용, 서버 post_restart — 확정 종가): "최고 +15.0% · 현재 출발 고가 아래 · 되돌림 10-12". 재출발 아니면 ''
+function lpwRestartText(r) {
+  if (!r || r.stage !== 'restart') return '';
+  const p = r.restart_peak_pct;
+  const parts = [`최고 ${p != null ? (p >= 0 ? '+' : '') + Number(p).toFixed(1) + '%' : '—'}`];
+  if (r.restart_below_now === true) parts.push('현재 출발 고가 아래');
+  else if (r.restart_below_now === false) parts.push('현재 출발 고가 위');
+  if (r.restart_back_below_date) parts.push('되돌림 ' + String(r.restart_back_below_date).slice(5));
+  return parts.join(' · ');
+}
 // 출발 레코드 → 숨고르기(출발·숨고르기·분류 전 — 무효선에 가까운 순, 거리 모르면 아래)와 종료(재출발·무효 — 전환일 최근 위)
 function lpwStageSplit(recs) {
   const rest = [], ended = [];
@@ -7892,6 +7902,7 @@ function renderLowpointWatch() {
     return `<tr>
         <td class="lpw-sym">${name(r)} ${coh(r)}${st}${warn(r)}${lpwPendingHtml(r)}</td>
         <td class="num r" title="출발일 ${_escapeHtml(r.reached_date || '')}부터">${lpwDays(r.reached_date, today) ?? '—'}일</td>
+        <td class="num r" title="${_escapeHtml(r.reached_date || '')}">${r.reached_date ? _escapeHtml(String(r.reached_date).slice(5)) : '—'}</td>
         <td class="num r">${r.invalid_line != null ? _lptFmt(r.invalid_line, r.mkt) : '—'}</td>
         <td class="num r" title="출발일 ${_escapeHtml(r.reached_date || '')} ${r.mkt === 'US' ? '일봉 고가' : '정규장 고가'}">${hi != null ? _lptFmt(hi, r.mkt) : '—'}</td>
         <td class="num r" title="${r.last_date ? '종가 ' + _escapeHtml(r.last_date) : ''}">${r.last_close != null ? _lptFmt(r.last_close, r.mkt) : '—'}</td>
@@ -7902,7 +7913,7 @@ function renderLowpointWatch() {
   }).join('');
   const restCard = `<section class="n-card lpw-card">
       <div class="lpw-h"><span class="n-h">숨고르기 · ${rest.length}</span><span class="n-sub" style="font-size:11px">관심 신호 · 측정 전 — 무효선에 가까운 순</span></div>
-      ${restRows ? `<div class="jr-table-wrap"><table class="jr-table lpt-table lpw-table"><thead><tr><th>종목</th><th class="r">경과</th><th class="r">무효선</th><th class="r">출발 고가</th><th class="r">현재가</th><th>무효선 ~ 출발 고가</th><th class="r">출발일 모양</th><th class="r" title="최근 거래량 ÷ 출발일 거래량">거래량</th><th></th></tr></thead><tbody>${restRows}</tbody></table></div>`
+      ${restRows ? `<div class="jr-table-wrap"><table class="jr-table lpt-table lpw-table"><thead><tr><th>종목</th><th class="r">경과</th><th class="r">출발일</th><th class="r">무효선</th><th class="r">출발 고가</th><th class="r">현재가</th><th>무효선 ~ 출발 고가</th><th class="r">출발일 모양</th><th class="r" title="최근 거래량 ÷ 출발일 거래량">거래량</th><th></th></tr></thead><tbody>${restRows}</tbody></table></div>`
         : '<div class="n-sub">숨고르기 중인 종목 없음</div>'}
     </section>`;
   const endRows = ended.map(r => `<tr>
@@ -7913,9 +7924,10 @@ function renderLowpointWatch() {
         <td class="num r">${_escapeHtml(r.reached_date || '')}</td>
         <td class="num r" title="출발일 ${r.mkt === 'US' ? '일봉 고가' : '정규장 고가(장외 체결 제외)'} · 기준 대비 ${r.reached_pct != null ? r.reached_pct + '%' : '—'}">${lpwDepHigh(r) != null ? _lptFmt(lpwDepHigh(r), r.mkt) : '—'}</td>
         <td class="num r">${r.invalid_line != null ? _lptFmt(r.invalid_line, r.mkt) : '—'}</td>
+        <td class="n-sub" style="font-size:11px" title="${r.stage === 'restart' ? `재출발일 종가 ${r.restart_close != null ? _lptFmt(r.restart_close, r.mkt) : '—'} 기준 · 최고 종가 ${r.restart_peak_date || '—'} · D+5 ${r.restart_d5 ? r.restart_d5.pct + '%' : '—'} · D+10 ${r.restart_d10 ? r.restart_d10.pct + '%' : '—'} (확정 종가 ${r.restart_checked_date || '—'}까지)` : ''}">${_escapeHtml(lpwRestartText(r)) || '—'}</td>
         <td class="r"><button type="button" class="n-btn sm" title="관찰에서 삭제" aria-label="삭제" onclick="lpwDelete('${_escapeHtml(r.id)}')">✕</button></td></tr>`).join('');
   const endCard = ended.length ? `<section class="n-card lpw-card"><details><summary class="n-h" style="cursor:pointer">종료 · 재출발 ${ended.filter(r => r.stage === 'restart').length} / 무효 ${ended.filter(r => r.stage === 'invalid').length}</summary>
-      <div class="jr-table-wrap"><table class="jr-table lpt-table lpw-table"><thead><tr><th>종목</th><th>결과</th><th class="r">전환일</th><th class="r">전환일 종가</th><th class="r">출발일</th><th class="r">출발 고가</th><th class="r">무효선</th><th></th></tr></thead><tbody>${endRows}</tbody></table></div></details>
+      <div class="jr-table-wrap"><table class="jr-table lpt-table lpw-table"><thead><tr><th>종목</th><th>결과</th><th class="r">전환일</th><th class="r">전환일 종가</th><th class="r">출발일</th><th class="r">출발 고가</th><th class="r">무효선</th><th>재출발 이후</th><th></th></tr></thead><tbody>${endRows}</tbody></table></div></details>
     </section>` : '';
   return `<section class="n-card lpw-info">
       <span class="n-sub" style="flex:1 1 260px">저점 히트 종가(기준가) 대비 <b>+${pct}%</b> 도달을 추적해요 — 기준일 다음 거래일부터 <b>정규장 고가 기준(장외 체결 제외)</b>, 매일 07:00 KST 자동 갱신 · ${runInfo} · <b>관심 신호 · 측정 전</b></span>

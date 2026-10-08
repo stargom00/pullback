@@ -5,6 +5,16 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.342 [저점 관찰 재출발 이후 결과 — 사용자 지시, 표시·리뷰 전용(단계 판정 그대로)] "재출발 레코드에 재출발일 이후 최고 종가, 재출발 후
+    D+5·D+10 종가 수익률(재출발일 종가 기준) 저장. '되돌림' 표시: 재출발 후 종가가 출발 고가 아래로 다시 내려온 적이 있으면 그 날짜
+    기록. … 확정 종가만, 새 임계값 금지." lowpoint_watch.post_restart — restart_close · restart_peak_close/date/pct(재출발일 포함
+    이후 최고 종가, 재출발일 종가 대비) · restart_d5·restart_d10(재출발 다음 거래일부터 N번째 확정 봉 — D+5·D+10은 순위 주봉 기간
+    재사용) · restart_back_below_date(재출발 다음 거래일부터 처음 종가 < 출발 고가) · restart_below_now(마지막 확정 종가 < 출발 고가).
+    재출발 레코드는 이 값 때문에 매일 07:00 추적에서 계속 조회한다(is_target — 무효만 조회 안 함) — 단계·전환일·무효선·출발일 모양은
+    다시 계산하지 않는다. 종료 섹션 재출발 행 "재출발 이후" 칸: "최고 +15.0% · 현재 출발 고가 아래 · 되돌림 10-12"(D+5·D+10은 툴팁).
+    기존 재출발 레코드는 다음 추적에서 채워진다. 테스트: test_lowpoint_watch_stage.py. + 숨고르기 표 "출발일" 칸(사용자 지시
+    "MM-DD 형식, 경과 칸 옆. 종료 표와 같은 값 사용") — 레코드 reached_date(종료 표 출발일과 같은 필드), 툴팁에 전체 날짜
+    (test_lowpoint_watch_dense.py::test_rest_table_departure_date_column).
 v5.341 [저점일지 "순위" 페이지 — 코호트 분류 학습, 사용자 지시 "사용자가 저점 종목을 고르는 '눈'을 키우는 학습 시스템. 예측(분류)
     → 결과 → 비교를 기록·채점한다 … 관심 신호 학습용이며 측정 결론이 아님. 새 판정 임계값 금지."] (매매 기록 | 평가 | 관찰 | 추적 |
     순위). ① 코호트 = 관찰 코호트 그대로(주봉·월봉 라벨), 레코드는 서버가 만든다(_lp_rank_ensure — 관찰 등록 직후·07:00 추적, **기한
@@ -8961,7 +8971,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.341"
+VERSION = "v5.342"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

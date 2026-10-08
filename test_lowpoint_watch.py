@@ -134,7 +134,7 @@ def test_daily_track_fetches_only_active_codes(monkeypatch):
     recs = w.records_from_entry(_entry("2026-10-02", rows_kr=[KR_ROW], rows_us=[US_ROW]), "week")
     recs.append({**recs[0], "id": "w_done", "code": "005930.KS", "status": "reached"})     # 도달 — 다시 안 본다
     recs[-1]["reach_rule"] = w.REACH_RULE                          # 정규장 규칙으로 이미 도달 — 다시 안 본다
-    recs[-1]["stage"] = "restart"                                  # v5.337: 종료(재출발·무효)된 출발만 다시 안 본다
+    recs[-1]["stage"] = "invalid"                                  # v5.337: 종료된 출발은 다시 안 본다(v5.342부터 재출발은 이후 결과 때문에 조회)
     minutes = []
     fm = lambda code, day: minutes.append((code, str(day))) or [{"localDateTime": day.strftime("%Y%m%d") + "100000", "highPrice": 16400.0}]
     updates, summary = w.track(recs, date(2026, 10, 5), "2026-10-05T20:10:00+09:00", fetch_min=fm)   # v5.339: KR 10-05 확정 후

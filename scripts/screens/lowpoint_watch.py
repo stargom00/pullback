@@ -220,12 +220,49 @@ STAGE_FIELDS = ("stage", "invalid_line", "departure_high", "stage_date", "last_c
 
 
 def is_target(r: dict) -> bool:
-    """추적 대상 — 관찰 중, v5.333 규칙 전 도달(재판정), 또는 종료(재출발·무효) 전 단계의 출발 레코드."""
+    """추적 대상 — 관찰 중, v5.333 규칙 전 도달(재판정), 종료(재출발·무효) 전 단계의 출발 레코드, 그리고 v5.342 재출발 레코드
+    (재출발 이후 결과 기록 — 단계는 다시 판정하지 않는다). 무효는 조회하지 않는다."""
     if r.get("status") == "active":
         return True
     if r.get("status") != "reached":
         return False
-    return r.get("reach_rule") != REACH_RULE or r.get("stage") not in TERMINAL_STAGES
+    return r.get("reach_rule") != REACH_RULE or r.get("stage") != "invalid"
+
+
+# ── v5.342(사용자 지시) 재출발 이후 결과 — 표시·리뷰 전용, 단계 판정은 그대로 ─────────────────────────────────────
+# "재출발 레코드에 재출발일 이후 최고 종가, 재출발 후 D+5·D+10 종가 수익률(재출발일 종가 기준) 저장. '되돌림' 표시: 재출발 후 종가가
+# 출발 고가 아래로 다시 내려온 적이 있으면 그 날짜 기록. … 확정 종가만, 새 임계값 금지." D+5·D+10은 순위(v5.341) 주봉 기간을 재사용.
+RESTART_HORIZONS = (5, 10)
+
+
+def post_restart(daily: "pd.DataFrame | None", restart_date: str, departure_high: "float | None",
+                 through: "str | None") -> dict:
+    """재출발일(종가 > 출발 고가로 처음 마감한 날) 이후 확정 종가로 —
+      restart_close(재출발일 종가) · restart_peak_close/date(재출발일 포함 이후 최고 종가)·restart_peak_pct(재출발일 종가 대비 %)
+      restart_d5·restart_d10({date, close, pct} — 재출발 다음 거래일부터 N번째 확정 봉, 재출발일 종가 대비)
+      restart_back_below_date(재출발 다음 거래일부터 처음 종가 < 출발 고가인 날 — 없으면 None)
+      restart_below_now(마지막 확정 종가 < 출발 고가) · restart_checked_date. 못 구하면 빈 dict(저장값 유지)."""
+    d = _confirmed_daily(daily, through)
+    if d is None or d.empty or departure_high is None:
+        return {}
+    d = d.dropna(subset=["Close"])
+    rts = pd.Timestamp(restart_date)
+    if rts not in d.index:
+        return {}
+    rc = float(d.loc[rts, "Close"])
+    since = d[d.index >= rts]["Close"]
+    after = d[d.index > rts]["Close"]
+    peak_ts = since.idxmax()
+    below = after[after < float(departure_high)]
+    out = {"restart_close": rc, "restart_peak_close": float(since.max()), "restart_peak_date": str(peak_ts.date()),
+           "restart_peak_pct": round((float(since.max()) / rc - 1) * 100, 2),
+           "restart_back_below_date": str(below.index[0].date()) if len(below) else None,
+           "restart_below_now": bool(float(since.iloc[-1]) < float(departure_high)),
+           "restart_checked_date": str(since.index[-1].date())}
+    for n in RESTART_HORIZONS:
+        out[f"restart_d{n}"] = ({"date": str(after.index[n - 1].date()), "close": float(after.iloc[n - 1]),
+                                 "pct": round((float(after.iloc[n - 1]) / rc - 1) * 100, 2)} if len(after) >= n else None)
+    return out
 
 
 def _kr_close_confirmed_hm() -> int:
@@ -457,6 +494,11 @@ def track(records: list, today: date, now_iso: str, fetch=fetch_daily, fetch_min
                      reached_high=hit.get("reached_high"), reached_pct=hit.get("reached_pct"))
             if not was_reached:
                 reached += 1
+            if rc is None and was_reached and r.get("reach_rule") == REACH_RULE and r.get("stage") == "restart":
+                # v5.342: 재출발은 종료 단계 — 단계·무효선·출발일 모양은 다시 계산하지 않고 재출발 이후 결과만 갱신
+                u.update(post_restart(daily, r.get("stage_date"), r.get("departure_high"), thru))
+                updates[r["id"]] = u
+                continue
             si = stage_info(r["base_date"], hit["reached_date"], hit.get("reached_high"), daily, thru)
             u.update(si)
             u.update(departure_shape(daily, hit["reached_date"], thru, hit.get("reached_high")))      # 표시 전용 — 판정은 위 si에서 끝났다

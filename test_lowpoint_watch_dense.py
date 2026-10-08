@@ -43,7 +43,7 @@ def _state_line():
 
 FNS = ("lpwBar", "lpwSortRows", "lpwDays", "lpwGroups", "lpReturnPct", "lpDisplayName", "_lptFmt", "_lptPct",
        "_lptCode", "lpwPendingHtml", "lpwEndedLabel", "lpwDepHigh", "lpwRestPos", "lpwVolRatio", "lpwStageSplit",
-       "lpwShapeText", "renderLowpointWatch")
+       "lpwShapeText", "lpwRestartText", "renderLowpointWatch")
 
 
 def _js(expr, recs=None, extra=""):
@@ -147,3 +147,22 @@ def test_other_pages_markup_untouched():
         assert "lpw-" not in _fn(f)
     track = _fn("renderLowpointTrack")
     assert "lpw-" not in track.split("if (view === 'watch')")[0] + track.split("renderLowpointWatch();")[1]
+
+
+def test_rest_table_departure_date_column():
+    """v5.342 숨고르기 표 "출발일" 칸 — 경과 바로 옆, MM-DD, 종료 표와 같은 값(reached_date)."""
+    recs = RECS + [{"id": "r1", "tf": "week", "label": "2026-10-02", "code": "RRR", "base_price": 100, "base_date": "2026-10-02",
+                    "status": "reached", "stage": "resting", "reached_date": "2026-10-05", "invalid_line": 100,
+                    "departure_high": 106, "last_close": 103},
+                   {"id": "e1", "tf": "week", "label": "2026-10-02", "code": "EEE", "base_price": 100, "base_date": "2026-10-02",
+                    "status": "reached", "stage": "invalid", "reached_date": "2026-10-06", "stage_date": "2026-10-07"}]
+    html = _js("renderLowpointWatch()", recs)
+    rest = [x for x in html.split('<section class="n-card lpw-card">')[1:] if "숨고르기 ·" in x][0]
+    head = rest.split("<thead>")[1].split("</thead>")[0]
+    cols = [re.sub(r"<[^>]+>", "", c).strip() for c in re.findall(r"<th[^>]*>(.*?)</th>", head)]
+    assert cols[:4] == ["종목", "경과", "출발일", "무효선"]
+    row = [r for r in rest.split("<tr>")[1:] if ">RRR</a>" in r][0]
+    cells = [re.sub(r"<[^>]+>", "", c).strip() for c in re.findall(r"<td[^>]*>(.*?)</td>", row, flags=re.S)]
+    assert cells[1:3] == ["2일", "10-05"]                                       # 경과(10-05 → 10-07) 옆에 출발일
+    ended = [x for x in html.split('<section class="n-card lpw-card">')[1:] if "종료 ·" in x][0]
+    assert "2026-10-06" in ended                                                  # 종료 표도 같은 필드(reached_date)

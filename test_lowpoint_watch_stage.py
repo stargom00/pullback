@@ -14,6 +14,8 @@
 ③ 경계 비교 바꿔치기(`c > dep` → `>=`, `c < inv` → `<=`) → 각각 test_boundaries FAIL
 ④ (추가 2 출발일 모양) 윗꼬리를 max(시가,종가) 대신 min(시가,종가)부터 → test_shape_values · test_shape_boundaries FAIL
 ⑤ (v5.340 출발 크기) 판정 고가(reached_high) 대신 출발일 일봉 고가 → test_departure_atr_size FAIL
+⑥ (v5.342 재출발 이후) 최고 종가를 종가 대신 고가로 → test_post_restart_values · test_post_restart_confirmed_only_and_below_now ·
+   test_restart_record_tracked_without_restaging FAIL
 """
 from __future__ import annotations
 
@@ -217,11 +219,14 @@ def test_app_job_classifies_logs_and_freezes_terminal(monkeypatch, tmp_path, cap
     # 다음 추적: 종료(재출발·무효)는 조회하지 않고 그대로, 남은 것만 단계 전환 로그
     data["A01.KS"] = _daily(PRE + [DEP, ("2026-10-06", 1040, 1040, 250), ("2026-10-08", 1061, 1061, 1)])
     app._lp_watch_job_blocking("watch", datetime(2026, 10, 9, 7, 0, tzinfo=KST))
-    assert seen[-1] == ["A01.KS", "B01"]
+    assert seen[-1] == ["A01.KS", "A02.KQ", "B01"]                       # v5.342: 재출발(A02)은 이후 결과 때문에 조회 · 무효는 안 봄
     out = capsys.readouterr().out
     assert "전환 1건: A01.KS(2026-10-02 week) resting→restart" in out and "기존 도달 레코드 단계 분류 0건" in out
     by = {r["code"]: r for r in app._rec_list_load(app.LP_WATCH_PATH)}
-    assert by["A02.KQ"]["rev"] == 2 and by["A01.KS"]["stage"] == "restart" and by["A01.KS"]["rev"] == 3
+    assert by["A01.KS"]["stage"] == "restart" and by["A01.KS"]["rev"] == 3
+    # v5.342: 재출발 A02는 이후 결과만 갱신(rev 3) — 단계·전환일은 그대로, 무효 A03·B02는 손대지 않음(rev 2)
+    assert (by["A02.KQ"]["stage"], by["A02.KQ"]["stage_date"], by["A02.KQ"]["rev"]) == ("restart", "2026-10-07", 3)
+    assert by["A02.KQ"]["restart_close"] == 1065 and by["A03.KQ"]["rev"] == 2 and by["B02"]["rev"] == 2
 
 
 def test_app_job_warns_inverted(monkeypatch, tmp_path, capsys):
@@ -418,3 +423,62 @@ def test_departure_atr_wired_into_track_and_not_judgement():
     assert up[rec["id"]]["departure_atr_mult"] == pytest.approx(2.0)
     import inspect
     assert "atr" not in inspect.getsource(w.stage_info).lower()
+
+
+# ── v5.342 재출발 이후 결과(표시·리뷰 전용 — 단계 판정 그대로) ─────────────────────────────
+def _restart_daily():
+    """출발 10-05(고가 1,060) → 10-06 종가 1,070 재출발 → 10-07 1,090 → 10-08 1,100(최고, 장중 고가 1,150) → 10-12 1,060(= 출발 고가,
+    아래 아님) → 10-13 1,055(되돌림) → 10-14~10-20 1,080."""
+    after = [("2026-10-06", 1070, 1075, 1), ("2026-10-07", 1090, 1095, 1), ("2026-10-08", 1100, 1150, 1),
+             ("2026-10-12", 1060, 1065, 1), ("2026-10-13", 1055, 1062, 1)] + \
+            [(d, 1080, 1085, 1) for d in ("2026-10-14", "2026-10-15", "2026-10-16", "2026-10-19", "2026-10-20")]
+    return _daily(PRE + [DEP] + after)
+
+
+def test_post_restart_values():
+    got = w.post_restart(_restart_daily(), "2026-10-06", DEP_HIGH, "2026-10-20")
+    assert (got["restart_close"], got["restart_peak_close"], got["restart_peak_date"]) == (1070, 1100, "2026-10-08")
+    assert got["restart_peak_pct"] == round((1100 / 1070 - 1) * 100, 2)                  # 종가 최고 — 장중 고가 1,150 아님
+    assert got["restart_back_below_date"] == "2026-10-13"                                  # 10-12 종가 = 출발 고가는 아래 아님
+    assert got["restart_below_now"] is False and got["restart_checked_date"] == "2026-10-20"
+    # D+5 = 재출발 다음 거래일부터 5번째(10-07·08·12·13·14 — 10-09 한글날은 봉이 없다)
+    assert got["restart_d5"] == {"date": "2026-10-14", "close": 1080.0, "pct": round((1080 / 1070 - 1) * 100, 2)}
+    assert got["restart_d10"] is None                                                        # 재출발 후 9봉뿐
+
+
+def test_post_restart_confirmed_only_and_below_now():
+    d = _restart_daily()
+    early = w.post_restart(d, "2026-10-06", DEP_HIGH, "2026-10-13")                         # 10-13까지 확정
+    assert early["restart_below_now"] is True and early["restart_back_below_date"] == "2026-10-13"
+    pre = w.post_restart(d, "2026-10-06", DEP_HIGH, "2026-10-12")                           # 10-13 미확정 — 되돌림 아직 없음
+    assert pre["restart_back_below_date"] is None and pre["restart_below_now"] is False and pre["restart_d5"] is None
+    assert w.post_restart(d, "2026-10-06", DEP_HIGH, None) == {} and w.post_restart(d, "2026-10-06", None, "2026-10-20") == {}
+    assert w.post_restart(d, "2026-10-05", DEP_HIGH, "2026-10-04") == {}                    # 재출발일 봉 미확정
+
+
+def test_restart_record_tracked_without_restaging():
+    """재출발 레코드는 매일 조회하되 단계·전환일·무효선은 다시 계산하지 않는다(다른 데이터를 줘도 그대로)."""
+    rec = {**_rec("R1.KS", "KR", status="reached", reach_rule=w.REACH_RULE, reached_date="2026-10-05", reached_high=DEP_HIGH,
+                  stage="restart", stage_date="2026-10-06", stage_close=1070.0, invalid_line=1020.0, departure_high=DEP_HIGH)}
+    assert w.is_target(rec) and not w.is_target({**rec, "stage": "invalid"})
+    up, s = w.track([rec], date(2026, 10, 21), "2026-10-21T07:00:00+09:00", fetch=lambda r, t: {"R1.KS": _restart_daily()},
+                    fetch_min=lambda c, d: (_ for _ in ()).throw(AssertionError("분봉 금지")))
+    u = up[rec["id"]]
+    assert not ({"stage", "stage_date", "invalid_line", "departure_high", "stage_close"} & set(u))
+    assert u["restart_peak_close"] == 1100 and u["restart_back_below_date"] == "2026-10-13" and s["transitions"] == []
+
+
+def test_restart_text_front():
+    if not shutil.which("node"):
+        pytest.skip("node 미설치")
+    src = _fn("lpwRestartText")
+    p = subprocess.run(["node", "-e", src + """
+      console.log(JSON.stringify([
+        lpwRestartText({stage:'restart', restart_peak_pct:15, restart_below_now:true, restart_back_below_date:'2026-10-13'}),
+        lpwRestartText({stage:'restart', restart_peak_pct:2.84, restart_below_now:false}),
+        lpwRestartText({stage:'restart'}), lpwRestartText({stage:'invalid', restart_peak_pct:5})]));"""],
+                       capture_output=True, text=True, timeout=20)
+    assert p.returncode == 0, p.stderr
+    assert json.loads(p.stdout) == ["최고 +15.0% · 현재 출발 고가 아래 · 되돌림 10-13", "최고 +2.8% · 현재 출발 고가 위", "최고 —", ""]
+    body = _fn("renderLowpointWatch")
+    assert "<th>재출발 이후</th>" in body and body.count("lpwRestartText(r)") == 1
