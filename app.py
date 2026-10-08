@@ -5,6 +5,19 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.343 [저점 관찰 유형(바닥형/눌림형) — 사용자 지시, 표시·필터 전용(저점·관찰 판정 불변)] "사용자가 보려는 종목은 '긴 하락 → 바닥 박스
+    → 재상승'형(하이딥·꿈비). 저점 히트에는 상승 추세 속 과매도 눌림형(PEG)도 섞여 있어 구분이 필요. ABC의 A·B 판정과 B 품질 라벨이
+    이 구분에 쓸 수 있는 기존 기준이다. 새 임계값 금지." ① lowpoint_watch.setup_type = abc_screener.analyze_abc 그대로(ABC_CONFIG —
+    250봉 고점 → 저점 하락폭 ≥ 40%·봉수 ≥ 40) — 판정 "ABC"면 바닥형, A를 쟀는데 미통과면 눌림형, A를 못 잼(MA600 600봉 부족 등)이면
+    판정 불가. 확정 봉까지 자른 뒤 ABC 탭과 같은 정제(app._downcast — naver 무거래일 OHLC=0 봉 제거; 정제 없이 재면 하이딥 저가 0 →
+    하락 100%) — US도 같은 함수(yfinance 배당 미조정). 바닥형엔 A(고점·저점·하락폭·봉수)·B 구간·B 품질(흡수/중립/재하락 주의/B 미형성)
+    저장. ② 갱신 = 기존 07:00 추적·지금 갱신(분봉 없음) — 600봉을 위해 관찰 일봉 조회 창을 ABC 탭과 같은 naver_kr.KR_SCAN_DAYS
+    (1900일)로, US는 같은 일수를 덮는 기존 기간("5y")으로 넓힘(판정 함수들은 기준일 뒤·출발일 근처 봉만 봐서 단계·출발·무효선 값 불변
+    — 테스트로 고정). ③ 화면: 관찰 중·숨고르기 행에 유형 칩("바닥형 −73% · 흡수", 툴팁에 A·B 구간), 상단 필터 칩 [전체 n][바닥형 n]
+    [눌림형 n](관찰 중·숨고르기에 적용, 종료는 전체), 순위 행에도 칩. ④ 순위 스냅샷에 유형·B 품질(확정 시점 값), 리뷰 ①② 유형별 보기
+    (review.by_type — 확정 시점 유형, 미분류는 지금 유형). 실데이터(10-08 확정): 하이딥 바닥형 −86%·B 미형성(저점 5봉 전), 꿈비
+    바닥형 −73.3%·흡수, PEG 눌림형 −24.5%. 테스트: test_lowpoint_watch_setup.py(실데이터 픽스처 test_fixtures/
+    lowpoint_setup_20261009.json.gz · ABC 탭 판정 기록 13종목 대조).
 v5.342 [저점 관찰 재출발 이후 결과 — 사용자 지시, 표시·리뷰 전용(단계 판정 그대로)] "재출발 레코드에 재출발일 이후 최고 종가, 재출발 후
     D+5·D+10 종가 수익률(재출발일 종가 기준) 저장. '되돌림' 표시: 재출발 후 종가가 출발 고가 아래로 다시 내려온 적이 있으면 그 날짜
     기록. … 확정 종가만, 새 임계값 금지." lowpoint_watch.post_restart — restart_close · restart_peak_close/date/pct(재출발일 포함
@@ -8971,7 +8984,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.342"
+VERSION = "v5.343"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -20935,7 +20948,8 @@ async def lp_rank_list():
     return JSONResponse(_clean_nan({
         "ok": True, "now": now_iso, "records": recs,
         "open": {r["id"]: rk.is_open(r, now_iso) for r in recs},
-        "watch": {wid: {k: wr.get(k) for k in ("status", "stage", "reached_date", "last_close", "last_date", "invalid_line")}
+        "watch": {wid: {k: wr.get(k) for k in ("status", "stage", "reached_date", "last_close", "last_date", "invalid_line",
+                                               "setup_type", "setup_a", "setup_b", "setup_b_quality", "setup_reason")}
                   for r in recs for wid in [i["watch_id"] for i in r.get("items") or []] for wr in [watch_by.get(wid) or {}]},
         "review": rk.review(recs, watch_by),
         "picks": list(rk.PICKS), "pick_label": rk.PICK_LABEL, "reasons": list(rk.REASONS), "max_reasons": rk.MAX_REASONS,

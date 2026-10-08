@@ -1245,6 +1245,9 @@ table.jr-table.lpw-table th.lpw-sort{cursor:pointer;user-select:none}
 .lpw-info .lpw-defs{flex-basis:100%;margin:0;padding-left:16px;font-size:11.5px;line-height:1.5}
 @media (max-width:480px){.lpw-table .lpw-pxcell{display:none}.lpw-table .lpw-hitchip{display:none}}   /* v5.327: 좁은 화면은 종료 후보 칩 대신 행 강조만 */
 /* /v5.326 */
+/* v5.343 유형 칩 — 색은 기존 토큰(바닥형 강조·눌림형 흐림) */
+.lpw-hitchip.lpw-type-bottom{color:var(--n-accent)}
+.lpw-hitchip.lpw-type-unknown{opacity:max(.7,var(--fade-floor))}
 /* v5.341 저점 순위 분류 표 — .lpr-table 아래로 한정 */
 .lpr-table .lpr-seg,.lpr-table .lpr-chips{display:inline-flex;flex-wrap:wrap;gap:3px}
 .lpr-table .jr-pill{padding:1px 7px;font-size:11px;min-height:20px}
@@ -1400,7 +1403,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.342</span>
+      <span class="ver mono" id="verBadge">v5.343</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -7463,7 +7466,10 @@ function lpSetView(v) {
 // ── v5.341(사용자 지시) 저점 순위 — "사용자가 저점 종목을 고르는 '눈'을 키우는 학습 시스템. 예측(분류) → 결과 → 비교를
 // 기록·채점한다." 레코드·기한·스냅샷·결과·리뷰 집계는 서버(lowpoint_rank.py), 화면은 분류 입력·표시만(순수 함수는 node 테스트).
 // 관심 신호 학습용 — 측정 결론 아님.
-const _lpr = { recs: [], open: {}, watch: {}, review: null, meta: null, draft: {}, busy: false, msg: '', error: null };
+const _lpr = { recs: [], open: {}, watch: {}, review: null, meta: null, draft: {}, busy: false, msg: '', error: null, reviewType: 'all' };
+// v5.343 리뷰 ①② 유형별 — 'all'이면 전체 집계, 아니면 서버 review.by_type[유형]
+function lprReviewPart(rv, t) { return (!t || t === 'all') ? rv : ((rv.by_type || {})[t] || rv); }
+function lprSetReviewType(t) { _lpr.reviewType = t; renderLowpointTrack(); }
 // 코호트별 최신 레코드(주·월 각각 라벨이 가장 늦은 것)
 function lprLatest(recs) {
   const out = {};
@@ -7536,7 +7542,29 @@ function lprConfirm(rid) {
 // ── v5.325(사용자 지시) 저점 관찰 — "히트 시점 종가를 기준가로 기록하고 이후 +5% 도달 여부를 자동 추적 — 도달한
 // 종목은 활성 목록에서 빠지고, 미도달 종목만 진입 후보로 남는 관찰 페이지." 레코드·판정은 서버(lowpoint_watch.py,
 // 매일 07:00 KST + 수동 갱신), 화면은 그룹·정렬·일수만 계산한다(순수 함수 — node 테스트).
-const _lpw = { recs: [], error: null, busy: false, reachPct: null, lastRun: null, msg: '', sortKey: 'pct', sortDir: 'desc' };
+const _lpw = { recs: [], error: null, busy: false, reachPct: null, lastRun: null, msg: '', sortKey: 'pct', sortDir: 'desc', typeFilter: 'all' };
+// v5.343(사용자 지시) 유형 — 서버(lowpoint_watch.setup_type = ABC A 판정 재사용)가 정한 값을 칩으로만(표시·필터 전용).
+// 바닥형 = ABC A 통과(긴 하락 → 바닥), 눌림형 = A 미통과, 판정 불가 = A를 못 잼(봉 부족 등). 아직 추적 전이면 칩 없음.
+function lpwTypeLabel(t) { return ({ bottom: '바닥형', pullback: '눌림형', unknown: '판정 불가' })[t] || null; }
+function lpwSetupChip(r) {
+  const t = r && r.setup_type;
+  if (!t || !lpwTypeLabel(t)) return null;
+  if (t === 'bottom') {
+    const a = r.setup_a || {}, b = r.setup_b || {}, q = r.setup_b_quality;
+    const drop = a.drop_pct != null ? ` −${Math.round(a.drop_pct)}%` : '';
+    const title = `ABC A 통과 — 250봉 고점 ${a.high ?? '—'} → 저점 ${a.low ?? '—'}(−${a.drop_pct ?? '—'}%, ${a.span_bars ?? '—'}봉)`
+      + ` · B ${b.bars ?? '—'}봉${b.range_pct != null ? ` 범위 ${b.range_pct}%` : ' (범위 못 잼)'}${q ? ' · B 품질 ' + q : ''}`;
+    return { cls: 'bottom', text: `바닥형${drop}${q ? ' · ' + q : ''}`, title };
+  }
+  return { cls: t, text: lpwTypeLabel(t), title: r.setup_reason || lpwTypeLabel(t) };
+}
+function lpwSetupChipHtml(r) {
+  const c = lpwSetupChip(r);
+  return c ? ` <span class="chip lpw-hitchip lpw-type-${c.cls}" title="${_escapeHtml(c.title)}">${_escapeHtml(c.text)}</span>` : '';
+}
+// 유형 필터(전체·바닥형·눌림형) — 레코드만 거른다(판정·정렬 불변)
+function lpwTypeFilter(recs, f) { return (!f || f === 'all') ? (recs || []) : (recs || []).filter(r => r.setup_type === f); }
+function lpwSetTypeFilter(f) { _lpw.typeFilter = f; renderLowpointTrack(); }
 // v5.326(사용자 지시) 진행 바 — 기준가(0%)가 가운데, 오른쪽 절반 = 0 → +목표%(채워질수록 "곧 소멸"), 왼쪽 절반 = 0 → −목표%
 // (길수록 "더 싸짐"). 폭은 각 절반 안의 비율 %(목표% 넘으면 꽉 참). 색은 방향만: 양수 = 상승색, 음수 = 하락색(등락% 글자와 같음).
 function lpwBar(pct, goal) {
@@ -7871,13 +7899,15 @@ function renderLowpointWatch() {
     const tip = p == null ? '현재가 없음' : `기준가 대비 ${p >= 0 ? '+' : ''}${p.toFixed(2)}% · 목표 +${goal}%까지 ${(goal - p).toFixed(2)}%p`;
     return `<div class="lpw-bar" title="${tip}" role="img" aria-label="${tip}">${b.side === 'none' ? '' : `<i class="${b.side}" style="width:${(b.width / 2).toFixed(1)}%"></i>`}</div>`;
   };
-  const groups = lpwGroups(_lpw.recs).filter(g => g.active.length).map(g => {
+  const tf = _lpw.typeFilter || 'all';
+  const shown = lpwTypeFilter(_lpw.recs, tf);                              // v5.343: 관찰 중·숨고르기만 거른다(종료는 전체)
+  const groups = lpwGroups(shown).filter(g => g.active.length).map(g => {
     const title = `${String(g.label).slice(5)} ${g.tf === 'week' ? '주봉' : '월봉'} · 관찰 ${g.active.length} / 출발 ${g.reached.length}`;
     const dates = [...new Set([...g.active, ...g.reached].map(r => r.base_date))].sort().join(', ');
     const act = lpwSortRows(g.active, _lpw.sortKey, _lpw.sortDir, today).map(r => {
       const p = lpReturnPct(r.last_close, Number(r.base_price));
       return `<tr>
-        <td class="lpw-sym">${name(r)}${lpwPendingHtml(r)}</td>
+        <td class="lpw-sym">${name(r)}${lpwSetupChipHtml(r)}${lpwPendingHtml(r)}</td>
         <td class="r lpw-pxcell"><span class="lpw-px">${_lptFmt(r.base_price, r.mkt)} → ${r.last_close != null ? _lptFmt(r.last_close, r.mkt) : '—'}</span></td>
         <td class="r">${_lptPct(p)}</td>
         <td class="lpw-barcell">${bar(p)}</td>
@@ -7894,13 +7924,14 @@ function renderLowpointWatch() {
   // v5.337 숨고르기(펼침)·종료(접힘) — 출발한 레코드만. 코호트(주·월봉 기준일)는 행의 작은 칩으로
   const coh = r => `<span class="chip lpw-hitchip" title="기준일 ${_escapeHtml(r.base_date || '')} · 기준가 ${_lptFmt(r.base_price, r.mkt)}">${_escapeHtml(String(r.label).slice(5))} ${r.tf === 'week' ? '주' : '월'}</span>`;
   const warn = r => r.stage_warning ? ` <span class="chip lpw-hitchip" style="color:var(--px-down)" title="${_escapeHtml(r.stage_warning)} — 판정하지 않았어요">판정 보류</span>` : '';
-  const { rest, ended } = lpwStageSplit(_lpw.recs);
+  const { rest } = lpwStageSplit(shown);
+  const { ended } = lpwStageSplit(_lpw.recs);
   const restRows = rest.map(r => {
     const hi = lpwDepHigh(r), rp = lpwRestPos(r), vr = lpwVolRatio(r);
     const st = r.stage === 'resting' ? '' : ` <span class="chip lpw-hitchip" title="${r.stage ? '출발 다음 거래일 종가가 아직 없어요 — 숨고르기 0일' : '다음 추적 때 단계를 분류해요'}">${r.stage ? '출발' : '분류 전'}</span>`;
     const tip = rp.pos == null ? '현재가·무효선 없음' : `무효선 ${_lptFmt(r.invalid_line, r.mkt)} ~ 출발 고가 ${_lptFmt(hi, r.mkt)} 사이 ${rp.pos.toFixed(0)}% · 무효선까지 ${rp.dist >= 0 ? '+' : ''}${rp.dist.toFixed(2)}%`;
     return `<tr>
-        <td class="lpw-sym">${name(r)} ${coh(r)}${st}${warn(r)}${lpwPendingHtml(r)}</td>
+        <td class="lpw-sym">${name(r)} ${coh(r)}${lpwSetupChipHtml(r)}${st}${warn(r)}${lpwPendingHtml(r)}</td>
         <td class="num r" title="출발일 ${_escapeHtml(r.reached_date || '')}부터">${lpwDays(r.reached_date, today) ?? '—'}일</td>
         <td class="num r" title="${_escapeHtml(r.reached_date || '')}">${r.reached_date ? _escapeHtml(String(r.reached_date).slice(5)) : '—'}</td>
         <td class="num r">${r.invalid_line != null ? _lptFmt(r.invalid_line, r.mkt) : '—'}</td>
@@ -7932,6 +7963,10 @@ function renderLowpointWatch() {
   return `<section class="n-card lpw-info">
       <span class="n-sub" style="flex:1 1 260px">저점 히트 종가(기준가) 대비 <b>+${pct}%</b> 도달을 추적해요 — 기준일 다음 거래일부터 <b>정규장 고가 기준(장외 체결 제외)</b>, 매일 07:00 KST 자동 갱신 · ${runInfo} · <b>관심 신호 · 측정 전</b></span>
       <button type="button" class="n-btn sm" onclick="lpwRefresh()" ${_lpw.busy ? 'disabled' : ''}>${_lpw.busy ? '갱신 중…' : '지금 갱신'}</button>
+      <span class="lp-chips" role="group" aria-label="유형 필터" style="flex-basis:100%">${[['all', '전체'], ['bottom', '바닥형'], ['pullback', '눌림형']].map(([k, l]) => {
+        const n = lpwTypeFilter(_lpw.recs.filter(r => !lpwEndedLabel(r.stage)), k).length;
+        return `<button type="button" class="jr-pill${tf === k ? ' on' : ''}" onclick="lpwSetTypeFilter('${k}')" title="${k === 'bottom' ? 'ABC A 통과 — 긴 하락 → 바닥' : k === 'pullback' ? 'ABC A 미통과 — 추세 속 눌림' : '전체'}">${l} ${n}</button>`; }).join('')}
+        <span class="n-sub" style="font-size:11px;align-self:center">유형 = ABC A 판정 재사용 · 관찰 중·숨고르기에 적용 · 표시 전용</span></span>
       <ul class="n-sub lpw-defs">
         <li><b>출발</b> — +${pct}% 도달(위 판정 그대로, <b>확정된 봉만</b> — KR 20:10 KST·US 뉴욕 16:00 이후). 출발 고가 = 그날 판정 고가</li>
         <li><b>무효선</b> — 기준일부터 출발 전날까지 종가 최고값(기준일 포함)</li>
@@ -7972,7 +8007,7 @@ function renderLowpointRank() {
           <td class="n-sub" style="font-size:11px">${(sn.themes || []).map(t => `${_escapeHtml(t.theme)} ${t.up}/${t.total}`).join(', ') || '—'}</td>` : '';
       return `<tr>
         <td class="lpw-sym"><a class="name-link" href="${tvUrl(it.code, it.mkt)}" target="_blank" rel="noopener">${_escapeHtml(lpDisplayName(it))}</a>
-          <span class="chip lpw-hitchip">${_escapeHtml(stageLbl[wr.stage] || (wr.status === 'reached' ? '출발' : '관찰'))}</span></td>
+          <span class="chip lpw-hitchip">${_escapeHtml(stageLbl[wr.stage] || (wr.status === 'reached' ? '출발' : '관찰'))}</span>${lpwSetupChipHtml(sn ? { ...wr, setup_type: sn.setup_type, setup_b_quality: sn.setup_b_quality } : wr)}</td>
         <td><span class="lpr-seg">${seg}</span></td>
         <td><span class="lpr-chips">${chips}</span></td>
         ${snapCells}
@@ -7994,7 +8029,9 @@ function renderLowpointRank() {
     ${cohorts || '<section class="n-card" style="padding:18px 22px"><div class="n-sub">분류할 코호트가 아직 없어요 — 다음 주봉·월봉 스캔 뒤 생겨요(기한이 지난 코호트는 만들지 않아요)</div></section>'}
     ${reviewHtml}`;
 }
-function renderLowpointRankReview(rv, m) {
+function renderLowpointRankReview(rvAll, m) {
+  const rt = _lpr.reviewType || 'all';
+  const rv = { ...rvAll, ...lprReviewPart(rvAll, rt) };                     // ①② 유형별, ③④는 전체 그대로
   const pct = v => _lptPct(v), keys = rv.horizon_keys || [];
   const kh = keys.map(k => `<th class="r">${k.toUpperCase().replace('D', 'D+')} 평균</th>`).join('');
   const line = (lbl, a) => `<tr><td>${lbl}</td><td class="num r">${a.n}</td><td class="num r">${a.departed_rate != null ? a.departed_rate + '%' : '—'}</td>${keys.map(k => `<td class="r">${pct(a.avg[k])}${a.n_ret[k] ? `<span class="n-sub" style="font-size:10px"> n${a.n_ret[k]}</span>` : ''}</td>`).join('')}</tr>`;
@@ -8013,6 +8050,9 @@ function renderLowpointRankReview(rv, m) {
   const c = rv.cohorts || {}, mc = rv.min_cohorts || {};
   return `<section class="n-card lpw-card"><div class="lpw-h"><span class="n-h">리뷰</span>
       <span class="n-sub" style="font-size:11px;color:var(--px-down)">코호트 4주(월봉은 3개월) 쌓이기 전에는 결론 내지 않음 — 지금 주봉 ${c.week || 0}/${mc.week || 4} · 월봉 ${c.month || 0}/${mc.month || 3}</span></div>
+      <span class="lp-chips" role="group" aria-label="리뷰 유형" style="margin:6px 0 0">${[['all', '전체'], ['bottom', '바닥형'], ['pullback', '눌림형'], ['unknown', '판정 불가']].map(([k, l]) =>
+        `<button type="button" class="jr-pill${rt === k ? ' on' : ''}" onclick="lprSetReviewType('${k}')">${l} ${(k === 'all' ? rvAll.total : ((rvAll.by_type || {})[k] || {}).total || { n: 0 }).n}</button>`).join('')}
+        <span class="n-sub" style="font-size:11px;align-self:center">①② 유형별 — 확정 시점 유형(미분류는 지금 유형)</span></span>
       <div class="n-sub" style="font-size:12px;margin:6px 0 2px">① 분류별 성적(출발률 = 관찰에서 출발한 비율)</div>${tbl(`<th>분류</th><th class="r">종목</th><th class="r">출발률</th>${kh}`, t1)}
       <div class="n-sub" style="font-size:12px;margin:10px 0 2px">② 오른 종목 vs 안 오른 종목 — 확정 시점 지표 평균(출발 ${a.n} · 미출발 ${b.n} · 스냅샷 없음 ${rv.rose_vs_not.no_snapshot})</div>${tbl('<th>지표</th><th class="r">출발</th><th class="r">미출발</th>', t2)}
       <div class="n-sub" style="font-size:12px;margin:10px 0 2px">③ 놓친 것 — 보통·안 간다로 둔 종목 중 출발(${(rv.missed || []).length})</div>${t3 ? tbl('<th>종목</th><th>내 분류</th><th class="r">출발일</th><th>이유 칩</th><th>확정 시점</th>', t3) : '<div class="n-sub">없음</div>'}

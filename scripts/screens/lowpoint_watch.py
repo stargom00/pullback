@@ -15,6 +15,7 @@
   stage       v5.337 watch | departed | resting | restart | invalid — 출발 이후 단계(stage_info), 종료(restart·invalid)면 고정
   invalid_line·departure_high·stage_date·stage_close·last_checked_date·departure_volume·last_volume·stage_warning
   departure_vol_mult·departure_close_pos·departure_upper_wick·departure_atr_mult — 출발일 모양(표시 전용, departure_shape)
+  setup_type(bottom|pullback|unknown)·setup_a·setup_b·setup_b_quality·setup_reason — v5.343 유형(표시·필터 전용, setup_type)
 
 판정(v5.333): 기준일 **이후** 거래일의 **정규장 고가** ≥ 기준가 × (1 + REACH_PCT/100) → 도달(정확히 1.05배도 도달).
 기준일 당일·이전은 보지 않는다. KR 정규장 고가 = naver 분봉 09:00~15:30 최고가(장외 체결 제외 — 아래 REACH_RULE 주석,
@@ -388,6 +389,37 @@ def departure_shape(daily: "pd.DataFrame | None", reached_date: str, through: "s
     return out
 
 
+# ── v5.343(사용자 지시) 저점 유형 — 표시·필터 전용, 저점·관찰 판정 불변 ─────────────────────────────────────
+# "사용자가 보려는 종목은 '긴 하락 → 바닥 박스 → 재상승'형(하이딥·꿈비). 저점 히트에는 상승 추세 속 과매도 눌림형(PEG)도 섞여 있어
+# 구분이 필요. ABC의 A·B 판정과 B 품질 라벨이 이 구분에 쓸 수 있는 기존 기준이다. 새 임계값 금지."
+#   바닥형 = abc_screener.analyze_abc 판정 "ABC"(A 통과 — ABC_CONFIG a_lookback 250봉 고점 → 이후 저점 하락폭 ≥ a_drop_min·
+#            봉수 ≥ a_span_min 그대로) · 눌림형 = A를 쟀는데 미통과 · 판정 불가 = A를 못 잼(MA600 계산 불가 = 봉 부족 등).
+# ABC 탭과 **같은 함수·같은 정제**(app._downcast — naver 무거래일 OHLC=0 봉 제거, 체크포인트(확정 봉)까지 자른 뒤 적용 — CLAUDE.md
+# v5.242 룩어헤드 주의)라 같은 데이터면 ABC 탭의 A 판정과 같다. US도 같은 함수(데이터만 yfinance 배당 미조정).
+SETUP_LABEL = {"bottom": "바닥형", "pullback": "눌림형", "unknown": "판정 불가"}
+
+
+def setup_type(daily: "pd.DataFrame | None", through: "str | None") -> dict:
+    """확정 봉(≤ through)까지의 일봉 → {setup_type, setup_reason, setup_a(A 고점·저점·하락폭·봉수), setup_b(B 구간 — 바닥형만),
+    setup_b_quality(흡수/중립/재하락 주의/B 미형성 — 바닥형만), setup_checked_date}."""
+    import abc_screener
+    from app import _downcast                    # 프로덕션 fetch 후처리 그대로 — 사본 금지(harness.clean_at_checkpoint와 같은 방식)
+    out = {"setup_type": "unknown", "setup_reason": None, "setup_a": None, "setup_b": None, "setup_b_quality": None,
+           "setup_checked_date": None}
+    d = _confirmed_daily(daily, through)
+    if d is None or d.empty:
+        return {**out, "setup_reason": "일봉 없음"}
+    d = _downcast(d)
+    out["setup_checked_date"] = str(pd.Timestamp(d.index[-1]).date()) if len(d) else None
+    r = abc_screener.analyze_abc(d)
+    if r.get("a") is None:
+        return {**out, "setup_reason": r.get("reason")}
+    out["setup_a"] = {k: r["a"][k] for k in ("high", "low", "drop_pct", "span_bars", "bars_since_low")}
+    if r["verdict"] == "ABC":
+        return {**out, "setup_type": "bottom", "setup_b": r.get("b"), "setup_b_quality": (r.get("b_quality") or {}).get("label")}
+    return {**out, "setup_type": "pullback", "setup_reason": r.get("reason")}
+
+
 def _us_period(earliest: str, today: date) -> str:
     """기준일을 덮는 가장 짧은 yfinance period(기준일 이후 일봉만 필요)."""
     days = (today - date.fromisoformat(earliest)).days
@@ -404,8 +436,11 @@ def fetch_daily(records: list, today: date) -> dict:
     if not records:
         return {}
     # v5.337: 출발일 모양(직전 50거래일 평균 거래량)을 위해 기준일 앞으로 더 받는다
+    # v5.343: 유형(ABC A 판정 — MA600까지 600봉)을 위해 ABC 탭과 같은 KR 창(naver_kr.KR_SCAN_DAYS)까지 — 판정 함수들은 기준일 뒤·
+    # 출발일 근처 봉만 보므로 창을 넓혀도 관찰 단계·출발·무효선 값은 같다(test_lowpoint_watch_setup.py가 고정)
     from datetime import timedelta
-    earliest = str(date.fromisoformat(min(r["base_date"] for r in records)) - timedelta(days=shape_lookback_days()))
+    earliest = str(min(date.fromisoformat(min(r["base_date"] for r in records)) - timedelta(days=shape_lookback_days()),
+                       today - timedelta(days=naver_kr.KR_SCAN_DAYS)))
     kr = sorted({r["code"] for r in records if r.get("mkt") != "US"})
     us = sorted({r["code"] for r in records if r.get("mkt") == "US"})
     out = {}
@@ -444,6 +479,7 @@ def track(records: list, today: date, now_iso: str, fetch=fetch_daily, fetch_min
         u = {"last_close": last["last_close"], "last_date": last["last_date"], "checked_at": now_iso, "reach_rule": REACH_RULE}
         thru = confirmed_through(r.get("mkt"), now_iso)
         tag = f"{r['code']}({r.get('label')} {r.get('tf')})"
+        u.update(setup_type(daily, thru))                               # v5.343 유형 — 표시·필터 전용(아래 판정은 이 값을 안 본다)
         rc = None
         if was_reached and r.get("reach_rule") == PREV_REACH_RULE:
             rc = recheck_reached(r, daily, thru, fetch_min)

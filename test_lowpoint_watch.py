@@ -138,9 +138,10 @@ def test_daily_track_fetches_only_active_codes(monkeypatch):
     minutes = []
     fm = lambda code, day: minutes.append((code, str(day))) or [{"localDateTime": day.strftime("%Y%m%d") + "100000", "highPrice": 16400.0}]
     updates, summary = w.track(recs, date(2026, 10, 5), "2026-10-05T20:10:00+09:00", fetch_min=fm)   # v5.339: KR 10-05 확정 후
-    # 기준일(10-02)부터 + 휴장 여유 10일 + v5.337 출발일 모양용 직전 50거래일(달력 70일)
-    assert asked["kr"] == [("002320.KS", 13 + w.shape_lookback_days())] and w.shape_lookback_days() == 70
-    assert asked["us"] == [(("AVA",), "3mo", lp.US_AUTO_ADJUST)]
+    # v5.343: 유형(ABC A — MA600 600봉)용으로 ABC 탭과 같은 KR 창(naver_kr.KR_SCAN_DAYS) + 휴장 여유 10일. US는 같은 일수를 덮는 기간
+    import naver_kr
+    assert asked["kr"] == [("002320.KS", naver_kr.KR_SCAN_DAYS + 10)] and w.shape_lookback_days() == 70
+    assert asked["us"] == [(("AVA",), "5y", lp.US_AUTO_ADJUST)]
     assert minutes == [("002320.KS", "2026-10-05")]                # 분봉도 관찰 종목·필요한 거래일만
     assert set(updates) == {r["id"] for r in recs if r["status"] == "active"}
     assert updates[recs[0]["id"]]["status"] == "reached"          # 정규장 16400 ≥ 15560×1.05 = 16338

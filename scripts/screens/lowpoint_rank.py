@@ -136,7 +136,8 @@ def snapshot_item(item: dict, daily: "pd.DataFrame | None", through: "str | None
     d = w._confirmed_daily(daily, through)
     d = d.dropna(subset=["Close"]) if d is not None and not d.empty else d
     out = {"close": None, "close_date": None, "pct_vs_base": None, "atr_pct": None, "max_vol_mult": None,
-           "stage": None, "invalid_dist_pct": None, "themes": themes or [], "flow": flow}
+           "stage": None, "invalid_dist_pct": None, "themes": themes or [], "flow": flow,
+           "setup_type": "unknown", "setup_b_quality": None}
     if d is not None and not d.empty:
         c = float(d["Close"].iloc[-1])
         out.update(close=c, close_date=str(pd.Timestamp(d.index[-1]).date()),
@@ -145,6 +146,9 @@ def snapshot_item(item: dict, daily: "pd.DataFrame | None", through: "str | None
     if watch_rec:
         st = watch_rec.get("stage") or ("watch" if watch_rec.get("status") == "active" else None)
         out["stage"] = st
+        # v5.343 유형(바닥형/눌림형/판정 불가)·B 품질 — 확정 시점 관찰 레코드 값(07:00 추적이 ABC 판정으로 갱신)
+        out["setup_type"] = watch_rec.get("setup_type") or "unknown"
+        out["setup_b_quality"] = watch_rec.get("setup_b_quality")
         inv = watch_rec.get("invalid_line")
         if inv and out["close"] is not None and watch_rec.get("status") == "reached":
             out["invalid_dist_pct"] = round((out["close"] / float(inv) - 1) * 100, 2)
@@ -199,6 +203,9 @@ def review_rows(recs: list, watch_by_id: dict) -> list:
                          "code": it["code"], "name": it["name"], "mkt": it["mkt"],
                          "pick": pick_of(rec, wid), "reasons": list(p.get("reasons") or []) if rec.get("confirmed_at") else [],
                          "snapshot": (rec.get("snapshot") or {}).get(wid), "results": (rec.get("results") or {}).get(wid) or {},
+                         # v5.343 유형 — 확정 스냅샷 값이 우선(그 시점 판정), 없으면(미분류) 관찰 레코드 현재 값
+                         "setup_type": (((rec.get("snapshot") or {}).get(wid) or {}).get("setup_type")
+                                        or wr.get("setup_type") or "unknown"),
                          "departed": wr.get("status") == "reached", "departed_date": wr.get("reached_date"),
                          "stage": wr.get("stage") or ("watch" if wr.get("status") == "active" else None),
                          "watch_missing": not wr})
@@ -208,9 +215,32 @@ def review_rows(recs: list, watch_by_id: dict) -> list:
 SNAP_METRICS = ("pct_vs_base", "atr_pct", "max_vol_mult", "invalid_dist_pct")
 
 
+SETUP_TYPES = ("bottom", "pullback", "unknown")
+
+
 def review(recs: list, watch_by_id: dict) -> dict:
     rows = review_rows(recs, watch_by_id)
     keys = sorted({f"d{n}" for hs in HORIZONS.values() for n in hs}, key=lambda k: int(k[1:]))
+    out = _review_parts(rows, keys)
+    # ④ 이유 칩별 — 칩을 고른 종목 중 출발 비율
+    chips = {}
+    for c in REASONS:
+        rs = [r for r in rows if c in r["reasons"]]
+        chips[c] = {"n": len(rs), "departed": sum(1 for r in rs if r["departed"]),
+                    "rate": round(sum(1 for r in rs if r["departed"]) / len(rs) * 100, 1) if rs else None}
+    return {
+        "cohorts": {tf: sum(1 for r in recs or [] if r["tf"] == tf) for tf in HORIZONS},
+        "min_cohorts": MIN_COHORTS, **out,
+        # v5.343 리뷰 ①② 유형별(바닥형/눌림형/판정 불가) — 같은 집계를 유형 부분집합에
+        "by_type": {t: _review_parts([r for r in rows if r["setup_type"] == t], keys) for t in SETUP_TYPES},
+        "missed": [r for r in rows if r["pick"] in ("normal", "no") and r["departed"]],
+        "chips": chips,
+        "horizon_keys": keys,
+    }
+
+
+def _review_parts(rows: list, keys: list) -> dict:
+    """리뷰 ①(분류별 성적·전체)·②(오른 종목 vs 안 오른 종목) — 행 부분집합 하나에 대해."""
 
     def agg(rs):
         return {"n": len(rs), "departed": sum(1 for r in rs if r["departed"]),
@@ -226,20 +256,7 @@ def review(recs: list, watch_by_id: dict) -> dict:
                 "flow_organ": _avg([(r["snapshot"].get("flow") or {}).get("organ") for r in rs]),
                 "flow_foreign": _avg([(r["snapshot"].get("flow") or {}).get("foreign") for r in rs]),
                 "theme_share": round(sum(1 for r in rs if r["snapshot"].get("themes")) / len(rs) * 100, 1) if rs else None}
-    # ④ 이유 칩별 — 칩을 고른 종목 중 출발 비율
-    chips = {}
-    for c in REASONS:
-        rs = [r for r in rows if c in r["reasons"]]
-        chips[c] = {"n": len(rs), "departed": sum(1 for r in rs if r["departed"]),
-                    "rate": round(sum(1 for r in rs if r["departed"]) / len(rs) * 100, 1) if rs else None}
-    return {
-        "cohorts": {tf: sum(1 for r in recs or [] if r["tf"] == tf) for tf in HORIZONS},
-        "min_cohorts": MIN_COHORTS,
-        "by_pick": by_pick, "total": agg(rows),
-        "rose_vs_not": {"departed": snap_avg([r for r in snap if r["departed"]]),
-                        "not_departed": snap_avg([r for r in snap if not r["departed"]]),
-                        "no_snapshot": len(rows) - len(snap)},
-        "missed": [r for r in rows if r["pick"] in ("normal", "no") and r["departed"]],
-        "chips": chips,
-        "horizon_keys": keys,
-    }
+    return {"by_pick": by_pick, "total": agg(rows),
+            "rose_vs_not": {"departed": snap_avg([r for r in snap if r["departed"]]),
+                            "not_departed": snap_avg([r for r in snap if not r["departed"]]),
+                            "no_snapshot": len(rows) - len(snap)}}
