@@ -405,7 +405,7 @@ def setup_type(daily: "pd.DataFrame | None", through: "str | None") -> dict:
     import abc_screener
     from app import _downcast                    # 프로덕션 fetch 후처리 그대로 — 사본 금지(harness.clean_at_checkpoint와 같은 방식)
     out = {"setup_type": "unknown", "setup_reason": None, "setup_a": None, "setup_b": None, "setup_b_quality": None,
-           "setup_checked_date": None}
+           "setup_checked_date": None, "setup_ref_low": None, "setup_ref_basis": None, "setup_ref_date": None}
     d = _confirmed_daily(daily, through)
     if d is None or d.empty:
         return {**out, "setup_reason": "일봉 없음"}
@@ -415,9 +415,17 @@ def setup_type(daily: "pd.DataFrame | None", through: "str | None") -> dict:
     if r.get("a") is None:
         return {**out, "setup_reason": r.get("reason")}
     out["setup_a"] = {k: r["a"][k] for k in ("high", "low", "drop_pct", "span_bars", "bars_since_low")}
+    # v5.344(사용자 지시) "무효 참고" — 표시 전용(판정·단계 전환에 안 씀). 바닥형 = ABC A 저점(고점 이후 최저가 — 위 analyze_abc 값),
+    # 눌림형 = 평가 눌림형 ④ 직전 저점(lowpoint_eval.prior_low — 같은 함수), 판정 불가 = 없음.
     if r["verdict"] == "ABC":
-        return {**out, "setup_type": "bottom", "setup_b": r.get("b"), "setup_b_quality": (r.get("b_quality") or {}).get("label")}
-    return {**out, "setup_type": "pullback", "setup_reason": r.get("reason")}
+        lo_idx = len(d) - 1 - int(r["a"]["bars_since_low"])
+        return {**out, "setup_type": "bottom", "setup_b": r.get("b"), "setup_b_quality": (r.get("b_quality") or {}).get("label"),
+                "setup_ref_low": r["a"]["low"], "setup_ref_basis": "A 저점",
+                "setup_ref_date": str(pd.Timestamp(d.index[lo_idx]).date()) if 0 <= lo_idx < len(d) else None}
+    pl = ev.prior_low(d["Close"])
+    return {**out, "setup_type": "pullback", "setup_reason": r.get("reason"),
+            "setup_ref_low": pl["low_close"] if pl else None, "setup_ref_basis": "직전 저점" if pl else None,
+            "setup_ref_date": pl["low_date"] if pl else None}
 
 
 def _us_period(earliest: str, today: date) -> str:

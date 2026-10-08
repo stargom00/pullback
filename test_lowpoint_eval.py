@@ -219,13 +219,14 @@ def _put(rec, base):
 
 def test_eval_save_reload_manual_and_rev(store):
     assert _put(REC, None)[0] == 200
-    s, d = _put({**REC, "manual": {"rise_rsi": "O", "dilution": "X"}, "memo": "유증 2025", "interest": True,
+    s, d = _put({**REC, "manual": {"rise_rsi": "O", "no_dilution": "X"}, "memo": "유증 2025", "interest": True,
                  "checked_at": "2026-10-04", "auto": {"items": [{"key": "months", "result": True}]}}, 1)
     assert s == 200 and d["record"]["rev"] == 2
     lst = json.loads(asyncio.run(app.lp_evals_list()).body)
     rec = lst["evals"][0]
-    assert rec["manual"] == {"rise_rsi": "O", "dilution": "X"} and rec["memo"] == "유증 2025" and rec["interest"] is True
-    assert [k for k, _ in lst["manual_items"]] == list(app.LP_EVAL_MANUAL_KEYS)
+    assert rec["manual"] == {"rise_rsi": "O", "no_dilution": "X"} and rec["memo"] == "유증 2025" and rec["interest"] is True
+    assert [k for k, _ in lst["manual_items"]] == [k for k, _ in ev.MANUAL_ITEMS]               # 바닥형 수동(v5.344 — 키 전체는
+    assert [k for k, _ in lst["pullback_manual_items"]] == [k for k, _ in ev.PULLBACK_MANUAL_ITEMS]  # 바닥형+눌림형 합집합)
     assert _put({**REC, "memo": "낡은 탭"}, 1)[1]["code"] == "conflict"
 
 
@@ -274,14 +275,14 @@ def _js(expr, *fns):
     return json.loads(p.stdout)
 
 
-MANUAL = [["rise_rsi", "a"], ["long_base", "b"], ["dilution", "c"]]
+MANUAL = [["rise_rsi", "a"], ["long_base", "b"], ["no_dilution", "c"]]
 
 
 def test_tally_counts_auto_and_manual():
     rec = {"auto": {"items": [{"result": True}, {"result": True}, {"result": False}, {"result": None}]},
-           "manual": {"rise_rsi": "O", "dilution": "X"}}
-    assert _js(f"lpeTally({json.dumps(rec)}, {json.dumps(MANUAL)})", "lpeManualEffective", "lpeTally") == {"O": 3, "X": 2, "blank": 2}
-    assert _js(f"lpeTally({{}}, {json.dumps(MANUAL)})", "lpeManualEffective", "lpeTally") == {"O": 0, "X": 0, "blank": 3}
+           "manual": {"rise_rsi": "O", "no_dilution": "X"}}
+    assert _js(f"lpeTally({json.dumps(rec)}, {json.dumps(MANUAL)})", "lpeManualEffective", "lpeSetupOf", "lpeChecklist", "lpeTally") == {"O": 3, "X": 2, "blank": 2}
+    assert _js(f"lpeTally({{}}, {json.dumps(MANUAL)})", "lpeManualEffective", "lpeSetupOf", "lpeChecklist", "lpeTally") == {"O": 0, "X": 0, "blank": 3}
 
 
 def test_manual_cycle():
@@ -318,23 +319,24 @@ def test_version_badge_matches():
 # ── v5.318: 수동 항목 "파란구름(월봉 일목 구름)" 추가 ───────────────
 def test_ichimoku_manual_item_added_and_keys_in_sync():
     keys = [k for k, _ in ev.MANUAL_ITEMS]
-    assert keys == ["rise_rsi", "rise_stoch", "long_base", "dilution", "ichimoku_cloud"]
-    assert tuple(keys) == app.LP_EVAL_MANUAL_KEYS
+    assert keys == ["rise_rsi", "rise_stoch", "long_base", "no_dilution", "ichimoku_cloud"]   # v5.344 dilution → no_dilution
+    pb = [k for k, _ in ev.PULLBACK_MANUAL_ITEMS]
+    assert tuple(dict.fromkeys(keys + pb)) == app.LP_EVAL_MANUAL_KEYS                       # 바닥형 + 눌림형 수동 키 합집합
     assert dict(ev.MANUAL_ITEMS)["ichimoku_cloud"] == "파란구름의 두꺼운 구간을 충분히 지났다(월봉 일목 구름 기준)"
 
 
 def test_old_record_without_new_key_is_compatible(store):
     """v5.317 레코드(새 키 없음)가 그대로 저장·로드되고, 새 항목은 미표시로 센다. 새 항목 O/X도 저장된다."""
-    old = {**REC, "manual": {"rise_rsi": "O", "long_base": "X", "dilution": None}}
+    old = {**REC, "manual": {"rise_rsi": "O", "long_base": "X", "no_dilution": None}}
     assert _put(old, None)[0] == 200
     lst = json.loads(asyncio.run(app.lp_evals_list()).body)
     rec = lst["evals"][0]
     assert "ichimoku_cloud" not in rec["manual"]
-    tally = _js(f"lpeTally({json.dumps(rec)}, {json.dumps(lst['manual_items'])})", "lpeManualEffective", "lpeTally")
-    assert tally == {"O": 1, "X": 1, "blank": 3}           # rise_stoch·dilution·ichimoku_cloud 미표시
+    tally = _js(f"lpeTally({json.dumps(rec)}, {json.dumps(lst['manual_items'])})", "lpeManualEffective", "lpeSetupOf", "lpeChecklist", "lpeTally")
+    assert tally == {"O": 1, "X": 1, "blank": 3}           # rise_stoch·no_dilution·ichimoku_cloud 미표시
     s, d = _put({**rec, "manual": {**rec["manual"], "ichimoku_cloud": "O"}}, rec["rev"])
     assert s == 200 and d["record"]["manual"]["ichimoku_cloud"] == "O"
-    tally2 = _js(f"lpeTally({json.dumps(d['record'])}, {json.dumps(lst['manual_items'])})", "lpeManualEffective", "lpeTally")
+    tally2 = _js(f"lpeTally({json.dumps(d['record'])}, {json.dumps(lst['manual_items'])})", "lpeManualEffective", "lpeSetupOf", "lpeChecklist", "lpeTally")
     assert tally2 == {"O": 2, "X": 1, "blank": 2}
     assert _put({**d["record"], "manual": {"ichimoku_cloud": "Z"}}, d["record"]["rev"])[0] == 400
 
@@ -406,10 +408,10 @@ def test_na_is_blank_in_tally():
                                     "rise_stoch": {"result": True, "na": False, "detail": ""},
                                     "long_base": {"result": None, "na": True, "detail": ""},
                                     "ichimoku_cloud": {"result": None, "na": True, "detail": ""}}},
-           "manual": {"long_base": "O", "ichimoku_cloud": "X", "dilution": "O"}}
-    manual = [[k, k] for k in app.LP_EVAL_MANUAL_KEYS]
-    # O: items 1 + rise_stoch 자동 O + dilution 1 / X: rise_rsi 자동 X / 미표시: long_base·ichimoku(해당 없음)
-    assert _js(f"lpeTally({json.dumps(rec)}, {json.dumps(manual)})", "lpeManualEffective", "lpeTally") == \
+           "manual": {"long_base": "O", "ichimoku_cloud": "X", "no_dilution": "O"}}
+    manual = [[k, k] for k, _ in ev.MANUAL_ITEMS]                         # 바닥형 체크리스트 수동 항목(v5.344)
+    # O: items 1 + rise_stoch 자동 O + no_dilution 1 / X: rise_rsi 자동 X / 미표시: long_base·ichimoku(해당 없음)
+    assert _js(f"lpeTally({json.dumps(rec)}, {json.dumps(manual)})", "lpeManualEffective", "lpeSetupOf", "lpeChecklist", "lpeTally") == \
         {"O": 3, "X": 1, "blank": 2}
 
 
@@ -452,14 +454,14 @@ def test_no_signal_is_dash_for_each_item(monkeypatch):
 
 def test_legacy_combined_manual_value_is_kept_but_not_counted(store):
     """v5.318 첫 후속의 합산 수동값(rise_2x)이 있는 레코드도 저장·로드되고(400 아님), 집계엔 안 들어간다."""
-    old = {**REC, "manual": {"rise_2x": "O", "dilution": "X"},
+    old = {**REC, "manual": {"rise_2x": "O", "no_dilution": "X"},
            "auto": {"items": [], "manual_auto": {"rise_2x": {"result": True, "na": False, "detail": "옛 합산"}}}}
     assert _put(old, None)[0] == 200
     lst = json.loads(asyncio.run(app.lp_evals_list()).body)
     rec = lst["evals"][0]
     assert rec["manual"]["rise_2x"] == "O"
-    tally = _js(f"lpeTally({json.dumps(rec)}, {json.dumps(lst['manual_items'])})", "lpeManualEffective", "lpeTally")
-    assert tally == {"O": 0, "X": 1, "blank": 4}            # rise_2x(수동 O·자동 O) 둘 다 무시, dilution X만
+    tally = _js(f"lpeTally({json.dumps(rec)}, {json.dumps(lst['manual_items'])})", "lpeManualEffective", "lpeSetupOf", "lpeChecklist", "lpeTally")
+    assert tally == {"O": 0, "X": 1, "blank": 4}            # rise_2x(수동 O·자동 O) 둘 다 무시, no_dilution X만
     s, d = _put({**rec, "memo": "다른 칸 수정"}, rec["rev"])
     assert s == 200
     assert "예전 합산 항목" in _fn("_lpeCard") and "rise_2x" in _fn("_lpeCard")

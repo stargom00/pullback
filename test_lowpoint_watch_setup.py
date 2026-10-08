@@ -104,7 +104,8 @@ def test_stage_values_unchanged_by_setup_and_longer_window(monkeypatch):
     monkeypatch.setattr(w, "setup_type", lambda daily, through: {})
     no_setup = run(d)
     short = run(d[d.index >= "2026-06-01"])                                               # 예전(v5.342) 조회 창 정도
-    setup_keys = {"setup_type", "setup_reason", "setup_a", "setup_b", "setup_b_quality", "setup_checked_date"}
+    setup_keys = {"setup_type", "setup_reason", "setup_a", "setup_b", "setup_b_quality", "setup_checked_date",
+                  "setup_ref_low", "setup_ref_basis", "setup_ref_date"}                     # v5.344 무효 참고 — 표시 전용
     shape = {"departure_vol_mult"}                                                        # 50일 평균 — 짧은 창이면 원래 None(창 확대 전에도 같은 규칙)
     for rid in full:
         assert {k: v for k, v in full[rid].items() if k not in setup_keys} == no_setup[rid]

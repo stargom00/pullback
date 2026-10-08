@@ -96,10 +96,106 @@ MANUAL_ITEMS = [
     ("rise_rsi", "RSI<30 이후 의미있는 상승(+30%)"),
     ("rise_stoch", "StochRSI 0 이후 의미있는 상승(+30%)"),
     ("long_base", "긴 횡보를 거쳤나"),
-    ("dilution", "희석 이력(유증·CB)"),
+    # v5.344(사용자 지시): "희석 이력(유증·CB)"만 O = 나쁜 조건이라 합계 방향이 반대였다 → "희석 이력 없음"(O = 없음 = 좋음).
+    # 키도 dilution → no_dilution으로 바꿔 옛 값(O = 있음)과 섞이지 않게 한다 — 옛 값은 app._lp_eval_migrate_dilution이 반전 이관.
+    ("no_dilution", "희석 이력 없음(유증·CB)"),
     # v5.318(사용자 지시) — 같은 O/X/미표시 토글. 예전 레코드엔 이 키가 없어 미표시로 시작한다.
     ("ichimoku_cloud", "파란구름의 두꺼운 구간을 충분히 지났다(월봉 일목 구름 기준)"),
 ]
+
+# v5.344(사용자 지시) 항목 설명(화면 툴팁) — "RSI·StochRSI 이후 의미 있는 상승" 툴팁 문구는 사용자 지시 원문
+ITEM_TIPS = {
+    "rise_rsi": "바닥 신호 뒤 실제 반등(+30%)이 나왔는지. 월봉 기준.",
+    "rise_stoch": "바닥 신호 뒤 실제 반등(+30%)이 나왔는지. 월봉 기준.",
+}
+
+# ── v5.344(사용자 지시) 눌림형 체크리스트 — "평가 체크리스트는 '긴 하락 끝 바닥'용이라 우상향 속 조정(눌림형)에는 맞지
+# 않음(월봉 RSI<30이 거의 안 나옴). v5.343의 유형(바닥형/눌림형)에 맞춰 체크리스트를 둘로 나눈다. 새 숫자 임계값 금지."
+# 기존 상수(HL_MONTHS 6 · MA_MONTHS 20 · ABC_CONFIG a_lookback 250 · VP_UP30_MAX_PCT)와 자연 경계만 쓴다.
+PULLBACK_ITEMS = [
+    ("ma20_rising", "월봉 20선 상승 중(지금 20개월 평균 > 6개월 전)"),
+    ("above_ma20", "월봉 20선 위(20개월 이동평균)"),                       # 바닥형 항목 재사용
+    ("higher_lows", "저점 높이기(최근 6개월 저가 ≥ 직전 6개월)"),          # 바닥형 항목 재사용
+    ("above_prior_low", "직전 저점 위(250봉 최고 종가일 직전, 고점 이후와 같은 봉 수의 최저 종가)"),
+    ("vol_contracting", "조정 거래량 감소(고점 이후 평균 < 고점 직전 같은 봉 수)"),
+    ("light_overhead", "위 +30% 구간 매물대 비중 낮음"),                   # 바닥형 항목 재사용
+]
+PULLBACK_MANUAL_ITEMS = [
+    ("no_dilution", "희석 이력 없음(유증·CB)"),                            # 바닥형과 같은 키 — 같은 수동값
+    ("not_loss", "적자 지속 아님(최근 연간 순이익 흑자)"),
+]
+
+
+def _a_lookback() -> int:
+    import abc_screener
+    return int(abc_screener.ABC_CONFIG["a_lookback"])   # 250봉 — ABC A 기간 재사용(새 상수 금지)
+
+
+def prior_low(close: pd.Series, lookback: "int | None" = None) -> "dict | None":
+    """직전 저점 — 최근 lookback봉(기본 ABC A 기간 250) 중 **최고 종가일**을 고점으로, **고점 직전 '고점 이후 봉 수'와 같은 길이**
+    (고점일 제외 — ⑤ 조정 거래량과 같은 구간 정의, v5.344 사용자 지시) 중 최저 종가.
+    반환 {peak_date, peak_close, low_date, low_close, window_bars(= 고점 이후 봉 수)}. 고점이 마지막 봉(이후 0봉)이거나 고점 직전
+    봉이 그 길이만큼 없으면 None(짧은 구간으로 대신하지 않는다 — ⑤와 같다).
+    평가 눌림형 ④와 관찰 "무효 참고"(눌림형)가 이 함수 하나를 쓴다."""
+    n = lookback or _a_lookback()
+    c = close.dropna()
+    if c.empty:
+        return None
+    win = c.iloc[-n:]
+    peak_ts = win.idxmax()
+    pos = c.index.get_loc(peak_ts)
+    k = len(c) - 1 - pos                                   # 고점 이후 봉 수
+    if k <= 0 or pos < k:
+        return None
+    before = c.iloc[pos - k:pos]
+    lo_ts = before.idxmin()
+    return {"peak_date": str(pd.Timestamp(peak_ts).date()), "peak_close": float(c.loc[peak_ts]),
+            "low_date": str(pd.Timestamp(lo_ts).date()), "low_close": float(before.loc[lo_ts]), "window_bars": len(before)}
+
+
+def pullback_checks(daily: pd.DataFrame, months: pd.DataFrame, long_items: "list | None" = None) -> list:
+    """눌림형 체크리스트 자동 6개. 재사용 항목(②③⑥)은 바닥형 long_checks 결과를 그대로 가져온다(사본 금지)."""
+    lab = dict(PULLBACK_ITEMS)
+    base = {it["key"]: it for it in (long_items if long_items is not None else long_checks(daily, months))}
+    n = 0 if months is None else len(months)
+    out = []
+    if n >= MA_MONTHS + HL_MONTHS:
+        mc = months["Close"]
+        now_ma, prev_ma = float(mc.iloc[-MA_MONTHS:].mean()), float(mc.iloc[-(MA_MONTHS + HL_MONTHS):-HL_MONTHS].mean())
+        out.append(_item("ma20_rising", lab["ma20_rising"], now_ma > prev_ma, round(now_ma / prev_ma, 4) if prev_ma else None,
+                         f"20개월 평균 {_n(now_ma)} vs {HL_MONTHS}개월 전 {_n(prev_ma)}"))
+    else:
+        out.append(_item("ma20_rising", lab["ma20_rising"], None, None, f"완성 월봉 {MA_MONTHS + HL_MONTHS}개 필요(현재 {n}개)"))
+    for k in ("above_ma20", "higher_lows"):
+        out.append({**base[k], "label": lab[k]})
+    c = daily["Close"] if daily is not None and not daily.empty else None
+    pl = prior_low(c) if c is not None else None
+    if pl is None:
+        out.append(_item("above_prior_low", lab["above_prior_low"], None, None, "고점 이후 봉 없음 또는 고점 직전 같은 봉 수 부족"))
+    else:
+        cur = float(c.dropna().iloc[-1])
+        dist = round((pl["low_close"] / cur - 1) * 100, 2) if cur > 0 else None
+        out.append(_item("above_prior_low", lab["above_prior_low"], cur >= pl["low_close"], pl["low_close"],
+                         f"고점 {pl['peak_date']} 종가 {_n(pl['peak_close'])} · 직전 {pl['window_bars']}봉(고점 이후와 같은 수) 최저 종가 "
+                         f"{_n(pl['low_close'])}({pl['low_date']}) · 현재가 대비 {dist:+.2f}%" if dist is not None else "현재가 0"))
+        out[-1]["prior_low"] = {**pl, "dist_pct": dist}
+    if pl is None or "Volume" not in daily.columns:
+        out.append(_item("vol_contracting", lab["vol_contracting"], None, None, "고점 앞 봉 없음"))
+    else:
+        v = daily["Volume"].reindex(c.dropna().index)
+        pos = v.index.get_loc(pd.Timestamp(pl["peak_date"]))
+        after = v.iloc[pos + 1:]
+        before = v.iloc[max(0, pos - len(after)):pos]
+        if len(after) == 0 or len(before) < len(after):
+            out.append(_item("vol_contracting", lab["vol_contracting"], None, None,
+                             "고점 이후 봉 없음" if len(after) == 0 else f"고점 직전 {len(after)}봉 부족"))
+        else:
+            a, b = float(after.mean()), float(before.mean())
+            out.append(_item("vol_contracting", lab["vol_contracting"], a < b if b > 0 else None,
+                             round(a / b, 3) if b > 0 else None,
+                             f"고점({pl['peak_date']}) 이후 {len(after)}봉 평균 / 직전 {len(before)}봉 평균 = {a / b:.2f}배" if b > 0 else "직전 거래량 0"))
+    out.append({**base["light_overhead"], "label": lab["light_overhead"]})
+    return out
 
 
 # ── 월봉 ───────────────────────────────────────────────────────────────
@@ -294,7 +390,8 @@ def manual_auto(months: pd.DataFrame) -> dict:
                         if not surge_seen else {"result": None, "na": False, "detail": "폭등 있음 — 직접 판단"})
     out["ichimoku_cloud"] = ({"result": None, "na": True, "detail": f"월봉 {n}개 — 구름 미형성(52개 필요) · 해당 없음"}
                              if n < CLOUD_MIN_MONTHS else {"result": None, "na": False, "detail": "직접 판단"})
-    out["dilution"] = {"result": None, "na": False, "detail": "직접 판단"}
+    out["no_dilution"] = {"result": None, "na": False, "detail": "직접 판단 — O = 유증·CB 이력 없음(좋음), X = 있음"}
+    out["not_loss"] = {"result": None, "na": False, "detail": "직접 판단 — 최근 연간 순이익 흑자면 O"}   # v5.344 눌림형 ⑧
     return out
 
 
@@ -357,8 +454,15 @@ def evaluate(code: str, mkt: str, now: datetime) -> dict:
         return {"ok": False, "error": "일봉을 받지 못했어요", "items": []}
     months = completed_months(monthly, mkt, now)
     items = long_checks(daily, months)
+    # v5.344: 유형(관찰과 같은 ABC 판정 — lowpoint_watch.setup_type, 확정 봉까지) + 눌림형 체크리스트를 같이 낸다.
+    # 어느 체크리스트를 보일지·집계할지는 화면(유형 = 수동 전환 > 자동, 판정 불가는 바닥형 체크리스트)이 정한다.
+    import lowpoint_watch as lw
+    setup = lw.setup_type(daily, lw.confirmed_through(mkt if mkt != "UPBIT" else "KR", now.isoformat()))
     # O·X·미표시 집계는 화면(lpeTally)이 자동+수동을 합쳐 한 곳에서 센다(사본 금지)
-    return {"ok": True, "items": items, "manual_auto": manual_auto(months),
+    return {"ok": True, "items": items, "pullback_items": pullback_checks(daily, months, items),
+            "setup": {k: setup.get(k) for k in ("setup_type", "setup_reason", "setup_a", "setup_b", "setup_b_quality",
+                                                "setup_checked_date")},
+            "manual_auto": manual_auto(months),
             "last_date": str(daily.index[-1].date()), "close": float(daily["Close"].iloc[-1])}
 
 

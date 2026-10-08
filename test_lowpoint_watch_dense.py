@@ -43,7 +43,7 @@ def _state_line():
 
 FNS = ("lpwBar", "lpwSortRows", "lpwDays", "lpwGroups", "lpReturnPct", "lpDisplayName", "_lptFmt", "_lptPct",
        "_lptCode", "lpwPendingHtml", "lpwEndedLabel", "lpwDepHigh", "lpwRestPos", "lpwVolRatio", "lpwStageSplit",
-       "lpwShapeText", "lpwRestartText", "lpwTypeLabel", "lpwSetupChip", "lpwSetupChipHtml", "lpwTypeFilter",
+       "lpwShapeText", "lpwRestartText", "lpwTypeLabel", "lpwSetupChip", "lpwSetupChipHtml", "lpwTypeFilter", "lpwRefLow",
        "renderLowpointWatch")
 
 
@@ -125,7 +125,7 @@ def test_columns_and_icon_buttons():
     html = _js("renderLowpointWatch()", RECS)
     head = _cohorts(html)[0].split("<thead>")[1].split("</thead>")[0]
     cols = [re.sub(r"<[^>]+>|[▲▼]", "", c).strip() for c in re.findall(r"<th[^>]*>(.*?)</th>", head)]
-    assert cols == ["종목", "기준가 → 현재가", "등락", "+5%까지", "경과", ""]
+    assert cols == ["종목", "기준가 → 현재가", "등락", "+5%까지", "무효 참고", "경과", ""]          # v5.344 무효 참고(표시 전용)
     assert 'aria-label="기록"' in html and 'aria-label="삭제"' in html and ">기록</button>" not in html
 
 

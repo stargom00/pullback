@@ -5,6 +5,23 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.344 [저점 평가 희석 방향 + 유형별 체크리스트 + 관찰 무효 참고 — 사용자 지시, 새 숫자 임계값 없음] ① "평가 체크리스트 '희석
+    이력(유증·CB)'만 O = 나쁜 조건이라 합계 방향이 반대. 집계 오류." → 항목 "희석 이력 없음(유증·CB)", 키 dilution → no_dilution
+    (O = 없음 = 좋음). 기존 값은 서버 시작 직후 _lp_eval_migrate_dilution이 O↔X 반전 이관(미표시 그대로, rev 올림, 멱등 — 옛 키가
+    남은 레코드만, 전후 목록 로그 "희석 방향 이관 … N건: 코드 O→X …", 0건이어도). 옛 키로 저장하는 요청(새로고침 안 한 탭)은 400.
+    다른 항목은 전부 O = 좋은 조건(점검 결과 — 아래 보고). "RSI·StochRSI 이후 의미 있는 상승" 툴팁 "바닥 신호 뒤 실제 반등(+30%)이
+    나왔는지. 월봉 기준."(lowpoint_eval.ITEM_TIPS). ② "평가 체크리스트는 '긴 하락 끝 바닥'용이라 우상향 속 조정(눌림형)에는 맞지
+    않음 … 체크리스트를 둘로 나눈다." 평가 카드 유형 = 관찰과 같은 ABC 판정(lowpoint_watch.setup_type, evaluate가 같이 계산) + 수동
+    전환(setup_override null/bottom/pullback, 저장). 바닥형 = 기존 체크리스트 그대로(자동 판정 불변). 눌림형(lowpoint_eval.
+    pullback_checks): ① 월봉 20선 상승 중(지금 20개월 평균 > HL_MONTHS(6)개월 전) ② 월봉 20선 위 ③ 저점 높이기 ⑥ 위 +30% 매물대
+    (②③⑥은 바닥형 결과 재사용 — 사본 없음) ④ 직전 저점 위(prior_low — 최근 ABC_CONFIG a_lookback(250)봉 최고 종가일을 고점으로,
+    고점 직전 "고점 이후 봉 수와 같은 길이"(고점일 제외, ⑤와 같은 구간 정의 — 사용자 확정) 최저 종가, 직전 봉이 그 길이만큼 없거나
+    고점이 마지막 봉이면 판정 안 함, 현재 종가 ≥ 그 값이면 O, 값·현재가 대비 거리 % 표시) ⑤ 조정 거래량 감소(고점 이후 평균 < 고점 직전 같은 봉 수 평균,
+    고점일 제외) + 수동 ⑦ 희석 이력 없음 ⑧ 적자 지속 아님(not_loss). 판정 불가·미판정은 바닥형 체크리스트 + "유형 판정 불가"/
+    "유형 미판정 — 재평가" 칩. 합계(lpeTally)는 유형에 맞는 체크리스트만 센다. ③ 관찰 중 "무효 참고" 칸(표시 전용 — 판정·단계
+    전환에 안 씀): 바닥형 = ABC A 저점, 눌림형 = ④ 직전 저점(같은 함수), 판정 불가 = —, 현재가 대비 거리 %. 실데이터(10-08): PEG
+    직전 저점 77.43(2026-01-08 — 고점 2026-02-17 86.95 이후 162봉, 그 직전 162봉 최저) — 현재가 71.84가 아래라 ④ X, 하이딥 A 저점 1,178(09-30). 테스트:
+    test_lowpoint_eval_setup.py.
 v5.343 [저점 관찰 유형(바닥형/눌림형) — 사용자 지시, 표시·필터 전용(저점·관찰 판정 불변)] "사용자가 보려는 종목은 '긴 하락 → 바닥 박스
     → 재상승'형(하이딥·꿈비). 저점 히트에는 상승 추세 속 과매도 눌림형(PEG)도 섞여 있어 구분이 필요. ABC의 A·B 판정과 B 품질 라벨이
     이 구분에 쓸 수 있는 기존 기준이다. 새 임계값 금지." ① lowpoint_watch.setup_type = abc_screener.analyze_abc 그대로(ABC_CONFIG —
@@ -8984,7 +9001,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.343"
+VERSION = "v5.344"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -13392,6 +13409,10 @@ async def _start_scheduler():
         _lp_watch_seed_from_latest()   # v5.325: 기존 주·월봉 히트를 관찰 초기 데이터로(파일 작업만, 네트워크 0)
     except Exception as e:
         print(f"[lowpoint-watch] 시작 시 등록 실패(일일 추적 때 재시도): {type(e).__name__}: {e}", flush=True)
+    try:
+        _lp_eval_migrate_dilution()    # v5.344: 평가 "희석 이력" → "희석 이력 없음" 값 반전 이관(멱등, 파일 작업만)
+    except Exception as e:
+        print(f"[lowpoint-evals] ⚠️ 희석 방향 이관 실패: {type(e).__name__}: {e}", flush=True)
     asyncio.create_task(_scheduler_loop())
 
 
@@ -20369,7 +20390,11 @@ _LP_EVALS_LOCK = _threading.RLock()
 # 기동 스캔 중 자동 판정 요청이 응답 없이 대기). 저점 월봉 러너(_LOWPOINT_EXECUTOR)와도 분리 — 월 1회 실행이
 # 몇 분 걸리는 동안 평가가 막히지 않게. 워커 1개라 동시 평가는 순서대로 처리된다.
 _LP_EVAL_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lp-eval")
-LP_EVAL_MANUAL_KEYS = ("rise_rsi", "rise_stoch", "long_base", "dilution", "ichimoku_cloud")   # lowpoint_eval.MANUAL_ITEMS와 같은 키(테스트로 고정)
+# lowpoint_eval.MANUAL_ITEMS + PULLBACK_MANUAL_ITEMS의 키 합집합(테스트로 고정). v5.344: dilution → no_dilution(방향 반전 —
+# 옛 키는 _lp_eval_migrate_dilution이 값을 뒤집어 옮긴다). 옛 키로 저장하려는 요청(새로고침 안 한 옛 탭)은 400 — 옛 의미(O = 있음)
+# 값이 새 키 옆에 다시 섞이지 않게 실패로 막는다.
+LP_EVAL_MANUAL_KEYS = ("rise_rsi", "rise_stoch", "long_base", "no_dilution", "ichimoku_cloud", "not_loss")
+LP_EVAL_SETUP_OVERRIDES = (None, "bottom", "pullback")   # v5.344 평가 카드 유형 수동 전환(None = 자동)
 # 예전(v5.318 첫 후속) 합산 항목 "의미있는 상승(2곳)"의 수동값 — 두 항목으로 나눌 근거가 없어 옮기지 않는다.
 # 저장은 계속 받되(예전 레코드의 다른 칸을 고칠 때 400이 나지 않게) 판정·집계에는 안 쓰고, 화면이 "항목별로
 # 다시 지정" 안내만 띄운다(조용히 지우지 않는다).
@@ -20385,9 +20410,13 @@ def _lp_eval_invalid(rec: dict) -> "str | None":
     if (rec.get("mkt") == "UPBIT") != upbit.is_upbit(code):
         return "UPBIT 레코드의 code는 KRW-XXX 형식"
     manual = rec.get("manual") or {}
+    if isinstance(manual, dict) and "dilution" in manual:
+        return "옛 항목 '희석 이력'은 '희석 이력 없음'으로 바뀌었어요(O·X 방향 반대) — 새로고침 후 다시 지정하세요"
     if not isinstance(manual, dict) or any(k not in LP_EVAL_MANUAL_KEYS + LP_EVAL_LEGACY_MANUAL_KEYS for k in manual) \
             or any(v not in ("O", "X", None) for v in manual.values()):
         return "manual은 정해진 항목의 O|X|null"
+    if rec.get("setup_override") not in LP_EVAL_SETUP_OVERRIDES:
+        return "setup_override는 null|bottom|pullback"
     if not isinstance(rec.get("memo") or "", str) or len(rec.get("memo") or "") > 4000:
         return "memo는 4000자 이하 문자열"
     if not isinstance(rec.get("interest", False), bool):
@@ -20405,6 +20434,36 @@ def _lp_eval_mod():
     return lowpoint_eval
 
 
+_LP_DILUTION_FLIP = {"O": "X", "X": "O", None: None}
+
+
+def _lp_eval_migrate_dilution() -> dict:
+    """v5.344(사용자 지시 "기존 레코드 값 반전 이관(O↔X, 미표시 그대로). 앱 정상 경로, /data 직접 수정 금지. 전후 목록 로그.")
+    manual.dilution(O = 이력 있음) → manual.no_dilution(O = 이력 없음)으로 값을 뒤집어 옮기고 옛 키는 지운다. 옛 키가 남은 레코드만
+    고치므로 몇 번 불러도 다시 뒤집히지 않는다(멱등). 서버 시작 직후 1회. 레코드마다 rev를 올린다(_journal_bump — 옛 탭의 PUT은
+    409로 막힌다). 이미 no_dilution이 있으면 그 값을 두고 옛 키만 지운다(로그에 남김). 0건이어도 로그."""
+    moved, kept = [], []
+    with _LP_EVALS_LOCK:
+        evals = _rec_list_load(LP_EVALS_PATH)
+        for r in evals:
+            m = r.get("manual") or {}
+            if "dilution" not in m:
+                continue
+            old = m.pop("dilution")
+            if "no_dilution" in m:
+                kept.append(f"{r.get('id')}(옛 {old} 버림 · 새 {m['no_dilution']} 유지)")
+            else:
+                m["no_dilution"] = _LP_DILUTION_FLIP.get(old)
+                moved.append(f"{r.get('id')} {old or '미표시'}→{m['no_dilution'] or '미표시'}")
+            r["manual"] = m
+            _journal_bump(r)
+        if moved or kept:
+            _rec_list_write(LP_EVALS_PATH, evals)
+    print(f"[lowpoint-evals] 희석 방향 이관(희석 이력 → 희석 이력 없음, O↔X) {len(moved)}건: {', '.join(moved) or '없음'}"
+          + (f" · 새 키가 이미 있어 옛 값만 지움 {len(kept)}건: {', '.join(kept)}" if kept else ""), flush=True)
+    return {"moved": moved, "kept": kept}
+
+
 @app.get("/api/lowpoint/evals")
 async def lp_evals_list():
     try:
@@ -20413,7 +20472,9 @@ async def lp_evals_list():
         return JSONResponse({"ok": False, "error": f"평가 기록 읽기 실패: {e}"}, status_code=500)
     ev = _lp_eval_mod()
     return JSONResponse(_clean_nan({"ok": True, "evals": evals,
-                                    "long_items": ev.LONG_ITEMS, "manual_items": ev.MANUAL_ITEMS}))
+                                    "long_items": ev.LONG_ITEMS, "manual_items": ev.MANUAL_ITEMS,
+                                    "pullback_items": ev.PULLBACK_ITEMS, "pullback_manual_items": ev.PULLBACK_MANUAL_ITEMS,
+                                    "item_tips": ev.ITEM_TIPS}))
 
 
 @app.put("/api/lowpoint/evals/{rid}")

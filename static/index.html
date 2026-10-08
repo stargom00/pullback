@@ -1403,7 +1403,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.343</span>
+      <span class="ver mono" id="verBadge">v5.344</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -7418,7 +7418,7 @@ async function lptSaveSettings(form) {
 // ══ v5.317(사용자 지시) 저점 탭 "평가" 서브페이지 — 장기 체크리스트(자동 9 + 수동 3) · 단기 비교 ══
 // 자동 판정은 서버(scripts/screens/lowpoint_eval.py, 그 종목만 조회), 저장은 /api/lowpoint/evals
 // (매매 기록과 같은 레코드 단위 rev 규칙, 종목별 1건). O·X·미표시 집계는 lpeTally 한 곳에서만 센다.
-let _lpe = { evals: [], longItems: [], manualItems: [], hits: null, short: null, shortBusy: false,
+let _lpe = { evals: [], longItems: [], manualItems: [], pullbackItems: [], pullbackManualItems: [], tips: {}, hits: null, short: null, shortBusy: false,
              sortKey: 'rs_rank', sortDir: 'asc', error: null, busy: false, evaluating: {},
              // 판정이 끝날 때마다 화면을 다시 그리므로, 그 사이 입력 중이던 종목·메모가 지워지지 않게 따로 든다
              draft: '', memoDraft: {},
@@ -7436,13 +7436,29 @@ function lpeManualEffective(rec, key) {
   if (auto && auto.result != null) return { v: auto.result, src: 'auto', detail: auto.detail || '', auto };
   return { v: null, src: 'manual', detail: auto ? auto.detail : '', auto };
 }
-// 자동(result true/false/null) + 수동 항목의 실제 값(lpeManualEffective)을 같은 규칙으로 센다.
+// v5.344(사용자 지시) 평가 유형 — 관찰과 같은 ABC 판정(서버 auto.setup) + 수동 전환(rec.setup_override). 판정 불가·미판정은
+// 바닥형 체크리스트로 보이고 "유형 판정 불가" 칩. eff = 화면·집계에 쓰는 유형.
+function lpeSetupOf(rec) {
+  const auto = (rec && rec.auto && rec.auto.setup && rec.auto.setup.setup_type) || null;
+  const override = (rec && rec.setup_override) || null;
+  const known = auto === 'bottom' || auto === 'pullback';
+  return { eff: override || (known ? auto : 'bottom'), auto, override, unknown: !override && !known, judged: !!auto };
+}
+// 유형에 맞는 체크리스트 — 바닥형: 자동 auto.items + manualItems / 눌림형: 자동 auto.pullback_items + pullbackManualItems
+function lpeChecklist(rec, manualItems, pullbackManualItems) {
+  const st = lpeSetupOf(rec);
+  const pb = st.eff === 'pullback';
+  return { setup: st, autoItems: ((rec.auto && (pb ? rec.auto.pullback_items : rec.auto.items)) || []),
+           manual: pb ? (pullbackManualItems || []) : (manualItems || []) };
+}
+// 자동(result true/false/null) + 수동 항목의 실제 값(lpeManualEffective)을 같은 규칙으로 센다 — **유형에 맞는 체크리스트만**.
 // —(null·해당 없음)은 O·X 어느 쪽에도 안 들어가고 미표시로만 센다.
-function lpeTally(rec, manualItems) {
+function lpeTally(rec, manualItems, pullbackManualItems) {
   const out = { O: 0, X: 0, blank: 0 };
   const add = v => { if (v === true || v === 'O') out.O++; else if (v === false || v === 'X') out.X++; else out.blank++; };
-  for (const it of ((rec.auto && rec.auto.items) || [])) add(it.result);
-  for (const [k] of (manualItems || [])) add(lpeManualEffective(rec, k).v);
+  const cl = lpeChecklist(rec, manualItems, pullbackManualItems);
+  for (const it of cl.autoItems) add(it.result);
+  for (const [k] of cl.manual) add(lpeManualEffective(rec, k).v);
   return out;
 }
 // 단기 표 정렬 — 값 없음은 방향과 무관하게 맨 뒤.
@@ -7561,6 +7577,15 @@ function lpwSetupChip(r) {
 function lpwSetupChipHtml(r) {
   const c = lpwSetupChip(r);
   return c ? ` <span class="chip lpw-hitchip lpw-type-${c.cls}" title="${_escapeHtml(c.title)}">${_escapeHtml(c.text)}</span>` : '';
+}
+// v5.344 관찰 중 "무효 참고"(표시 전용 — 판정·단계 전환에 안 씀): 바닥형 = ABC A 저점, 눌림형 = 직전 저점(평가 ④와 같은 함수),
+// 판정 불가 = 없음. 거리 % = 참고선 ÷ 현재가 − 1(음수 = 아래에 있음). 숨고르기로 넘어가면 기존 무효선을 쓴다.
+function lpwRefLow(r) {
+  const v = r && r.setup_ref_low;
+  if (v == null || !(v > 0) || r.setup_type === 'unknown') return null;
+  const c = r.last_close;
+  return { v: Number(v), basis: r.setup_ref_basis || '', date: r.setup_ref_date || null,
+           dist: (c != null && c > 0) ? (Number(v) / c - 1) * 100 : null };
 }
 // 유형 필터(전체·바닥형·눌림형) — 레코드만 거른다(판정·정렬 불변)
 function lpwTypeFilter(recs, f) { return (!f || f === 'all') ? (recs || []) : (recs || []).filter(r => r.setup_type === f); }
@@ -7911,6 +7936,7 @@ function renderLowpointWatch() {
         <td class="r lpw-pxcell"><span class="lpw-px">${_lptFmt(r.base_price, r.mkt)} → ${r.last_close != null ? _lptFmt(r.last_close, r.mkt) : '—'}</span></td>
         <td class="r">${_lptPct(p)}</td>
         <td class="lpw-barcell">${bar(p)}</td>
+        <td class="num r">${(rl => rl ? `<span title="${_escapeHtml(rl.basis)}${rl.date ? ' ' + _escapeHtml(rl.date) : ''} — 표시 전용(판정에 안 씀)">${_lptFmt(rl.v, r.mkt)}${rl.dist != null ? ` <span class="n-sub" style="font-size:11px">${rl.dist >= 0 ? '+' : ''}${rl.dist.toFixed(1)}%</span>` : ''}</span>` : '<span class="n-sub">—</span>')(lpwRefLow(r))}</td>
         <td class="num r">${lpwDays(r.base_date, today)}일</td>
         <td class="r"><button type="button" class="n-btn sm" title="매매 기록에 이 종목으로 기록" aria-label="기록" onclick="lpwRecord('${_escapeHtml(r.id)}')">✎</button><button type="button" class="n-btn sm" title="관찰에서 삭제" aria-label="삭제" onclick="lpwDelete('${_escapeHtml(r.id)}')">✕</button></td></tr>`;
     }).join('');
@@ -7918,6 +7944,7 @@ function renderLowpointWatch() {
       <div class="lpw-h"><span class="n-h">${title}</span><span class="n-sub" style="font-size:11px">기준일 ${_escapeHtml(dates)}</span></div>
       <div class="jr-table-wrap"><table class="jr-table lpt-table lpw-table"><thead><tr><th>종목</th><th class="r lpw-pxcell">기준가 → 현재가</th>
           <th class="r lpw-sort" onclick="lpwSort('pct')">등락${arrow('pct')}</th><th>+${goal}%까지</th>
+          <th class="r" title="바닥형 = ABC A 저점 · 눌림형 = 직전 저점 · 표시 전용(판정에 안 씀)">무효 참고</th>
           <th class="r lpw-sort" onclick="lpwSort('days')">경과${arrow('days')}</th><th></th></tr></thead><tbody>${act}</tbody></table></div>
     </section>`;
   }).join('');
@@ -8063,6 +8090,7 @@ async function lpeLoad() {
   try {
     const d = await apiJson('/api/lowpoint/evals');
     _lpe.evals = d.evals || []; _lpe.longItems = d.long_items || []; _lpe.manualItems = d.manual_items || [];
+    _lpe.pullbackItems = d.pullback_items || []; _lpe.pullbackManualItems = d.pullback_manual_items || []; _lpe.tips = d.item_tips || {};
     _lpe.error = null;
     if (!_lpe.hits) { const h = await apiJson('/api/lowpoint/hits'); _lpe.hits = h.view || {}; }
   } catch (e) { _lpe.error = e; }
@@ -8101,7 +8129,7 @@ async function lpeEvaluate(id) {
   try {
     const a = await apiJson('/api/lowpoint/eval/auto/' + encodeURIComponent(rec.code) + '?mkt=' + rec.mkt);
     if (!a.ok) throw new Error(a.error || '자동 판정 실패');
-    await _lpePut({ ...rec, auto: { items: a.items, manual_auto: a.manual_auto, last_date: a.last_date, close: a.close, price_note: a.price_note || null }, checked_at: a.checked_at }, rec.rev);
+    await _lpePut({ ...rec, auto: { items: a.items, pullback_items: a.pullback_items || null, setup: a.setup || null, manual_auto: a.manual_auto, last_date: a.last_date, close: a.close, price_note: a.price_note || null }, checked_at: a.checked_at }, rec.rev);
   } catch (e) { alert('자동 판정 실패 — ' + e.message); }
   finally { delete _lpe.evaluating[id]; await lpeLoad(); renderLowpointTrack(); }
 }
@@ -8128,6 +8156,13 @@ async function lpeSetManual(id, key) {
   await _lpeRun(async () => {
     const rec = _lpe.evals.find(r => r.id === id);
     await _lpePut({ ...rec, manual: { ...(rec.manual || {}), [key]: lpeCycle((rec.manual || {})[key] ?? null) } }, rec.rev);
+  });
+}
+// v5.344 유형 수동 전환 — null(자동) / bottom / pullback. 체크리스트·합계가 그 유형으로 바뀌고 저장된다.
+async function lpeSetSetup(id, v) {
+  await _lpeRun(async () => {
+    const rec = _lpe.evals.find(r => r.id === id);
+    await _lpePut({ ...rec, setup_override: v || null }, rec.rev);
   });
 }
 async function lpeSaveMemo(id) {
@@ -8166,17 +8201,26 @@ function _lpeMark(v) {
   return '<span class="n-sub">—</span>';
 }
 function _lpeCard(rec) {
-  const ta = lpeTally(rec, _lpe.manualItems);
-  const items = (rec.auto && rec.auto.items) || [];
+  const ta = lpeTally(rec, _lpe.manualItems, _lpe.pullbackManualItems);
+  const cl = lpeChecklist(rec, _lpe.manualItems, _lpe.pullbackManualItems);
+  const st = cl.setup;
+  const items = cl.autoItems;
+  const tip = k => (_lpe.tips || {})[k] ? ` title="${_escapeHtml(_lpe.tips[k])}"` : '';
+  const typeName = t => t === 'pullback' ? '눌림형' : '바닥형';
+  const rid0 = _escapeHtml(rec.id);
+  const typeChip = `<span class="chip${st.eff === 'pullback' ? '' : ' accent'}" title="${st.override ? '수동 전환' : '자동 — 관찰과 같은 ABC A 판정'}">${typeName(st.eff)}${st.override ? '·수동' : ''}</span>`
+    + (st.unknown ? ` <span class="chip" title="${_escapeHtml((rec.auto && rec.auto.setup && rec.auto.setup.setup_reason) || '재평가하면 판정해요')}">${st.judged ? '유형 판정 불가' : '유형 미판정 — 재평가'}</span>` : '');
+  const typeSwitch = `<span class="lp-chips" role="group" aria-label="유형 전환">${[[null, `자동${st.judged && !st.unknown ? '(' + typeName(st.auto) + ')' : ''}`], ['bottom', '바닥형'], ['pullback', '눌림형']].map(([v, l]) =>
+      `<button type="button" class="jr-pill${(st.override || null) === v ? ' on' : ''}" onclick="lpeSetSetup('${rid0}', ${v ? `'${v}'` : 'null'})">${l}</button>`).join('')}</span>`;
   // v5.319: 근거는 한 줄 말줄임 — 호버(title)·탭(클릭 시 펼침)으로 전체
   const det = s => `<td class="lpe-detail" title="${_escapeHtml(s)}" onclick="this.classList.toggle('open')">${_escapeHtml(s)}</td>`;
-  const autoRows = items.map(it => `<tr><td class="lpe-label">${_escapeHtml(it.label)} <span class="chip">자동</span></td>
+  const autoRows = items.map(it => `<tr><td class="lpe-label"${tip(it.key)}>${_escapeHtml(it.label)} <span class="chip">자동</span></td>
       <td class="r lpe-mark">${_lpeMark(it.result)}</td>${det(it.detail || '')}</tr>`).join('');
-  const manualRows = _lpe.manualItems.map(([k, label]) => {
+  const manualRows = cl.manual.map(([k, label]) => {
     const e = lpeManualEffective(rec, k);
     const tag = e.src === 'na' ? '<span class="chip">해당 없음</span>' : e.src === 'auto' ? '<span class="chip">자동</span>' : '<span class="chip accent">수동</span>';
     const hint = e.src === 'na' ? '' : (e.auto && e.auto.result != null ? ' · 눌러서 수동 덮어쓰기(미표시 = 자동값)' : ' · 눌러서 O/X/미표시');
-    return `<tr><td class="lpe-label">${_escapeHtml(label)} ${tag}</td>
+    return `<tr><td class="lpe-label"${tip(k)}>${_escapeHtml(label)} ${tag}</td>
       <td class="r lpe-mark"><button type="button" class="n-btn sm" onclick="lpeSetManual('${_escapeHtml(rec.id)}','${k}')" title="미표시 → O → X" ${e.src === 'na' ? 'disabled' : ''}>${_lpeMark(e.v)}</button></td>
       ${det((e.detail || '') + hint)}</tr>`;
   }).join('');
@@ -8193,14 +8237,16 @@ function _lpeCard(rec) {
       <span class="n-h"><a class="name-link" href="${tvUrl(rec.code, rec.mkt)}" target="_blank" rel="noopener" title="${_escapeHtml(rec.name || '')}">${_escapeHtml(lpDisplayName(rec))}</a>${lpPriceNoteMark(rec.auto && rec.auto.price_note)}</span>
       <span class="n-sub">${rec.mkt === 'US' ? '' : _escapeHtml(rec.code) + ' · '}${rec.mkt}${rec.interest ? ' · <b class="st-accent">관심</b>' : ''}</span>
       <span class="jr-title-sp"></span>
+      ${typeChip}
       <span class="num">O ${ta.O} · X ${ta.X} · 미표시 ${ta.blank}</span>
       <span class="n-sub">체크 ${rec.checked_at || '—'}</span>
       <button type="button" class="n-btn sm" onclick="lpeEvaluate('${_escapeHtml(rec.id)}')" ${busy ? 'disabled' : ''}>${busy ? '판정 중…' : '재평가'}</button>
       <button type="button" class="n-btn sm${rec.interest ? ' primary' : ''}" onclick="lpeToggleInterest('${_escapeHtml(rec.id)}')">${rec.interest ? '관심 해제' : '관심 등록'}</button>
       <button type="button" class="n-btn sm" onclick="lpeDelete('${_escapeHtml(rec.id)}')">삭제</button>
     </div>
-    ${open ? `<div class="jr-table-wrap"><table class="jr-table lpt-table lpe-table"><tbody>
-      ${autoRows || '<tr><td colspan="3" class="n-sub">자동 판정 전 — 재평가를 누르세요</td></tr>'}${manualRows}
+    ${open ? `<div class="n-sub" style="font-size:12px;margin:4px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap">체크리스트 ${typeChip} ${typeSwitch}</div>
+    <div class="jr-table-wrap"><table class="jr-table lpt-table lpe-table"><tbody>
+      ${autoRows || `<tr><td colspan="3" class="n-sub">${rec.auto && st.eff === 'pullback' ? '눌림형 자동 판정 전 — 재평가를 누르세요' : '자동 판정 전 — 재평가를 누르세요'}</td></tr>`}${manualRows}
     </tbody></table></div>${legacyNote}${rec.auto && rec.auto.price_note ? `<div class="n-sub" style="font-size:12px;margin-top:6px">⚠ 데이터 경고 — ${_escapeHtml(rec.auto.price_note)} (2025-03-04 이전 naver·이후 정규장 이음새)</div>` : ''}
     <div class="lpe-memo">
       <textarea id="lpeMemo_${_escapeHtml(rec.id)}" rows="1" placeholder="메모"

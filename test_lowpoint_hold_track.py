@@ -186,7 +186,7 @@ def test_eval_sort_interest_then_newest():
     assert "created_at: kstStr(new Date(), 19)" in SRC
 
 
-CARD_FNS = ("lpeTally", "lpeManualEffective", "_lpeMark", "lpDisplayName", "lpPriceNoteMark", "_lpeCard")
+CARD_FNS = ("lpeTally", "lpeSetupOf", "lpeChecklist", "lpeManualEffective", "_lpeMark", "lpDisplayName", "lpPriceNoteMark", "_lpeCard")
 
 
 def _card(open_):
