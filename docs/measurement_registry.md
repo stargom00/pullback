@@ -36,7 +36,7 @@
 | 09-08 | 2026-09-08_kr_imminent_pre_pivot_entry_ev | KR 돌파임박 피벗 아래 선진입 | **기각**: −0.054R, z −1.15 | docs/kr_us_strategy_map.md |
 | 09-08 | 2026-09-08_us_pullback_atr_pct_bucket_ev | US 눌림목 ATR% 구간별 EV | **기각**: z 2.30이나 반분 미재현 | docs/kr_us_strategy_map.md |
 | 09-08 | 2026-09-08_us_pullback_immediate_2nd_sort_candidates | US 눌림목 2차 정렬 후보 3개 | **기각**: 3후보 미달 | docs/kr_us_strategy_map.md |
-| 09-10 | 2026-09-10_jongga_exit_timing | 종가베팅 익일 시가 vs 익일 종가 매도 | **미달 → 현행 유지**(+0.18%p, z 0.34) · ⚠️ 오염 봉 1건(201490.KQ) 포함 실행 — 빼면 재현 게이트 실패 조건(무효 가능, 재실행 여부 미정) · 결과 절 10-09 보충 | docs/kr_jongga_betting_backtest.md "사전등록: 매도 타이밍" > "결과(2026-09-10 실행)" |
+| 09-10 | 2026-09-10_jongga_exit_timing | 종가베팅 익일 시가 vs 익일 종가 매도 | **무효(오염), 재검증 결과 대기** — 원판정 미달(+0.18%p, z 0.34)이었으나 OHLC=0 오염 1건(201490.KQ) 포함, 빼면 재현 게이트 실패. 재실행 안 함(2026-10-09 사용자 지시) | docs/kr_jongga_betting_backtest.md "사전등록: 매도 타이밍" > "결과(2026-09-10 실행)" |
 | 09-11 | 2026-09-11_confirm_entry_close_bench_revalidation | 종가진입 5탭 벤치마크 룩어헤드 수정 재검증 | **철회**(돌파임박 KR): z 1.84/1.93 | docs/confirm_entry_close_bench_revalidation.md |
 | 09-11 | 2026-09-11_imminent_score_rank_vs_return | 돌파임박 score 순위 vs 5일 수익률 | **기각**("무의미"): ρ −0.047 | docs/imminent_score_rank_vs_return.md |
 | 09-12 | 2026-09-12_buystop_bench_revalidation | 안D buy-stop 벤치마크 수정 재검증 | **원판정 유지**(기각) | docs/buystop_bench_revalidation.md |
@@ -52,6 +52,7 @@
 | 10-06 | 2026-10-06_abc_display_only_check | v5.331 ABC 표시 전용 변경 전후 등급 | **회귀확인**: 2,455종목 차이 0건 | CLAUDE.md ABC 항목 |
 | 10-09 | 2026-10-09_ma99_breakout_retest | 바닥형 MA99 돌파 뒤 되돌림 지지 진입 EV | **기각**: A EV −0.053R, z 2.58(판정식 1·3 미달) | docs/ma99_breakout_retest.md §2 |
 | 10-09 | 2026-10-09_lowpoint_departure_rest_entry | 저점 주봉 히트 출발 다음 날 진입 EV(H1) · 출발 크기 상·하(H2) | **H1 기각**: A −0.132R vs C +0.137R, z −8.08 · **H2 기각**: z 0.38 (기각 확정 — 생존편향 원칙) | docs/lowpoint_departure_rest_entry.md §2 |
+| 10-09 | 2026-10-09_jongga_adoption_clean_revalidation | 종가베팅 채택(조합 A) 재현 검증 — 원문 그대로 + 데이터 정제만(CleanView), 3.54→1.80 분해 | **등록(미실행)** | docs/jongga_adoption_clean_revalidation.md |
 | 10-09 | 2026-10-09_bull_candle_departure_entry | 저점 주봉 히트 → **기준양봉**(종가 ≥ 전일×1.15·양봉) 출발 다음 날 진입 EV — 직전 측정(+5% 고가 출발) 기각 후 정의 수정, Bonferroni 2개(z 2.24) | **등록(미실행)** — 해석 기본값 확인 대기, 종가베팅 재현 검증 뒤 실행 | docs/bull_candle_departure_entry.md |
 
 **메모(옮겨 적을 때 애매했던 건)**
