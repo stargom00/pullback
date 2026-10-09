@@ -25,7 +25,8 @@ analyze_abc가 "MA600 불가"를 돌려주므로 바닥형이 아니다(프로�
 CLAUDE.md v5.242 항목). 무효봉이 하나도 없는 종목은 어느 접두 구간을 정제해도 결과가 같으므로 전체를 한 번만
 정제해 잘라 쓴다(_View.dirty=False — 아래 assert로 확인). 무효봉이 있는 종목은 봉마다 접두 구간을 정제한다.
 
-실행 시각: KST 20:10~22:30만(사전등록 [실행]). 그 밖이면 즉시 종료한다.
+실행 시각: KR 데이터만 쓰므로 harness.check_run_window(("kr",)) — KR 종가 확정(20:10 KST) 이후 ~ 다음 KR 거래일 08:00 KST 전,
+KR 휴장일은 종일(사용자 결정 2026-10-09, 사전등록 문서 §1-부록 — 원문의 "KST 20:10~22:30만"을 대체). 그 밖이면 즉시 종료한다.
 실행: MEAS_CACHE=<경로.pkl> python3 scripts/measurements/2026-10-09_ma99_breakout_retest.py
       (MEAS_CACHE가 있으면 fetch 결과를 저장·재사용 — 같은 날 재실행용)
 """
@@ -36,7 +37,6 @@ import random
 import sys
 import time
 from collections import Counter
-from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
@@ -67,20 +67,15 @@ SEED = 20261009
 KR_DAYS = 1900           # harness 90cp 표준 깊이(≈1270봉) — 600봉 판정 + 이벤트 구간 확보
 MIN_MEDIAN_BARS = 1000   # fetch 깊이 하드 체크(중앙값 봉수가 이 미만이면 실패)
 
-# 실행 시각 창(KST, 사전등록 [실행]) — app.KR_CLOSE_CONFIRMED_HM(20:10)과 미장 개장(22:30)
-RUN_WINDOW_KST = ((20, 10), (22, 30))
+# 실행 시각: harness.run_window_ok(("kr",)) — 규칙은 harness 한 곳(사본 금지, 사전등록 §1-부록 2026-10-09)
+RUN_MARKETS = ("kr",)
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                    "2026-10-09_ma99_breakout_retest.results.json")
 
 
 def check_run_window():
-    kst = datetime.now(timezone(timedelta(hours=9)))
-    hm = (kst.hour, kst.minute)
-    lo, hi = RUN_WINDOW_KST
-    if not (lo <= hm < hi):
-        raise SystemExit(f"[중단] 실행 창 밖: 지금 {kst:%Y-%m-%d %H:%M} KST — "
-                         f"{lo[0]:02d}:{lo[1]:02d}~{hi[0]:02d}:{hi[1]:02d} KST에만 실행한다(사전등록 [실행]).")
+    return harness.check_run_window(RUN_MARKETS)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -303,7 +298,7 @@ def verdict(sum_a, sum_c, halves):
 
 
 def main():
-    check_run_window()
+    run_window = check_run_window()
     t0 = time.time()
     blob = load_data()
     data = {t: df for t, df in blob["data"].items() if harness.is_kr_ticker(t)}
@@ -350,7 +345,7 @@ def main():
     z_ab, _ = harness.ev_gap_zscore(sum_b, sum_a)     # 보조: z > 0 = A가 B보다 큼(서술)
 
     result = {
-        "run_stamp": stamp, "fetched_at": blob.get("fetched_at"),
+        "run_stamp": stamp, "run_window": run_window, "fetched_at": blob.get("fetched_at"),
         "n_tickers": len(data), "bars_median": med, "elapsed_s": round(time.time() - t0),
         "params": {"MA_N": MA_N, "PRE_BELOW": PRE_BELOW, "E2_WINDOW": E2_WINDOW, "MAX_BARS": MAX_BARS,
                    "EV_MIN": EV_MIN, "Z_MIN": Z_MIN, "N_MIN": N_MIN, "C_PER_EVENT": C_PER_EVENT,

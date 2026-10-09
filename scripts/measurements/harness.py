@@ -328,6 +328,45 @@ def checkpoints(start=60, end=250, step=10):
     return list(range(start, end + 1, step))
 
 
+# ── 측정 실행 시각 규칙(사용자 결정 2026-10-09 — CLAUDE.md "측정 실행 시각 규칙") ─────────────────────────
+# "KR 데이터만 쓰는 측정: KR 종가 확정(20:10 KST) 이후 ~ 다음 KR 거래일 08:00 KST 전. 주말·휴장일은 종일.
+#  US 데이터를 쓰는 측정: 기존대로 KST 20:10~22:30(US 장중 회피)."
+# 20:10 = app.KR_CLOSE_CONFIRMED_HM(애프터마켓 종료 + 여유, 사본 금지), 휴장일 = app.is_trading_day("kr") 정적 목록.
+# 08:00·22:30은 사용자 지시 값(08:00 = KR 개장 전 여유, 22:30 = 미장 개장).
+KR_MEASURE_CUTOFF_MIN = 8 * 60       # 다음 KR 거래일 08:00 KST 전까지(사용자 지시 값)
+US_OPEN_MIN = 22 * 60 + 30           # 미장 개장 22:30 KST(사용자 지시 값 — 기존 규칙 그대로)
+
+
+def run_window_ok(markets, now=None) -> "tuple[bool, str]":
+    """측정 실행 시각 판정 — (가능 여부, 사유). markets: 측정이 쓰는 시장 집합("kr"/"us").
+    KR만: KR 휴장일(주말 포함)이면 종일 가능, KR 거래일이면 20:10 이후 또는 08:00 전(= 전 거래일 확정 뒤 다음 거래일 개장 전).
+    US 포함: 20:10~22:30 KST만(KR 거래일 여부 무관 — 기존 규칙)."""
+    from datetime import datetime, timedelta, timezone
+    import app
+    kst = (now or datetime.now(timezone(timedelta(hours=9)))).astimezone(timezone(timedelta(hours=9)))
+    m = kst.hour * 60 + kst.minute
+    confirmed = app.KR_CLOSE_CONFIRMED_HM
+    hm = lambda x: f"{x // 60:02d}:{x % 60:02d}"
+    mk = {str(x).lower() for x in markets}
+    if "us" in mk:
+        ok = confirmed <= m < US_OPEN_MIN
+        return ok, (f"US 포함 측정 — {hm(confirmed)}~{hm(US_OPEN_MIN)} KST만" + ("" if ok else f" (지금 {kst:%Y-%m-%d %H:%M} KST)"))
+    trading = app.is_trading_day("kr", kst.strftime("%Y-%m-%d"))
+    if not trading:
+        return True, f"KR 전용 측정 — 오늘({kst:%Y-%m-%d}) KR 휴장일이라 종일 가능"
+    ok = m >= confirmed or m < KR_MEASURE_CUTOFF_MIN
+    return ok, (f"KR 전용 측정 — KR 거래일엔 {hm(confirmed)} 이후 ~ 다음 거래일 {hm(KR_MEASURE_CUTOFF_MIN)} 전"
+                + ("" if ok else f" (지금 {kst:%Y-%m-%d %H:%M} KST — 장중·애프터 확정 전)"))
+
+
+def check_run_window(markets) -> str:
+    """run_window_ok가 거짓이면 즉시 종료(SystemExit). 참이면 사유 문자열 반환(결과 JSON에 남길 것)."""
+    ok, why = run_window_ok(markets)
+    if not ok:
+        raise SystemExit(f"[중단] 실행 시각 규칙 위반: {why}")
+    return why
+
+
 def run_stamp(data: dict | None = None) -> dict:
     """측정 실행 시각(로컬+KST)과 데이터의 KR/US 마지막 봉 날짜를 기록용으로 반환.
     **새 측정 스크립트는 결과 JSON에 이 값을 반드시 넣을 것.**
