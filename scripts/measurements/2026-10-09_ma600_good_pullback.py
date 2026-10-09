@@ -12,7 +12,9 @@ Bonferroni 7(z ≥ 2.69).
 기준봉(①): 장대양봉(종가 ≥ 전일 종가 × 1.15 그리고 종가 > 시가). A = 전일 종가 < 선, 당일 종가 > 선. C = 전일 종가 < 선, 당일 종가 ≤ 선.
 매물대(②): 기준봉 **전일까지** 정제 데이터로 supply_profile(종가, 거래량, last = 전일 종가) — 전일 종가 위쪽 최대 거래량 구간.
   조건 = 어느 날 저가 ≤ 매물대 상단, 그리고 그때까지 종가 < 매물대 하단인 날이 없음.
-이평선(③): 어느 날 저가가 [min(MA10, MA50), max(MA10, MA50)] 안, 그리고 그때까지 종가 < MA50인 날이 없음.
+이평선(③): 어느 날 봉의 저가~고가 범위가 [min(MA10, MA50), max(MA10, MA50)] 구간과 겹침(사용자 승인 해석 6 — 50일선 아래꼬리 + 종가 회복도
+  닿음), 그리고 그때까지 종가 < MA50인 날이 없음.
+매물대가 통째로 기준봉 종가 위(하단 > 기준봉 종가)면 미진입 사유 "위 매물 잔존"(`overhead_supply`)으로 따로 센다(사용자 승인 해석 4).
 눌림: 기준봉 다음 날부터 종가 < 기준봉 종가인 날 1일 이상.
 확인봉(④ 대체): 눌림 1일 이상·②·③ 충족이 **앞선 봉에서** 끝난 뒤 나온, 양봉이면서 종가 > 전일 고가인 첫 봉.
 기한: 기준봉 다음 날부터 20거래일(유효봉). 그 안에 ②·③ 종가 이탈이 먼저 나오거나 확인봉이 없으면 미진입.
@@ -70,7 +72,7 @@ def supply_zone(p_prev):
 
 def find_entry(view, k_bull: int, zone) -> dict:
     """기준봉(원본 k_bull) 뒤 20유효거래일 안 확인봉 탐색. 반환 {"reason", "k_confirm", "day", "stop", ...}.
-    reason: confirmed · no_zone · break_zone(종가 < 매물대 하단) · break_ma50(종가 < MA50) · break_both ·
+    reason: confirmed · no_zone · overhead_supply(매물대 하단 > 기준봉 종가 — 위 매물 잔존) · break_zone(종가 < 매물대 하단) · break_ma50(종가 < MA50) · break_both ·
             no_pullback · fail_zone_only(②만 실패) · fail_ma_only(③만 실패) · fail_both · no_confirm_bar(②·③·눌림 다 됐는데 확인봉 없음) ·
             window_incomplete(데이터 끝).
     각 봉은 그 봉까지 정제한 df에서 판정(무효봉 건너뜀, 거래일로 안 셈). 이탈 판정을 먼저 본다(확인봉 자신도 이탈하면 안 된다).
@@ -78,6 +80,8 @@ def find_entry(view, k_bull: int, zone) -> dict:
     if zone is None:
         return {"reason": "no_zone"}
     b_close = float(view.prefix(k_bull)["Close"].iloc[-1])
+    if zone["lo"] > b_close:
+        return {"reason": "overhead_supply"}        # 기준봉이 매물대를 못 뚫었다 — "이탈"과 따로 센다(해석 4)
     pulled = z_touch = m_touch = False
     min_low = None
     day = 0
@@ -100,8 +104,8 @@ def find_entry(view, k_bull: int, zone) -> dict:
             pulled = True
         if lo <= zone["hi"]:
             z_touch = True
-        if min(ma_f, ma_s) <= lo <= max(ma_f, ma_s):
-            m_touch = True
+        if lo <= max(ma_f, ma_s) and h >= min(ma_f, ma_s):
+            m_touch = True                             # 봉 범위가 10~50일선 구간과 겹침(해석 6)
     if day < WINDOW:
         return {"reason": "window_incomplete"}
     if not pulled:

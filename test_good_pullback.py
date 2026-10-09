@@ -55,7 +55,7 @@ def _df(tail):
 
 K_BULL = 300
 D1 = (109, 109.5, 104.5, 107)          # 눌림(107 < 110), 저가 104.5 ≤ 108 → ② 닿음, MA 구간 아님
-D2 = (106, 106.5, 101, 105)            # 저가 101 ∈ [MA50≈100.3, MA10≈101.7] → ③ 닿음, 종가 105 ≥ 매물대 하단 104·MA50
+D2 = (106, 106.5, 101, 105)            # 봉 범위 101~106.5가 [MA50≈100.3, MA10≈101.7]과 겹침 → ③ 닿음, 종가 105 ≥ 매물대 하단 104·MA50
 D3 = (105.5, 108, 105, 107.5)          # 양봉, 종가 107.5 > 전일 고가 106.5 → 확인봉
 
 
@@ -85,7 +85,7 @@ def test_1_zone_not_touched_is_no_entry():
 
 
 def test_2_ma_band_not_touched_is_no_entry():
-    """② 저가 102.5(구간 ≈[100.3, 101.7] 밖) → 미진입(②만 충족)."""
+    """② 봉 범위 102.5~106.5가 구간 ≈[100.3, 101.7]과 안 겹침 → 미진입(②만 충족). 해석 6(범위 겹침)으로 바꾼 뒤에도 사보타주로 FAIL 확인."""
     rising = [(108 + 0.6 * i, 108.5 + 0.6 * i, 107.8 + 0.6 * i, 108.3 + 0.6 * i) for i in range(80)]   # 저가가 늘 10일선 위
     reason, d, _ = _fe([D1, (106, 106.5, 102.5, 105), D3] + rising)
     assert reason == "fail_ma_only" and d is None
@@ -116,6 +116,19 @@ def test_6_confirm_on_day_21_is_no_entry():
     brk = (105.9, 108, 105.5, 107.9)
     assert _fe([D1, D2] + [idle] * 18 + [brk] + FLAT)[0] == "no_confirm_bar"
     assert _fe([D1, D2] + [idle] * 17 + [brk] + FLAT)[:2] == ("confirmed", 20)
+
+
+def test_ma50_lower_wick_with_close_recovery_touches():
+    """해석 6: 2일째 저가 99로 50일선(≈100.3) 아래를 찔렀다가 종가 105로 회복 → 저가가 구간 밖이어도 봉 범위가 겹쳐 ③ 닿음, 종가는 50일선 위라
+    이탈 아님 → 3일째 확인봉. (원문 문자 그대로 "저가가 구간 안"이면 ③ 미충족이었다.)"""
+    reason, d, r = _fe([D1, (106, 106.5, 99, 105), D3] + FLAT)
+    assert (reason, d, r["stop"]) == ("confirmed", 3, 99.0)
+
+
+def test_overhead_supply_counted_separately():
+    """해석 4: 매물대가 통째로 기준봉 종가(110) 위면 "이탈"이 아니라 "위 매물 잔존"."""
+    assert _fe([D1, D2, D3] + FLAT, zone={"lo": 112.0, "hi": 116.0})[0] == "overhead_supply"
+    assert _fe([D1, D2, D3] + FLAT, zone={"lo": 110.0, "hi": 114.0})[0] != "overhead_supply"      # 하단 = 종가는 "위"가 아님
 
 
 def test_no_zone_is_no_entry():
