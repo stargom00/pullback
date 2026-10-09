@@ -105,5 +105,18 @@ def test_exit_index_matches_race():
 
 
 def test_params_are_registered_values():
-    assert m.MA_N == 600 and m.MIN_BARS == 601 and m.Z_MIN == 2.50 and m.EV_MIN == 0.15 and m.N_MIN == 100
+    assert m.MA_N == 600 and m.MIN_BARS == 601 and m.Z_MIN == 2.58 and m.EV_MIN == 0.15 and m.N_MIN == 100
+    assert m.DATA_DAYS == 3000 and m.OTHER_N == 99 and m.D_FWD == 63
     assert m.MAX_BARS == 60 and m.bc.BULL_CLOSE_RATIO == 1.15 and m.RUN_MARKETS == ["KR"] and m.MA_CHECK_N == 3
+
+
+def test_forward_63_and_buckets():
+    """기록 전용 D+63: 장대양봉 종가 대비 63번째 유효봉 종가·그 사이 최고 고가·최저 저가. 63봉 미만이면 incomplete. 구간 경계 고정."""
+    df = _df(613, [PREV_BELOW, (96, 111, 95, 110)] + [(110, 121, 99, 110 + i * 0.5) for i in range(1, 64)])
+    v = m.harness.CleanView(df)
+    f = m.forward_63(v, 614, 110.0)
+    assert not f["d63_incomplete"] and abs(f["d63_pct"] - ((110 + 63 * 0.5) / 110 - 1) * 100) < 1e-6
+    assert abs(f["d63_max_pct"] - 10.0) < 1e-6 and abs(f["d63_min_pct"] - (99 / 110 - 1) * 100) < 1e-6
+    assert m.forward_63(m.harness.CleanView(df.iloc[:-1]), 614, 110.0) == {"d63_incomplete": True}
+    b = m.d63_buckets([-30, -29.9, -10, 0, 0.1, 10, 30, 99.9, 100, 250])
+    assert b == {"<=-30": 1, "-30~-10": 2, "-10~0": 1, "0~+10": 2, "+10~+30": 1, "+30~+100": 1, ">=+100": 2}
