@@ -52,6 +52,7 @@
 | 10-06 | 2026-10-06_abc_display_only_check | v5.331 ABC 표시 전용 변경 전후 등급 | **회귀확인**: 2,455종목 차이 0건 | CLAUDE.md ABC 항목 |
 | 10-09 | 2026-10-09_ma99_breakout_retest | 바닥형 MA99 돌파 뒤 되돌림 지지 진입 EV | **기각**: A EV −0.053R, z 2.58(판정식 1·3 미달) | docs/ma99_breakout_retest.md §2 |
 | 10-09 | 2026-10-09_lowpoint_departure_rest_entry | 저점 주봉 히트 출발 다음 날 진입 EV(H1) · 출발 크기 상·하(H2) | **H1 기각**: A −0.132R vs C +0.137R, z −8.08 · **H2 기각**: z 0.38 (기각 확정 — 생존편향 원칙) | docs/lowpoint_departure_rest_entry.md §2 |
+| 10-09 | 2026-10-09_bull_candle_departure_entry | 저점 주봉 히트 → **기준양봉**(종가 ≥ 전일×1.15·양봉) 출발 다음 날 진입 EV — 직전 측정(+5% 고가 출발) 기각 후 정의 수정, Bonferroni 2개(z 2.24) | **등록(미실행)** — 해석 기본값 확인 대기, 종가베팅 재현 검증 뒤 실행 | docs/bull_candle_departure_entry.md |
 
 **메모(옮겨 적을 때 애매했던 건)**
 - 09-10 종가베팅 매도 타이밍: 결과 절이 없어 2026-10-09에 결과 JSON 기준으로 보충했다. 그때 원자료에서 OHLC=0 오염 1건을 찾았다 —
