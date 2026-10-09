@@ -1248,6 +1248,7 @@ table.jr-table.lpw-table th.lpw-sort{cursor:pointer;user-select:none}
 /* v5.343 유형 칩 — 색은 기존 토큰(바닥형 강조·눌림형 흐림) */
 .lpw-hitchip.lpw-type-bottom{color:var(--n-accent)}
 .lpw-hitchip.lpw-type-unknown{opacity:max(.7,var(--fade-floor))}
+.lpw-hitchip.lpw-type-down{color:var(--c-blue-fg4)}
 /* v5.341 저점 순위 분류 표 — .lpr-table 아래로 한정 */
 .lpr-table .lpr-seg,.lpr-table .lpr-chips{display:inline-flex;flex-wrap:wrap;gap:3px}
 .lpr-table .jr-pill{padding:1px 7px;font-size:11px;min-height:20px}
@@ -1403,7 +1404,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.344</span>
+      <span class="ver mono" id="verBadge">v5.345</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -6618,6 +6619,8 @@ const IDXBAR_HIDDEN_MODES = new Set(['calendar', 'journal', 'lowpoint_track', 'n
 // [수정] 배너마다 **주인 탭**을 적어 두고, 탭 전환 시점(applyTabViewState)에 주인
 // 탭이 아니면 무조건 숨긴다. 주인 탭 안에서 켤지·내용은 여전히 renderCards()가 정한다.
 const TAB_OWNED_BANNERS = { jonggaSafetyBanner: 'jongga', jonggaSessionBanner: 'jongga', stopWidthWarnBanner: 'pullback' };
+// v5.345: 스캔형 탭 본문 묶음 — 별도 화면 탭(일지·저점일지 등)에서는 항상 숨긴다(test_tab_status_leak.py가 고정)
+const SCAN_AREA_IDS = ['content', 'status'];
 function applyTabViewState() {
   hideFilterButtonsIfNotApplicable();   // v5.56: journal은 load() 자체를 안 타서 여기서도 호출
   applyMarketButtonsEnabled(mode);      // v5.290: ABC 진입/이탈 시 시장 버튼 비활성/복원
@@ -6629,7 +6632,10 @@ function applyTabViewState() {
   const isLpTrack = mode === 'lowpoint_track';   // v5.302
   const isNewlisting = mode === 'newlisting';      // v5.314
   const isCustomView = isJournal || isMoneyflow || isPositions || isCalendar || isSurgeObserve || isLpTrack || isNewlisting;
-  document.getElementById('content').style.display = isCustomView ? 'none' : '';
+  // v5.345(버그수정): #status(스캔 통계 줄)는 #content와 한 묶음 — 스캔형 탭 로더 6곳만 쓴다. 예전엔 #content만 숨겨
+  // 직전 스캔형 탭(ABC "스캔 기준 … · 728건 · 번들 캐시만 읽음" 등)의 줄이 별도 화면 탭(저점일지 등)에 남았다.
+  // 같은 표시 규칙(SCAN_AREA_IDS)으로 같이 켜고 끈다.
+  for (const id of SCAN_AREA_IDS) document.getElementById(id).style.display = isCustomView ? 'none' : '';
   document.getElementById('journalView').style.display = isJournal ? 'block' : 'none';
   document.getElementById('moneyflowView').style.display = isMoneyflow ? 'block' : 'none';
   document.getElementById('positionsView').style.display = isPositions ? 'block' : 'none';
@@ -7140,12 +7146,15 @@ function lpSplitSell(hold, sell, newId) {
   if (!(q > 0)) throw new Error('매도 수량은 0보다 커야 해요');
   if (q > have) throw new Error(`보유 ${have}주보다 많이 팔 수 없어요`);
   if (!(Number(sell.sellPrice) > 0) || !sell.sellDate) throw new Error('매도일·매도가를 입력하세요');
+  // v5.345(사용자 지시): 종료 사유 필수 — 메인 일지 종료 사유 게이트와 같은 방식(고르기 전엔 종료 안 됨). 서버도 거부한다.
+  if (!sell.exitReason) throw new Error('종료 사유를 고르세요');
+  const why = { exitReason: sell.exitReason, exitMemo: String(sell.exitMemo || '').trim() || null };
   if (q === have) {
-    return { close: { ...hold, sellDate: sell.sellDate, sellPrice: Number(sell.sellPrice) }, remain: null, full: true };
+    return { close: { ...hold, sellDate: sell.sellDate, sellPrice: Number(sell.sellPrice), ...why }, remain: null, full: true };
   }
   const { rev, updated_at, ...base } = hold;
   return {
-    close: { ...base, id: newId, qty: q, sellDate: sell.sellDate, sellPrice: Number(sell.sellPrice),
+    close: { ...base, id: newId, qty: q, sellDate: sell.sellDate, sellPrice: Number(sell.sellPrice), ...why,
              partial: true, partial_of: hold.id },
     remain: { ...hold, qty: have - q },
     full: false,
@@ -7165,7 +7174,33 @@ function lpApplyCloseEdit(r, f) {
   const sellPrice = Number(f.sellPrice), qty = Number(f.qty);
   if (!f.sellDate) throw new Error('매도일을 입력하세요');
   if (!(sellPrice > 0) || !(qty > 0)) throw new Error('매도가·수량은 0보다 커야 해요');
-  return { ...r, sellDate: f.sellDate, sellPrice, qty };
+  // v5.345: 미기록(옛 종료)은 비워 둔 채 저장 가능, 한 번 고른 사유는 지울 수 없다(서버 _lp_trade_exit_rule과 같은 규칙)
+  if (!f.exitReason && r.exitReason) throw new Error('종료 사유는 지울 수 없어요 — 다른 사유를 고르세요');
+  return { ...r, sellDate: f.sellDate, sellPrice, qty, exitReason: f.exitReason || r.exitReason || null,
+           exitMemo: String(f.exitMemo ?? r.exitMemo ?? '').trim() || null };
+}
+// v5.345 종료 사유 칩(라디오) + 메모 한 줄 — 종료 폼·종료 행 수정 폼이 이 함수 하나를 쓴다. 선택지는 서버 목록(_lpt.exitReasons).
+function _lptReasonFieldsHtml(r, required) {
+  const reasons = _lpt.exitReasons || [];
+  return `<span class="lpt-reasons" role="radiogroup" aria-label="종료 사유">${reasons.map(x =>
+      `<label class="jr-pill${r && r.exitReason === x ? ' on' : ''}"><input type="radio" name="exitReason" value="${_escapeHtml(x)}" ${r && r.exitReason === x ? 'checked' : ''} ${required ? 'required' : ''} onchange="this.closest('.lpt-reasons').querySelectorAll('label').forEach(l=>l.classList.toggle('on', l.contains(this)))">${_escapeHtml(x)}</label>`).join('')}</span>
+    <label>메모<input name="exitMemo" maxlength="200" value="${_escapeHtml((r && r.exitMemo) || '')}" placeholder="한 줄(선택)"></label>`;
+}
+// v5.345 사유별 건수·실현 손익(₩/$ 분리 — lpCurrencyBucket·lpRealizedPnl 재사용). 사유 없는 옛 종료 = "미기록".
+// 건수 합 = 전체 종료 건수(값 누락은 손익에서만 빼고 skipped로 센다).
+function lpExitReasonSummary(closed, reasons) {
+  const keys = [...(reasons || []), '미기록'];
+  const g = Object.fromEntries(keys.map(k => [k, { reason: k, n: 0, pnl: { KR: 0, US: 0 }, skipped: 0 }]));
+  for (const r of closed || []) {
+    if (!r.sellDate) continue;
+    const k = r.exitReason && g[r.exitReason] ? r.exitReason : '미기록';
+    const x = g[k];
+    x.n += 1;
+    const v = lpRealizedPnl(r);
+    if (!v) { x.skipped += 1; continue; }
+    x.pnl[lpCurrencyBucket(r.mkt)] += v.pnl;
+  }
+  return keys.map(k => g[k]).map(x => ({ ...x, pnl: { KR: Math.round(x.pnl.KR * 100) / 100, US: Math.round(x.pnl.US * 100) / 100 } }));
 }
 // 보유 정렬: 단기 전체 먼저, 장기는 항상 그 아래. 그룹 안은 종목명순(사용자 지시).
 function lpSortHoldings(list) {
@@ -7270,6 +7305,7 @@ async function _lptLoad() {
   const d = await apiJson('/api/lowpoint/trades');
   _lpt.trades = d.trades || [];
   _lpt.settings = d.settings || _lpt.settings;
+  _lpt.exitReasons = d.exit_reasons || [];   // v5.345 종료 사유 선택지(서버 LP_TRADE_EXIT_REASONS)
 }
 async function _lptPrices() {
   const open = _lpt.trades.filter(r => !r.sellDate);
@@ -7361,6 +7397,7 @@ function _lptSellFormHtml(r, cur, today, colspan) {
           <label>매도일<input type="date" name="sellDate" value="${today}" required></label>
           <label>매도가<input name="sellPrice" inputmode="decimal" value="${cur != null ? cur : ''}" required></label>
           <label>수량<input name="qty" inputmode="decimal" value="${r.qty}" required></label>
+          ${_lptReasonFieldsHtml(null, true)}
           <button type="submit" class="n-btn primary">종료 확정</button>
           <button type="button" class="n-btn" onclick="_lpt.selling=null;renderLowpointTrack()">취소</button>
           <span class="n-sub">보유 ${r.qty}주보다 적게 팔면 판 만큼만 종료 기록으로 나뉘어요</span>
@@ -7385,7 +7422,8 @@ async function lptConfirmSell(form, id) {
   const hold = _lpt.trades.find(r => r.id === id);
   if (!hold) return;
   let split;
-  try { split = lpSplitSell(hold, { sellDate: f.get('sellDate'), sellPrice: f.get('sellPrice'), qty: Number(f.get('qty')) }, Date.now()); }
+  try { split = lpSplitSell(hold, { sellDate: f.get('sellDate'), sellPrice: f.get('sellPrice'), qty: Number(f.get('qty')),
+                                     exitReason: f.get('exitReason'), exitMemo: f.get('exitMemo') }, Date.now()); }
   catch (e) { alert(e.message); return; }
   await _lptRun(async () => {
     if (split.full) {
@@ -7442,7 +7480,10 @@ function lpeSetupOf(rec) {
   const auto = (rec && rec.auto && rec.auto.setup && rec.auto.setup.setup_type) || null;
   const override = (rec && rec.setup_override) || null;
   const known = auto === 'bottom' || auto === 'pullback';
-  return { eff: override || (known ? auto : 'bottom'), auto, override, unknown: !override && !known, judged: !!auto };
+  const eff = override || (known ? auto : 'bottom');
+  // v5.345 표시 분류 — 눌림형이면 서버가 ①·④로 나눈 값(auto.pullback_class: trend/down/pullback_unknown), 체크리스트는 눌림형 그대로
+  const cls = !override && !known ? 'unknown' : eff === 'bottom' ? 'bottom' : ((rec.auto && rec.auto.pullback_class) || 'pullback_unknown');
+  return { eff, auto, override, unknown: !override && !known, judged: !!auto, cls };
 }
 // 유형에 맞는 체크리스트 — 바닥형: 자동 auto.items + manualItems / 눌림형: 자동 auto.pullback_items + pullbackManualItems
 function lpeChecklist(rec, manualItems, pullbackManualItems) {
@@ -7561,18 +7602,27 @@ function lprConfirm(rid) {
 const _lpw = { recs: [], error: null, busy: false, reachPct: null, lastRun: null, msg: '', sortKey: 'pct', sortDir: 'desc', typeFilter: 'all' };
 // v5.343(사용자 지시) 유형 — 서버(lowpoint_watch.setup_type = ABC A 판정 재사용)가 정한 값을 칩으로만(표시·필터 전용).
 // 바닥형 = ABC A 통과(긴 하락 → 바닥), 눌림형 = A 미통과, 판정 불가 = A를 못 잼(봉 부족 등). 아직 추적 전이면 칩 없음.
-function lpwTypeLabel(t) { return ({ bottom: '바닥형', pullback: '눌림형', unknown: '판정 불가' })[t] || null; }
+// v5.345: 눌림형을 추세 눌림/하락 추세로 나눈다 — 서버(lowpoint_watch.setup_class, 평가 ①·④ 재사용)가 정한 분류를 그대로 표시.
+function lpwTypeLabel(c) { return ({ bottom: '바닥형', trend: '추세 눌림', down: '하락 추세', pullback_unknown: '눌림형(판정 불가)', unknown: '판정 불가' })[c] || null; }
+// 레코드의 분류 — setup_class(v5.345)가 없으면 옛 유형에서(눌림형은 판정 불가로). 아직 추적 전이면 null.
+function lpwClassOf(r) {
+  if (!r || !r.setup_type) return null;
+  if (r.setup_class) return r.setup_class;
+  return r.setup_type === 'bottom' ? 'bottom' : r.setup_type === 'pullback' ? 'pullback_unknown' : 'unknown';
+}
 function lpwSetupChip(r) {
-  const t = r && r.setup_type;
-  if (!t || !lpwTypeLabel(t)) return null;
-  if (t === 'bottom') {
+  const c = lpwClassOf(r);
+  if (!c || !lpwTypeLabel(c)) return null;
+  if (c === 'bottom') {
     const a = r.setup_a || {}, b = r.setup_b || {}, q = r.setup_b_quality;
     const drop = a.drop_pct != null ? ` −${Math.round(a.drop_pct)}%` : '';
     const title = `ABC A 통과 — 250봉 고점 ${a.high ?? '—'} → 저점 ${a.low ?? '—'}(−${a.drop_pct ?? '—'}%, ${a.span_bars ?? '—'}봉)`
       + ` · B ${b.bars ?? '—'}봉${b.range_pct != null ? ` 범위 ${b.range_pct}%` : ' (범위 못 잼)'}${q ? ' · B 품질 ' + q : ''}`;
     return { cls: 'bottom', text: `바닥형${drop}${q ? ' · ' + q : ''}`, title };
   }
-  return { cls: t, text: lpwTypeLabel(t), title: r.setup_reason || lpwTypeLabel(t) };
+  const why = { trend: 'ABC A 미통과 · 월봉 20선 상승 중 · 직전 저점 위', down: 'ABC A 미통과 · 월봉 20선 상승 아님 또는 직전 저점 아래',
+                pullback_unknown: 'ABC A 미통과 · 20선 상승·직전 저점 중 판정 불가' }[c];
+  return { cls: c === 'trend' ? 'pullback' : c === 'down' ? 'down' : 'unknown', text: lpwTypeLabel(c), title: why || r.setup_reason || lpwTypeLabel(c) };
 }
 function lpwSetupChipHtml(r) {
   const c = lpwSetupChip(r);
@@ -7587,8 +7637,11 @@ function lpwRefLow(r) {
   return { v: Number(v), basis: r.setup_ref_basis || '', date: r.setup_ref_date || null,
            dist: (c != null && c > 0) ? (Number(v) / c - 1) * 100 : null };
 }
-// 유형 필터(전체·바닥형·눌림형) — 레코드만 거른다(판정·정렬 불변)
-function lpwTypeFilter(recs, f) { return (!f || f === 'all') ? (recs || []) : (recs || []).filter(r => r.setup_type === f); }
+// 유형 필터(전체·바닥형·추세 눌림·하락 추세·판정 불가) — 레코드만 거른다(판정·정렬 불변). '판정 불가'는 판정 불가·눌림형(판정
+// 불가)·아직 미판정을 모두 담아, 전체를 뺀 칩 건수 합 = 전체가 되게 한다.
+function lpwTypeFilters() { return [['all', '전체'], ['bottom', '바닥형'], ['trend', '추세 눌림'], ['down', '하락 추세'], ['unknown', '판정 불가']]; }
+function lpwFilterKey(r) { const c = lpwClassOf(r); return c === 'bottom' || c === 'trend' || c === 'down' ? c : 'unknown'; }
+function lpwTypeFilter(recs, f) { return (!f || f === 'all') ? (recs || []) : (recs || []).filter(r => lpwFilterKey(r) === f); }
 function lpwSetTypeFilter(f) { _lpw.typeFilter = f; renderLowpointTrack(); }
 // v5.326(사용자 지시) 진행 바 — 기준가(0%)가 가운데, 오른쪽 절반 = 0 → +목표%(채워질수록 "곧 소멸"), 왼쪽 절반 = 0 → −목표%
 // (길수록 "더 싸짐"). 폭은 각 절반 안의 비율 %(목표% 넘으면 꽉 참). 색은 방향만: 양수 = 상승색, 음수 = 하락색(등락% 글자와 같음).
@@ -7990,10 +8043,13 @@ function renderLowpointWatch() {
   return `<section class="n-card lpw-info">
       <span class="n-sub" style="flex:1 1 260px">저점 히트 종가(기준가) 대비 <b>+${pct}%</b> 도달을 추적해요 — 기준일 다음 거래일부터 <b>정규장 고가 기준(장외 체결 제외)</b>, 매일 07:00 KST 자동 갱신 · ${runInfo} · <b>관심 신호 · 측정 전</b></span>
       <button type="button" class="n-btn sm" onclick="lpwRefresh()" ${_lpw.busy ? 'disabled' : ''}>${_lpw.busy ? '갱신 중…' : '지금 갱신'}</button>
-      <span class="lp-chips" role="group" aria-label="유형 필터" style="flex-basis:100%">${[['all', '전체'], ['bottom', '바닥형'], ['pullback', '눌림형']].map(([k, l]) => {
+      <span class="lp-chips" role="group" aria-label="유형 필터" style="flex-basis:100%">${lpwTypeFilters().map(([k, l]) => {
         const n = lpwTypeFilter(_lpw.recs.filter(r => !lpwEndedLabel(r.stage)), k).length;
-        return `<button type="button" class="jr-pill${tf === k ? ' on' : ''}" onclick="lpwSetTypeFilter('${k}')" title="${k === 'bottom' ? 'ABC A 통과 — 긴 하락 → 바닥' : k === 'pullback' ? 'ABC A 미통과 — 추세 속 눌림' : '전체'}">${l} ${n}</button>`; }).join('')}
-        <span class="n-sub" style="font-size:11px;align-self:center">유형 = ABC A 판정 재사용 · 관찰 중·숨고르기에 적용 · 표시 전용</span></span>
+        if (k === 'unknown' && !n && tf !== k) return '';
+        const tip = { all: '전체', bottom: 'ABC A 통과 — 긴 하락 → 바닥', trend: 'ABC A 미통과 + 월봉 20선 상승 중 + 직전 저점 위',
+                      down: 'ABC A 미통과 + (20선 상승 아님 또는 직전 저점 아래)', unknown: '유형 판정 불가·눌림형(판정 불가)·미판정' }[k];
+        return `<button type="button" class="jr-pill${tf === k ? ' on' : ''}" onclick="lpwSetTypeFilter('${k}')" title="${tip}">${l} ${n}</button>`; }).join('')}
+        <span class="n-sub" style="font-size:11px;align-self:center">유형 = ABC A 판정 + 평가 눌림형 ①20선 상승·④직전 저점 재사용 · 관찰 중·숨고르기에 적용 · 표시 전용</span></span>
       <ul class="n-sub lpw-defs">
         <li><b>출발</b> — +${pct}% 도달(위 판정 그대로, <b>확정된 봉만</b> — KR 20:10 KST·US 뉴욕 16:00 이후). 출발 고가 = 그날 판정 고가</li>
         <li><b>무효선</b> — 기준일부터 출발 전날까지 종가 최고값(기준일 포함)</li>
@@ -8034,7 +8090,7 @@ function renderLowpointRank() {
           <td class="n-sub" style="font-size:11px">${(sn.themes || []).map(t => `${_escapeHtml(t.theme)} ${t.up}/${t.total}`).join(', ') || '—'}</td>` : '';
       return `<tr>
         <td class="lpw-sym"><a class="name-link" href="${tvUrl(it.code, it.mkt)}" target="_blank" rel="noopener">${_escapeHtml(lpDisplayName(it))}</a>
-          <span class="chip lpw-hitchip">${_escapeHtml(stageLbl[wr.stage] || (wr.status === 'reached' ? '출발' : '관찰'))}</span>${lpwSetupChipHtml(sn ? { ...wr, setup_type: sn.setup_type, setup_b_quality: sn.setup_b_quality } : wr)}</td>
+          <span class="chip lpw-hitchip">${_escapeHtml(stageLbl[wr.stage] || (wr.status === 'reached' ? '출발' : '관찰'))}</span>${lpwSetupChipHtml(sn ? { ...wr, setup_type: sn.setup_type, setup_class: sn.setup_class || null, setup_b_quality: sn.setup_b_quality } : wr)}</td>
         <td><span class="lpr-seg">${seg}</span></td>
         <td><span class="lpr-chips">${chips}</span></td>
         ${snapCells}
@@ -8077,7 +8133,7 @@ function renderLowpointRankReview(rvAll, m) {
   const c = rv.cohorts || {}, mc = rv.min_cohorts || {};
   return `<section class="n-card lpw-card"><div class="lpw-h"><span class="n-h">리뷰</span>
       <span class="n-sub" style="font-size:11px;color:var(--px-down)">코호트 4주(월봉은 3개월) 쌓이기 전에는 결론 내지 않음 — 지금 주봉 ${c.week || 0}/${mc.week || 4} · 월봉 ${c.month || 0}/${mc.month || 3}</span></div>
-      <span class="lp-chips" role="group" aria-label="리뷰 유형" style="margin:6px 0 0">${[['all', '전체'], ['bottom', '바닥형'], ['pullback', '눌림형'], ['unknown', '판정 불가']].map(([k, l]) =>
+      <span class="lp-chips" role="group" aria-label="리뷰 유형" style="margin:6px 0 0">${lpwTypeFilters().map(([k, l]) =>
         `<button type="button" class="jr-pill${rt === k ? ' on' : ''}" onclick="lprSetReviewType('${k}')">${l} ${(k === 'all' ? rvAll.total : ((rvAll.by_type || {})[k] || {}).total || { n: 0 }).n}</button>`).join('')}
         <span class="n-sub" style="font-size:11px;align-self:center">①② 유형별 — 확정 시점 유형(미분류는 지금 유형)</span></span>
       <div class="n-sub" style="font-size:12px;margin:6px 0 2px">① 분류별 성적(출발률 = 관찰에서 출발한 비율)</div>${tbl(`<th>분류</th><th class="r">종목</th><th class="r">출발률</th>${kh}`, t1)}
@@ -8129,7 +8185,7 @@ async function lpeEvaluate(id) {
   try {
     const a = await apiJson('/api/lowpoint/eval/auto/' + encodeURIComponent(rec.code) + '?mkt=' + rec.mkt);
     if (!a.ok) throw new Error(a.error || '자동 판정 실패');
-    await _lpePut({ ...rec, auto: { items: a.items, pullback_items: a.pullback_items || null, setup: a.setup || null, manual_auto: a.manual_auto, last_date: a.last_date, close: a.close, price_note: a.price_note || null }, checked_at: a.checked_at }, rec.rev);
+    await _lpePut({ ...rec, auto: { items: a.items, pullback_items: a.pullback_items || null, pullback_class: a.pullback_class || null, setup: a.setup || null, manual_auto: a.manual_auto, last_date: a.last_date, close: a.close, price_note: a.price_note || null }, checked_at: a.checked_at }, rec.rev);
   } catch (e) { alert('자동 판정 실패 — ' + e.message); }
   finally { delete _lpe.evaluating[id]; await lpeLoad(); renderLowpointTrack(); }
 }
@@ -8208,7 +8264,8 @@ function _lpeCard(rec) {
   const tip = k => (_lpe.tips || {})[k] ? ` title="${_escapeHtml(_lpe.tips[k])}"` : '';
   const typeName = t => t === 'pullback' ? '눌림형' : '바닥형';
   const rid0 = _escapeHtml(rec.id);
-  const typeChip = `<span class="chip${st.eff === 'pullback' ? '' : ' accent'}" title="${st.override ? '수동 전환' : '자동 — 관찰과 같은 ABC A 판정'}">${typeName(st.eff)}${st.override ? '·수동' : ''}</span>`
+  const clsName = st.cls === 'unknown' ? typeName(st.eff) : (lpwTypeLabel(st.cls) || typeName(st.eff));
+  const typeChip = `<span class="chip${st.eff === 'pullback' ? '' : ' accent'}" title="${st.override ? '수동 전환' : '자동 — 관찰과 같은 ABC A 판정'}${st.eff === 'pullback' ? ' · 눌림형 ①20선 상승·④직전 저점으로 추세 눌림/하락 추세 구분(체크리스트는 눌림형 그대로)' : ''}">${clsName}${st.override ? '·수동' : ''}</span>`
     + (st.unknown ? ` <span class="chip" title="${_escapeHtml((rec.auto && rec.auto.setup && rec.auto.setup.setup_reason) || '재평가하면 판정해요')}">${st.judged ? '유형 판정 불가' : '유형 미판정 — 재평가'}</span>` : '');
   const typeSwitch = `<span class="lp-chips" role="group" aria-label="유형 전환">${[[null, `자동${st.judged && !st.unknown ? '(' + typeName(st.auto) + ')' : ''}`], ['bottom', '바닥형'], ['pullback', '눌림형']].map(([v, l]) =>
       `<button type="button" class="jr-pill${(st.override || null) === v ? ' on' : ''}" onclick="lpeSetSetup('${rid0}', ${v ? `'${v}'` : 'null'})">${l}</button>`).join('')}</span>`;
@@ -8411,12 +8468,14 @@ function renderLowpointTrack() {
       <td>${_lptNameLink(r)}<div class="jr-s num">${_escapeHtml(_lptCode(r))} · ${r.mkt}${r.partial ? ' · 분할' : ''}</div></td>
       <td class="num r">${_lptFmt(r.buyPrice, r.mkt)}</td><td class="num r">${_lptFmt(r.sellPrice, r.mkt)}</td><td class="num r">${r.qty}</td>
       <td class="r">${_lptPct(ret)}</td><td class="num r" style="color:${col}">${pnl > 0 ? '+' : ''}${_lptFmt(pnl, r.mkt)}</td>
+      <td>${r.exitReason ? `<span class="chip">${_escapeHtml(r.exitReason)}</span>` : '<span class="chip" title="v5.345 이전 종료 — 수정으로 채울 수 있어요">미기록</span>'}${r.exitMemo ? `<div class="jr-s">${_escapeHtml(r.exitMemo)}</div>` : ''}</td>
       <td class="r" style="white-space:nowrap"><button type="button" class="n-btn sm" onclick="lptStartEdit(${r.id})">수정</button>
-        <button type="button" class="n-btn sm" onclick="lptDelete(${r.id})">삭제</button></td></tr>${_lpt.editing === r.id ? `<tr class="lpt-sell"><td colspan="9">
+        <button type="button" class="n-btn sm" onclick="lptDelete(${r.id})">삭제</button></td></tr>${_lpt.editing === r.id ? `<tr class="lpt-sell"><td colspan="10">
         <form class="lpt-form" onsubmit="event.preventDefault();lptSaveEdit(this, ${r.id})">
           <label>매도일<input type="date" name="sellDate" value="${_escapeHtml(r.sellDate || '')}" required></label>
           <label>매도가<input name="sellPrice" inputmode="decimal" value="${r.sellPrice}" required></label>
           <label>수량<input name="qty" inputmode="decimal" value="${r.qty}" required></label>
+          ${_lptReasonFieldsHtml(r, !!r.exitReason)}
           <button type="submit" class="n-btn primary">수정 저장</button>
           <button type="button" class="n-btn" onclick="_lpt.editing=null;renderLowpointTrack()">취소</button>
           <span class="n-sub">수익률·수익금·월간 요약·상단 합계가 다시 계산돼요</span>
@@ -8458,8 +8517,11 @@ function renderLowpointTrack() {
     </section>
     <section class="n-card" style="padding:18px 22px">
       <div class="jr-card-h" style="padding:0 0 10px"><span class="n-h">종료</span><span class="n-sub">${closed.length}건 · 매도일순</span></div>
-      <div class="jr-table-wrap"><table class="jr-table lpt-table"><thead><tr><th>매도일</th><th>구분</th><th>종목</th><th class="r">평단</th><th class="r">매도가</th><th class="r">수량</th><th class="r">수익률</th><th class="r">수익금</th><th></th></tr></thead>
-      <tbody>${closedRows || '<tr><td colspan="9" class="n-sub" style="padding:18px;text-align:center">종료 기록 없음</td></tr>'}</tbody></table></div>
+      <div class="jr-table-wrap"><table class="jr-table lpt-table"><thead><tr><th>매도일</th><th>구분</th><th>종목</th><th class="r">평단</th><th class="r">매도가</th><th class="r">수량</th><th class="r">수익률</th><th class="r">수익금</th><th>종료 사유</th><th></th></tr></thead>
+      <tbody>${closedRows || '<tr><td colspan="10" class="n-sub" style="padding:18px;text-align:center">종료 기록 없음</td></tr>'}</tbody></table></div>
+      ${closed.length ? `<div class="jr-table-wrap" style="margin-top:10px"><table class="jr-table lpt-table"><thead><tr><th>종료 사유</th><th class="r">건수</th><th class="r">실현 손익 ₩</th><th class="r">실현 손익 $</th></tr></thead><tbody>${
+        lpExitReasonSummary(closed, _lpt.exitReasons).filter(x => x.n).map(x => `<tr><td>${_escapeHtml(x.reason)}</td><td class="num r">${x.n}${x.skipped ? `<span class="n-sub" style="font-size:11px"> ⚠️값 누락 ${x.skipped}</span>` : ''}</td>
+          <td class="r">${_rsMoney(x.pnl.KR, 'KR')}</td><td class="r">${x.pnl.US ? _rsMoney(x.pnl.US, 'US') : '<span class="n-sub">—</span>'}</td></tr>`).join('')}</tbody></table></div>` : ''}
     </section>
     <section class="n-card" style="padding:18px 22px">
       <div class="jr-card-h" style="padding:0 0 10px"><span class="n-h">월간 요약</span><span class="n-sub">매도월 기준 · ₩(KR·UPBIT)/$(US) 분리</span></div>

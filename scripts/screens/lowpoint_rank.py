@@ -137,7 +137,7 @@ def snapshot_item(item: dict, daily: "pd.DataFrame | None", through: "str | None
     d = d.dropna(subset=["Close"]) if d is not None and not d.empty else d
     out = {"close": None, "close_date": None, "pct_vs_base": None, "atr_pct": None, "max_vol_mult": None,
            "stage": None, "invalid_dist_pct": None, "themes": themes or [], "flow": flow,
-           "setup_type": "unknown", "setup_b_quality": None}
+           "setup_type": "unknown", "setup_class": "unknown", "setup_b_quality": None}
     if d is not None and not d.empty:
         c = float(d["Close"].iloc[-1])
         out.update(close=c, close_date=str(pd.Timestamp(d.index[-1]).date()),
@@ -148,6 +148,7 @@ def snapshot_item(item: dict, daily: "pd.DataFrame | None", through: "str | None
         out["stage"] = st
         # v5.343 유형(바닥형/눌림형/판정 불가)·B 품질 — 확정 시점 관찰 레코드 값(07:00 추적이 ABC 판정으로 갱신)
         out["setup_type"] = watch_rec.get("setup_type") or "unknown"
+        out["setup_class"] = watch_rec.get("setup_class") or ("bottom" if out["setup_type"] == "bottom" else "unknown")   # v5.345
         out["setup_b_quality"] = watch_rec.get("setup_b_quality")
         inv = watch_rec.get("invalid_line")
         if inv and out["close"] is not None and watch_rec.get("status") == "reached":
@@ -206,6 +207,7 @@ def review_rows(recs: list, watch_by_id: dict) -> list:
                          # v5.343 유형 — 확정 스냅샷 값이 우선(그 시점 판정), 없으면(미분류) 관찰 레코드 현재 값
                          "setup_type": (((rec.get("snapshot") or {}).get(wid) or {}).get("setup_type")
                                         or wr.get("setup_type") or "unknown"),
+                         "setup_class": _row_class((rec.get("snapshot") or {}).get(wid), wr),   # v5.345
                          "departed": wr.get("status") == "reached", "departed_date": wr.get("reached_date"),
                          "stage": wr.get("stage") or ("watch" if wr.get("status") == "active" else None),
                          "watch_missing": not wr})
@@ -216,6 +218,21 @@ SNAP_METRICS = ("pct_vs_base", "atr_pct", "max_vol_mult", "invalid_dist_pct")
 
 
 SETUP_TYPES = ("bottom", "pullback", "unknown")
+SETUP_CLASSES = ("bottom", "trend", "down", "unknown")   # v5.345 리뷰 유형 — 눌림형을 추세 눌림/하락 추세로 나눔
+
+
+def _row_class(snap: "dict | None", wr: dict) -> str:
+    """리뷰 분류(바닥형/추세 눌림/하락 추세/판정 불가) — 확정 스냅샷이 있으면 그 시점 값, 없으면(미분류) 관찰 현재 값.
+    분류 필드가 없는 옛 값(v5.343~v5.344)은 바닥형이면 바닥형, 그 외는 판정 불가로 센다."""
+    src = snap if snap else wr
+    return _review_class(src.get("setup_class")) or ("bottom" if src.get("setup_type") == "bottom" else "unknown")
+
+
+def _review_class(c: "str | None") -> "str | None":
+    """리뷰 분류 키 — pullback_unknown은 판정 불가로 합친다."""
+    if c is None:
+        return None
+    return c if c in SETUP_CLASSES else "unknown"
 
 
 def review(recs: list, watch_by_id: dict) -> dict:
@@ -232,7 +249,7 @@ def review(recs: list, watch_by_id: dict) -> dict:
         "cohorts": {tf: sum(1 for r in recs or [] if r["tf"] == tf) for tf in HORIZONS},
         "min_cohorts": MIN_COHORTS, **out,
         # v5.343 리뷰 ①② 유형별(바닥형/눌림형/판정 불가) — 같은 집계를 유형 부분집합에
-        "by_type": {t: _review_parts([r for r in rows if r["setup_type"] == t], keys) for t in SETUP_TYPES},
+        "by_type": {t: _review_parts([r for r in rows if r["setup_class"] == t], keys) for t in SETUP_CLASSES},
         "missed": [r for r in rows if r["pick"] in ("normal", "no") and r["departed"]],
         "chips": chips,
         "horizon_keys": keys,

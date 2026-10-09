@@ -5,6 +5,27 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.345 [상태 줄 누수 수정 + 저점 매매 종료 사유 + 눌림형 → 추세 눌림/하락 추세 — 사용자 지시] ① 버그수정: ABC 탭 → 저점일지 등 별도
+    화면 탭으로 가면 "스캔 기준 2026-10-08 19:42 KST · 728건 · 번들 캐시만 읽음" 줄(#status)이 남았다(headless Chrome 재현 — ABC→
+    저점일지 5페이지·ABC 해시 후 이동 재현, 저점일지 해시 새로고침·홈 직접 진입은 안 남음). 원인: #status는 #content와 같은 스캔형
+    탭 묶음(쓰는 곳 = 스캔형 로더 6곳)인데 applyTabViewState가 별도 화면 탭에서 #content·검색줄·진단줄만 숨기고 #status는 표시 규칙에서
+    빠져 있었다 — 직전 스캔형 탭(ABC·눌림목·추세전환 등 전부)의 줄이 별도 화면 탭 7개 모두에 남는 같은 원인. 섹터 묶음 칩은 #content
+    안이라 재현에서 새지 않았다. 수정: SCAN_AREA_IDS(['content', 'status'])로 같이 켜고 끈다(CSS 땜질 없음). 브라우저 대표 경로(ABC→
+    저점일지 5페이지 · 눌림목/ABC/추세전환 → 별도 화면 7탭 · 해시 새로고침) 누수 0, 되돌리면 26건. 테스트: test_tab_status_leak.py.
+    ② 저점 매매 종료 사유(사용자 지시 "종료할 때 이유를 남길 곳이 없어 '기준대로 나온 매매'와 '감으로 나온 매매'를 구분할 수 없음"):
+    종료 시 사유 칩 필수 — 목표 도달 / 손절선 이탈 / 시간 손절 / 판단 변경 / 기타(LP_TRADE_EXIT_REASONS, 사용자 지시 원문, 목록 API로
+    화면에 내려줌) + 메모 한 줄(선택, exitMemo). 새로 종료하는 저장(보유 → 종료·처음부터 종료·분할 종료)은 서버가 사유 없으면 400
+    (_lp_trade_exit_rule — lp_trade_put on_create/on_update), 프론트 lpSplitSell도 같은 게이트. 기존 종료 레코드는 "미기록"으로
+    표시·그대로 수정 저장되고 수정 폼에서 나중에 채운다(한 번 채운 사유는 지울 수 없음). 종료 행에 사유·메모, 사유별 건수·실현 손익
+    표(lpExitReasonSummary — ₩/$ 분리는 lpCurrencyBucket·lpRealizedPnl 재사용, 건수 합 = 전체 종료). 메인 일지 종료 사유는 수정
+    모달 인라인 선택지·검증(추세추종용 사유)이라 그대로 못 써서 같은 "종료 시 필수 게이트" 방식을 저점 매매의 기존 검증 경로에 얹었다.
+    테스트: test_lowpoint_exit_reason.py. ③ 눌림형 분리(표시·필터 전용 — "관찰의 '눌림형'은 ABC A 미통과(덜 빠진 종목) 전체라서
+    우상향 속 눌림과 하락 추세가 섞여 있음"): 평가 눌림형 ①(20개월선 상승 중)·④(직전 저점 위) 재사용(lowpoint_eval.pullback_class) —
+    추세 눌림 = ①O·④O, 하락 추세 = ①X 또는 ④X(X가 확정되면 하락 추세), 그 외 눌림형(판정 불가). 관찰 레코드 setup_class(관찰 추적에서
+    완성 월봉으로 체크리스트를 같은 함수로 돌림), 관찰 필터 칩 [전체][바닥형][추세 눌림][하락 추세](+판정 불가가 있으면 [판정 불가] —
+    칩 건수 합 = 전체), 순위 칩·스냅샷(setup_class)·리뷰 유형(바닥형/추세 눌림/하락 추세/판정 불가), 평가 카드 유형 칩(체크리스트는 눌림형
+    그대로, evaluate가 pullback_class를 같이 냄). 실데이터: PEG = 하락 추세(20선 하락·직전 저점 아래). 테스트:
+    test_lowpoint_pullback_class.py.
 v5.344 [저점 평가 희석 방향 + 유형별 체크리스트 + 관찰 무효 참고 — 사용자 지시, 새 숫자 임계값 없음] ① "평가 체크리스트 '희석
     이력(유증·CB)'만 O = 나쁜 조건이라 합계 방향이 반대. 집계 오류." → 항목 "희석 이력 없음(유증·CB)", 키 dilution → no_dilution
     (O = 없음 = 좋음). 기존 값은 서버 시작 직후 _lp_eval_migrate_dilution이 O↔X 반전 이관(미표시 그대로, rev 올림, 멱등 — 옛 키가
@@ -9001,7 +9022,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.344"
+VERSION = "v5.345"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -20257,6 +20278,23 @@ def _lp_num(v):
         return None
 
 
+# v5.345(사용자 지시) 종료 사유 — "종료할 때 이유를 남길 곳이 없어 '기준대로 나온 매매'와 '감으로 나온 매매'를 구분할 수 없음."
+# 선택지는 사용자 지시 원문 그대로(목록 API로 화면에 내려준다 — 화면 사본 없음). 새로 종료하는 저장은 사유 필수(lp_trade_put
+# on_create/on_update), 기존 종료 레코드(사유 없음 = 미기록)는 그대로 두고 나중에 수정으로 채운다.
+LP_TRADE_EXIT_REASONS = ("목표 도달", "손절선 이탈", "시간 손절", "판단 변경", "기타")
+LP_TRADE_EXIT_MEMO_MAX = 200     # 메모 "한 줄" — 입력 상한(AI 판단 어림값, 판정과 무관)
+
+
+def _lp_trade_exit_rule(rec: dict, srv: "dict | None") -> "str | None":
+    """새로 종료되는 저장(새 레코드가 종료 상태 · 보유 → 종료)은 사유 필수. 이미 있던 사유를 지우는 저장도 거부."""
+    if not rec.get("sellDate"):
+        return None
+    newly_closed = srv is None or not srv.get("sellDate")
+    if not rec.get("exitReason") and (newly_closed or (srv or {}).get("exitReason")):
+        return "종료 사유를 고르세요(" + " / ".join(LP_TRADE_EXIT_REASONS) + ")"
+    return None
+
+
 def _lp_trade_invalid(rec: dict) -> "str | None":
     """레코드 단위 규칙. 문제가 있으면 사유 문자열."""
     if rec.get("kind") not in ("단기", "장기"):
@@ -20281,6 +20319,13 @@ def _lp_trade_invalid(rec: dict) -> "str | None":
         return "sellPrice는 0보다 커야 함"
     if rec.get("partial_of") is not None and not has_sd:
         return "부분 종료(partial_of) 레코드는 sellDate·sellPrice가 필요"
+    if rec.get("exitReason") not in (None, "") + LP_TRADE_EXIT_REASONS:
+        return "exitReason은 " + "|".join(LP_TRADE_EXIT_REASONS)
+    if rec.get("exitReason") and not has_sd:
+        return "종료 사유는 종료 기록에만"
+    memo = rec.get("exitMemo")
+    if memo is not None and (not isinstance(memo, str) or len(memo) > LP_TRADE_EXIT_MEMO_MAX or "\n" in memo):
+        return f"exitMemo는 {LP_TRADE_EXIT_MEMO_MAX}자 이하 한 줄"
     return None
 
 
@@ -20303,7 +20348,8 @@ async def lp_trades_list():
         trades = _lp_trades_load()
     except (OSError, ValueError) as e:
         return JSONResponse({"ok": False, "error": f"저점 매매 기록 읽기 실패: {e}"}, status_code=500)
-    return JSONResponse(_clean_nan({"ok": True, "trades": trades, "settings": _lp_trade_settings()}))
+    return JSONResponse(_clean_nan({"ok": True, "trades": trades, "settings": _lp_trade_settings(),
+                                    "exit_reasons": list(LP_TRADE_EXIT_REASONS)}))
 
 
 @app.put("/api/lowpoint/trades/{rid}")
@@ -20351,8 +20397,9 @@ async def lp_trade_put(rid: int, request: Request):
                         f"입력하거나, 이 기록을 삭제 후 다시 등록하세요")
             return None
         status, payload, changed = _rev_store_put(trades, rid, rec, base_rev,
-                                                  on_create=lambda rs, r: partial_check(rs, r) or overlap(rs, r),
-                                                  on_update=lambda rs, srv, r: overlap(rs, r, srv))
+                                                  on_create=lambda rs, r: (partial_check(rs, r) or overlap(rs, r)
+                                                                           or _lp_trade_exit_rule(r, None)),
+                                                  on_update=lambda rs, srv, r: overlap(rs, r, srv) or _lp_trade_exit_rule(r, srv))
         if changed:
             _lp_trades_write(trades)
     # v5.328: 관심 추적 [기록]에서 온 저장 — 보유 기록이 실제로 저장됐을 때만(새 보유·추매) 그 관심 항목을 지운다

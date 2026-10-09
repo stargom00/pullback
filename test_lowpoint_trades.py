@@ -82,7 +82,7 @@ def test_add_on_buy_saved_as_one_record(store):
 def test_partial_close_quantity_checked(store, qty, ok):
     _put(HOLD, None)
     part = {**HOLD, "id": 2, "qty": qty, "sellDate": "2026-09-29", "sellPrice": 1720,
-            "partial": True, "partial_of": 1}
+            "partial": True, "partial_of": 1, "exitReason": "목표 도달"}   # v5.345 새 종료는 사유 필수
     r = _put(part, None)
     assert (r.status_code == 200) is ok, _b(r)
     if not ok:
@@ -156,14 +156,14 @@ def test_merge_buy_weighted_average():
 
 
 def test_split_sell_branches():
-    full = _js("lpSplitSell({id:1, qty:100, buyPrice:1000, rev:2}, {qty:100, sellDate:'2026-09-29', sellPrice:1100}, 99)")
+    full = _js("lpSplitSell({id:1, qty:100, buyPrice:1000, rev:2}, {qty:100, sellDate:'2026-09-29', sellPrice:1100, exitReason:'목표 도달'}, 99)")
     assert full["full"] is True and full["remain"] is None and full["close"]["id"] == 1 and full["close"]["sellPrice"] == 1100
-    part = _js("lpSplitSell({id:1, qty:100, buyPrice:1000, rev:2, updated_at:'x'}, {qty:30, sellDate:'2026-09-29', sellPrice:1100}, 99)")
+    part = _js("lpSplitSell({id:1, qty:100, buyPrice:1000, rev:2, updated_at:'x'}, {qty:30, sellDate:'2026-09-29', sellPrice:1100, exitReason:'목표 도달'}, 99)")
     assert part["full"] is False
     assert part["close"]["id"] == 99 and part["close"]["qty"] == 30 and part["close"]["partial_of"] == 1
     assert "rev" not in part["close"], "새 종료 레코드가 보유의 rev를 물려받으면 생성 PUT이 gone으로 막힌다"
     assert part["remain"]["qty"] == 70 and part["remain"]["rev"] == 2
-    err = _js("(() => { try { lpSplitSell({id:1, qty:10, buyPrice:1}, {qty:11, sellDate:'d', sellPrice:1}, 2); return null; } catch (e) { return e.message; } })()")
+    err = _js("(() => { try { lpSplitSell({id:1, qty:10, buyPrice:1}, {qty:11, sellDate:'d', sellPrice:1, exitReason:'기타'}, 2); return null; } catch (e) { return e.message; } })()")
     assert "보유 10주보다" in err
 
 

@@ -142,7 +142,7 @@ def test_progress_bar_uses_target_scale(ret, goal, side, width):
 
 
 def _render_hold(pre=""):
-    fns = KFNS + ("_lptFmt", "_lptPct", "lpDisplayName", "_lptSellFormHtml", "lpiRows", "renderLowpointHold")
+    fns = KFNS + ("_lptFmt", "_lptPct", "lpDisplayName", "_lptSellFormHtml", "_lptReasonFieldsHtml", "lpiRows", "renderLowpointHold")
     state = (f"var _lpt = {{ trades: {json.dumps(TRADES)}, settings: {{ target_pct: {json.dumps(TP)} }}, selling: null, error: null }};\n"
              f"var _lpk = {{ prices: {json.dumps(PRICES)}, checkedAt: '2026-10-06T07:00:30+09:00', failed: [], error: null, busy: false, msg: '' }};\n"
              "var _lpi = { recs: [], error: null, busy: false, msg: '', q: '', kind: '단기', price: '', found: null };\n")

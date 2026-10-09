@@ -399,13 +399,25 @@ def departure_shape(daily: "pd.DataFrame | None", reached_date: str, through: "s
 SETUP_LABEL = {"bottom": "바닥형", "pullback": "눌림형", "unknown": "판정 불가"}
 
 
-def setup_type(daily: "pd.DataFrame | None", through: "str | None") -> dict:
+def setup_class(setup: dict) -> str:
+    """v5.345 표시·필터·리뷰 분류 — bottom | trend | down | pullback_unknown | unknown."""
+    t = (setup or {}).get("setup_type")
+    if t == "bottom":
+        return "bottom"
+    if t == "pullback":
+        return (setup or {}).get("setup_pullback_class") or "pullback_unknown"
+    return "unknown"
+
+
+def setup_type(daily: "pd.DataFrame | None", through: "str | None", mkt: "str | None" = None,
+               now_iso: "str | None" = None) -> dict:
     """확정 봉(≤ through)까지의 일봉 → {setup_type, setup_reason, setup_a(A 고점·저점·하락폭·봉수), setup_b(B 구간 — 바닥형만),
     setup_b_quality(흡수/중립/재하락 주의/B 미형성 — 바닥형만), setup_checked_date}."""
     import abc_screener
     from app import _downcast                    # 프로덕션 fetch 후처리 그대로 — 사본 금지(harness.clean_at_checkpoint와 같은 방식)
     out = {"setup_type": "unknown", "setup_reason": None, "setup_a": None, "setup_b": None, "setup_b_quality": None,
-           "setup_checked_date": None, "setup_ref_low": None, "setup_ref_basis": None, "setup_ref_date": None}
+           "setup_checked_date": None, "setup_ref_low": None, "setup_ref_basis": None, "setup_ref_date": None,
+           "setup_pullback_class": None, "setup_class": "unknown"}
     d = _confirmed_daily(daily, through)
     if d is None or d.empty:
         return {**out, "setup_reason": "일봉 없음"}
@@ -419,13 +431,22 @@ def setup_type(daily: "pd.DataFrame | None", through: "str | None") -> dict:
     # 눌림형 = 평가 눌림형 ④ 직전 저점(lowpoint_eval.prior_low — 같은 함수), 판정 불가 = 없음.
     if r["verdict"] == "ABC":
         lo_idx = len(d) - 1 - int(r["a"]["bars_since_low"])
-        return {**out, "setup_type": "bottom", "setup_b": r.get("b"), "setup_b_quality": (r.get("b_quality") or {}).get("label"),
+        return {**out, "setup_type": "bottom", "setup_class": "bottom",
+                "setup_b": r.get("b"), "setup_b_quality": (r.get("b_quality") or {}).get("label"),
                 "setup_ref_low": r["a"]["low"], "setup_ref_basis": "A 저점",
                 "setup_ref_date": str(pd.Timestamp(d.index[lo_idx]).date()) if 0 <= lo_idx < len(d) else None}
     pl = ev.prior_low(d["Close"])
-    return {**out, "setup_type": "pullback", "setup_reason": r.get("reason"),
-            "setup_ref_low": pl["low_close"] if pl else None, "setup_ref_basis": "직전 저점" if pl else None,
-            "setup_ref_date": pl["low_date"] if pl else None}
+    # v5.345 눌림형 분리 — 평가 눌림형 체크리스트를 같은 함수로 돌려 ①·④로 나눈다(lowpoint_eval.pullback_class). 완성 월봉 판정에
+    # 시장·시각이 필요해 mkt·now_iso가 없으면(호출부가 안 주면) 판정하지 않는다.
+    pcls = None
+    if mkt and now_iso:
+        from datetime import datetime as _dt
+        months = ev.completed_months(ev.monthly_ohlc(d), mkt, _dt.fromisoformat(now_iso))
+        pcls = ev.pullback_class(ev.pullback_checks(d, months))
+    res = {**out, "setup_type": "pullback", "setup_reason": r.get("reason"),
+           "setup_ref_low": pl["low_close"] if pl else None, "setup_ref_basis": "직전 저점" if pl else None,
+           "setup_ref_date": pl["low_date"] if pl else None, "setup_pullback_class": pcls}
+    return {**res, "setup_class": setup_class(res)}
 
 
 def _us_period(earliest: str, today: date) -> str:
@@ -487,7 +508,7 @@ def track(records: list, today: date, now_iso: str, fetch=fetch_daily, fetch_min
         u = {"last_close": last["last_close"], "last_date": last["last_date"], "checked_at": now_iso, "reach_rule": REACH_RULE}
         thru = confirmed_through(r.get("mkt"), now_iso)
         tag = f"{r['code']}({r.get('label')} {r.get('tf')})"
-        u.update(setup_type(daily, thru))                               # v5.343 유형 — 표시·필터 전용(아래 판정은 이 값을 안 본다)
+        u.update(setup_type(daily, thru, r.get("mkt"), now_iso))       # v5.343 유형(v5.345 눌림 분리) — 표시·필터 전용(판정은 이 값을 안 본다)
         rc = None
         if was_reached and r.get("reach_rule") == PREV_REACH_RULE:
             rc = recheck_reached(r, daily, thru, fetch_min)

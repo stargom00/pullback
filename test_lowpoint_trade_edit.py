@@ -92,7 +92,8 @@ def test_edit_creating_overlap_is_rejected(store):
 def test_create_duplicate_holding_is_rejected_but_close_records_are_not(store):
     _put(HOLD, None)
     assert _put({**HOLD, "id": 3}, None)[0] == 400                         # 새 보유 겹침
-    part = {**HOLD, "id": 4, "qty": 30, "sellDate": "2026-09-29", "sellPrice": 1720, "partial": True, "partial_of": 1}
+    part = {**HOLD, "id": 4, "qty": 30, "sellDate": "2026-09-29", "sellPrice": 1720, "partial": True, "partial_of": 1,
+            "exitReason": "기타"}                                           # v5.345 새 종료는 사유 필수
     assert _put(part, None)[0] == 200                                      # 분할 종료(종료 기록)는 대상 아님
 
 
@@ -103,7 +104,7 @@ def test_existing_overlap_can_still_be_edited(store):
 
 
 def test_closed_record_edit(store):
-    closed = {**HOLD, "sellDate": "2026-09-30", "sellPrice": 1720}
+    closed = {**HOLD, "sellDate": "2026-09-30", "sellPrice": 1720, "exitReason": "목표 도달"}   # v5.345 새 종료는 사유 필수
     _put(closed, None)
     s, d = _put({**closed, "sellPrice": 1800, "sellDate": "2026-10-01", "qty": 90}, 1)
     assert s == 200 and d["record"]["sellPrice"] == 1800 and d["record"]["qty"] == 90

@@ -153,6 +153,24 @@ def prior_low(close: pd.Series, lookback: "int | None" = None) -> "dict | None":
             "low_date": str(pd.Timestamp(lo_ts).date()), "low_close": float(before.loc[lo_ts]), "window_bars": len(before)}
 
 
+# v5.345(사용자 지시) 눌림형 분리 — "관찰의 '눌림형'은 ABC A 미통과(덜 빠진 종목) 전체라서 우상향 속 눌림과 하락 추세가 섞여 있음.
+# … 평가 눌림형 체크리스트 ①(20개월선 상승 중)과 ④(직전 저점 위)를 재사용. 새 계산·상수 금지." 표시·필터 전용.
+#   추세 눌림 = ① O 그리고 ④ O · 하락 추세 = ① X 또는 ④ X · 그 외(①④ 중 None이 있고 X는 없음) = 눌림형(판정 불가).
+#   ①X·④None처럼 X가 하나라도 확정되면 하락 추세로 본다(X가 정해졌으니 "둘 다 O"는 이미 불가능).
+PULLBACK_CLASS_LABEL = {"trend": "추세 눌림", "down": "하락 추세", "pullback_unknown": "눌림형(판정 불가)"}
+
+
+def pullback_class(items: list) -> str:
+    """눌림형 체크리스트 결과(pullback_checks) → trend | down | pullback_unknown."""
+    r = {i["key"]: i.get("result") for i in items or []}
+    a, b = r.get("ma20_rising"), r.get("above_prior_low")
+    if a is False or b is False:
+        return "down"
+    if a is True and b is True:
+        return "trend"
+    return "pullback_unknown"
+
+
 def pullback_checks(daily: pd.DataFrame, months: pd.DataFrame, long_items: "list | None" = None) -> list:
     """눌림형 체크리스트 자동 6개. 재사용 항목(②③⑥)은 바닥형 long_checks 결과를 그대로 가져온다(사본 금지)."""
     lab = dict(PULLBACK_ITEMS)
@@ -459,7 +477,8 @@ def evaluate(code: str, mkt: str, now: datetime) -> dict:
     import lowpoint_watch as lw
     setup = lw.setup_type(daily, lw.confirmed_through(mkt if mkt != "UPBIT" else "KR", now.isoformat()))
     # O·X·미표시 집계는 화면(lpeTally)이 자동+수동을 합쳐 한 곳에서 센다(사본 금지)
-    return {"ok": True, "items": items, "pullback_items": pullback_checks(daily, months, items),
+    pb_items = pullback_checks(daily, months, items)
+    return {"ok": True, "items": items, "pullback_items": pb_items, "pullback_class": pullback_class(pb_items),   # v5.345
             "setup": {k: setup.get(k) for k in ("setup_type", "setup_reason", "setup_a", "setup_b", "setup_b_quality",
                                                 "setup_checked_date")},
             "manual_auto": manual_auto(months),

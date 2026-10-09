@@ -101,11 +101,12 @@ def test_stage_values_unchanged_by_setup_and_longer_window(monkeypatch):
     run = lambda df: w.track([dict(r) for r in recs], date(2026, 10, 9), "2026-10-09T07:00:00+09:00",
                              fetch=lambda r, t: {"407400.KQ": df}, fetch_min=fm)[0]
     full = run(d)
-    monkeypatch.setattr(w, "setup_type", lambda daily, through: {})
+    monkeypatch.setattr(w, "setup_type", lambda daily, through, mkt=None, now_iso=None: {})
     no_setup = run(d)
     short = run(d[d.index >= "2026-06-01"])                                               # 예전(v5.342) 조회 창 정도
     setup_keys = {"setup_type", "setup_reason", "setup_a", "setup_b", "setup_b_quality", "setup_checked_date",
-                  "setup_ref_low", "setup_ref_basis", "setup_ref_date"}                     # v5.344 무효 참고 — 표시 전용
+                  "setup_ref_low", "setup_ref_basis", "setup_ref_date",                     # v5.344 무효 참고 — 표시 전용
+                  "setup_pullback_class", "setup_class"}                                    # v5.345 눌림 분리 — 표시 전용
     shape = {"departure_vol_mult"}                                                        # 50일 평균 — 짧은 창이면 원래 None(창 확대 전에도 같은 규칙)
     for rid in full:
         assert {k: v for k, v in full[rid].items() if k not in setup_keys} == no_setup[rid]
@@ -126,8 +127,9 @@ def test_rank_snapshot_and_review_by_type():
     watch = {"w0": {"status": "reached", "setup_type": "pullback"},                       # 스냅샷(확정 시점) 유형이 우선
              "w1": {"status": "active"}, "w2": {"status": "active", "setup_type": "bottom"}, "w3": {"status": "active"}}
     rv = rk.review(recs, watch)
-    assert {t: rv["by_type"][t]["total"]["n"] for t in rk.SETUP_TYPES} == {"bottom": 2, "pullback": 1, "unknown": 1}
-    assert sum(rv["by_type"][t]["total"]["n"] for t in rk.SETUP_TYPES) == rv["total"]["n"]
+    # v5.345: 리뷰 유형은 바닥형/추세 눌림/하락 추세/판정 불가 — 분류 필드 없는 옛 눌림형 값은 판정 불가로 센다
+    assert {t: rv["by_type"][t]["total"]["n"] for t in rk.SETUP_CLASSES} == {"bottom": 2, "trend": 0, "down": 0, "unknown": 2}
+    assert sum(rv["by_type"][t]["total"]["n"] for t in rk.SETUP_CLASSES) == rv["total"]["n"]
     assert rv["by_type"]["bottom"]["by_pick"]["first"]["departed"] == 1
 
 
@@ -146,21 +148,24 @@ def _fn(name):
 def test_front_chip_and_filter():
     if not shutil.which("node"):
         pytest.skip("node 미설치")
-    src = "\n".join(_fn(f) for f in ("lpwTypeLabel", "lpwSetupChip", "lpwTypeFilter", "lprReviewPart"))
+    src = "\n".join(_fn(f) for f in ("lpwTypeLabel", "lpwClassOf", "lpwSetupChip", "lpwFilterKey", "lpwTypeFilters", "lpwTypeFilter",
+                                     "lprReviewPart"))
     p = subprocess.run(["node", "-e", src + """
-      const R = [{id:'a', setup_type:'bottom', setup_a:{drop_pct:86, high:8400, low:1178, span_bars:169}, setup_b:{bars:5, range_pct:null}, setup_b_quality:'B 미형성'},
-                 {id:'b', setup_type:'pullback', setup_reason:'A 미달'}, {id:'c', setup_type:'unknown'}, {id:'d'}];
+      const R = [{id:'a', setup_type:'bottom', setup_class:'bottom', setup_a:{drop_pct:86, high:8400, low:1178, span_bars:169}, setup_b:{bars:5, range_pct:null}, setup_b_quality:'B 미형성'},
+                 {id:'b', setup_type:'pullback', setup_class:'down', setup_reason:'A 미달'}, {id:'t', setup_type:'pullback', setup_class:'trend'},
+                 {id:'p', setup_type:'pullback'}, {id:'c', setup_type:'unknown'}, {id:'d'}];
       console.log(JSON.stringify([R.map(r => lpwSetupChip(r) && lpwSetupChip(r).text), lpwSetupChip(R[0]).title,
-        ['all','bottom','pullback'].map(f => lpwTypeFilter(R, f).map(r => r.id)),
+        lpwTypeFilters().map(([f]) => lpwTypeFilter(R, f).map(r => r.id)),
         lprReviewPart({total:1, by_type:{bottom:{total:2}}}, 'bottom').total, lprReviewPart({total:1}, 'all').total]));"""],
                        capture_output=True, text=True, timeout=20)
     assert p.returncode == 0, p.stderr
     texts, title, filt, part_b, part_all = json.loads(p.stdout)
-    assert texts == ["바닥형 −86% · B 미형성", "눌림형", "판정 불가", None]
+    assert texts == ["바닥형 −86% · B 미형성", "하락 추세", "추세 눌림", "눌림형(판정 불가)", "판정 불가", None]   # v5.345 3분류
     assert "ABC A 통과" in title and "B 5봉 (범위 못 잼)" in title
-    assert filt == [["a", "b", "c", "d"], ["a"], ["b"]] and (part_b, part_all) == (2, 1)
+    assert filt == [["a", "b", "t", "p", "c", "d"], ["a"], ["t"], ["b"], ["p", "c", "d"]]
+    assert sum(len(f) for f in filt[1:]) == len(filt[0])                                     # 칩 건수 합 = 전체
+    assert (part_b, part_all) == (2, 1)
     body = _fn("renderLowpointWatch")
     assert "lpwStageSplit(shown)" in body and "lpwGroups(shown)" in body and "lpwStageSplit(_lpw.recs)" in body   # 종료는 전체
-    assert body.count("lpwSetupChipHtml(r)") == 2 and "lpwSetTypeFilter('${k}')" in body
-    assert "['all', '전체'], ['bottom', '바닥형'], ['pullback', '눌림형']" in body
+    assert body.count("lpwSetupChipHtml(r)") == 2 and "lpwSetTypeFilter('${k}')" in body and "lpwTypeFilters().map(" in body
     assert "lpwSetupChipHtml(" in _fn("renderLowpointRank") and "lprSetReviewType(" in _fn("renderLowpointRankReview")

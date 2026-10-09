@@ -119,7 +119,7 @@ def test_record_converts_and_removes_interest():
 
 def test_no_removal_when_not_a_holding():
     _iput(I_KR)
-    assert _tput({**HOLD, "sellDate": "2026-10-06", "sellPrice": 1700}, from_interest="i_kr1")[0] == 200
+    assert _tput({**HOLD, "sellDate": "2026-10-06", "sellPrice": 1700, "exitReason": "기타"}, from_interest="i_kr1")[0] == 200
     assert _tput({**HOLD, "id": 102, "code": "005930.KS", "name": "삼성전자"}, from_interest="i_kr1")[1].get("interest_removed") is None
     _tput({**HOLD, "id": 103})                                                 # 대교 보유 생성
     s, d = _tput({**HOLD, "id": 104}, from_interest="i_kr1")                  # 겹침 400 — 저장 안 됨
@@ -208,7 +208,7 @@ def test_base_price_autofill_and_edit():
 
 def test_render_order_and_buttons():
     fns = ("lpkGroups", "lpTargetPrice", "lpReturnPct", "lpwDays", "lpwBar", "_lptFmt", "_lptPct", "lpDisplayName",
-           "_lptSellFormHtml", "lpiRows", "renderLowpointHold")
+           "_lptSellFormHtml", "_lptReasonFieldsHtml", "lpiRows", "renderLowpointHold")
     trades = [{"id": 1, "kind": "단기", "mkt": "KR", "code": "005930.KS", "name": "삼성전자", "buyDate": "2026-10-01", "buyPrice": 70000, "qty": 1},
               {"id": 2, "kind": "장기", "mkt": "US", "code": "NKE", "name": "Nike", "buyDate": "2026-09-26", "buyPrice": 36, "qty": 5}]
     pre = (f"var _lpt = {{ trades: {json.dumps(trades)}, settings: {{ target_pct: {json.dumps(TP)} }}, selling: null, error: null }};\n"

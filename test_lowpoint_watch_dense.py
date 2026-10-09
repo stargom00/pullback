@@ -43,7 +43,8 @@ def _state_line():
 
 FNS = ("lpwBar", "lpwSortRows", "lpwDays", "lpwGroups", "lpReturnPct", "lpDisplayName", "_lptFmt", "_lptPct",
        "_lptCode", "lpwPendingHtml", "lpwEndedLabel", "lpwDepHigh", "lpwRestPos", "lpwVolRatio", "lpwStageSplit",
-       "lpwShapeText", "lpwRestartText", "lpwTypeLabel", "lpwSetupChip", "lpwSetupChipHtml", "lpwTypeFilter", "lpwRefLow",
+       "lpwShapeText", "lpwRestartText", "lpwTypeLabel", "lpwClassOf", "lpwSetupChip", "lpwSetupChipHtml", "lpwFilterKey", "lpwTypeFilters",
+       "lpwTypeFilter", "lpwRefLow",
        "renderLowpointWatch")
 
 
