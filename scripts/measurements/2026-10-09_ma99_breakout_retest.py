@@ -13,7 +13,9 @@
   B 돌파일 진입  E1 봉 종가 진입, 손절 = E1 봉 저가
   C 대조        A 진입일마다 그날 바닥형인 다른 종목을 무작위로 C_PER_EVENT개, 그날 종가 진입·손절 = 그날 저가
 청산: harness.race() 2R 레이스 그대로(max_bars=60, 같은 날 손절·목표면 손절 우선).
-판정: A vs C — EV ≥ 0.15R, z ≥ 1.96, 시기 반분 양쪽 유지, 각 군 nv ≥ 100. 보조: A vs B(서술).
+필터: harness 표준 저유동성 컷(passes_liquidity_filter)을 세 군 진입봉에 똑같이 적용. 시총 필터 없음(§1-확인 3).
+판정: A군 EV ≥ 0.15R 그리고 A−C 격차 z ≥ 1.96, 시기 반분 양쪽(A EV ≥ 0.15R·A > C), 각 군 nv ≥ 100.
+      보조: A vs B(서술).
 
 바닥형 판정: abc_screener.analyze_abc(그 시점까지 자르고 harness.clean_at_checkpoint로 정제한 일봉)
 ["verdict"] == "ABC" — 프로덕션 저점 유형(lowpoint_watch.setup_type)과 같은 함수·같은 정제. 600봉 미만은
@@ -44,6 +46,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import harness  # noqa: E402
 import abc_screener  # noqa: E402
+from scanner import price_frozen_check, volume_info  # noqa: E402
 
 # ── 사전등록 원문의 값 ────────────────────────────────────────────────
 MA_N = 99                                            # 원문 "MA99"
@@ -170,9 +173,22 @@ def covariates(p: pd.DataFrame) -> dict:
             "ma99_slope20": (m0 / m20 - 1) if m20 == m20 and m20 > 0 else None}
 
 
-def run_race(view: _View, j: int, p: pd.DataFrame):
+def liquid(p: pd.DataFrame) -> bool:
+    """harness 표준 저유동성 컷(KR 일평균 거래대금 3억 미만·가격고정 제외)을 진입봉 시점 정제 df로 판정.
+    §1-확인 3(사용자 결정 2026-10-09 "harness 표준 저유동성 필터를 세 군 동일하게 적용"). hit 딕셔너리 필드는
+    프로덕션 analyze_*와 같은 함수(scanner.volume_info·price_frozen_check)로 만든다 — 재구현 금지."""
+    c, h, lo, v = p["Close"], p["High"], p["Low"], p["Volume"]
+    hit = {**volume_info(float(c.iloc[-1]), v), **price_frozen_check(c, h, lo, v)}
+    return harness.passes_liquidity_filter(hit, True)
+
+
+def run_race(view: _View, j: int, p: pd.DataFrame, stats: Counter, group: str):
+    if not liquid(p):
+        stats[f"{group.lower()}_illiquid"] += 1
+        return None                                   # 저유동성 — 그 군에서 제외
     entry, stop = float(p["Close"].iloc[-1]), float(p["Low"].iloc[-1])
     if not entry > stop:
+        stats[f"{group.lower()}_zero_risk"] += 1
         return None                                   # 손절폭 0 — 레이스 불가, 별도 집계
     fut = view.future(j)
     assert len(fut) == 0 or fut.index[0] > p.index[-1], "future lookahead"
@@ -203,7 +219,7 @@ def scan_ticker(t, view: _View, stats: Counter):
         stats["e1_bottom"] += 1
         e1_date = p.index[-1]
         ev = {"ticker": t, "e1_date": str(e1_date.date()), **covariates(p)}
-        ev["B"] = run_race(view, j, p)
+        ev["B"] = run_race(view, j, p, stats, "B")
         # E2: E1 다음 유효봉부터 정제 기준 20봉 안
         ev["A"] = None
         ev["e2_date"] = None
@@ -223,7 +239,7 @@ def scan_ticker(t, view: _View, stats: Counter):
             if lo <= ma and cl >= ma:
                 ev["e2_date"] = str(q.index[-1].date())
                 ev["e1_e2_gap"] = gap
-                ev["A"] = run_race(view, k, q)
+                ev["A"] = run_race(view, k, q, stats, "A")
                 stats["e2_found"] += 1
                 break
         events.append(ev)
@@ -256,10 +272,9 @@ def draw_controls(views, events, rng: random.Random, stats: Counter):
             p = v.prefix(j)
             if len(p) < abc_screener._min_bars() or not is_bottom(p):
                 continue
-            res = run_race(v, j, p)
+            res = run_race(v, j, p, stats, "C")
             if res is None:
-                stats["c_zero_risk"] += 1
-                continue
+                continue                              # 저유동성·손절폭 0 — 대조군에서도 빼고 계속 찾는다
             out.append({"ticker": u, "date": str(d.date()), "for": f"{ev['ticker']}@{ev['e2_date']}", "C": res})
             got += 1
         if got < C_PER_EVENT:
@@ -277,8 +292,8 @@ def summarize(rows):
 def verdict(sum_a, sum_c, halves):
     z, _ = harness.ev_gap_zscore(sum_c, sum_a)        # z > 0 = A가 C보다 큼
     checks = {
-        "ev_a_ge_min": sum_a["ev_R"] is not None and sum_a["ev_R"] >= EV_MIN,
-        "z_ge_min": z is not None and z >= Z_MIN,
+        "ev_a_ge_min": sum_a["ev_R"] is not None and sum_a["ev_R"] >= EV_MIN,   # A군 절대 EV
+        "z_ge_min": z is not None and z >= Z_MIN,                                # A−C 격차 z(§1-확인 1)
         "halves_hold": all(h["A"]["ev_R"] is not None and h["C"]["ev_R"] is not None
                            and h["A"]["ev_R"] >= EV_MIN and h["A"]["ev_R"] > h["C"]["ev_R"]
                            for h in halves.values()),
@@ -312,8 +327,6 @@ def main():
     a_rows = [dict(e["A"], date=e["e2_date"]) for e in events if e["A"] is not None]
     b_rows = [dict(e["B"], date=e["e1_date"]) for e in events if e["B"] is not None]
     c_rows = [dict(c["C"], date=c["date"]) for c in controls]
-    stats["a_zero_risk"] = sum(1 for e in events if e["e2_date"] and e["A"] is None)
-    stats["b_zero_risk"] = sum(1 for e in events if e["B"] is None)
 
     # 하드 실패: 어느 군이든 표본 0이면 측정 자체가 성립하지 않는다(CLAUDE.md "표본 0은 하드 실패").
     for name, rows in (("A", a_rows), ("B", b_rows), ("C", c_rows)):
