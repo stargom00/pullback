@@ -36,7 +36,7 @@
 | 09-08 | 2026-09-08_kr_imminent_pre_pivot_entry_ev | KR 돌파임박 피벗 아래 선진입 | **기각**: −0.054R, z −1.15 | docs/kr_us_strategy_map.md |
 | 09-08 | 2026-09-08_us_pullback_atr_pct_bucket_ev | US 눌림목 ATR% 구간별 EV | **기각**: z 2.30이나 반분 미재현 | docs/kr_us_strategy_map.md |
 | 09-08 | 2026-09-08_us_pullback_immediate_2nd_sort_candidates | US 눌림목 2차 정렬 후보 3개 | **기각**: 3후보 미달 | docs/kr_us_strategy_map.md |
-| 09-10 | 2026-09-10_jongga_exit_timing | 종가베팅 익일 시가 vs 익일 종가 매도 | **결과 기록 누락** — 결과 JSON `judgment.passed=false`(차이·z·반분 미달), docs엔 사전등록만 | docs/kr_jongga_betting_backtest.md "사전등록: 매도 타이밍" |
+| 09-10 | 2026-09-10_jongga_exit_timing | 종가베팅 익일 시가 vs 익일 종가 매도 | **미달 → 현행 유지**(+0.18%p, z 0.34) · ⚠️ 오염 봉 1건(201490.KQ) 포함 실행 — 빼면 재현 게이트 실패 조건(무효 가능, 재실행 여부 미정) · 결과 절 10-09 보충 | docs/kr_jongga_betting_backtest.md "사전등록: 매도 타이밍" > "결과(2026-09-10 실행)" |
 | 09-11 | 2026-09-11_confirm_entry_close_bench_revalidation | 종가진입 5탭 벤치마크 룩어헤드 수정 재검증 | **철회**(돌파임박 KR): z 1.84/1.93 | docs/confirm_entry_close_bench_revalidation.md |
 | 09-11 | 2026-09-11_imminent_score_rank_vs_return | 돌파임박 score 순위 vs 5일 수익률 | **기각**("무의미"): ρ −0.047 | docs/imminent_score_rank_vs_return.md |
 | 09-12 | 2026-09-12_buystop_bench_revalidation | 안D buy-stop 벤치마크 수정 재검증 | **원판정 유지**(기각) | docs/buystop_bench_revalidation.md |
@@ -51,11 +51,11 @@
 | 09-18 | 2026-09-18_fetch_window_730_vs_1900_regression | KR fetch 730→1900일 5탭 회귀 | **회귀확인**: 차이 0건 | docs/kr_us_strategy_map.md "KR 창 730→1900일" |
 | 10-06 | 2026-10-06_abc_display_only_check | v5.331 ABC 표시 전용 변경 전후 등급 | **회귀확인**: 2,455종목 차이 0건 | CLAUDE.md ABC 항목 |
 | 10-09 | 2026-10-09_ma99_breakout_retest | 바닥형 MA99 돌파 뒤 되돌림 지지 진입 EV | **기각**: A EV −0.053R, z 2.58(판정식 1·3 미달) | docs/ma99_breakout_retest.md §2 |
-| 10-09 | 2026-10-09_lowpoint_departure_rest_entry | 저점 주봉 히트 출발 다음 날 진입 EV(H1) · 출발 크기 상·하(H2) | **등록(미실행)** — 해석 확인 대기 | docs/lowpoint_departure_rest_entry.md |
+| 10-09 | 2026-10-09_lowpoint_departure_rest_entry | 저점 주봉 히트 출발 다음 날 진입 EV(H1) · 출발 크기 상·하(H2) | **등록(미실행)** — 해석 7건 승인 | docs/lowpoint_departure_rest_entry.md |
 
 **메모(옮겨 적을 때 애매했던 건)**
-- 09-10 종가베팅 매도 타이밍: docs 사전등록 절은 스크립트를 `2026-09-09_jongga_exit_timing.py`로 적었고 결과 절이 없다. 판정은
-  결과 JSON(`2026-09-10_jongga_exit_timing.stage2.json`)에만 남아 있다 — docs 결과 절 보충이 필요하다.
+- 09-10 종가베팅 매도 타이밍: 결과 절이 없어 2026-10-09에 결과 JSON 기준으로 보충했다. 그때 원자료에서 OHLC=0 오염 1건을 찾았다 —
+  판정(미달)은 같지만 오염을 빼면 재현 게이트가 실패하는 조건이라 "무효 가능"으로 표시한다(문서 결과 절).
 - 09-13 급등일 갭: 기준은 통과했지만 사전등록이 "기록만, 조건 변경 없음"이라 채택 분류가 아니다.
 - 09-01 재점화 종가/고가: 문서 표기 "판단 불가(임의 채택 안 함)" 그대로.
 - 09-11 score 순위: 문서 표기 "무의미" — 방향 가설 없는 측정을 기각으로 분류했다.
