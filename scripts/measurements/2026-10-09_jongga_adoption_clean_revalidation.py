@@ -100,6 +100,11 @@ class CleanAccess:
         v, j = self._jv(df, off)
         if j < 0 or not v.valid(j):
             return df.iloc[0:0]
+        # 원 evaluate의 "T까지 이력 ≥ MIN_BARS_AFTER_OFFSET(260)" 게이트는 원본 길이로만 본다 — 정제(갈래B 절단)로 T까지 이력이
+        # 그보다 짧아지면 같은 게이트 뜻대로 그날은 평가하지 않는다(빈 future → evaluate가 continue). 거래대금 순위(turnover_rank_at)는
+        # future를 안 보므로 원래대로 1봉만 있으면 참여한다. (2026-10-09 실행 전 결함 수정 — 문서 §1-부록)
+        if len(v.prefix(j)) < orig.MIN_BARS_AFTER_OFFSET:
+            return df.iloc[0:0]
         return v.future(j)
 
 

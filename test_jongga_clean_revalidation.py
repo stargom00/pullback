@@ -84,3 +84,17 @@ def test_patch_is_scoped_and_judgment_params_are_original():
     assert (harness.truncate_at, harness.future_after) == before                   # 블록 밖에선 원래 함수
     assert m.orig.OFFSETS == harness.checkpoints(60, 950, 10) and m.orig.ROUND_TRIP_COST == 0.003
     assert m.NET_MIN == 0.005 and m.Z_MIN == 1.96 and m.RUN_MARKETS == ["KR"]
+
+
+def test_short_clean_history_skipped_but_still_ranked():
+    """갈래B(5거래일+ 연속 무효) 절단으로 T까지 정제 이력이 260봉 미만이 되면 평가는 건너뛰고(원 게이트 뜻), 순위엔 참여한다.
+    2026-10-09 첫 실행이 이 경우 iloc[-2] 오류로 멈췄다(결과 미관측) — 그 재발 방지."""
+    df = _df(400)
+    for i in range(300, 306):                                   # 6봉 연속 무효 → 그 앞 전부 절단
+        df = _zero(df, i)
+    data = {"CUT.KQ": df, "OK.KS": _df()}
+    off = 400 - 1 - 320                                         # T = 320번째 봉 → 정제 이력 14봉
+    cln, rank = _eval(data, off, clean=True)
+    assert "CUT.KQ" in rank and {r["ticker"] for r in cln} == {"OK.KS"}
+    raw, _ = _eval(data, off, clean=False)
+    assert "CUT.KQ" in {r["ticker"] for r in raw}               # 원 방법은 원본 길이로 통과시킨다
