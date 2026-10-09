@@ -72,7 +72,7 @@ def supply_zone(p_prev):
 
 def find_entry(view, k_bull: int, zone) -> dict:
     """기준봉(원본 k_bull) 뒤 20유효거래일 안 확인봉 탐색. 반환 {"reason", "k_confirm", "day", "stop", ...}.
-    reason: confirmed · no_zone · overhead_supply(매물대 하단 > 기준봉 종가 — 위 매물 잔존) · break_zone(종가 < 매물대 하단) · break_ma50(종가 < MA50) · break_both ·
+    reason: confirmed · no_zone · halt_truncated(창 안 장기 정지로 정제 이력 < 50봉) · overhead_supply(매물대 하단 > 기준봉 종가 — 위 매물 잔존) · break_zone(종가 < 매물대 하단) · break_ma50(종가 < MA50) · break_both ·
             no_pullback · fail_zone_only(②만 실패) · fail_ma_only(③만 실패) · fail_both · no_confirm_bar(②·③·눌림 다 됐는데 확인봉 없음) ·
             window_incomplete(데이터 끝).
     각 봉은 그 봉까지 정제한 df에서 판정(무효봉 건너뜀, 거래일로 안 셈). 이탈 판정을 먼저 본다(확인봉 자신도 이탈하면 안 된다).
@@ -92,6 +92,9 @@ def find_entry(view, k_bull: int, zone) -> dict:
         if day > WINDOW:
             break
         p = view.prefix(k)
+        if len(p) < MA_SLOW:
+            # 확인 창 안 5거래일+ 연속 무효(장기 정지) → 정제(갈래B)가 그 앞을 잘라 MA50을 못 그린다 — 미진입, 사유 따로(실행 전 결함 수정, 문서 §1-부록)
+            return {"reason": "halt_truncated", "day": day}
         o, h, lo, c = (float(p[x].iloc[-1]) for x in ("Open", "High", "Low", "Close"))
         ma_f, ma_s = line.ma_at(p, 0, MA_FAST), line.ma_at(p, 0, MA_SLOW)
         min_low = lo if min_low is None else min(min_low, lo)

@@ -131,6 +131,14 @@ def test_overhead_supply_counted_separately():
     assert _fe([D1, D2, D3] + FLAT, zone={"lo": 110.0, "hi": 114.0})[0] != "overhead_supply"      # 하단 = 종가는 "위"가 아님
 
 
+def test_halt_inside_window_is_no_entry_not_crash():
+    """확인 창 안에 6봉 연속 OHLC=0(장기 정지) → 정제가 그 앞을 잘라 MA50 불가 → 미진입(halt_truncated). 2026-10-09 첫 실행이 여기서
+    MA10 이력 부족 하드 실패로 멈췄다(결과 미관측)."""
+    zero = (0, 0, 0, 107)
+    reason, d, _ = _fe([D1] + [zero] * 6 + [D2, D3] + FLAT)
+    assert reason == "halt_truncated" and d is None
+
+
 def test_no_zone_is_no_entry():
     assert _fe([D1, D2, D3] + FLAT, zone=None)[0] == "no_zone"
 
