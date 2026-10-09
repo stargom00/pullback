@@ -398,6 +398,43 @@ def run_stamp(data: dict | None = None) -> dict:
     return out
 
 
+class CleanView:
+    """한 종목의 '그 봉까지 자르고 정제한' 일봉 접근자(2026-10-09 승격 — MA99 측정 스크립트의 _View와 같은 정의,
+    그 스크립트는 실행 후라 그대로 둔다).
+
+    prefix(j)  = clean_at_checkpoint(raw.iloc[:j+1]) — j봉 시점에 프로덕션이 봤을 데이터(룩어헤드 없음)
+    valid(j)   = j봉이 정제 후에도 남는가(무효봉이면 False — 그 봉에선 진입·판정하지 않는다)
+    future(j)  = j봉 다음부터 각 봉이 자기 시점 정제에서 남는 봉만(레이스 입력)
+    무효봉이 하나도 없는 종목은 전체를 한 번만 정제해 잘라 쓴다(dirty=False — 접두 정제 = 전체 정제의 접두)."""
+
+    def __init__(self, raw: pd.DataFrame):
+        self.raw = raw
+        self.full = clean_at_checkpoint(raw)
+        self.dirty = not (len(self.full) == len(raw) and self.full.index.equals(raw.index))
+        self._cache = {}
+
+    def prefix(self, j: int) -> pd.DataFrame:
+        if not self.dirty:
+            return self.full.iloc[:j + 1]
+        p = self._cache.get(j)
+        if p is None:
+            p = clean_at_checkpoint(self.raw.iloc[:j + 1])
+            self._cache[j] = p
+        return p
+
+    def valid(self, j: int) -> bool:
+        if not self.dirty:
+            return True
+        p = self.prefix(j)
+        return len(p) > 0 and p.index[-1] == self.raw.index[j]
+
+    def future(self, j: int) -> pd.DataFrame:
+        if not self.dirty:
+            return self.full.iloc[j + 1:]
+        keep = [k for k in range(j + 1, len(self.raw)) if self.valid(k)]
+        return self.raw.iloc[keep]
+
+
 def truncate_at(df: pd.DataFrame, off: int) -> pd.DataFrame:
     n = len(df)
     return df.iloc[: n - off] if off > 0 else df
