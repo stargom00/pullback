@@ -53,7 +53,7 @@
 | 10-09 | 2026-10-09_ma99_breakout_retest | 바닥형 MA99 돌파 뒤 되돌림 지지 진입 EV | **기각**: A EV −0.053R, z 2.58(판정식 1·3 미달) | docs/ma99_breakout_retest.md §2 |
 | 10-09 | 2026-10-09_lowpoint_departure_rest_entry | 저점 주봉 히트 출발 다음 날 진입 EV(H1) · 출발 크기 상·하(H2) | **H1 기각**: A −0.132R vs C +0.137R, z −8.08 · **H2 기각**: z 0.38 (기각 확정 — 생존편향 원칙) | docs/lowpoint_departure_rest_entry.md §2 |
 | 10-09 | 2026-10-09_jongga_adoption_clean_revalidation | 종가베팅 채택(조합 A) 재현 검증 — 원문 그대로 + 데이터 정제만(CleanView), 3.54→1.80 분해 | **채택 유지(통과)**: 정제 후 +0.796%, z 3.20, n 301, 반분 +1.005/+0.601%. 3.54→1.80 하락은 거의 전부 오염(201490.KQ T+1 시가 0 → −100%) | docs/jongga_adoption_clean_revalidation.md |
-| 10-09 | 2026-10-09_jongga_exit_timing_clean(미작성) | 종가베팅 매도 타이밍 (a)익일 시가 vs (d)익일 종가 — 09-10 측정을 데이터 정제만 바꿔 재측정, Bonferroni 2개(z 2.24, 해석 기본값) | **등록(미실행)** — 실행하지 않음(2026-10-09 사용자 지시), 해석 기본값 확인 필요 | docs/jongga_exit_timing_clean.md |
+| 10-09 | 2026-10-09_jongga_exit_timing_clean | 종가베팅 매도 타이밍 (a)익일 시가 vs (d)익일 종가 — 09-10 측정을 데이터 정제만 바꿔 재측정, Bonferroni 2개(z 2.24, 해석 기본값) | **등록(미실행)** — 해석 기본값 승인·실행 지시(2026-10-09) | docs/jongga_exit_timing_clean.md |
 | 10-09 | 2026-10-09_bull_candle_departure_entry | 저점 주봉 히트 → **기준양봉**(종가 ≥ 전일×1.15·양봉) 출발 다음 날 진입 EV — 직전 측정(+5% 고가 출발) 기각 후 정의 수정, Bonferroni 2개(z 2.24) | **기각**: A −0.162R vs C +0.088R, z −7.33, 반분 모두 A<C — 출발 진입 종결(해석 기본값 2) | docs/bull_candle_departure_entry.md |
 
 **메모(옮겨 적을 때 애매했던 건)**
