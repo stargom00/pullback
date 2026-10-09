@@ -24,7 +24,11 @@ from datetime import datetime, timedelta, timezone
 
 KST = timezone(timedelta(hours=9))
 
-DAILY_LIMIT = 20         # 사용자 지시: 일일 총 호출 상한
+DAILY_LIMIT = 20         # 사용자 지시: 일일 총 호출 상한(아래 SEPARATE_BUCKETS 호출자는 제외)
+# v5.346(사용자 지시 2026-10-10 "상한 = 호출자별. 기존 3모듈 20회 공유 유지, 뉴스 요약 별도 NEWS_SUMMARY_DAILY_LIMIT(기본 50),
+# 같은 파일 영속"): 이 호출자들은 공유 20회를 쓰지 않고 자기 버킷만 센다 — 건당 비용이 훨씬 싼 Haiku 단건 요약이 웹서치를 쓰는
+# 세 모듈(돈의흐름·테마·캘린더)의 예산을 잡아먹지 않게. 상한은 환경변수(호출 시점에 읽음), 상태는 같은 파일의 "buckets".
+SEPARATE_BUCKETS = {"news_summary": ("NEWS_SUMMARY_DAILY_LIMIT", 50)}
 WARN_THRESHOLD = 14      # 상한의 70% — 경고 알림 기준
 WARN_MESSAGE_TEMPLATE = "⚠️ Claude API 호출 {count}/{limit} — 평소보다 많음, 확인 필요"
 BLOCK_MESSAGE = "🛑 일일 상한 도달 — Claude API 호출 차단됨. 원인 확인 필요"
@@ -68,7 +72,17 @@ def _load() -> dict:
             return data
     except (OSError, ValueError):
         pass
-    return {"date": _today(), "count": 0, "warned": False, "blocked_notified": False, "pending_alert": None}
+    return {"date": _today(), "count": 0, "warned": False, "blocked_notified": False, "pending_alert": None, "buckets": {}}
+
+
+def bucket_limit(caller: str) -> int:
+    """별도 버킷 호출자의 일일 상한(환경변수, 잘못된 값이면 기본값)."""
+    env, default = SEPARATE_BUCKETS[caller]
+    try:
+        v = int(os.environ.get(env, default))
+        return v if v >= 0 else default
+    except (TypeError, ValueError):
+        return default
 
 
 def _save(data: dict):
@@ -88,6 +102,15 @@ def check_and_count(caller: str) -> tuple[bool, str | None]:
     /api/apiguard/status로 노출된 pending_alert를 얼마냐봇이 폴링해 텔레그램
     으로 전달할 수 있게 한다."""
     data = _load()
+    if caller in SEPARATE_BUCKETS:
+        b = data.setdefault("buckets", {})
+        lim = bucket_limit(caller)
+        if b.get(caller, 0) >= lim:
+            print(f"[api_call_guard] {caller}: 별도 일일 상한({lim}) 도달 — 차단")
+            return False, None
+        b[caller] = b.get(caller, 0) + 1
+        _save(data)
+        return True, None
     if data["count"] >= DAILY_LIMIT:
         if not data["blocked_notified"]:
             data["blocked_notified"] = True
@@ -118,4 +141,5 @@ def status() -> dict:
         "warned": data["warned"],
         "blocked": data["count"] >= DAILY_LIMIT,
         "pending_alert": data.get("pending_alert"),
+        "buckets": {c: {"count": (data.get("buckets") or {}).get(c, 0), "limit": bucket_limit(c)} for c in SEPARATE_BUCKETS},
     }

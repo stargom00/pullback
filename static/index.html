@@ -577,6 +577,13 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .fund-box .vd.exp{color:var(--px-down);border:1px solid var(--px-down)}
 .fund-box .note{display:block;margin-top:4px;font-size:11px;opacity:max(.75,var(--fade-floor))}
 .journal-btn{width:100%;margin-top:10px;padding:7px;background:transparent;
+/* v5.346 카드 "🗞 왜?" — 뉴스 원인 3줄 요약 */
+.news-why{margin-top:10px}
+.news-why-out{margin-top:6px;font-size:12.5px;line-height:1.5}
+.news-why-out:empty{display:none}
+.news-why-lines div{margin:1px 0}
+.news-why-meta{color:var(--muted);font-size:11px;margin:4px 0}
+.news-why-err{color:var(--c-red-fg2);font-size:12px;margin:4px 0}
   border:1px dashed var(--line);color:var(--muted);border-radius:8px;font-size:12px;
   cursor:pointer;font-family:inherit;transition:all .12s}
 .journal-btn:hover{border-color:var(--amber);color:var(--amber)}
@@ -1404,7 +1411,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.345</span>
+      <span class="ver mono" id="verBadge">v5.346</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -2787,6 +2794,80 @@ function searchResultCard(s) {
   </div>`;
 }
 
+// v5.346(사용자 지시 2026-10-10): 카드 "🗞 왜?" — 최근 7일 뉴스(+KR 공시)로 움직임 원인을 Claude 3줄 요약.
+// 누를 때만 생성(자동 생성 금지), 같은 날 재클릭은 서버 캐시(API 재호출 없음), "강제 갱신"은 별도 버튼(서버 쿨다운 120초).
+// 가드·캐시는 서버 news_summary.get_summary() 한 곳 — 여기는 요청과 표시만. 버튼 위치: 스캔 탭 5개 카드 + 저점일지 평가 카드.
+const NEWS_WHY_MODES = new Set(['pullback', 'turnaround', 'imminent', 'boxbreak', 'breakout']);
+function _newsAttr(v) {
+  return _escapeHtml(v).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function newsWhyBoxHtml(ticker, market, name) {
+  if (!ticker) return '';
+  return `<div class="news-why" data-ticker="${_newsAttr(ticker)}" data-market="${_newsAttr(market || '')}" data-name="${_newsAttr(name || '')}">
+    <button type="button" class="n-btn sm news-why-btn" onclick="event.stopPropagation();newsWhy(this,false)" title="최근 7일 뉴스${market === 'US' ? '' : '·공시'}로 움직임 원인을 3줄 요약(누를 때만 생성, 같은 날은 캐시)">🗞 왜?</button>
+    <div class="news-why-out"></div>
+  </div>`;
+}
+// 서버 응답 → 표시 HTML(순수 함수 — test_news_why_frontend.py가 Node로 실행해 상태별 문구를 고정).
+function newsWhyHtml(res) {
+  if (!res || !res.status) return `<div class="news-why-err">응답 없음</div>`;
+  const esc = _escapeHtml;
+  const refresh = `<button type="button" class="n-btn sm" onclick="event.stopPropagation();newsWhy(this,true)">강제 갱신</button>`;
+  const meta = () => {
+    const parts = [];
+    if (res.status === 'cached') parts.push('캐시');
+    if (res.model) parts.push(esc(res.model));
+    if (res.tokens_in != null && res.model) parts.push(`토큰 ${res.tokens_in}/${res.tokens_out}`);
+    parts.push(`뉴스 ${res.news_count ?? 0}건` + (res.market === 'KR' ? ` · 공시 ${res.disclosure_count ?? 0}건` : ''));
+    if (res.generated_at) parts.push(esc(res.generated_at) + ' KST');
+    return `<div class="news-why-meta">${parts.join(' · ')}</div>`;
+  };
+  const lines = () => `<div class="news-why-lines">${(res.lines || []).map(l => `<div>${esc(l)}</div>`).join('')}</div>`;
+  switch (res.status) {
+    case 'ok':
+    case 'cached':
+    case 'no_news':
+      return lines() + meta() + refresh;
+    case 'cooldown':
+      return lines() + meta() + `<div class="news-why-err">강제 갱신은 ${res.retry_after_sec ?? ''}초 뒤에 다시</div>`;
+    case 'no_key':
+      return `<div class="news-why-err">API 키 미설정</div>`;
+    case 'limit':
+      return `<div class="news-why-err">오늘 한도 초과${res.limit != null ? ` (하루 ${res.limit}회)` : ''}</div>`;
+    case 'in_progress':
+      return `<div class="news-why-err">이미 요약 중</div>`;
+    case 'news_error':
+      return `<div class="news-why-err">⚠ 뉴스 수집 실패 — ${esc(res.message || '')}</div>`;
+    case 'summary_error':
+      return `<div class="news-why-err">⚠ 요약 실패 — ${esc(res.message || '')}</div>`
+        + (res.raw ? `<div class="news-why-meta">원문: ${esc(res.raw)}</div>` : '') + refresh;
+    default:
+      return `<div class="news-why-err">⚠ ${esc(res.message || res.status)}</div>`;
+  }
+}
+async function newsWhy(btn, force) {
+  const box = btn.closest('.news-why');
+  if (!box) return;
+  const out = box.querySelector('.news-why-out');
+  const main = box.querySelector('.news-why-btn');
+  if (main) main.disabled = true;
+  out.innerHTML = `<div class="news-why-meta">${force ? '다시 요약 중…' : '불러오는 중…'}</div>`;
+  try {
+    const res = await fetch('/api/news_summary', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticker: box.dataset.ticker, market: box.dataset.market, name: box.dataset.name, force: !!force }),
+    });
+    const text = await res.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch (_) { /* 아래에서 HTTP 상태로 보인다 */ }
+    out.innerHTML = data ? newsWhyHtml(data) : `<div class="news-why-err">⚠ 요청 실패 — HTTP ${res.status}</div>`;
+  } catch (e) {
+    out.innerHTML = `<div class="news-why-err">⚠ 요청 실패 — ${_escapeHtml(e && e.message || String(e))}</div>`;
+  } finally {
+    if (main) main.disabled = false;
+  }
+}
+
 function card(s) {
   if (s.mode === 'breakdown') return breakdownCard(s);
   if (s.mode === 'jongga') return jonggaCard(s);
@@ -3073,6 +3154,7 @@ function card(s) {
         <div class="sig-list">${items}</div>
       </div>`;
     })() : ''}
+    ${NEWS_WHY_MODES.has(s.mode) ? newsWhyBoxHtml(s.ticker, s.market, s.name) : ''}
     ${s.ticker ? `
     <button class="journal-btn" onclick="openJournal('${s.ticker}')">+ 일지에 추가</button>${s.mode === 'leader' ? `<button class="journal-btn" style="margin-left:6px;background:${isLeaderConversionWatch(s.ticker) ? 'var(--c-green-bg1)' : 'var(--c-blue-bg8)'};border-color:${isLeaderConversionWatch(s.ticker) ? 'var(--c-green-bg1)' : 'var(--c-blue-bg8)'};color:${isLeaderConversionWatch(s.ticker) ? 'inherit' : 'var(--c-blue-fg12)'}" onclick="watchLeaderConversion(this,'${s.ticker}')" ${isLeaderConversionWatch(s.ticker) ? 'disabled' : ''} title="눌림목 전환 관찰 등록 — 손절 없음, 봇 알림 없음. 대장관찰 히트의 74%가 60봉 내 눌림목 탭에 전환(중앙값 6봉). 눌림목 탭을 열 때마다 자동으로 전환 여부를 확인해요.">${isLeaderConversionWatch(s.ticker) ? '✓ 관찰중' : '👁 눌림목 전환 관찰'}</button>` : `<button class="journal-btn" style="margin-left:6px;background:${isPendingWatch(s.ticker) ? 'var(--c-green-bg1)' : 'var(--c-green-bg2)'};border-color:${isPendingWatch(s.ticker) ? 'var(--c-green-bg1)' : 'var(--c-green-bg2)'}" onclick="quickWatch(this,'${s.ticker}')" ${isPendingWatch(s.ticker) ? 'disabled' : ''} title="원클릭 봇 감시 등록">${isPendingWatch(s.ticker) ? '✓ 감시중' : '⚡ 감시'}</button>`}` : ''}
     </div>
@@ -8309,7 +8391,8 @@ function _lpeCard(rec) {
       <textarea id="lpeMemo_${_escapeHtml(rec.id)}" rows="1" placeholder="메모"
         oninput="_lpe.memoDraft['${_escapeHtml(rec.id)}']=this.value">${_escapeHtml(_lpe.memoDraft[rec.id] ?? rec.memo ?? '')}</textarea>
       <button type="button" class="n-btn sm" onclick="lpeSaveMemo('${_escapeHtml(rec.id)}')">메모 저장</button>
-    </div>` : ''}
+    </div>
+    ${(rec.mkt === 'KR' || rec.mkt === 'US') ? newsWhyBoxHtml(rec.code, rec.mkt, lpDisplayName(rec)) : ''}` : ''}
   </section>`;
 }
 // v5.327: 접힌 줄 클릭 = 펼침/접힘. 줄 안의 버튼·링크·입력 클릭은 토글하지 않는다(재평가·관심·삭제·TV 링크).

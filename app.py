@@ -5,6 +5,15 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.346 [카드 "🗞 왜?" 뉴스 원인 요약 — 사용자 지시 2026-10-10] 스캔 탭 5개(눌림목·추세전환·돌파임박·박스돌파·돌파) 종목 카드와
+  저점일지 평가 카드에 "🗞 왜?" 버튼. 누를 때만 Claude(환경변수 CLAUDE_MODEL_NEWS, 기본 claude-haiku-4-5-20251001, max_tokens 300)가
+  최근 7일 종목 뉴스(최대 15건) + KR 공시(최근 7일 최대 10건) + 최근 5일 일봉(등락률·거래대금 배수)으로 3줄 요약 — ① 무슨 일(날짜)
+  ② 성격(일회성 이벤트 / 실적·구조 변화 / 희석) ③ 근거, 원인 없으면 "뉴스상 원인 불명", US는 끝에 "US 공시 미확인". 매수·매도 의견·추측 금지.
+  소스: naver 모바일 뉴스·공시 JSON, Yahoo Finance RSS(0단계 실측). 새 모듈 news_summary.py(app.py 미의존) + POST /api/news_summary.
+  가드는 함수 레벨·파일 영속(CLAUDE.md 유료 API 원칙): 종목+KST 날짜 캐시(news_summary_cache.json, 같은 날 재클릭 = API 재호출 없음,
+  토큰 in/out·모델 저장) · 강제 갱신 쿨다운 120초 · 종목별 진행 중 잠금 · api_call_guard 별도 버킷 NEWS_SUMMARY_DAILY_LIMIT(기본 50 —
+  기존 돈의흐름·테마·캘린더 20회 공유는 그대로, /api/apiguard/status에 buckets 추가). 뉴스·공시 0건이면 API 미호출. 키(ANTHROPIC_API_KEY)
+  없으면 "API 키 미설정", 한도 넘으면 "오늘 한도 초과", 뉴스 수집 실패와 요약 실패(형식 불일치 포함)를 따로 표시.
 v5.345 [상태 줄 누수 수정 + 저점 매매 종료 사유 + 눌림형 → 추세 눌림/하락 추세 — 사용자 지시] ① 버그수정: ABC 탭 → 저점일지 등 별도
     화면 탭으로 가면 "스캔 기준 2026-10-08 19:42 KST · 728건 · 번들 캐시만 읽음" 줄(#status)이 남았다(headless Chrome 재현 — ABC→
     저점일지 5페이지·ABC 해시 후 이동 재현, 저점일지 해시 새로고침·홈 직접 진입은 안 남음). 원인: #status는 #content와 같은 스캔형
@@ -8803,6 +8812,7 @@ import theme_lifecycle
 import theme_reignition
 import macro_calendar
 import api_call_guard
+import news_summary
 
 app = FastAPI(title="눌림목 스캐너")
 
@@ -9022,7 +9032,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.345"
+VERSION = "v5.346"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -16428,6 +16438,45 @@ async def moving_averages(ticker: str):
         return JSONResponse(out)
     except Exception:
         return JSONResponse({"ok": False}, status_code=500)
+
+
+def _news_summary_df(ticker: str, market: str):
+    """"🗞 왜?" 입력용 일봉 — /api/ma와 같은 순서(스캔 캐시 → 없으면 _fetch). KR 코드에 접미사가 없으면 .KS를 붙여 조회한다
+    (naver는 6자리 코드만 보므로 접미사는 조회 결과에 영향 없음 — CLAUDE.md naver_kr.to_code 항목)."""
+    t = ticker.upper().strip()
+    for key in ("data:kr", "data:us"):
+        bundle = _data_cache.get(key)
+        if bundle and t in bundle.get("data", {}):
+            return bundle["data"][t]
+    if market == "KR" and "." not in t:
+        t = t + ".KS"
+    return _fetch(t)
+
+
+@app.post("/api/news_summary")
+async def news_summary_route(request: Request):
+    """v5.346 카드 "🗞 왜?" — 최근 7일 뉴스(+KR 공시)로 움직임 원인을 Claude 3줄 요약. 누를 때만, 같은 날 캐시 우선.
+    가드(캐시·쿨다운·진행 중 잠금·일일 상한)는 news_summary.get_summary() 안에 있다(함수 레벨 — CLAUDE.md 유료 API 가드 원칙).
+    body: {ticker, market?, name?, force?}"""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"status": "bad_request", "message": "JSON 본문 필요"}, status_code=400)
+    ticker = str(body.get("ticker") or "").strip()
+    if not ticker:
+        return JSONResponse({"status": "bad_request", "message": "ticker 필요"}, status_code=400)
+    _, mkt = news_summary.normalize(ticker, body.get("market"))
+    loop = asyncio.get_event_loop()
+    try:
+        df = await loop.run_in_executor(_executor, _news_summary_df, ticker, mkt)
+    except Exception as e:
+        print(f"[news_summary] {ticker} 일봉 조회 실패: {type(e).__name__}: {e}")
+        df = None
+    bars = news_summary.price_rows(df)
+    res = await loop.run_in_executor(_executor, lambda: news_summary.get_summary(
+        ticker, mkt, str(body.get("name") or ""), bars, bool(body.get("force"))))
+    res.pop("generated_ts", None)
+    return JSONResponse(res)
 
 
 @app.get("/api/jongga/candidates")

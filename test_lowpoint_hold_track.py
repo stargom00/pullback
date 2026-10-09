@@ -186,7 +186,7 @@ def test_eval_sort_interest_then_newest():
     assert "created_at: kstStr(new Date(), 19)" in SRC
 
 
-CARD_FNS = ("lpeTally", "lpeSetupOf", "lpeChecklist", "lpeManualEffective", "_lpeMark", "lpDisplayName", "lpPriceNoteMark", "_lpeCard")
+CARD_FNS = ("lpeTally", "lpeSetupOf", "lpeChecklist", "lpeManualEffective", "_lpeMark", "lpDisplayName", "lpPriceNoteMark", "_newsAttr", "newsWhyBoxHtml", "_lpeCard")   # v5.346: 평가 카드 "🗞 왜?"
 
 
 def _card(open_):
