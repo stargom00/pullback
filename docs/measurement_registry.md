@@ -36,7 +36,7 @@
 | 09-08 | 2026-09-08_kr_imminent_pre_pivot_entry_ev | KR 돌파임박 피벗 아래 선진입 | **기각**: −0.054R, z −1.15 | docs/kr_us_strategy_map.md |
 | 09-08 | 2026-09-08_us_pullback_atr_pct_bucket_ev | US 눌림목 ATR% 구간별 EV | **기각**: z 2.30이나 반분 미재현 | docs/kr_us_strategy_map.md |
 | 09-08 | 2026-09-08_us_pullback_immediate_2nd_sort_candidates | US 눌림목 2차 정렬 후보 3개 | **기각**: 3후보 미달 | docs/kr_us_strategy_map.md |
-| 09-10 | 2026-09-10_jongga_exit_timing | 종가베팅 익일 시가 vs 익일 종가 매도 | **무효(오염), 재검증 결과 대기** — 원판정 미달(+0.18%p, z 0.34)이었으나 OHLC=0 오염 1건(201490.KQ) 포함, 빼면 재현 게이트 실패. 재실행 안 함(2026-10-09 사용자 지시). 정제 후 재측정은 jongga_exit_timing_clean으로 새로 등록 | docs/kr_jongga_betting_backtest.md "사전등록: 매도 타이밍" > "결과(2026-09-10 실행)" |
+| 09-10 | 2026-09-10_jongga_exit_timing | 종가베팅 익일 시가 vs 익일 종가 매도 | **무효(오염)** → 정제 재측정(10-09 exit_timing_clean) 미달로 대체 — 원판정 미달(+0.18%p, z 0.34)이었으나 OHLC=0 오염 1건(201490.KQ) 포함, 빼면 재현 게이트 실패. 재실행 안 함(2026-10-09 사용자 지시). 정제 후 재측정은 jongga_exit_timing_clean으로 새로 등록 | docs/kr_jongga_betting_backtest.md "사전등록: 매도 타이밍" > "결과(2026-09-10 실행)" |
 | 09-11 | 2026-09-11_confirm_entry_close_bench_revalidation | 종가진입 5탭 벤치마크 룩어헤드 수정 재검증 | **철회**(돌파임박 KR): z 1.84/1.93 | docs/confirm_entry_close_bench_revalidation.md |
 | 09-11 | 2026-09-11_imminent_score_rank_vs_return | 돌파임박 score 순위 vs 5일 수익률 | **기각**("무의미"): ρ −0.047 | docs/imminent_score_rank_vs_return.md |
 | 09-12 | 2026-09-12_buystop_bench_revalidation | 안D buy-stop 벤치마크 수정 재검증 | **원판정 유지**(기각) | docs/buystop_bench_revalidation.md |
@@ -53,7 +53,7 @@
 | 10-09 | 2026-10-09_ma99_breakout_retest | 바닥형 MA99 돌파 뒤 되돌림 지지 진입 EV | **기각**: A EV −0.053R, z 2.58(판정식 1·3 미달) | docs/ma99_breakout_retest.md §2 |
 | 10-09 | 2026-10-09_lowpoint_departure_rest_entry | 저점 주봉 히트 출발 다음 날 진입 EV(H1) · 출발 크기 상·하(H2) | **H1 기각**: A −0.132R vs C +0.137R, z −8.08 · **H2 기각**: z 0.38 (기각 확정 — 생존편향 원칙) | docs/lowpoint_departure_rest_entry.md §2 |
 | 10-09 | 2026-10-09_jongga_adoption_clean_revalidation | 종가베팅 채택(조합 A) 재현 검증 — 원문 그대로 + 데이터 정제만(CleanView), 3.54→1.80 분해 | **채택 유지(통과)**: 정제 후 +0.796%, z 3.20, n 301, 반분 +1.005/+0.601%. 3.54→1.80 하락은 거의 전부 오염(201490.KQ T+1 시가 0 → −100%) | docs/jongga_adoption_clean_revalidation.md |
-| 10-09 | 2026-10-09_jongga_exit_timing_clean | 종가베팅 매도 타이밍 (a)익일 시가 vs (d)익일 종가 — 09-10 측정을 데이터 정제만 바꿔 재측정, Bonferroni 2개(z 2.24, 해석 기본값) | **등록(미실행)** — 해석 기본값 승인·실행 지시(2026-10-09) | docs/jongga_exit_timing_clean.md |
+| 10-09 | 2026-10-09_jongga_exit_timing_clean | 종가베팅 매도 타이밍 (a)익일 시가 vs (d)익일 종가 — 09-10 측정을 데이터 정제만 바꿔 재측정, Bonferroni 2개(z 2.24, 해석 기본값) | **미달 — 현행(익일 시가) 유지**: 게이트 통과(+0.796%), (d)−(a) +0.528%p, 대응 z 1.41(< 2.24), 이전 절반 +0.289%p(< 0.30) | docs/jongga_exit_timing_clean.md |
 | 10-09 | 2026-10-09_bull_candle_departure_entry | 저점 주봉 히트 → **기준양봉**(종가 ≥ 전일×1.15·양봉) 출발 다음 날 진입 EV — 직전 측정(+5% 고가 출발) 기각 후 정의 수정, Bonferroni 2개(z 2.24) | **기각**: A −0.162R vs C +0.088R, z −7.33, 반분 모두 A<C — 출발 진입 종결(해석 기본값 2) | docs/bull_candle_departure_entry.md |
 
 **메모(옮겨 적을 때 애매했던 건)**
