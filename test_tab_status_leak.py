@@ -21,7 +21,7 @@ import pytest
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC = open(os.path.join(ROOT, "static", "index.html"), encoding="utf-8").read()
-CUSTOM = ["journal", "moneyflow", "positions", "calendar", "surge_observe", "lowpoint_track", "newlisting"]
+CUSTOM = ["journal", "moneyflow", "positions", "calendar", "surge_observe", "lowpoint_track", "newlisting", "coin_journal"]   # v5.347 코인 일지 +1
 
 
 def _fn(name):
@@ -46,7 +46,7 @@ let mode = 'abc';
 const noop = () => {};
 const hideFilterButtonsIfNotApplicable = noop, applyMarketButtonsEnabled = noop, updateMoreTabsToggle = noop, writeTabHash = noop,
       renderJournal = noop, onEnterMoneyflowTab = noop, onEnterPositionsTab = noop, onEnterCalendarTab = noop,
-      onEnterSurgeObserveTab = noop, onEnterLowpointTrackTab = noop, onEnterNewlistingTab = noop, load = noop;
+      onEnterSurgeObserveTab = noop, onEnterLowpointTrackTab = noop, onEnterNewlistingTab = noop, onEnterCoinJournalTab = noop, load = noop;
 """
 
 

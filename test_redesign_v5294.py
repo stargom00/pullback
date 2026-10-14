@@ -29,6 +29,7 @@ EXISTING_MODES = {
     "breakdown", "pattern", "stage2", "ibd9", "strong_pivot", "earnings", "surge",
     "lowpoint_track",   # v5.302 신설, v5.303부터 오른쪽 작은 메뉴(일지 옆) — 새 키는 여기 명시적으로 추가해야 통과
     "newlisting",       # v5.314 신설(더보기) → v5.315 메인 줄(추세전환 옆) — 신규상장 13~20개월차
+    "coin_journal",     # v5.347 신설 — 오른쪽 작은 메뉴(저점일지 옆), 바이낸스 선물 연습 기록
 }
 
 
@@ -158,7 +159,7 @@ def test_tab_owned_banners_are_hidden_on_tab_switch():
     src = _fn("applyTabViewState")
     assert "Object.entries(TAB_OWNED_BANNERS)" in src and "mode !== owner" in src
     assert "IDXBAR_HIDDEN_MODES.has(mode)" in src
-    assert "const IDXBAR_HIDDEN_MODES = new Set(['calendar', 'journal', 'lowpoint_track', 'newlisting']);" in TEXT
+    assert "const IDXBAR_HIDDEN_MODES = new Set(['calendar', 'journal', 'lowpoint_track', 'newlisting', 'coin_journal']);" in TEXT   # v5.347 코인 일지
 
 
 def test_journal_table_is_six_columns_everywhere():
@@ -310,6 +311,6 @@ def test_reignition_watch_block_is_gone_but_data_kept_for_home():
 
 def test_lowpoint_track_is_next_to_journal_not_in_more_panel():
     util = re.findall(r'data-mode="(\w+)"', _element("utilTabs", "</nav>"))
-    assert util == ["themes", "eod", "journal", "lowpoint_track"], util
+    assert util == ["themes", "eod", "journal", "lowpoint_track", "coin_journal"], util   # v5.347 코인일지는 저점일지 옆
     more = re.findall(r'data-mode="(\w+)"', _element("moreTabsPanel", "</header>"))
     assert "lowpoint_track" not in more

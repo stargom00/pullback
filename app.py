@@ -5,6 +5,17 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.347 [코인 일지 탭 — 사용자 지시 2026-10-14] 바이낸스 BTCUSDT 선물 연습 기록용 "코인일지" 탭(주식 일지와 별개 — 파일
+  coin_journal.json, API GET·POST /api/coin-journal · PUT·DELETE /api/coin-journal/{id}, 기존 /api 로그인 보호 그대로). 한 건 = 한 사이클:
+  1차 진입(가격·시각·증거금) · 목표(문구+가격) · 추가 진입 1·2 · 덜어내기(추가분 전량 청산, 추가 1·2에 같은 가격 — 단순화) · 종료(남은
+  전량) · 종료 사유(목표도달/포기선/강제청산/충동/기타, 종료 시 필수) · 한 줄 복기. 상태 자동(진행중 → 덜어냄·보유중 → 종료).
+  계산은 새 모듈 coin_journal.py 한 곳(화면 사본 없음): 평단 = 수량 가중 Σ(증거금×배율) ÷ Σ(증거금×배율 ÷ 진입가)(바이낸스 표시와 같음),
+  건별 손익(롱 (청산−진입)/진입 × 배율 × 증거금, 숏 반대 — 추가분 청산가 = 덜어낸 가격, 없으면 종료가), ROI = 손익 합 ÷ 증거금 합,
+  수수료 차감 ROI(건별 증거금×배율×0.0012 왕복), 경과(1차 → 종료). 종료가 없으면 ROI 미표시. 통계(종료 건만): 건수·사유별·평균 ROI·
+  수수료 차감 평균·추가 진입 있음/없음 평균과 n. 검증: 추가 진입 없이 덜어낸 가격만 있으면 400, 추가 2만 있으면 400, 종료에 사유 없으면 400.
+  시각은 오프셋 포함 ISO로 저장, 오프셋 없는 입력은 뉴질랜드 현지(Pacific/Auckland, 서머타임 반영)로 해석 — tzdata를 requirements에 추가
+  (컨테이너에 시간대 데이터가 없어도 동작). 저장은 저점 매매 기록과 같은 공용 함수(레코드 단위 rev·409, 원자적 쓰기+.bak, 날짜별 사본,
+  삭제 로그). 모바일 빠른 입력: 심볼·배율·1차 진입가·증거금·목표만으로 저장(시각 = 지금 NZ, 5m·롱), 나머지는 카드 [수정].
 v5.346 [카드 "🗞 왜?" 뉴스 원인 요약 — 사용자 지시 2026-10-10] 스캔 탭 5개(눌림목·추세전환·돌파임박·박스돌파·돌파) 종목 카드와
   저점일지 평가 카드에 "🗞 왜?" 버튼. 누를 때만 Claude(환경변수 CLAUDE_MODEL_NEWS, 기본 claude-haiku-4-5-20251001, max_tokens 300)가
   최근 7일 종목 뉴스(최대 15건) + KR 공시(최근 7일 최대 10건) + 최근 5일 일봉(등락률·거래대금 배수)으로 3줄 요약 — ① 무슨 일(날짜)
@@ -8813,6 +8824,7 @@ import theme_reignition
 import macro_calendar
 import api_call_guard
 import news_summary
+import coin_journal
 
 app = FastAPI(title="눌림목 스캐너")
 
@@ -9032,7 +9044,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.346"
+VERSION = "v5.347"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -13374,6 +13386,7 @@ async def _scheduler_loop():
             _daily_backup(LP_WATCH_PATH, "lowpoint_watch", lock=_LP_WATCH_LOCK)       # v5.325 저점 관찰
             _daily_backup(LP_INTEREST_PATH, "lowpoint_interest", lock=_LP_INTEREST_LOCK)   # v5.328 관심 추적
             _daily_backup(LP_RANK_PATH, "lowpoint_rankings", lock=_LP_RANK_LOCK)   # v5.341 순위
+            _daily_backup(COIN_JOURNAL_PATH, "coin_journal", lock=_COIN_JOURNAL_LOCK)   # v5.347 코인 일지
             asyncio.create_task(_maybe_run_lowpoint())   # v5.301: 저점종목 토요일 자동 실행(백그라운드)
         except Exception as e:
             print(f"[scheduler] loop error: {e}")
@@ -13434,6 +13447,7 @@ async def _start_scheduler():
         _daily_backup(LP_WATCH_PATH, "lowpoint_watch", force=True, lock=_LP_WATCH_LOCK)       # v5.325 저점 관찰
         _daily_backup(LP_INTEREST_PATH, "lowpoint_interest", force=True, lock=_LP_INTEREST_LOCK)   # v5.328 관심 추적
         _daily_backup(LP_RANK_PATH, "lowpoint_rankings", force=True, lock=_LP_RANK_LOCK)   # v5.341 순위
+        _daily_backup(COIN_JOURNAL_PATH, "coin_journal", force=True, lock=_COIN_JOURNAL_LOCK)   # v5.347 코인 일지
     except Exception as e:
         print(f"[journal-backup] 시작 백업 실패: {e}", flush=True)
     try:
@@ -20472,6 +20486,111 @@ async def lp_trade_delete(rid: int, request: Request):
         removed = trades.pop(idx)
         _lp_trades_write(trades)
         _rev_store_delete_log(LP_TRADES_DELETE_LOG_PATH, rid, request, removed, "lowpoint-trades")
+    return JSONResponse({"ok": True, "deleted": rid})
+
+
+# ── v5.347(사용자 지시 2026-10-14) 코인 일지 — 바이낸스 BTCUSDT 선물 연습 기록 ─────────────────
+# 주식 일지(journal_user.json·localStorage pullback_journal_v1)와 별개 파일 coin_journal.json — 기존 일지 코드·파일은 건드리지 않는다.
+# 저장 규칙은 저점 매매 기록과 같은 공용 함수(_rev_store_put: 레코드 단위 rev·409, _rec_list_write: 원자적+.bak,
+# _daily_backup: 날짜별 사본, _rev_store_delete_log: 삭제 로그). 검증·계산은 coin_journal.py(app.py 미의존) 한 곳.
+COIN_JOURNAL_PATH = _resolve_persistent_path("coin_journal.json")
+COIN_JOURNAL_DELETE_LOG_PATH = os.path.join(os.path.dirname(COIN_JOURNAL_PATH), "coin_journal_deletions.log")
+_COIN_JOURNAL_LOCK = _threading.RLock()
+
+
+def _coin_prepare(rec: dict, creating: bool):
+    """(정규화된 레코드, 거부 사유|None) — 시각 형식 오류도 거부 사유로."""
+    try:
+        norm = coin_journal.normalize(rec, creating=creating)
+    except ValueError as e:
+        return None, str(e)
+    return norm, coin_journal.invalid(norm)
+
+
+def _coin_view(records: list) -> dict:
+    out = []
+    for r in records:
+        try:
+            out.append({**r, "calc": coin_journal.calc(r)})
+        except Exception as e:      # 계산 불가 레코드도 목록에서 빼지 않고 이유를 보인다
+            out.append({**r, "calc": None, "calc_error": f"{type(e).__name__}: {e}"})
+    return {"ok": True, "records": out, "stats": coin_journal.stats([r for r in records if not r.get("calc_error")]),
+            "exit_reasons": list(coin_journal.EXIT_REASONS), "timeframes": list(coin_journal.TIMEFRAMES),
+            "sides": list(coin_journal.SIDES), "fee_roundtrip": coin_journal.FEE_ROUNDTRIP}
+
+
+@app.get("/api/coin-journal")
+async def coin_journal_list():
+    try:
+        records = _rec_list_load(COIN_JOURNAL_PATH)
+    except (OSError, ValueError) as e:
+        return JSONResponse({"ok": False, "error": f"코인 일지 읽기 실패: {e}"}, status_code=500)
+    return JSONResponse(_clean_nan(_coin_view(records)))
+
+
+@app.post("/api/coin-journal")
+async def coin_journal_create(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "JSON 본문 필요"}, status_code=400)
+    rec = body.get("record") if isinstance(body, dict) else None
+    if not isinstance(rec, dict):
+        return JSONResponse({"ok": False, "error": "record 필요"}, status_code=400)
+    norm, bad = _coin_prepare(rec, creating=True)
+    if bad:
+        return JSONResponse({"ok": False, "error": bad}, status_code=400)
+    with _COIN_JOURNAL_LOCK:
+        try:
+            records = _rec_list_load(COIN_JOURNAL_PATH)
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
+        rid = max([int(r.get("id") or 0) for r in records] + [0]) + 1
+        norm["id"] = rid
+        norm["created_at"] = coin_journal.now_iso()
+        status, payload, changed = _rev_store_put(records, rid, norm, None)
+        if changed:
+            _rec_list_write(COIN_JOURNAL_PATH, records)
+    return JSONResponse(_clean_nan(payload), status_code=status)
+
+
+@app.put("/api/coin-journal/{rid}")
+async def coin_journal_put(rid: int, request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "JSON 본문 필요"}, status_code=400)
+    rec = body.get("record") if isinstance(body, dict) else None
+    if not isinstance(rec, dict) or rec.get("id") != rid:
+        return JSONResponse({"ok": False, "error": "record.id가 경로 id와 같아야 함"}, status_code=400)
+    norm, bad = _coin_prepare(rec, creating=False)
+    if bad:
+        return JSONResponse({"ok": False, "error": bad}, status_code=400)
+    norm.pop("calc", None)
+    with _COIN_JOURNAL_LOCK:
+        try:
+            records = _rec_list_load(COIN_JOURNAL_PATH)
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
+        status, payload, changed = _rev_store_put(records, rid, norm, body.get("base_rev"))
+        if changed:
+            _rec_list_write(COIN_JOURNAL_PATH, records)
+    return JSONResponse(_clean_nan(payload), status_code=status)
+
+
+@app.delete("/api/coin-journal/{rid}")
+async def coin_journal_delete(rid: int, request: Request):
+    with _COIN_JOURNAL_LOCK:
+        try:
+            records = _rec_list_load(COIN_JOURNAL_PATH)
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
+        idx = next((i for i, r in enumerate(records) if r.get("id") == rid), None)
+        if idx is None:
+            return JSONResponse({"ok": True, "already_gone": True})
+        removed = records.pop(idx)
+        _rec_list_write(COIN_JOURNAL_PATH, records)
+        _rev_store_delete_log(COIN_JOURNAL_DELETE_LOG_PATH, rid, request, removed, "coin-journal")
     return JSONResponse({"ok": True, "deleted": rid})
 
 

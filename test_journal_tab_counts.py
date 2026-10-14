@@ -87,7 +87,7 @@ def test_tab_count_uses_same_filter_as_list():
 def test_tab_labels_renamed():
     util = SRC[SRC.index('id="utilTabs"'):SRC.index("</nav>", SRC.index('id="utilTabs"'))]
     labels = [re.sub(r"<[^>]+>", "", b).strip() for b in re.findall(r"<button\b[^>]*>(.*?)</button>", util, re.S)]
-    assert labels == ["업종/테마", "마감정리", "추추일지", "저점일지"], labels
+    assert labels == ["업종/테마", "마감정리", "추추일지", "저점일지", "코인일지"], labels   # v5.347 코인일지 +1
     assert 'data-mode="journal">추추일지</button>' in SRC and ">저점일지</button>" in SRC
 
 
