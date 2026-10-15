@@ -1411,7 +1411,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.347</span>
+      <span class="ver mono" id="verBadge">v5.348</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -1421,7 +1421,6 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
         <!-- v5.283: 라벨만 "US눌림목" — 내부 키 pullback·저장 식별자 '눌림목'은 그대로. -->
         <button class="tab" data-mode="pullback" title="진입 시 시장 필터가 미국으로 전환됩니다(탭을 벗어나면 원래대로).">US눌림목</button>
         <button class="tab" data-mode="abc" title="A(하락)·B(바닥다지기)·C(돌파) 패턴 — KR 전용, 관심 신호(진입 근거 없음, 측정 전)">ABC</button>
-        <button class="tab" data-mode="turnaround">추세전환</button>
         <!-- v5.314 신설(더보기) → v5.315(사용자 지시 "더보기 안에 있어 접근 불편 — 밖으로"): 추세전환 옆 -->
         <button class="tab" data-mode="newlisting" title="상장 13~20개월차 KR·US 중 상장 후 최고 종가 대비 −50% 이상 하락 — 매월 1일 저점 월봉 뒤 자동 갱신">신규상장</button>
         <button class="tab hdr-more" id="moreTabsToggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="moreTabsPanel">더보기<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
@@ -1429,7 +1428,6 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
       <span class="hdr-sep" aria-hidden="true"></span>
       <nav class="tabs hdr-util" role="tablist" aria-label="기록" id="utilTabs">
         <button class="tab" data-mode="themes" title="업종·테마별 구성종목 — 스캐너가 이미 계산한 값만 표시(새 계산 없음)">업종/테마</button>
-        <button class="tab" data-mode="eod">마감정리</button>
         <button class="tab" data-mode="journal">추추일지</button>
         <!-- v5.302 저점종목 내 매매 기록(홈 저점종목 카드 = 후보와 별개). v5.303: 더보기 → 일지 옆. -->
         <button class="tab" data-mode="lowpoint_track" title="저점종목 매매 기록 — 현재가·수익률·목표가, 일지와 별도 저장">저점일지</button>
@@ -1460,6 +1458,9 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
            "급등 스캔"(surge, analyze_surge 게이트)과 다른 기능이다. -->
       <button class="tab" data-mode="surge_observe" title="당일 +15%↑ & 거래량 20일평균 10배↑ KR — 판정/EV/진입가 없음, 순수 관찰(2주 실험)">급등<span class="exp-tag">2주 실험</span></button>
       <button class="tab" data-mode="positions">포지션</button>
+      <!-- v5.348(사용자 지시 "상단 메뉴가 화면 폭에서 잘린다 — 마감정리·추세전환을 더보기로"): 메뉴 위치만 옮김(탭 내부 로직 그대로) -->
+      <button class="tab" data-mode="turnaround">추세전환</button>
+      <button class="tab" data-mode="eod">마감정리</button>
     </div>
     <div class="more-sec">
       <div class="more-h">실험</div>

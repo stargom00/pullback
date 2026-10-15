@@ -5,6 +5,9 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.348 [상단 메뉴 정리 — 사용자 지시 2026-10-15 "상단 메뉴가 화면 폭에서 잘린다(코인일지 탭이 '코'까지만 보임)"] "추세전환"(메인 줄)과
+  "마감정리"(오른쪽 기록 메뉴)를 "더보기" 드롭다운의 "탭" 섹션 끝(포지션 뒤, 추세전환 → 마감정리)으로 옮김. 메뉴 위치만 — 탭 내부 로직·키
+  (turnaround·eod)·해시(#tab=추세전환·#tab=마감정리) 그대로, 열려 있으면 더보기 라벨에 탭 이름이 뜨는 기존 방식 그대로.
 v5.347 [코인 일지 탭 — 사용자 지시 2026-10-14] 바이낸스 BTCUSDT 선물 연습 기록용 "코인일지" 탭(주식 일지와 별개 — 파일
   coin_journal.json, API GET·POST /api/coin-journal · PUT·DELETE /api/coin-journal/{id}, 기존 /api 로그인 보호 그대로). 한 건 = 한 사이클:
   1차 진입(가격·시각·증거금) · 목표(문구+가격) · 추가 진입 1·2 · 덜어내기(추가분 전량 청산, 추가 1·2에 같은 가격 — 단순화) · 종료(남은
@@ -9044,7 +9047,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.347"
+VERSION = "v5.348"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

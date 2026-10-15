@@ -47,7 +47,7 @@ def test_main_tab_row_is_exactly_six_buttons():
     body = _element("modeTabs", "</nav>")
     labels = [re.sub(r"<[^>]+>", "", b).strip()
               for b in re.findall(r"<button\b[^>]*>(.*?)</button>", body, re.S)]
-    assert labels == ["홈", "US눌림목", "ABC", "추세전환", "신규상장", "더보기"], labels
+    assert labels == ["홈", "US눌림목", "ABC", "신규상장", "더보기"], labels   # v5.348 추세전환 → 더보기(이동)
 
 
 def test_newlisting_moved_out_of_more_panel():
@@ -311,6 +311,6 @@ def test_reignition_watch_block_is_gone_but_data_kept_for_home():
 
 def test_lowpoint_track_is_next_to_journal_not_in_more_panel():
     util = re.findall(r'data-mode="(\w+)"', _element("utilTabs", "</nav>"))
-    assert util == ["themes", "eod", "journal", "lowpoint_track", "coin_journal"], util   # v5.347 코인일지는 저점일지 옆
+    assert util == ["themes", "journal", "lowpoint_track", "coin_journal"], util   # v5.347 코인일지는 저점일지 옆, v5.348 마감정리 → 더보기(이동)
     more = re.findall(r'data-mode="(\w+)"', _element("moreTabsPanel", "</header>"))
     assert "lowpoint_track" not in more
