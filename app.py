@@ -5,6 +5,15 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.349 [코인 일지 v2 — 채널 방식 단순화, 사용자 지시 2026-10-17] 입력 "목표/목표가" → "TP %"(기본 0.5) 하나. 저장 때 서버가 TP 가격을
+  계산(평단 기준 — 추가 진입이 없으면 1차 진입가, 롱 ×(1+TP%) · 숏 ×(1−TP%), 추가 진입을 넣고 저장하면 다시 계산). 카드에 TP 가격과
+  20배 ROI(TP% × 20, 레코드 배율과 무관한 고정 환산 — 지시 원문 "20배 ROI"). 종료 사유 TP도달/포기선/강제청산/수동/기타로 교체 — 옛 사유
+  (목표도달·충동)는 이미 그 값으로 저장된 기록만 그대로 재저장 허용, 새로 고르거나 그 값으로 바꾸는 저장은 400(충동 ≠ 수동이라 자동 변환
+  안 함). 카드에 [종료] 버튼 → 종료가·사유·한 줄 복기만 묻는 작은 창(종료 시각 = 지금), [수정] 창은 그대로(목표 칸만 TP %로). 통계: 건수
+  (종료/전체)·TP 도달률(TP도달 ÷ 종료)·평균 보유 시간(1차 진입→종료)·추가 진입 있음/없음 ROI·수수료 차감 ROI·사유별. 기존 기록(82,050 롱)은
+  그대로 — TP 비움, 옛 target은 화면이 안 보내도 서버가 이어 붙여 보존(카드에 "옛 목표"로 표시). 마이그레이션 없음.
+  [테스트] test_coin_journal.py::test_v5349_tp_legacy_close_and_stats 신설 + 기존 사유 문자열 갱신(14). 사보타주 5종(TP 기준을 1차
+  진입가로 / 옛 사유 아무 때나 허용 / 종료 창이 calc까지 전송 / target 이어 붙이기 제거 / TP 도달률 분모 변경) 전부 FAIL 확인 후 원복.
 v5.348 [상단 메뉴 정리 — 사용자 지시 2026-10-15 "상단 메뉴가 화면 폭에서 잘린다(코인일지 탭이 '코'까지만 보임)"] "추세전환"(메인 줄)과
   "마감정리"(오른쪽 기록 메뉴)를 "더보기" 드롭다운의 "탭" 섹션 끝(포지션 뒤, 추세전환 → 마감정리)으로 옮김. 메뉴 위치만 — 탭 내부 로직·키
   (turnaround·eod)·해시(#tab=추세전환·#tab=마감정리) 그대로, 열려 있으면 더보기 라벨에 탭 이름이 뜨는 기존 방식 그대로.
@@ -9047,7 +9056,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.348"
+VERSION = "v5.349"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -20501,13 +20510,16 @@ COIN_JOURNAL_DELETE_LOG_PATH = os.path.join(os.path.dirname(COIN_JOURNAL_PATH), 
 _COIN_JOURNAL_LOCK = _threading.RLock()
 
 
-def _coin_prepare(rec: dict, creating: bool):
-    """(정규화된 레코드, 거부 사유|None) — 시각 형식 오류도 거부 사유로."""
+def _coin_prepare(rec: dict, creating: bool, old: "dict | None" = None):
+    """(정규화된 레코드, 거부 사유|None) — 시각 형식 오류도 거부 사유로. old = 서버에 있던 같은 id 레코드(수정일 때).
+    v5.349: 화면이 더는 보내지 않는 옛 "목표"(target)는 서버 기록에서 이어 붙인다(v5.347 레코드를 그대로 둔다 — 사용자 지시)."""
+    if old and "target" in old and "target" not in rec:
+        rec = {**rec, "target": old["target"]}
     try:
         norm = coin_journal.normalize(rec, creating=creating)
     except ValueError as e:
         return None, str(e)
-    return norm, coin_journal.invalid(norm)
+    return norm, coin_journal.invalid(norm, old)
 
 
 def _coin_view(records: list) -> dict:
@@ -20519,7 +20531,9 @@ def _coin_view(records: list) -> dict:
             out.append({**r, "calc": None, "calc_error": f"{type(e).__name__}: {e}"})
     return {"ok": True, "records": out, "stats": coin_journal.stats([r for r in records if not r.get("calc_error")]),
             "exit_reasons": list(coin_journal.EXIT_REASONS), "timeframes": list(coin_journal.TIMEFRAMES),
-            "sides": list(coin_journal.SIDES), "fee_roundtrip": coin_journal.FEE_ROUNDTRIP}
+            "sides": list(coin_journal.SIDES), "fee_roundtrip": coin_journal.FEE_ROUNDTRIP,
+            "legacy_exit_reasons": list(coin_journal.LEGACY_EXIT_REASONS), "tp_pct_default": coin_journal.TP_PCT_DEFAULT,
+            "tp_roi_leverage": coin_journal.TP_ROI_LEVERAGE}
 
 
 @app.get("/api/coin-journal")
@@ -20566,15 +20580,16 @@ async def coin_journal_put(rid: int, request: Request):
     rec = body.get("record") if isinstance(body, dict) else None
     if not isinstance(rec, dict) or rec.get("id") != rid:
         return JSONResponse({"ok": False, "error": "record.id가 경로 id와 같아야 함"}, status_code=400)
-    norm, bad = _coin_prepare(rec, creating=False)
-    if bad:
-        return JSONResponse({"ok": False, "error": bad}, status_code=400)
-    norm.pop("calc", None)
     with _COIN_JOURNAL_LOCK:
         try:
             records = _rec_list_load(COIN_JOURNAL_PATH)
         except (OSError, ValueError) as e:
             return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
+        old = next((r for r in records if r.get("id") == rid), None)
+        norm, bad = _coin_prepare(rec, creating=False, old=old)
+        if bad:
+            return JSONResponse({"ok": False, "error": bad}, status_code=400)
+        norm.pop("calc", None)
         status, payload, changed = _rev_store_put(records, rid, norm, body.get("base_rev"))
         if changed:
             _rec_list_write(COIN_JOURNAL_PATH, records)

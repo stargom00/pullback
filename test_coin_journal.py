@@ -33,7 +33,7 @@ def _rec(**kw):
 
 # ── 계산(손 계산 대조) ──────────────────────────────────────────────
 def test_calc_entry_only_long():
-    r = _rec(exit={"price": 80800, "time": "2026-10-14T12:35"}, exit_reason="목표도달")
+    r = _rec(exit={"price": 80800, "time": "2026-10-14T12:35"}, exit_reason="TP도달")
     c = cj.calc(r)
     hand = (80800 - 80000) / 80000 * LEV * 100                    # 10 USDT
     fee = 100 * LEV * 0.0012                                       # 1.2
@@ -63,7 +63,7 @@ def test_calc_two_adds_and_trim_at_other_price():
 
 def test_calc_short():
     r = _rec(side="short", add1={"price": 81000, "margin": 100, "time": "2026-10-14T10:30"},
-             exit={"price": 79000, "time": "2026-10-14T11:00"}, exit_reason="목표도달")
+             exit={"price": 79000, "time": "2026-10-14T11:00"}, exit_reason="TP도달")
     c = cj.calc(r)
     hand = -(79000 - 80000) / 80000 * LEV * 100 + -(79000 - 81000) / 81000 * LEV * 100   # 숏은 부호 반대, 덜어내기 없음 → 추가분도 종료가
     assert c["pnl"] == pytest.approx(hand) and c["roi_pct"] == pytest.approx(hand / 200 * 100) and c["pnl"] > 0
@@ -79,7 +79,7 @@ def test_no_exit_no_roi_even_if_trimmed():
 def test_status_auto():
     assert _rec()["status"] == "진행중"
     assert _rec(add1={"price": 79000, "margin": 100}, trim={"price": 79500})["status"] == "덜어냄·보유중"
-    assert _rec(exit={"price": 80100}, exit_reason="충동")["status"] == "종료"
+    assert _rec(exit={"price": 80100}, exit_reason="수동")["status"] == "종료"
 
 
 def test_time_normalized_nz_with_dst_and_iso_kept():
@@ -98,16 +98,16 @@ def test_validation_rules():
     assert "종료 사유" in cj.invalid(_rec(exit={"price": 80100}))
     assert cj.invalid(_rec(exit={"price": 80100}, exit_reason="감")) is not None
     assert cj.invalid(_rec(tf="1h")) is not None and cj.invalid(_rec(side="up")) is not None
-    assert cj.EXIT_REASONS == ("목표도달", "포기선", "강제청산", "충동", "기타") and cj.FEE_ROUNDTRIP == 0.0012
+    assert cj.EXIT_REASONS == ("TP도달", "포기선", "강제청산", "수동", "기타") and cj.FEE_ROUNDTRIP == 0.0012
 
 
 def test_stats_closed_only():
-    recs = [_rec(exit={"price": 80800}, exit_reason="목표도달"),
+    recs = [_rec(exit={"price": 80800}, exit_reason="TP도달"),
             _rec(add1={"price": 79000, "margin": 100}, exit={"price": 79000}, exit_reason="포기선"),
             _rec()]
     st = cj.stats(recs)
     c0, c1 = cj.calc(recs[0]), cj.calc(recs[1])
-    assert st["n_closed"] == 2 and st["by_reason"]["목표도달"] == 1 and st["by_reason"]["포기선"] == 1
+    assert st["n_closed"] == 2 and st["by_reason"]["TP도달"] == 1 and st["by_reason"]["포기선"] == 1
     assert st["avg_roi_pct"] == pytest.approx((c0["roi_pct"] + c1["roi_pct"]) / 2)
     assert st["avg_roi_net_pct"] == pytest.approx((c0["roi_net_pct"] + c1["roi_net_pct"]) / 2)
     assert st["with_adds"] == {"n": 1, "avg_roi_pct": pytest.approx(c1["roi_pct"])}
@@ -149,12 +149,12 @@ def test_api_crud_and_status_transitions(api):
     assert st == 200 and d["record"]["status"] == "덜어냄·보유중" and d["record"]["rev"] == 2
     st, d = run(app.coin_journal_put(1, _Req({"record": rec2, "base_rev": 1})))       # 낡은 rev → 409
     assert st == 409 and d["code"] == "conflict"
-    rec3 = {**d["record"], "exit": {"price": 80500, "time": "2026-10-14T13:00"}, "exit_reason": "목표도달", "review": "본전 덜어내기 지킴"}
+    rec3 = {**d["record"], "exit": {"price": 80500, "time": "2026-10-14T13:00"}, "exit_reason": "TP도달", "review": "본전 덜어내기 지킴"}
     st, d = run(app.coin_journal_put(1, _Req({"record": rec3, "base_rev": 2})))
     assert st == 200 and d["record"]["status"] == "종료"
     st, d = run(app.coin_journal_list())
     assert st == 200 and len(d["records"]) == 1 and d["records"][0]["calc"]["roi_pct"] is not None
-    assert d["stats"]["n_closed"] == 1 and d["exit_reasons"][0] == "목표도달" and "calc" not in json.loads((tmp / "coin_journal.json").read_text())[0]
+    assert d["stats"]["n_closed"] == 1 and d["exit_reasons"][0] == "TP도달" and "calc" not in json.loads((tmp / "coin_journal.json").read_text())[0]
     st, d = run(app.coin_journal_delete(1, _Req()))
     assert st == 200 and d["deleted"] == 1
     assert run(app.coin_journal_list())[1]["records"] == []
@@ -220,3 +220,53 @@ def test_front_time_and_leg_helpers():
     assert "NZ 10. 14. 10:05" in out[3] and "KST 10. 14. 06:05" in out[3]
     assert out[4] is None and out[5] == {"price": 80000, "time": "2026-10-14T10:05", "margin": 100}
     assert out[6] == {"price": 79500, "time": None} and out[7:] == ["+1.23%", "-2.00%", "—"]
+
+
+# ── v5.349 채널 방식 단순화: TP %·TP 가격·20배 ROI, 옛 기록 보존, 종료 창, 통계 ─────────────────
+def test_v5349_tp_legacy_close_and_stats(api):
+    """사용자 지시(2026-10-17): TP %(기본 0.5) 하나 → 저장 시 TP 가격 계산, 카드에 20배 ROI, 사유 TP도달/포기선/강제청산/수동/기타,
+    [종료] 작은 창, 통계(건수·TP 도달률·평균 보유·추가 진입 있음/없음 ROI·수수료 차감 ROI), 기존 1건은 TP 비운 채 그대로."""
+    app, run, tmp = api
+    # TP 가격 = 평단 기준(롱 +, 숏 −), 추가 진입을 넣으면 다시 계산. 20배 ROI = TP% × 20.
+    long_ = _rec(tp_pct=0.5)
+    assert long_["tp_price"] == pytest.approx(80000 * 1.005) and cj.calc(long_)["tp_roi_pct"] == pytest.approx(10.0)
+    short = _rec(side="short", tp_pct="0.5", add1={"price": 81000, "margin": 100})
+    avg = 2000 / (1000 / 80000 + 1000 / 81000)
+    assert short["tp_price"] == pytest.approx(avg * 0.995) and cj.calc(short)["avg_entry"] == pytest.approx(avg)
+    assert cj.invalid(_rec(tp_pct=0)) is not None and cj.invalid(_rec(tp_pct=60)) is not None
+    # 기존 기록(v5.347 — target 있음, tp 없음, 옛 사유)은 그대로: TP 비어 있음, target 보존, 옛 사유 그대로 재저장 허용, 옛 사유로 바꾸기는 거부.
+    legacy = {"id": 1, "rev": 1, "symbol": "BTCUSDT", "tf": "5m", "side": "long", "leverage": 10, "status": "종료",
+              "entry": {"price": 82050, "margin": 100, "time": "2026-10-14T10:05:00+13:00"},
+              "target": {"text": "15분봉 구름 아랫선", "price": 83650},
+              "exit": {"price": 82500, "time": "2026-10-14T11:05:00+13:00"}, "exit_reason": "충동", "review": ""}
+    (tmp / "coin_journal.json").write_text(json.dumps([legacy], ensure_ascii=False), encoding="utf-8")
+    st, d = run(app.coin_journal_list())
+    r0 = d["records"][0]
+    assert st == 200 and r0.get("tp_pct") is None and r0["calc"]["tp_roi_pct"] is None and d["tp_pct_default"] == 0.5
+    edit = {k: v for k, v in r0.items() if k not in ("calc", "target")}           # 화면은 target을 안 보낸다
+    st, d = run(app.coin_journal_put(1, _Req({"record": {**edit, "review": "충동 진입"}, "base_rev": 1})))
+    assert st == 200 and d["record"]["exit_reason"] == "충동" and d["record"]["tp_pct"] is None
+    assert d["record"]["target"] == {"text": "15분봉 구름 아랫선", "price": 83650}
+    assert run(app.coin_journal_create(_Req({"record": {**QUICK, "exit": {"price": 80100}, "exit_reason": "충동"}})))[0] == 400
+    # [종료] 창: 화면 함수(cjCloseRecord)가 만든 레코드를 그대로 PUT → 종료·TP도달, 다른 필드 유지
+    st, d = run(app.coin_journal_create(_Req({"record": {**QUICK, "tp_pct": "0.5"}})))
+    assert st == 200 and d["record"]["tp_price"] == pytest.approx(80000 * 1.005)
+    srv = run(app.coin_journal_list())[1]["records"][1]
+    if not shutil.which("node"):
+        pytest.skip("node 미설치")
+    src = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+    code = "\n".join(_fn(src, n) for n in ("cjLeg", "cjCloseRecord"))
+    js = f"console.log(JSON.stringify(cjCloseRecord({json.dumps(srv)}, '80400', 'TP도달', '채널 상단 익절', '2026-10-17T01:00:00.000Z')))"
+    p = subprocess.run(["node", "-e", code + "\n" + js], capture_output=True, text=True, timeout=20)
+    assert p.returncode == 0, p.stderr
+    closed = json.loads(p.stdout)
+    assert "calc" not in closed and closed["exit"] == {"price": 80400, "time": "2026-10-17T01:00:00.000Z"}
+    st, d = run(app.coin_journal_put(2, _Req({"record": closed, "base_rev": srv["rev"]})))
+    assert st == 200 and d["record"]["status"] == "종료" and d["record"]["exit_reason"] == "TP도달"
+    assert d["record"]["tp_pct"] == 0.5 and d["record"]["review"] == "채널 상단 익절"
+    # 통계: 종료 2건(옛 1·새 1), TP 도달 1 → 50%, 평균 보유 = 두 건 경과 평균, 옛 사유도 사유별에 보인다
+    stt = run(app.coin_journal_list())[1]["stats"]
+    durs = [cj.calc(r)["duration_min"] for r in json.loads((tmp / "coin_journal.json").read_text())]
+    assert stt["n_total"] == 2 and stt["n_closed"] == 2 and stt["n_tp"] == 1 and stt["tp_hit_rate_pct"] == pytest.approx(50)
+    assert stt["avg_hold_min"] == pytest.approx(sum(durs) / 2) and stt["by_reason"]["충동"] == 1 and stt["by_reason"]["TP도달"] == 1
+    assert stt["no_adds"]["n"] == 2 and stt["avg_roi_net_pct"] is not None
