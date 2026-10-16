@@ -12,7 +12,8 @@ app.py 미의존 — 저장·rev·삭제 로그는 app.py의 공용 레코드 �
 - ROI % = 건별 손익 합 ÷ 증거금 합. 수수료 차감 ROI = 건별로 증거금×배율×FEE_ROUNDTRIP을 빼고 같은 식.
 - 종료가가 없으면 ROI·손익 미표시(덜어내기만 있어도 미표시). 경과 = 1차 진입 → 종료.
 TP(v5.349, 사용자 지시 2026-10-17 "채널 방식으로 단순화"): 입력은 TP %(기본 0.5) 하나. 저장 때 TP 가격을 서버가 계산한다 —
-  기준은 평단(추가 진입이 없으면 1차 진입가와 같다), 롱 평단×(1+TP%/100), 숏 평단×(1−TP%/100). 추가 진입을 넣고 저장하면 다시 계산된다.
+  기준은 **1차 진입가**(v5.350 사용자 지시 "평단 → 1차 진입가로 변경 (봇 v2.44와 통일). 추가 진입해도 TP 불변"):
+  롱 1차×(1+TP%/100), 숏 1차×(1−TP%/100). 추가 진입은 TP 가격을 바꾸지 않는다(v5.349는 평단 기준이었다).
   20배 ROI = TP% × 20(사용자 지시 "20배 ROI 표시" — 레코드 배율과 무관한 고정 20배 환산).
   옛 "목표/목표가"(target)는 v5.347 레코드에 남아 있으면 그대로 둔다(검증·계산에 안 씀). TP %가 없는 옛 레코드는 TP 가격도 없다.
 상태(자동): 종료가 있으면 "종료", 아니면 덜어낸 가격이 있으면 "덜어냄·보유중", 아니면 "진행중".
@@ -100,7 +101,7 @@ def normalize(rec: dict, creating: bool = False) -> dict:
     out["tp_price"] = None
     if out["tp_pct"] is not None:
         try:          # 진입 값이 잘못된 레코드는 invalid()가 거부한다 — 여기선 계산만 시도
-            out["tp_price"] = tp_price(avg_entry(out), out["side"], out["tp_pct"])
+            out["tp_price"] = tp_price(_num(e.get("price")), out["side"], out["tp_pct"])   # v5.350: 1차 진입가 기준(봇 v2.44와 같음)
         except (TypeError, ValueError, ZeroDivisionError):
             out["tp_price"] = None
     out["exit_reason"] = rec.get("exit_reason") or None
@@ -163,8 +164,9 @@ def avg_entry(rec: dict) -> float:
     return sum(m * lev for _, _, m, _ in ls) / sum(m * lev / p for _, p, m, _ in ls)
 
 
-def tp_price(avg: float, side: str, pct: float) -> float:
-    return avg * (1 + pct / 100) if side == "long" else avg * (1 - pct / 100)
+def tp_price(base: float, side: str, pct: float) -> float:
+    """base = 1차 진입가(v5.350). 롱 +TP%, 숏 −TP%."""
+    return base * (1 + pct / 100) if side == "long" else base * (1 - pct / 100)
 
 
 def tp_roi_pct(pct) -> "float | None":

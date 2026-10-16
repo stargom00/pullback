@@ -227,12 +227,13 @@ def test_v5349_tp_legacy_close_and_stats(api):
     """사용자 지시(2026-10-17): TP %(기본 0.5) 하나 → 저장 시 TP 가격 계산, 카드에 20배 ROI, 사유 TP도달/포기선/강제청산/수동/기타,
     [종료] 작은 창, 통계(건수·TP 도달률·평균 보유·추가 진입 있음/없음 ROI·수수료 차감 ROI), 기존 1건은 TP 비운 채 그대로."""
     app, run, tmp = api
-    # TP 가격 = 평단 기준(롱 +, 숏 −), 추가 진입을 넣으면 다시 계산. 20배 ROI = TP% × 20.
+    # TP 가격 = 1차 진입가 기준(롱 +, 숏 −, v5.350 봇 v2.44와 통일) — 추가 진입해도 불변. 20배 ROI = TP% × 20.
     long_ = _rec(tp_pct=0.5)
     assert long_["tp_price"] == pytest.approx(80000 * 1.005) and cj.calc(long_)["tp_roi_pct"] == pytest.approx(10.0)
     short = _rec(side="short", tp_pct="0.5", add1={"price": 81000, "margin": 100})
     avg = 2000 / (1000 / 80000 + 1000 / 81000)
-    assert short["tp_price"] == pytest.approx(avg * 0.995) and cj.calc(short)["avg_entry"] == pytest.approx(avg)
+    assert short["tp_price"] == pytest.approx(80000 * 0.995) and cj.calc(short)["avg_entry"] == pytest.approx(avg)   # 평단은 바뀌어도 TP는 1차 기준
+    assert _rec(tp_pct=0.5, add1={"price": 79000, "margin": 100}, add2={"price": 78000, "margin": 200})["tp_price"] == pytest.approx(80000 * 1.005)
     assert cj.invalid(_rec(tp_pct=0)) is not None and cj.invalid(_rec(tp_pct=60)) is not None
     # 기존 기록(v5.347 — target 있음, tp 없음, 옛 사유)은 그대로: TP 비어 있음, target 보존, 옛 사유 그대로 재저장 허용, 옛 사유로 바꾸기는 거부.
     legacy = {"id": 1, "rev": 1, "symbol": "BTCUSDT", "tf": "5m", "side": "long", "leverage": 10, "status": "종료",
