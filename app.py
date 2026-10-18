@@ -5,6 +5,9 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.351 [코인 일지 봇 읽기 개방 — 사용자 지시 2026-10-19 "예약 작업이 봇 주소 하나로 신호·일지를 보게"] `_BOT_READ_EXACT_PATHS`에
+  "/api/coin-journal" 추가(GET·API_READ_TOKEN 헤더만 통과, 쓰기 3경로는 세션 게이트 그대로). 얼마냐봇 v2.46 `/api/coin-journal`이 이 경로를
+  대리 읽기. 데이터·화면 변경 없음. [테스트] test_coin_journal_bot_read.py 신설(GET 통과·POST/PUT/DELETE 미통과).
 v5.350 [코인 일지 TP 기준 변경 — 사용자 지시 2026-10-17 "TP 가격 기준을 평단 → 1차 진입가로 변경 (봇 v2.44와 통일). 추가 진입해도 TP
   불변"] coin_journal.normalize()의 TP 가격 = 1차 진입가 ×(1±TP%)(v5.349는 평단 기준). 저장 때 계산이라 이미 저장된 TP 가격은 그 기록을
   다시 저장할 때 새 기준으로 바뀐다. [테스트] test_v5349_tp_legacy_close_and_stats 기대값 수정(숏+추가 진입 → 80000×0.995, 롱+추가 2회 →
@@ -8896,6 +8899,10 @@ _BOT_READ_EXACT_PATHS = {
     # 한다. 이건 `_SYNC_TOKEN_GATED_PATHS`류의 **게이트 우회가 아니다**:
     # API_READ_TOKEN 헤더로 통과하며 읽기 전용이다(위 보안 메모 참고).
     "/api/jongga/forward", "/api/paper-track",
+    # v5.351(사용자 지시 2026-10-19): 코인 일지 GET을 봇 토큰 읽기로 개방 — 얼마냐봇 v2.46이
+    # 같은 경로를 대리 읽기(/api/coin-journal 프록시)해서 Claude 예약 작업이 본다. GET만
+    # (_is_bot_read_path가 메서드를 먼저 거름) — POST/PUT/DELETE는 세션 게이트 그대로.
+    "/api/coin-journal",
 }
 _BOT_READ_PATH_PREFIXES = ("/api/dist/", "/api/ma/", "/api/pullback-signal/", "/api/vol/")
 
@@ -9060,7 +9067,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.350"
+VERSION = "v5.351"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
