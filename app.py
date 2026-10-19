@@ -5,6 +5,16 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.352 [코인 일지 청산 모델·화면 정리 — 사용자 지시 2026-10-19 "절반은 81852, 절반은 82200에서 팔았어. 일지 쓰는 게 너무 불편함. 정렬
+  맞춰주고 이해하기 쉽게. 빨간 글씨 오류(추가 진입이 없는데 덜어낸 가격)도 고쳐줘"] 덜어내기/종료 두 칸 → **청산 목록 exits**(가격·비중%·
+  시각, 최대 4건). 비중 합 100 = 종료(사유 필요), 일부 = "일부 청산"(실현 손익만), 없음 = 진행중. 손익 = 청산마다 부호×(청산가−평단)/평단×
+  전체 명목×비중 — 평단 기준이라 "추가분만 덜어내기"는 비중 = 추가분 명목 비중으로 적는다(옛 오류 메시지의 원인이던 "덜어내기는 추가 진입
+  있을 때만" 제약 자체가 없어짐). 수수료 = 명목×0.0012×청산 비중. 옛 레코드(trim/exit)는 읽을 때 exits로 변환(trim = 추가분 비중, exit =
+  나머지), `exit`는 종료 때 마지막 청산 복사(통계·화면 호환). 기본값: 봉 1m(목록에 1m 추가)·배율 20·증거금 35·TP 0.5.
+  화면: 빠른 입력에 방향·봉, 카드 버튼 [청산](가격·비중, 절반/전부 버튼, 사유는 전부일 때만)·[추가 진입](가격·증거금)·[수정](구간별 한 줄
+  격자: 기본/1차/추가1/추가2/청산1~4/마무리). 카드 표는 가격·증거금/비중·시각 열 고정, 청산 건별 손익 표시.
+  [테스트] test_coin_journal.py: 슬기 실제 사례(81,136 롱 270 USDT 20배 → 50% 81,852 · 50% 82,200 = +59.23 USDT, ROI +21.94%,
+  수수료 빼면 +19.54%) 손 계산 대조, 일부 청산·옛 레코드 변환·비중 합 초과 400·사유 규칙. 사보타주 3종 FAIL 확인 후 원복.
 v5.351 [코인 일지 봇 읽기 개방 — 사용자 지시 2026-10-19 "예약 작업이 봇 주소 하나로 신호·일지를 보게"] `_BOT_READ_EXACT_PATHS`에
   "/api/coin-journal" 추가(GET·API_READ_TOKEN 헤더만 통과, 쓰기 3경로는 세션 게이트 그대로). 얼마냐봇 v2.46 `/api/coin-journal`이 이 경로를
   대리 읽기. 데이터·화면 변경 없음. [테스트] test_coin_journal_bot_read.py 신설(GET 통과·POST/PUT/DELETE 미통과).
@@ -9067,7 +9077,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.351"
+VERSION = "v5.352"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -20544,7 +20554,10 @@ def _coin_view(records: list) -> dict:
             "exit_reasons": list(coin_journal.EXIT_REASONS), "timeframes": list(coin_journal.TIMEFRAMES),
             "sides": list(coin_journal.SIDES), "fee_roundtrip": coin_journal.FEE_ROUNDTRIP,
             "legacy_exit_reasons": list(coin_journal.LEGACY_EXIT_REASONS), "tp_pct_default": coin_journal.TP_PCT_DEFAULT,
-            "tp_roi_leverage": coin_journal.TP_ROI_LEVERAGE}
+            "tp_roi_leverage": coin_journal.TP_ROI_LEVERAGE,
+            # v5.352 화면 기본값·상한(계산 사본 아님)
+            "margin_default": coin_journal.MARGIN_DEFAULT, "leverage_default": coin_journal.LEVERAGE_DEFAULT,
+            "exits_max": coin_journal.EXITS_MAX}
 
 
 @app.get("/api/coin-journal")

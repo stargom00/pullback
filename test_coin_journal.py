@@ -1,9 +1,8 @@
-"""v5.347 코인 일지 — 평단·ROI·수수료 차감 ROI(손 계산), 검증 400, API CRUD·rev, 상태 자동 전이, 시각 정규화, 프론트 시각 함수.
+"""코인 일지 — 평단·ROI·수수료 차감 ROI(손 계산), 검증 400, API CRUD·rev, 상태 자동 전이, 시각 정규화, 프론트 시각 함수.
 
-사용자 지시: "사보타주: 덜어낸 가격을 종료가로 바꿔 계산하면 추가 2회 케이스가 FAIL해야 한다."
-사보타주 확인(2026-10-14, FAIL 확인 후 원복): legs()에서 추가분 청산가를 trim_px 대신 exit_px로 → test_calc_two_adds_and_trim_at_other_price FAIL ·
-평단을 증거금×배율 가중(Σ진입가×notional ÷ Σnotional)으로 → test_calc_two_adds_and_trim_at_other_price FAIL ·
-덜어내기 검증 제거 → test_trim_without_adds_is_400 FAIL.
+v5.352(사용자 지시 2026-10-19): 덜어내기/종료 두 칸 → 청산 목록 exits(가격·비중%). 평단 기준 비중 손익. 옛 trim/exit 레코드는 읽을 때 변환.
+사보타주 확인(2026-10-19, FAIL 확인 후 원복): 청산 손익을 pct 무시(전량)로 → test_calc_split_exits FAIL ·
+옛 trim 변환의 비중을 100으로 → test_legacy_trim_exit_converted FAIL · 비중 합 100 초과 검증 제거 → test_validation_rules FAIL.
 """
 from __future__ import annotations
 
@@ -42,23 +41,45 @@ def test_calc_entry_only_long():
     assert c["duration_min"] == pytest.approx(150) and c["status"] == "종료"
 
 
-def test_calc_two_adds_and_trim_at_other_price():
-    """추가 2회 + 덜어내기(79,500)와 종료(80,500)가 다른 가격 — 추가분은 덜어낸 가격, 1차는 종료가로 청산."""
+def test_calc_split_exits():
+    """슬기 실제 사례(2026-10-19): 롱 81,136 × 270 USDT × 20배, 절반 81,852 · 절반 82,200. 평단 기준 비중 손익."""
+    r = _rec(leverage=20, entry={"price": 81136, "margin": 270, "time": "2026-10-19T09:44"},
+             exits=[{"price": 81852, "pct": 50, "time": "2026-10-19T11:00"}, {"price": 82200, "pct": 50, "time": "2026-10-19T12:30"}],
+             exit_reason="수동")
+    c = cj.calc(r)
+    notional = 270 * 20
+    hand = (81852 - 81136) / 81136 * notional * 0.5 + (82200 - 81136) / 81136 * notional * 0.5
+    fee = notional * 0.0012
+    assert r["status"] == "종료" and c["closed_pct"] == 100 and c["pnl"] == pytest.approx(hand)
+    assert c["roi_pct"] == pytest.approx(hand / 270 * 100) and c["roi_net_pct"] == pytest.approx((hand - fee) / 270 * 100)
+    assert c["duration_min"] == pytest.approx(166) and [x["pct"] for x in c["exits"]] == [50, 50]
+    assert r["exit"] == {"price": 82200.0, "time": "2026-10-19T12:30:00+13:00", "pct": 50.0}
+
+
+def test_calc_two_adds_partial_exit_uses_avg():
+    """추가 2회 뒤 추가분 비중(75%)만 본전 근처에서 정리 → 일부 청산: 실현 손익만, ROI 없음. 평단은 수량 가중."""
+    r = _rec(add1={"price": 79000, "margin": 100, "time": "2026-10-14T10:30"},
+             add2={"price": 78000, "margin": 200, "time": "2026-10-14T10:50"},
+             exits=[{"price": 79500, "pct": 75, "time": "2026-10-14T11:20"}])
+    c = cj.calc(r)
+    legs = [(80000, 100), (79000, 100), (78000, 200)]
+    notional = sum(m * LEV for _, m in legs)
+    avg = notional / sum(m * LEV / p for p, m in legs)
+    assert round(c["avg_entry"], 2) == 78741.31 and c["n_adds"] == 2
+    assert r["status"] == "일부 청산" and c["roi_pct"] is None and c["pnl"] is None
+    assert c["realized_pnl"] == pytest.approx((79500 - avg) / avg * notional * 0.75) and c["remaining_pct"] == 25
+
+
+def test_legacy_trim_exit_converted():
+    """v5.351 이전 레코드(trim + exit)는 exits로 변환: trim = 추가분 명목 비중, exit = 나머지."""
     r = _rec(add1={"price": 79000, "margin": 100, "time": "2026-10-14T10:30"},
              add2={"price": 78000, "margin": 200, "time": "2026-10-14T10:50"},
              trim={"price": 79500, "time": "2026-10-14T11:20"},
              exit={"price": 80500, "time": "2026-10-14T13:00"}, exit_reason="포기선")
-    c = cj.calc(r)
-    legs = [(80000, 100, 80500), (79000, 100, 79500), (78000, 200, 79500)]
-    notional = sum(m * LEV for _, m, _ in legs)
-    qty = sum(m * LEV / p for p, m, _ in legs)
-    hand_avg = notional / qty                                      # 수량 가중 = 바이낸스 평단
-    hand_pnl = sum((x - p) / p * LEV * m for p, m, x in legs)
-    hand_fee = sum(m * LEV * 0.0012 for _, m, _ in legs)
-    assert c["avg_entry"] == pytest.approx(hand_avg) and round(c["avg_entry"], 2) == 78741.31   # 4000 ÷ (1000/80000 + 1000/79000 + 2000/78000)
-    assert c["pnl"] == pytest.approx(hand_pnl) and c["roi_pct"] == pytest.approx(hand_pnl / 400 * 100)
-    assert c["roi_net_pct"] == pytest.approx((hand_pnl - hand_fee) / 400 * 100)
-    assert c["n_adds"] == 2 and [l["close"] for l in c["legs"]] == [80500, 79500, 79500]
+    assert [(x["price"], x["pct"]) for x in r["exits"]] == [(79500.0, 75.0), (80500.0, 25.0)]
+    assert r["trim"] is None and r["status"] == "종료" and r["exit"]["price"] == 80500.0
+    only_exit = _rec(exit={"price": 80800, "time": "2026-10-14T12:35"}, exit_reason="TP도달")
+    assert only_exit["exits"] == [{"price": 80800.0, "time": "2026-10-14T12:35:00+13:00", "pct": 100.0}]
 
 
 def test_calc_short():
@@ -70,16 +91,17 @@ def test_calc_short():
     assert c["roi_net_pct"] == pytest.approx((hand - 200 * LEV * 0.0012) / 200 * 100)
 
 
-def test_no_exit_no_roi_even_if_trimmed():
-    r = _rec(add1={"price": 79000, "margin": 100}, trim={"price": 79500})
+def test_no_full_exit_no_roi():
+    r = _rec(exits=[{"price": 79500, "pct": 40}])
     c = cj.calc(r)
-    assert c["roi_pct"] is None and c["roi_net_pct"] is None and c["pnl"] is None and c["status"] == "덜어냄·보유중"
+    assert c["roi_pct"] is None and c["roi_net_pct"] is None and c["pnl"] is None and c["status"] == "일부 청산"
 
 
 def test_status_auto():
     assert _rec()["status"] == "진행중"
-    assert _rec(add1={"price": 79000, "margin": 100}, trim={"price": 79500})["status"] == "덜어냄·보유중"
-    assert _rec(exit={"price": 80100}, exit_reason="수동")["status"] == "종료"
+    assert _rec(exits=[{"price": 79500, "pct": 50}])["status"] == "일부 청산"
+    assert _rec(exits=[{"price": 79500, "pct": 50}, {"price": 80100, "pct": 50}], exit_reason="수동")["status"] == "종료"
+    assert _rec(exit={"price": 80100}, exit_reason="수동")["status"] == "종료"      # 옛 형식도 종료
 
 
 def test_time_normalized_nz_with_dst_and_iso_kept():
@@ -93,9 +115,13 @@ def test_time_normalized_nz_with_dst_and_iso_kept():
 
 def test_validation_rules():
     assert cj.invalid(_rec()) is None
-    assert "추가 진입이 없는데" in cj.invalid(_rec(trim={"price": 79500}))
     assert "추가 진입 1" in cj.invalid(_rec(add2={"price": 79000, "margin": 100}))
     assert "종료 사유" in cj.invalid(_rec(exit={"price": 80100}))
+    assert "종료 사유" in cj.invalid(_rec(exits=[{"price": 80100, "pct": 100}]))
+    assert "100%를 넘어요" in cj.invalid(_rec(exits=[{"price": 80100, "pct": 60}, {"price": 80200, "pct": 60}]))
+    assert "비중은" in cj.invalid(_rec(exits=[{"price": 80100, "pct": 0}]))
+    assert "아직 전부" in cj.invalid(_rec(exits=[{"price": 80100, "pct": 50}], exit_reason="수동"))
+    assert cj.invalid(_rec(exits=[{"price": 80100, "pct": 50}])) is None
     assert cj.invalid(_rec(exit={"price": 80100}, exit_reason="감")) is not None
     assert cj.invalid(_rec(tf="1h")) is not None and cj.invalid(_rec(side="up")) is not None
     assert cj.EXIT_REASONS == ("TP도달", "포기선", "강제청산", "수동", "기타") and cj.FEE_ROUNDTRIP == 0.0012
@@ -141,15 +167,17 @@ def test_api_crud_and_status_transitions(api):
     app, run, tmp = api
     st, d = run(app.coin_journal_create(_Req({"record": QUICK})))                    # 모바일 빠른 입력만으로 저장
     assert st == 200 and d["record"]["id"] == 1 and d["record"]["rev"] == 1 and d["record"]["status"] == "진행중"
-    assert d["record"]["symbol"] == "BTCUSDT" and d["record"]["tf"] == "5m" and d["record"]["side"] == "long"
+    assert d["record"]["symbol"] == "BTCUSDT" and d["record"]["tf"] == "1m" and d["record"]["side"] == "long"
     assert d["record"]["entry"]["time"].endswith(("+13:00", "+12:00"))               # 시각 = 지금(NZ, 오프셋 포함)
     rec = d["record"]
-    rec2 = {**rec, "add1": {"price": 79000, "margin": 100, "time": "2026-10-14T10:30"}, "trim": {"price": 79500, "time": "2026-10-14T11:20"}}
+    rec2 = {**rec, "add1": {"price": 79000, "margin": 100, "time": "2026-10-14T10:30"},
+            "exits": [{"price": 79500, "pct": 50, "time": "2026-10-14T11:20"}]}
     st, d = run(app.coin_journal_put(1, _Req({"record": rec2, "base_rev": 1})))
-    assert st == 200 and d["record"]["status"] == "덜어냄·보유중" and d["record"]["rev"] == 2
+    assert st == 200 and d["record"]["status"] == "일부 청산" and d["record"]["rev"] == 2
     st, d = run(app.coin_journal_put(1, _Req({"record": rec2, "base_rev": 1})))       # 낡은 rev → 409
     assert st == 409 and d["code"] == "conflict"
-    rec3 = {**d["record"], "exit": {"price": 80500, "time": "2026-10-14T13:00"}, "exit_reason": "TP도달", "review": "본전 덜어내기 지킴"}
+    rec3 = {**d["record"], "exits": d["record"]["exits"] + [{"price": 80500, "pct": 50, "time": "2026-10-14T13:00"}],
+            "exit_reason": "TP도달", "review": "본전 덜어내기 지킴"}
     st, d = run(app.coin_journal_put(1, _Req({"record": rec3, "base_rev": 2})))
     assert st == 200 and d["record"]["status"] == "종료"
     st, d = run(app.coin_journal_list())
@@ -164,15 +192,15 @@ def test_api_crud_and_status_transitions(api):
     assert st == 409 and d["code"] == "gone"
 
 
-def test_trim_without_adds_is_400(api):
+def test_over_100_pct_is_400(api):
     app, run, _ = api
-    st, d = run(app.coin_journal_create(_Req({"record": {**QUICK, "trim": {"price": 79500}}})))
-    assert st == 400 and "덜어낸 가격" in d["error"]
+    st, d = run(app.coin_journal_create(_Req({"record": {**QUICK, "exits": [{"price": 79500, "pct": 70}, {"price": 79600, "pct": 70}]}})))
+    assert st == 400 and "100%" in d["error"]
     st, d = run(app.coin_journal_create(_Req({"record": QUICK})))
     assert st == 200
-    rec = {**d["record"], "trim": {"price": 79500, "time": "2026-10-14T11:20"}}
+    rec = {**d["record"], "exits": [{"price": 79500, "pct": 100, "time": "2026-10-14T11:20"}]}   # 사유 없이 전량
     st, d = run(app.coin_journal_put(1, _Req({"record": rec, "base_rev": 1})))
-    assert st == 400 and "덜어낸 가격" in d["error"]
+    assert st == 400 and "종료 사유" in d["error"]
 
 
 def test_other_400s(api):
@@ -256,12 +284,16 @@ def test_v5349_tp_legacy_close_and_stats(api):
     if not shutil.which("node"):
         pytest.skip("node 미설치")
     src = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
-    code = "\n".join(_fn(src, n) for n in ("cjLeg", "cjCloseRecord"))
-    js = f"console.log(JSON.stringify(cjCloseRecord({json.dumps(srv)}, '80400', 'TP도달', '채널 상단 익절', '2026-10-17T01:00:00.000Z')))"
+    code = "\n".join(_fn(src, n) for n in ("cjLeg", "cjExit", "cjCloseRecord", "cjAddRecord"))
+    js = f"console.log(JSON.stringify(cjCloseRecord({json.dumps(srv)}, '80400', '100', 'TP도달', '채널 상단 익절', '2026-10-17T01:00:00.000Z')))"
     p = subprocess.run(["node", "-e", code + "\n" + js], capture_output=True, text=True, timeout=20)
     assert p.returncode == 0, p.stderr
     closed = json.loads(p.stdout)
-    assert "calc" not in closed and closed["exit"] == {"price": 80400, "time": "2026-10-17T01:00:00.000Z"}
+    assert "calc" not in closed and closed["exits"] == [{"price": 80400, "pct": 100, "time": "2026-10-17T01:00:00.000Z"}]
+    # [추가 진입] 창: 비어 있는 add1에 넣는다
+    js2 = f"console.log(JSON.stringify(cjAddRecord({json.dumps(srv)}, '79500', '35', '2026-10-17T00:30:00.000Z').add1))"
+    p2 = subprocess.run(["node", "-e", code + "\n" + js2], capture_output=True, text=True, timeout=20)
+    assert p2.returncode == 0 and json.loads(p2.stdout) == {"price": 79500, "time": "2026-10-17T00:30:00.000Z", "margin": 35}
     st, d = run(app.coin_journal_put(2, _Req({"record": closed, "base_rev": srv["rev"]})))
     assert st == 200 and d["record"]["status"] == "종료" and d["record"]["exit_reason"] == "TP도달"
     assert d["record"]["tp_pct"] == 0.5 and d["record"]["review"] == "채널 상단 익절"

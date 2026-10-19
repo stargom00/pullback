@@ -1267,6 +1267,25 @@ table.jr-table.lpw-table th.lpw-sort{cursor:pointer;user-select:none}
 .lpe-card .lpe-caret{color:var(--n-muted);font-size:11px;width:10px}
 /* /v5.327 */
 #lowpointTrackView>*+*,#newlistingView>*+*,#coinJournalView>*+*{margin-top:20px}
+/* v5.352 코인 일지 — 카드·수정 폼 격자 정렬 */
+.cj-card{padding:14px 20px}
+.cj-head{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center}
+.cj-side{font-weight:700;padding:1px 8px;border-radius:6px;font-size:12px}
+.cj-side.long{background:var(--n-hit-tint);color:var(--n-text)}
+.cj-side.short{background:var(--c-blue-bg3);color:var(--n-text)}
+.cj-keyline,.cj-result,.cj-stats{display:flex;flex-wrap:wrap;gap:4px 20px;margin-top:8px;align-items:baseline}
+.cj-table th{font-weight:500;color:var(--n-muted);font-size:12px}
+.cj-table td,.cj-table th{padding:5px 10px;white-space:nowrap}
+.cj-table tr.cj-exit td:first-child{color:var(--n-muted)}
+.cj-form input{width:120px}
+.cj-form input[name=review]{width:100%}
+.cj-pcts{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.cj-edit{margin-top:12px;border-top:1px solid var(--n-line2);padding-top:10px;display:grid;gap:8px}
+.cj-row{display:grid;grid-template-columns:72px repeat(auto-fit,minmax(130px,1fr));gap:8px 12px;align-items:end}
+.cj-rowlabel{font-size:13px;font-weight:600;padding-bottom:10px;color:var(--n-text)}
+.cj-row label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--n-muted)}
+.cj-row input,.cj-row select{min-height:38px;background:var(--c-blue-bg3);border:1px solid var(--n-line2);border-radius:8px;color:var(--n-text);padding:0 10px;font:inherit;font-size:14px;min-width:0;width:100%}
+@media (max-width:640px){.cj-row{grid-template-columns:1fr 1fr}.cj-rowlabel{grid-column:1/-1;padding-bottom:0}}
 .lpt-form{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:flex-end}
 .lpt-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--n-muted)}
 .lpt-form input,.lpt-form select{min-height:40px;background:var(--c-blue-bg3);border:1px solid var(--n-line2);border-radius:8px;color:var(--n-text);padding:0 10px;font:inherit;font-size:14px;min-width:0}
@@ -1411,7 +1430,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.351</span>
+      <span class="ver mono" id="verBadge">v5.352</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -7414,8 +7433,9 @@ async function _lptPrices() {
 // 주식 일지(renderJournal·journalCache·pullback_journal_v1)와 완전히 분리된 코드·파일(/api/coin-journal, coin_journal.json).
 // 평단·손익·ROI·상태·통계는 서버(coin_journal.py)가 계산해 내려준다 — 여기는 입력·표시만(계산 사본 없음).
 // 시각: 입력은 뉴질랜드 현지(datetime-local), 서버가 오프셋 포함 ISO로 저장. 카드엔 NZ·KST 둘 다.
-// v5.349(사용자 지시 2026-10-17) 채널 방식 단순화 — 목표/목표가 → TP %(TP 가격·20배 ROI는 서버 계산), [종료] 작은 창(종료가·사유·복기).
-const _cj = { records: [], stats: null, meta: {}, error: null, loaded: false, editing: null, closing: null, confirmDel: null, msg: '' };
+// v5.352(사용자 지시 2026-10-19 "일지 쓰는 게 너무 불편함. 정렬 맞추고 이해하기 쉽게"): 덜어내기/종료 두 칸 → 청산 목록(가격·비중%).
+//   카드 버튼 셋: [청산](가격·비중 50/100·사유) [추가 진입](가격·증거금) [수정](전체 칸, 격자 정렬). 빠른 입력에 방향·봉 추가, 기본 20배·35 USDT·1m.
+const _cj = { records: [], stats: null, meta: {}, error: null, loaded: false, editing: null, closing: null, adding: null, confirmDel: null, msg: '' };
 const CJ_SIDE_LABEL = { long: '롱', short: '숏' };
 function cjNzLocal(iso) {
   // 오프셋 ISO → 뉴질랜드 현지 "YYYY-MM-DDTHH:MM"(datetime-local 입력값). 빈 값은 ''.
@@ -7431,13 +7451,24 @@ function cjTimeBoth(iso) {
     .format(new Date(iso));
   return `NZ ${f('Pacific/Auckland')} · KST ${f('Asia/Seoul')}`;
 }
+function cjTimeNz(iso) {
+  if (!iso) return '—';
+  return new Intl.DateTimeFormat('ko-KR', { timeZone: 'Pacific/Auckland', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
+}
 function cjLeg(price, time, margin) {
-  // 입력 칸 → 구간 객체. 가격이 비면 그 구간 없음(null). margin === undefined면 덜어내기·종료(증거금 없음).
+  // 입력 칸 → 구간 객체. 가격이 비면 그 구간 없음(null). margin === undefined면 증거금 없는 구간.
   const px = String(price ?? '').trim();
   if (!px) return null;
   const leg = { price: Number(px), time: String(time ?? '').trim() || null };
   if (margin !== undefined) leg.margin = Number(String(margin ?? '').trim());
   return leg;
+}
+function cjExit(price, pct, time) {
+  // 청산 한 건 {price, pct, time}. 가격 비면 null. 비중 비면 100.
+  const px = String(price ?? '').trim();
+  if (!px) return null;
+  const pc = String(pct ?? '').trim();
+  return { price: Number(px), pct: pc ? Number(pc) : 100, time: String(time ?? '').trim() || null };
 }
 function cjPct(v) {
   return v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
@@ -7447,6 +7478,7 @@ function cjDuration(min) {
   const h = Math.floor(min / 60), m = Math.round(min % 60);
   return h ? `${h}시간 ${m}분` : `${m}분`;
 }
+function cjNum(v, d = 2) { return v == null ? '—' : Number(v).toFixed(d); }
 async function onEnterCoinJournalTab() {
   const wrap = document.getElementById('coinJournalView');
   if (!_cj.loaded) wrap.innerHTML = `<div class="n-sub">불러오는 중…</div>`;
@@ -7462,49 +7494,58 @@ function _cjStatsHtml(st) {
   if (!st || !st.n_closed) return `<section class="n-card" style="padding:14px 20px"><div class="n-sub">종료된 기록이 아직 없어요 — 통계는 종료 건만 집계해요${st ? ` (전체 ${st.n_total}건)` : ''}.</div></section>`;
   const reasons = Object.entries(st.by_reason || {}).filter(([, n]) => n).map(([k, n]) => `${_escapeHtml(k)} ${n}`).join(' · ') || '—';
   return `<section class="n-card" style="padding:14px 20px">
-    <div style="display:flex;flex-wrap:wrap;gap:6px 22px;align-items:baseline">
+    <div class="cj-stats">
       <span><b>종료 ${st.n_closed}건</b> <span class="n-sub">/ 전체 ${st.n_total}건</span></span>
       <span>TP 도달률 <b class="num">${st.tp_hit_rate_pct == null ? '—' : st.tp_hit_rate_pct.toFixed(0) + '%'}</b> <span class="n-sub">(${st.n_tp}/${st.n_closed})</span></span>
       <span>평균 보유 <b class="num">${cjDuration(st.avg_hold_min)}</b></span>
-      <span>수수료 차감 ROI <b class="num">${cjPct(st.avg_roi_net_pct)}</b></span>
-      <span>추가 진입 있음 <span class="num">${cjPct(st.with_adds.avg_roi_pct)}</span> (n ${st.with_adds.n})</span>
-      <span>없음 <span class="num">${cjPct(st.no_adds.avg_roi_pct)}</span> (n ${st.no_adds.n})</span>
+      <span>평균 ROI <b class="num">${cjPct(st.avg_roi_pct)}</b> <span class="n-sub">수수료 빼면 ${cjPct(st.avg_roi_net_pct)}</span></span>
+      <span>추가 진입 있음 <span class="num">${cjPct(st.with_adds.avg_roi_pct)}</span> (${st.with_adds.n}건) · 없음 <span class="num">${cjPct(st.no_adds.avg_roi_pct)}</span> (${st.no_adds.n}건)</span>
     </div>
     <div class="n-sub" style="margin-top:6px">종료 사유: ${reasons}</div>
   </section>`;
 }
 function _cjCardHtml(r) {
   const c = r.calc || {};
-  const lev = r.leverage;
-  const legRow = (label, leg, withMargin) => leg ? `<tr><td>${label}</td><td class="num">${leg.price}</td>
-    <td class="num">${withMargin ? leg.margin + ' USDT' : ''}</td><td class="n-sub">${cjTimeBoth(leg.time)}</td></tr>` : '';
-  const chip = r.status === '종료' ? 'chip' : 'chip accent';
   const rid = Number(r.id);
+  const sideKo = CJ_SIDE_LABEL[r.side] || r.side;
+  const chip = r.status === '종료' ? 'chip' : 'chip accent';
   const del = _cj.confirmDel === rid
     ? `<button type="button" class="n-btn sm" onclick="cjDelete(${rid})">정말 삭제</button><button type="button" class="n-btn sm" onclick="_cj.confirmDel=null;renderCoinJournal()">취소</button>`
     : `<button type="button" class="n-btn sm" onclick="_cj.confirmDel=${rid};renderCoinJournal()">삭제</button>`;
-  return `<section class="n-card" style="padding:14px 20px">
-    <div class="jr-card-h" style="flex-wrap:wrap;gap:8px">
+  const entryRow = (label, leg) => leg ? `<tr><td>${label}</td><td class="num r">${cjNum(leg.price, 1)}</td><td class="num r">${leg.margin} USDT</td><td class="n-sub">${cjTimeNz(leg.time)}</td></tr>` : '';
+  const exitRows = (r.exits || []).map((x, i) => {
+    const cx = (c.exits || [])[i] || {};
+    return `<tr class="cj-exit"><td>청산 ${i + 1}</td><td class="num r">${cjNum(x.price, 1)}</td><td class="num r">${x.pct}%</td><td class="n-sub">${cjTimeNz(x.time)}${cx.pnl != null ? ` · <span class="num">${cx.pnl >= 0 ? '+' : ''}${cx.pnl.toFixed(2)} USDT</span>` : ''}</td></tr>`;
+  }).join('');
+  const nAdds = (r.add1 ? 1 : 0) + (r.add2 ? 1 : 0);
+  const open = r.status !== '종료';
+  const result = r.status === '종료'
+    ? `<span>ROI <b class="num">${cjPct(c.roi_pct)}</b></span><span class="n-sub">수수료 빼면 <b class="num">${cjPct(c.roi_net_pct)}</b></span>
+       <span>손익 <b class="num">${c.pnl != null ? (c.pnl >= 0 ? '+' : '') + c.pnl.toFixed(2) : '—'}</b> USDT</span><span class="n-sub">보유 ${cjDuration(c.duration_min)}</span>`
+    : (r.exits && r.exits.length
+      ? `<span>남은 비중 <b class="num">${c.remaining_pct ?? '—'}%</b></span><span>실현 손익 <b class="num">${c.realized_pnl != null ? (c.realized_pnl >= 0 ? '+' : '') + c.realized_pnl.toFixed(2) : '—'}</b> USDT</span>`
+      : '');
+  return `<section class="n-card cj-card">
+    <div class="cj-head">
       <span class="n-h">${_escapeHtml(r.symbol)}</span>
-      <span class="n-sub">${CJ_SIDE_LABEL[r.side] || r.side} · ${_escapeHtml(r.tf)} · ×${lev}</span>
+      <span class="cj-side ${r.side}">${sideKo}</span>
+      <span class="n-sub">${_escapeHtml(r.tf)} · ×${r.leverage}</span>
       <span class="${chip}">${_escapeHtml(r.status)}</span>
       <span class="jr-title-sp"></span>
-      ${r.status !== '종료' ? `<button type="button" class="n-btn sm primary" onclick="_cj.closing=${rid};renderCoinJournal()">종료</button>` : ''}
-      <button type="button" class="n-btn sm" onclick="_cj.editing=${rid};renderCoinJournal()">수정</button>${del}
+      ${open ? `<button type="button" class="n-btn sm primary" onclick="_cj.closing=${rid};_cj.adding=null;_cj.editing=null;renderCoinJournal()">청산</button>` : ''}
+      ${open && nAdds < 2 ? `<button type="button" class="n-btn sm" onclick="_cj.adding=${rid};_cj.closing=null;_cj.editing=null;renderCoinJournal()">추가 진입</button>` : ''}
+      <button type="button" class="n-btn sm" onclick="_cj.editing=_cj.editing===${rid}?null:${rid};_cj.closing=null;_cj.adding=null;renderCoinJournal()">수정</button>${del}
     </div>
-    ${cjTpLine(r)}
-    <div class="jr-table-wrap"><table class="jr-table lpt-table"><tbody>
-      ${legRow('1차', r.entry, true)}${legRow('추가 1', r.add1, true)}${legRow('추가 2', r.add2, true)}
-      ${legRow('덜어내기', r.trim, false)}${legRow('종료', r.exit, false)}
+    <div class="cj-keyline">
+      <span>평단 <b class="num">${cjNum(c.avg_entry, 1)}</b></span>
+      <span>증거금 <b class="num">${c.margin_total ?? '—'}</b> USDT</span>
+      ${cjTpLine(r)}
+    </div>
+    <div class="jr-table-wrap"><table class="jr-table lpt-table cj-table"><thead><tr><th></th><th class="r">가격</th><th class="r">증거금 / 비중</th><th>시각 (NZ)</th></tr></thead><tbody>
+      ${entryRow('1차 진입', r.entry)}${entryRow('추가 1', r.add1)}${entryRow('추가 2', r.add2)}${exitRows}
     </tbody></table></div>
-    ${c.calc_error || r.calc_error ? `<div class="st-dot st-bad">계산 불가 — ${_escapeHtml(r.calc_error || '')}</div>` : `
-    <div style="display:flex;flex-wrap:wrap;gap:4px 20px;margin-top:6px">
-      <span>평단 <b class="num">${c.avg_entry != null ? c.avg_entry.toFixed(2) : '—'}</b></span>
-      <span>증거금 <span class="num">${c.margin_total ?? '—'}</span> USDT</span>
-      ${r.exit ? `<span>ROI <b class="num">${cjPct(c.roi_pct)}</b></span><span>수수료 차감 <b class="num">${cjPct(c.roi_net_pct)}</b></span>
-      <span>손익 <span class="num">${c.pnl != null ? c.pnl.toFixed(2) : '—'}</span> USDT</span><span>경과 ${cjDuration(c.duration_min)}</span>` : ''}
-    </div>`}
-    ${r.exit ? `<div class="n-sub" style="margin-top:4px">종료 사유: ${_escapeHtml(r.exit_reason || '—')}</div>` : ''}
+    ${c.calc_error || r.calc_error ? `<div class="st-dot st-bad">계산 불가 — ${_escapeHtml(r.calc_error || '')}</div>` : (result ? `<div class="cj-result">${result}</div>` : '')}
+    ${r.status === '종료' ? `<div class="n-sub" style="margin-top:4px">종료 사유: ${_escapeHtml(r.exit_reason || '—')}</div>` : ''}
     ${r.review ? `<div style="margin-top:4px">복기: ${_escapeHtml(r.review)}</div>` : ''}
     ${_cj.editing === rid ? _cjEditFormHtml(r) : ''}
   </section>`;
@@ -7513,11 +7554,11 @@ function cjTpLine(r) {
   // TP 가격·20배 ROI는 서버 값(tp_price, calc.tp_roi_pct) 표시만. TP %가 없는 v5.347 기록은 옛 "목표"가 있으면 그걸 보인다.
   const c = r.calc || {};
   if (r.tp_pct != null) {
-    const px = r.tp_price != null ? r.tp_price.toFixed(2) : '—';
-    return `<div style="margin:4px 0">TP <b class="num">${px}</b> <span class="n-sub">(${r.side === 'short' ? '−' : '+'}${r.tp_pct}% · ${c.tp_roi_leverage || 20}배 ROI ${cjPct(c.tp_roi_pct)})</span></div>`;
+    const px = r.tp_price != null ? r.tp_price.toFixed(1) : '—';
+    return `<span>TP <b class="num">${px}</b> <span class="n-sub">(${r.side === 'short' ? '−' : '+'}${r.tp_pct}% · ${c.tp_roi_leverage || 20}배 ROI ${cjPct(c.tp_roi_pct)})</span></span>`;
   }
   const t = r.target;
-  return t && (t.text || t.price) ? `<div class="n-sub" style="margin:4px 0">옛 목표: ${_escapeHtml(t.text || '')}${t.price ? ` <span class="num">${t.price}</span>` : ''}</div>` : '';
+  return t && (t.text || t.price) ? `<span class="n-sub">옛 목표: ${_escapeHtml(t.text || '')}${t.price ? ` <span class="num">${t.price}</span>` : ''}</span>` : '';
 }
 function cjReasonOptions(cur) {
   // 새 사유 목록 + (이 기록이 이미 옛 사유로 저장돼 있으면) 그 값 하나 — 옛 사유는 새로 고를 수 없다(서버도 거부).
@@ -7526,40 +7567,69 @@ function cjReasonOptions(cur) {
   if (cur && !list.includes(cur) && (m.legacy_exit_reasons || []).includes(cur)) list.push(cur);
   return list.map(v => `<option value="${_escapeHtml(v)}"${v === cur ? ' selected' : ''}>${_escapeHtml(v)}</option>`).join('');
 }
+function _cjModal(title, inner, closeExpr) {
+  return `<div class="modal-bg open" onclick="if(event.target===this){${closeExpr};renderCoinJournal()}">
+    <div class="modal" style="max-width:420px"><h3>${title}</h3>${inner}</div></div>`;
+}
 function _cjCloseModalHtml(r) {
-  return `<div class="modal-bg open" onclick="if(event.target===this){_cj.closing=null;renderCoinJournal()}">
-    <div class="modal" style="max-width:360px">
-      <h3>종료 — ${_escapeHtml(r.symbol)} ${CJ_SIDE_LABEL[r.side] || r.side}</h3>
-      <form class="lpt-form" onsubmit="event.preventDefault();cjSaveClose(this, ${Number(r.id)})">
-        <label>종료가<input name="exit_price" inputmode="decimal" required autofocus></label>
-        <label>사유<select name="exit_reason" required><option value="">—</option>${cjReasonOptions(null)}</select></label>
+  const c = r.calc || {};
+  const remain = c.remaining_pct ?? 100;
+  const half = Math.min(remain, 50);
+  return _cjModal(`청산 — ${_escapeHtml(r.symbol)} ${CJ_SIDE_LABEL[r.side] || r.side} <span class="n-sub">(남은 비중 ${remain}%)</span>`, `
+      <form class="lpt-form cj-form" onsubmit="event.preventDefault();cjSaveClose(this, ${Number(r.id)})">
+        <label>청산 가격<input name="exit_price" inputmode="decimal" required autofocus></label>
+        <label>비중 (%)<input name="exit_pct" inputmode="decimal" value="${remain}" required></label>
+        <div class="cj-pcts" style="flex:1 1 100%">
+          <button type="button" class="n-btn sm" onclick="this.form.exit_pct.value='${half}'">절반 (${half}%)</button>
+          <button type="button" class="n-btn sm" onclick="this.form.exit_pct.value='${remain}'">전부 (${remain}%)</button>
+          <span class="n-sub">전부 정리하면 아래 사유를 골라요</span>
+        </div>
+        <label>종료 사유<select name="exit_reason"><option value="">— (일부 청산이면 비움)</option>${cjReasonOptions(null)}</select></label>
         <label style="flex:1 1 100%">한 줄 복기<input name="review" maxlength="200" value="${_escapeHtml(r.review || '')}"></label>
-        <div class="n-sub" style="flex:1 1 100%">종료 시각은 지금으로 저장돼요. 시각을 고치려면 [수정].</div>
-        <button type="submit" class="n-btn primary">종료 저장</button>
+        <div class="n-sub" style="flex:1 1 100%">시각은 지금(NZ)으로 저장돼요. 고치려면 [수정].</div>
+        <button type="submit" class="n-btn primary">저장</button>
         <button type="button" class="n-btn" onclick="_cj.closing=null;renderCoinJournal()">취소</button>
-      </form>
-    </div>
-  </div>`;
+      </form>`, '_cj.closing=null');
+}
+function _cjAddModalHtml(r) {
+  const key = r.add1 ? '추가 2' : '추가 1';
+  const m = _cj.meta || {};
+  return _cjModal(`${key} — ${_escapeHtml(r.symbol)} ${CJ_SIDE_LABEL[r.side] || r.side}`, `
+      <form class="lpt-form cj-form" onsubmit="event.preventDefault();cjSaveAdd(this, ${Number(r.id)})">
+        <label>진입 가격<input name="add_price" inputmode="decimal" required autofocus></label>
+        <label>증거금 (USDT)<input name="add_margin" inputmode="decimal" value="${m.margin_default ?? 35}" required></label>
+        <div class="n-sub" style="flex:1 1 100%">규칙: 평단 대비 −0.5% 이상 역행 + 새 신호일 때만. 시각은 지금(NZ).</div>
+        <button type="submit" class="n-btn primary">저장</button>
+        <button type="button" class="n-btn" onclick="_cj.adding=null;renderCoinJournal()">취소</button>
+      </form>`, '_cj.adding=null');
 }
 function _cjEditFormHtml(r) {
   const m = _cj.meta || {};
   const opt = (arr, cur, lab) => (arr || []).map(v => `<option value="${_escapeHtml(v)}"${v === cur ? ' selected' : ''}>${_escapeHtml(lab ? lab[v] || v : v)}</option>`).join('');
-  const legInputs = (key, label, leg, withMargin) => `<label>${label} 가격<input name="${key}_price" inputmode="decimal" value="${leg ? leg.price : ''}"></label>
-    <label>${label} 시각(NZ)<input type="datetime-local" name="${key}_time" value="${leg ? cjNzLocal(leg.time) : ''}"></label>
-    ${withMargin ? `<label>${label} 증거금<input name="${key}_margin" inputmode="decimal" value="${leg ? leg.margin : ''}"></label>` : ''}`;
-  return `<form class="lpt-form" style="margin-top:10px" onsubmit="event.preventDefault();cjSaveEdit(this, ${Number(r.id)})">
-    <label>심볼<input name="symbol" value="${_escapeHtml(r.symbol)}"></label>
-    <label>봉<select name="tf">${opt(m.timeframes, r.tf)}</select></label>
-    <label>방향<select name="side">${opt(m.sides, r.side, CJ_SIDE_LABEL)}</select></label>
-    <label>배율<input name="leverage" inputmode="decimal" value="${r.leverage}"></label>
-    ${legInputs('entry', '1차', r.entry, true)}
-    <label>TP %<input name="tp_pct" inputmode="decimal" value="${r.tp_pct ?? ''}"></label>
-    ${legInputs('add1', '추가 1', r.add1, true)}${legInputs('add2', '추가 2', r.add2, true)}
-    ${legInputs('trim', '덜어내기', r.trim, false)}${legInputs('exit', '종료', r.exit, false)}
-    <label>종료 사유<select name="exit_reason"><option value="">—</option>${cjReasonOptions(r.exit_reason)}</select></label>
-    <label style="flex:1 1 240px">복기<input name="review" maxlength="200" value="${_escapeHtml(r.review || '')}"></label>
-    <button type="submit" class="n-btn primary">저장</button>
-    <button type="button" class="n-btn" onclick="_cj.editing=null;renderCoinJournal()">닫기</button>
+  const row = (label, cells) => `<div class="cj-row"><div class="cj-rowlabel">${label}</div>${cells}</div>`;
+  const entryCells = (key, leg) => `<label>가격<input name="${key}_price" inputmode="decimal" value="${leg ? leg.price : ''}"></label>
+    <label>증거금<input name="${key}_margin" inputmode="decimal" value="${leg ? leg.margin : ''}"></label>
+    <label>시각 (NZ)<input type="datetime-local" name="${key}_time" value="${leg ? cjNzLocal(leg.time) : ''}"></label>`;
+  const exits = [...(r.exits || [])];
+  while (exits.length < (m.exits_max || 4)) exits.push(null);
+  const exitCells = (i, x) => `<label>가격<input name="exit${i}_price" inputmode="decimal" value="${x ? x.price : ''}"></label>
+    <label>비중 %<input name="exit${i}_pct" inputmode="decimal" value="${x ? x.pct : ''}"></label>
+    <label>시각 (NZ)<input type="datetime-local" name="exit${i}_time" value="${x ? cjNzLocal(x.time) : ''}"></label>`;
+  return `<form class="cj-edit" onsubmit="event.preventDefault();cjSaveEdit(this, ${Number(r.id)})">
+    ${row('기본', `<label>심볼<input name="symbol" value="${_escapeHtml(r.symbol)}"></label>
+      <label>방향<select name="side">${opt(m.sides, r.side, CJ_SIDE_LABEL)}</select></label>
+      <label>봉<select name="tf">${opt(m.timeframes, r.tf)}</select></label>
+      <label>배율<input name="leverage" inputmode="decimal" value="${r.leverage}"></label>
+      <label>TP %<input name="tp_pct" inputmode="decimal" value="${r.tp_pct ?? ''}"></label>`)}
+    ${row('1차 진입', entryCells('entry', r.entry))}
+    ${row('추가 1', entryCells('add1', r.add1))}
+    ${row('추가 2', entryCells('add2', r.add2))}
+    ${exits.map((x, i) => row(`청산 ${i + 1}`, exitCells(i + 1, x))).join('')}
+    ${row('마무리', `<label>종료 사유<select name="exit_reason"><option value="">—</option>${cjReasonOptions(r.exit_reason)}</select></label>
+      <label style="flex:1 1 260px">복기<input name="review" maxlength="200" value="${_escapeHtml(r.review || '')}"></label>`)}
+    <div class="cj-row"><div class="cj-rowlabel"></div><button type="submit" class="n-btn primary">저장</button>
+      <button type="button" class="n-btn" onclick="_cj.editing=null;renderCoinJournal()">닫기</button>
+      <span class="n-sub">빈 가격 = 그 구간 없음. 청산 비중 합이 100%면 종료(사유 필요).</span></div>
   </form>`;
 }
 function renderCoinJournal() {
@@ -7572,22 +7642,27 @@ function renderCoinJournal() {
       <div style="margin-top:12px"><button type="button" class="n-btn" onclick="onEnterCoinJournalTab()">다시 시도</button></div></section>`;
     return;
   }
+  const m = _cj.meta || {};
+  const opt = (arr, cur, lab) => (arr || []).map(v => `<option value="${_escapeHtml(v)}"${v === cur ? ' selected' : ''}>${_escapeHtml(lab ? lab[v] || v : v)}</option>`).join('');
   const quick = `<section class="n-card" style="padding:16px 20px">
-    <form class="lpt-form" onsubmit="event.preventDefault();cjQuickAdd(this)">
+    <div class="n-sub" style="margin-bottom:8px"><b>새 진입</b> — 진입 시각은 지금(NZ). TP 가격은 저장 때 1차 진입가 기준으로 계산.</div>
+    <form class="lpt-form cj-form" onsubmit="event.preventDefault();cjQuickAdd(this)">
+      <label>방향<select name="side">${opt(m.sides || ['long', 'short'], 'long', CJ_SIDE_LABEL)}</select></label>
+      <label>진입가<input name="price" inputmode="decimal" required autocomplete="off"></label>
+      <label>증거금 (USDT)<input name="margin" inputmode="decimal" value="${m.margin_default ?? 35}" required></label>
+      <label>배율<input name="leverage" inputmode="decimal" value="${m.leverage_default ?? 20}"></label>
+      <label>봉<select name="tf">${opt(m.timeframes || ['1m'], '1m')}</select></label>
+      <label>TP %<input name="tp_pct" inputmode="decimal" value="${m.tp_pct_default ?? 0.5}"></label>
       <label>심볼<input name="symbol" value="BTCUSDT"></label>
-      <label>배율<input name="leverage" inputmode="decimal" value="10"></label>
-      <label>1차 진입가<input name="price" inputmode="decimal" required></label>
-      <label>증거금(USDT)<input name="margin" inputmode="decimal" required></label>
-      <label>TP %<input name="tp_pct" inputmode="decimal" value="${(_cj.meta && _cj.meta.tp_pct_default) ?? 0.5}"></label>
       <button type="submit" class="n-btn primary">기록</button>
     </form>
-    <div class="n-sub" style="margin-top:6px">빠른 입력 — 진입 시각은 지금(NZ), 5m·롱. TP 가격은 저장 때 계산돼요. 종료는 카드의 [종료], 추가 진입·덜어내기는 [수정]에서.</div>
-    ${_cj.msg ? `<div class="st-dot st-bad" style="margin-top:6px">${_escapeHtml(_cj.msg)}</div>` : ''}
+    ${_cj.msg ? `<div class="st-dot st-bad" style="margin-top:8px">${_escapeHtml(_cj.msg)}</div>` : ''}
   </section>`;
   const recs = [..._cj.records].sort((a, b) => String(b.entry && b.entry.time).localeCompare(String(a.entry && a.entry.time)));
   const closing = _cj.closing != null ? _cj.records.find(x => Number(x.id) === _cj.closing) : null;
+  const adding = _cj.adding != null ? _cj.records.find(x => Number(x.id) === _cj.adding) : null;
   wrap.innerHTML = head + _cjStatsHtml(_cj.stats) + quick + (recs.length ? recs.map(_cjCardHtml).join('') : '<div class="n-sub">기록이 없어요.</div>')
-    + (closing ? _cjCloseModalHtml(closing) : '');
+    + (closing ? _cjCloseModalHtml(closing) : '') + (adding ? _cjAddModalHtml(adding) : '');
 }
 async function _cjSend(url, method, body) {
   const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
@@ -7595,10 +7670,15 @@ async function _cjSend(url, method, body) {
   try { d = await apiParse(res, { allow: 'any' }); } catch (e) { d = { error: e && e.message ? e.message : String(e) }; }   // v5.298 공통 헬퍼 apiParse(응답 직접 파싱 금지)
   return { ok: res.ok, status: res.status, d };
 }
+function _cjAfter(r, clearKey, what) {
+  if (r.ok) { _cj[clearKey] = null; _cj.msg = ''; }
+  else if (r.status === 409) { _cj[clearKey] = null; _cj.msg = `다른 곳에서 먼저 바뀐 기록이라 최신본을 다시 불러왔어요 — 다시 ${what}하세요.`; }
+  else { _cj.msg = `${what} 거부 — ${(r.d && r.d.error) || 'HTTP ' + r.status}`; }
+}
 async function cjQuickAdd(form) {
   const f = new FormData(form);
-  const rec = { symbol: f.get('symbol'), leverage: f.get('leverage'), tf: '5m', side: 'long',
-    entry: cjLeg(f.get('price'), null, f.get('margin')), tp_pct: String(f.get('tp_pct') || '').trim() || null };
+  const rec = { symbol: f.get('symbol'), leverage: f.get('leverage'), tf: f.get('tf') || '1m', side: f.get('side') || 'long',
+    entry: cjLeg(f.get('price'), null, f.get('margin')), tp_pct: String(f.get('tp_pct') || '').trim() || null, exits: [] };
   const r = await _cjSend('/api/coin-journal', 'POST', { record: rec });
   _cj.msg = r.ok ? '' : `저장 거부 — ${(r.d && r.d.error) || 'HTTP ' + r.status}`;
   await onEnterCoinJournalTab();
@@ -7606,35 +7686,52 @@ async function cjQuickAdd(form) {
 async function cjSaveEdit(form, rid) {
   const f = new FormData(form);
   const srv = _cj.records.find(x => Number(x.id) === rid) || {};
+  const exits = [];
+  for (let i = 1; i <= 6; i++) {
+    if (!f.has(`exit${i}_price`)) break;
+    const x = cjExit(f.get(`exit${i}_price`), f.get(`exit${i}_pct`), f.get(`exit${i}_time`));
+    if (x) exits.push(x);
+  }
   const rec = { id: rid, symbol: f.get('symbol'), tf: f.get('tf'), side: f.get('side'), leverage: f.get('leverage'),
     entry: cjLeg(f.get('entry_price'), f.get('entry_time'), f.get('entry_margin')),
     add1: cjLeg(f.get('add1_price'), f.get('add1_time'), f.get('add1_margin')),
     add2: cjLeg(f.get('add2_price'), f.get('add2_time'), f.get('add2_margin')),
-    trim: cjLeg(f.get('trim_price'), f.get('trim_time')),
-    exit: cjLeg(f.get('exit_price'), f.get('exit_time')),
+    exits,
     exit_reason: f.get('exit_reason') || null, review: f.get('review'),
     tp_pct: String(f.get('tp_pct') || '').trim() || null,
     created_at: srv.created_at };
   const r = await _cjSend(`/api/coin-journal/${rid}`, 'PUT', { record: rec, base_rev: srv.rev });
-  if (r.ok) { _cj.editing = null; _cj.msg = ''; }
-  else if (r.status === 409) { _cj.editing = null; _cj.msg = '다른 곳에서 먼저 바뀐 기록이라 최신본을 다시 불러왔어요 — 다시 수정하세요.'; }
-  else { _cj.msg = `저장 거부 — ${(r.d && r.d.error) || 'HTTP ' + r.status}`; }
+  _cjAfter(r, 'editing', '저장');
   await onEnterCoinJournalTab();
 }
-function cjCloseRecord(srv, price, reason, review, nowIso) {
-  // [종료] 창 → 서버 기록 사본에 종료가·사유·복기·지금 시각만 얹는다(나머지 필드는 서버 기록 그대로, 계산값 calc는 뺌).
+function cjCloseRecord(srv, price, pct, reason, review, nowIso) {
+  // [청산] 창 → 서버 기록 사본의 exits 끝에 한 건 추가(가격·비중·지금 시각). 사유·복기는 그대로 얹고 calc는 뺀다.
   const { calc, calc_error, ...rec } = srv;
-  return { ...rec, exit: cjLeg(price, nowIso), exit_reason: reason || null, review };
+  const x = cjExit(price, pct, nowIso);
+  return { ...rec, exits: [...(rec.exits || []), ...(x ? [x] : [])], exit_reason: reason || null, review };
+}
+function cjAddRecord(srv, price, margin, nowIso) {
+  // [추가 진입] 창 → 비어 있는 add1/add2에 넣는다.
+  const { calc, calc_error, ...rec } = srv;
+  const leg = cjLeg(price, nowIso, margin);
+  return rec.add1 ? { ...rec, add2: leg } : { ...rec, add1: leg };
 }
 async function cjSaveClose(form, rid) {
   const f = new FormData(form);
   const srv = _cj.records.find(x => Number(x.id) === rid);
   if (!srv) { _cj.closing = null; await onEnterCoinJournalTab(); return; }
-  const rec = cjCloseRecord(srv, f.get('exit_price'), f.get('exit_reason'), f.get('review'), new Date().toISOString());
+  const rec = cjCloseRecord(srv, f.get('exit_price'), f.get('exit_pct'), f.get('exit_reason'), f.get('review'), new Date().toISOString());
   const r = await _cjSend(`/api/coin-journal/${rid}`, 'PUT', { record: rec, base_rev: srv.rev });
-  if (r.ok) { _cj.closing = null; _cj.msg = ''; }
-  else if (r.status === 409) { _cj.closing = null; _cj.msg = '다른 곳에서 먼저 바뀐 기록이라 최신본을 다시 불러왔어요 — 다시 종료하세요.'; }
-  else { _cj.msg = `종료 저장 거부 — ${(r.d && r.d.error) || 'HTTP ' + r.status}`; }
+  _cjAfter(r, 'closing', '청산 저장');
+  await onEnterCoinJournalTab();
+}
+async function cjSaveAdd(form, rid) {
+  const f = new FormData(form);
+  const srv = _cj.records.find(x => Number(x.id) === rid);
+  if (!srv) { _cj.adding = null; await onEnterCoinJournalTab(); return; }
+  const rec = cjAddRecord(srv, f.get('add_price'), f.get('add_margin'), new Date().toISOString());
+  const r = await _cjSend(`/api/coin-journal/${rid}`, 'PUT', { record: rec, base_rev: srv.rev });
+  _cjAfter(r, 'adding', '추가 진입 저장');
   await onEnterCoinJournalTab();
 }
 async function cjDelete(rid) {
