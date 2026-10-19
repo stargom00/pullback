@@ -1268,6 +1268,10 @@ table.jr-table.lpw-table th.lpw-sort{cursor:pointer;user-select:none}
 /* /v5.327 */
 #lowpointTrackView>*+*,#newlistingView>*+*,#coinJournalView>*+*{margin-top:20px}
 /* v5.352 코인 일지 — 카드·수정 폼 격자 정렬 */
+.cj-pnlbox{padding:14px 20px;display:flex;flex-wrap:wrap;gap:8px 40px;align-items:flex-start}
+.cj-pnl{font-size:22px;font-weight:700;margin:2px 0}
+.cj-pnlnote{flex:1 1 100%;text-align:right}
+.cj-up{color:var(--px-up)}.cj-down{color:var(--px-down)}
 .cj-card{padding:14px 20px}
 .cj-head{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center}
 .cj-side{font-weight:700;padding:1px 8px;border-radius:6px;font-size:12px}
@@ -1430,7 +1434,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.352</span>
+      <span class="ver mono" id="verBadge">v5.353</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -7490,6 +7494,19 @@ async function onEnterCoinJournalTab() {
   }
   renderCoinJournal();
 }
+function cjUsdt(v) {
+  if (v == null) return '—';
+  return `<span class="num ${v > 0 ? 'cj-up' : v < 0 ? 'cj-down' : ''}">${v >= 0 ? '+' : ''}${v.toFixed(2)} USDT</span>`;
+}
+function _cjPnlBoxHtml(st) {
+  // v5.352 저점 매매 "이번 달/올해 수익금"과 같은 자리 — 종료 건 실현 손익(USDT), 마지막 청산일 NZ 기준. 서버 stats.pnl_month/pnl_year.
+  const m = (st && st.pnl_month) || { pnl: 0, pnl_net: 0, n: 0 }, y = (st && st.pnl_year) || { pnl: 0, pnl_net: 0, n: 0 };
+  return `<section class="n-card cj-pnlbox">
+    <div><div class="n-sub">이번 달 손익</div><div class="cj-pnl">${cjUsdt(m.pnl)}</div><div class="n-sub">수수료 빼면 ${cjUsdt(m.pnl_net)} · ${m.n}건</div></div>
+    <div><div class="n-sub">올해 손익</div><div class="cj-pnl">${cjUsdt(y.pnl)}</div><div class="n-sub">수수료 빼면 ${cjUsdt(y.pnl_net)} · ${y.n}건</div></div>
+    <div class="n-sub cj-pnlnote">실현 손익(종료 기록) · 마지막 청산일 기준(NZ) · 수수료 0.12% 왕복</div>
+  </section>`;
+}
 function _cjStatsHtml(st) {
   if (!st || !st.n_closed) return `<section class="n-card" style="padding:14px 20px"><div class="n-sub">종료된 기록이 아직 없어요 — 통계는 종료 건만 집계해요${st ? ` (전체 ${st.n_total}건)` : ''}.</div></section>`;
   const reasons = Object.entries(st.by_reason || {}).filter(([, n]) => n).map(([k, n]) => `${_escapeHtml(k)} ${n}`).join(' · ') || '—';
@@ -7661,7 +7678,7 @@ function renderCoinJournal() {
   const recs = [..._cj.records].sort((a, b) => String(b.entry && b.entry.time).localeCompare(String(a.entry && a.entry.time)));
   const closing = _cj.closing != null ? _cj.records.find(x => Number(x.id) === _cj.closing) : null;
   const adding = _cj.adding != null ? _cj.records.find(x => Number(x.id) === _cj.adding) : null;
-  wrap.innerHTML = head + _cjStatsHtml(_cj.stats) + quick + (recs.length ? recs.map(_cjCardHtml).join('') : '<div class="n-sub">기록이 없어요.</div>')
+  wrap.innerHTML = head + _cjPnlBoxHtml(_cj.stats) + _cjStatsHtml(_cj.stats) + quick + (recs.length ? recs.map(_cjCardHtml).join('') : '<div class="n-sub">기록이 없어요.</div>')
     + (closing ? _cjCloseModalHtml(closing) : '') + (adding ? _cjAddModalHtml(adding) : '');
 }
 async function _cjSend(url, method, body) {

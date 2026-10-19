@@ -303,3 +303,22 @@ def test_v5349_tp_legacy_close_and_stats(api):
     assert stt["n_total"] == 2 and stt["n_closed"] == 2 and stt["n_tp"] == 1 and stt["tp_hit_rate_pct"] == pytest.approx(50)
     assert stt["avg_hold_min"] == pytest.approx(sum(durs) / 2) and stt["by_reason"]["충동"] == 1 and stt["by_reason"]["TP도달"] == 1
     assert stt["no_adds"]["n"] == 2 and stt["avg_roi_net_pct"] is not None
+
+
+def test_stats_month_year_pnl(monkeypatch):
+    """v5.352 이번 달·올해 실현 손익 — 마지막 청산 시각(NZ) 기준. 다른 달·다른 해 건은 빠진다."""
+    import datetime as _dt
+
+    class _Now(_dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return _dt.datetime(2026, 10, 19, 13, 0, tzinfo=cj.NZ)
+    monkeypatch.setattr(cj, "datetime", _Now)
+    a = _rec(leverage=20, entry={"price": 81136, "margin": 270, "time": "2026-10-19T09:44"},
+             exits=[{"price": 82200, "pct": 100, "time": "2026-10-19T13:17"}], exit_reason="수동")
+    b = _rec(exits=[{"price": 80800, "pct": 100, "time": "2026-09-30T23:50"}], exit_reason="TP도달")      # 지난 달, 올해
+    c = _rec(exits=[{"price": 80800, "pct": 100, "time": "2025-12-31T10:00"}], exit_reason="TP도달")      # 작년
+    st = cj.stats([a, b, c, _rec()])
+    ca, cb = cj.calc(a), cj.calc(b)
+    assert st["pnl_month"]["n"] == 1 and st["pnl_month"]["pnl"] == pytest.approx(ca["pnl"]) and st["pnl_month"]["pnl_net"] == pytest.approx(ca["pnl_net"])
+    assert st["pnl_year"]["n"] == 2 and st["pnl_year"]["pnl"] == pytest.approx(ca["pnl"] + cb["pnl"])

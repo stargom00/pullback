@@ -289,7 +289,20 @@ def stats(records: list) -> dict:
     with_add = [c for r, c in closed if c["n_adds"] > 0]
     no_add = [c for r, c in closed if c["n_adds"] == 0]
     n_tp = sum(1 for r, _ in closed if r.get("exit_reason") == TP_REASON)
-    return {"n_total": len(records), "n_closed": len(closed),
+    # v5.352 이번 달·올해 실현 손익(USDT) — 종료 건의 마지막 청산 시각(NZ) 기준, 저점 매매 "이번 달/올해 수익금"과 같은 자리에 표시
+    now = datetime.now(NZ)
+    month = {"pnl": 0.0, "pnl_net": 0.0, "n": 0}
+    year = {"pnl": 0.0, "pnl_net": 0.0, "n": 0}
+    for r, c in closed:
+        try:
+            t = datetime.fromisoformat((r.get("exit") or {}).get("time") or "").astimezone(NZ)
+        except (TypeError, ValueError):
+            continue
+        if t.year == now.year:
+            year["n"] += 1; year["pnl"] += c["pnl"]; year["pnl_net"] += c["pnl_net"]
+            if t.month == now.month:
+                month["n"] += 1; month["pnl"] += c["pnl"]; month["pnl_net"] += c["pnl_net"]
+    return {"n_total": len(records), "n_closed": len(closed), "pnl_month": month, "pnl_year": year,
             "tp_hit_rate_pct": n_tp / len(closed) * 100 if closed else None, "n_tp": n_tp,
             "avg_hold_min": avg([c["duration_min"] for _, c in closed]),
             "by_reason": {k: sum(1 for r, _ in closed if r.get("exit_reason") == k) for k in reasons},
