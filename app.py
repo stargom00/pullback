@@ -5,6 +5,12 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.354 [달력 재확인 종목 + 봇 알림 — 사용자 지시 2026-10-21 "저점종목 매수기법 정립·공부. 구름 두꺼운 종목을 12월 29일에 다시 열어 구름
+  모양 확인할 것처럼, 달력에 열어봐야 할 종목을 날짜에 기록하고 알림으로 받고 싶어. 눌림목스캐너 페이지에 붙일까?"] 홈 달력 내 일정
+  (user_events.json, v5.322)에 선택 필드 ticker·memo 추가 — 새 저장 구조 없음(레코드 단위 rev 규칙 그대로). 날짜 목록에 종목은 TV 차트
+  링크로, 달력 아래 "📌 재확인 예정"(오늘부터 10건)으로 한눈에. GET /api/user-events/due?date= (기본 오늘 KST, 봇 읽기 개방) —
+  얼마냐봇 v2.50이 08:45 KST에 읽어 "📅 오늘 열어볼 종목"으로 보낸다. [테스트] test_home_calendar: ticker/memo 검증·due 정렬·
+  node로 calApplyEventEdit 종목 정규화(소문자→대문자·빈값→null).
 v5.353 [코인 일지 이번 달·올해 손익 박스 — 사용자 지시 2026-10-19 "주식 일지처럼 수익률 위에 표시해줘"] 저점 매매 "이번 달/올해 수익금"과
   같은 자리에 실현 손익(USDT)·수수료 차감·건수. 종료 건의 마지막 청산 시각(NZ) 기준(coin_journal.stats pnl_month/pnl_year). 화면은 표시만.
   [테스트] test_stats_month_year_pnl(이번 달 1건·지난 달 1건·작년 1건·진행 중 1건 → 월 1건·연 2건).
@@ -8916,6 +8922,8 @@ _BOT_READ_EXACT_PATHS = {
     # 같은 경로를 대리 읽기(/api/coin-journal 프록시)해서 Claude 예약 작업이 본다. GET만
     # (_is_bot_read_path가 메서드를 먼저 거름) — POST/PUT/DELETE는 세션 게이트 그대로.
     "/api/coin-journal",
+    # v5.354(사용자 지시 2026-10-21): 달력에 등록한 "오늘 열어볼 종목"을 얼마냐봇이 아침에 읽어 보낸다. GET·읽기 전용.
+    "/api/user-events/due",
 }
 _BOT_READ_PATH_PREFIXES = ("/api/dist/", "/api/ma/", "/api/pullback-signal/", "/api/vol/")
 
@@ -9080,7 +9088,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.353"
+VERSION = "v5.354"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -21400,6 +21408,7 @@ USER_EVENTS_PATH = _resolve_persistent_path("user_events.json")
 USER_EVENTS_DELETE_LOG_PATH = os.path.join(os.path.dirname(USER_EVENTS_PATH), "user_events_deletions.log")
 _USER_EVENTS_LOCK = _threading.RLock()
 USER_EVENT_TITLE_MAX = 100   # 제목 한 줄 상한(AI 판단 어림값 — 달력 칸 표시용, 재검토 가능)
+USER_EVENT_MEMO_MAX = 500    # v5.354 재확인 메모 상한(AI 판단 어림값 — 텔레그램 한 줄에 실릴 길이, 재검토 가능)
 
 
 def _user_event_invalid(rec: dict) -> "str | None":
@@ -21423,10 +21432,38 @@ def _user_event_invalid(rec: dict) -> "str | None":
     tm = rec.get("time")
     if tm is not None and not (isinstance(tm, str) and _re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", tm)):
         return "시간은 HH:MM(KST) 또는 비움"
-    extra = set(rec) - {"id", "date", "title", "time", "rev", "updated_at"}
+    # v5.354: 재확인 종목(선택) — 그 날짜에 차트를 다시 열어볼 종목. 티커는 대문자 영숫자·점·하이픈
+    # (259960.KS / 259960 / AAPL / KRW-BTC), 메모는 여러 줄 허용(왜 등록했는지 — 열었을 때 기억 안 나면 의미 없음).
+    tk = rec.get("ticker")
+    if tk is not None and not (isinstance(tk, str) and _re.fullmatch(r"[A-Z0-9][A-Z0-9.\-]{0,15}", tk)):
+        return "종목은 대문자 티커(예: 259960.KS, AAPL) 또는 비움"
+    memo = rec.get("memo")
+    if memo is not None and not isinstance(memo, str):
+        return "메모는 문자열"
+    if memo is not None and len(memo) > USER_EVENT_MEMO_MAX:
+        return f"메모는 {USER_EVENT_MEMO_MAX}자 이하"
+    extra = set(rec) - {"id", "date", "title", "time", "ticker", "memo", "rev", "updated_at"}
     if extra:
         return f"알 수 없는 필드: {sorted(extra)}"
     return None
+
+
+@app.get("/api/user-events/due")
+async def user_events_due(date: str = ""):
+    """v5.354(사용자 지시 2026-10-21 "달력에 열어봐야 할 종목을 날짜에 기록하고, 알림으로 받고 싶어") —
+    그 날짜(기본 오늘 KST)의 내 일정 전부. 얼마냐봇이 아침에 읽어 "📅 오늘 열어볼 종목"으로 보낸다
+    (_BOT_READ_EXACT_PATHS, 읽기 전용 — 쓰기 없음). 종목 있는 것 먼저, 그다음 시각순."""
+    import re as _re
+    d = (date or "").strip() or datetime.now(KST).strftime("%Y-%m-%d")
+    if not _re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
+        return JSONResponse({"ok": False, "error": "date는 YYYY-MM-DD"}, status_code=400)
+    try:
+        events = _rec_list_load(USER_EVENTS_PATH)
+    except (OSError, ValueError) as e:
+        return JSONResponse({"ok": False, "error": f"일정 읽기 실패: {e}"}, status_code=500)
+    due = [e for e in events if e.get("date") == d]
+    due.sort(key=lambda e: (0 if e.get("ticker") else 1, e.get("time") or "99:99", str(e.get("title") or "")))
+    return JSONResponse({"ok": True, "date": d, "events": due})
 
 
 @app.get("/api/user-events")

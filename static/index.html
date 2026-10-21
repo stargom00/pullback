@@ -1434,7 +1434,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.353</span>
+      <span class="ver mono" id="verBadge">v5.354</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -6222,8 +6222,25 @@ function calApplyEventEdit(rec, fields, newId) {
   if (time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error('시간은 HH:MM(KST) 또는 비움');
   const date = String(fields.date || (rec && rec.date) || '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('날짜가 없어요');
-  const out = { ...(rec || { id: newId }), date, title, time: time || null };
+  // v5.354: 재확인 종목(선택) — 소문자·공백은 정리해 대문자 티커로(259960.ks → 259960.KS). 서버 검증과 같은 패턴.
+  const ticker = String(fields.ticker || '').trim().toUpperCase();
+  if (ticker && !/^[A-Z0-9][A-Z0-9.\-]{0,15}$/.test(ticker)) throw new Error('종목은 티커(예: 259960.KS, AAPL)로');
+  const memo = String(fields.memo || '').replace(/\r\n?/g, '\n').trim();
+  if (memo.length > 500) throw new Error('메모는 500자 이하');
+  const out = { ...(rec || { id: newId }), date, title, time: time || null, ticker: ticker || null, memo: memo || null };
   return out;
+}
+// 재확인 종목 → 트레이딩뷰 링크용 시장 — 접미사 없는 6자리는 KRX(tvUrl이 kr 분기에서 접미사를 떼므로 KS/KQ 구분 불필요)
+function calTickerMarket(t) { return /^\d{6}$/.test(t) || /\.(KS|KQ)$/.test(t) ? 'kr' : undefined; }
+function calTickerHtml(t) {
+  if (!t) return '';
+  return `<a class="num" href="${tvUrl(t, calTickerMarket(t))}" target="_blank" rel="noopener" title="트레이딩뷰에서 열기" style="font-weight:700">📌 ${_escapeHtml(t)}</a>`;
+}
+// 📌 재확인 예정 — 오늘부터 종목 있는 내 일정 limit건(날짜순). 봇 아침 알림과 같은 데이터(/api/user-events/due는 그날 것만).
+function calUpcomingTickerEvents(user, today, limit) {
+  return (user || []).filter(e => e && e.ticker && e.date >= today)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.title).localeCompare(String(b.title)))
+    .slice(0, limit || 10);
 }
 const _cal = { ym: null, sel: null, user: [], error: null, editId: null, busy: false };
 function _calToday() { return (_calendarData && _calendarData.today) || kstStr(new Date(), 10); }
@@ -6262,7 +6279,7 @@ async function calSave(form) {
   const rec = _cal.editId && _cal.editId !== 'new' ? _cal.user.find(r => r.id === _cal.editId) : null;
   _cal.busy = true;
   try {
-    const out = calApplyEventEdit(rec, { title: f.get('title'), time: f.get('time'), date: rec ? rec.date : _cal.sel },
+    const out = calApplyEventEdit(rec, { title: f.get('title'), time: f.get('time'), ticker: f.get('ticker'), memo: f.get('memo'), date: rec ? rec.date : _cal.sel },
                                   'ue_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7));
     await _calPut(out, rec ? rec.rev : null);
     _cal.editId = null;
@@ -6304,7 +6321,7 @@ function renderHomeCal() {
     const ev = by[_cal.sel] || { sys: [], user: [] };
     const dw = CAL_DOW[new Date(_cal.sel + 'T00:00:00Z').getUTCDay()];
     const sysRows = ev.sys.map(e => `<div class="ev-row"><span class="chip">시스템</span><span style="min-width:0">${e.html}</span></div>`).join('');
-    const userRows = ev.user.map(e => `<div class="ev-row"><span class="chip accent">내 일정</span><span style="min-width:0;flex:1">${e.time ? `<b class="num">${e.time} KST</b> ` : ''}${_escapeHtml(e.title)}</span>
+    const userRows = ev.user.map(e => `<div class="ev-row"><span class="chip accent">${e.ticker ? '재확인' : '내 일정'}</span><span style="min-width:0;flex:1">${e.time ? `<b class="num">${e.time} KST</b> ` : ''}${calTickerHtml(e.ticker)}${e.ticker ? ' ' : ''}${_escapeHtml(e.title)}${e.memo ? `<div class="n-sub" style="font-size:11px;white-space:pre-wrap">${_escapeHtml(e.memo)}</div>` : ''}</span>
         <span style="display:flex;gap:4px"><button type="button" class="n-link" onclick="calStartEdit('${e.id}')">수정</button><button type="button" class="n-link" onclick="calDelete('${e.id}')">삭제</button></span></div>`).join('');
     const inWindow = _cal.sel >= today && data.today;
     dayHtml = `<div class="hc-daylist">
@@ -6314,6 +6331,11 @@ function renderHomeCal() {
       ${!inWindow ? '<span class="n-sub" style="font-size:11px">시스템 일정(매크로·휴장·실적)은 오늘~D+14만 표시돼요</span>' : ''}
     </div>`;
   }
+  // v5.354: 📌 재확인 예정 — 달력을 넘기지 않아도 "언제 뭘 열어볼지"가 한눈에
+  const upcoming = calUpcomingTickerEvents(_cal.user, today, 10);
+  const upHtml = upcoming.length ? `<div class="hc-daylist"><span class="n-sub" style="font-size:12px">📌 재확인 예정</span>
+      ${upcoming.map(e => `<div class="ev-row"><button type="button" class="n-link num" onclick="calSelect('${e.date}')" title="그날로">${e.date.slice(5)}${e.date === today ? ' 오늘' : ''}</button><span style="min-width:0;flex:1">${calTickerHtml(e.ticker)} ${_escapeHtml(e.title)}</span></div>`).join('')}
+    </div>` : '';
   const genAt = data.macro_generated_at ? new Date(data.macro_generated_at).toLocaleDateString('ko-KR') : null;
   const foot = `<div class="n-sub" style="font-size:11px">${_escapeHtml(data.macro_note || '일정은 참고용이며 변경될 수 있어요.')}${genAt ? ` (매크로 일정 갱신: ${genAt})` : ''}
       <button type="button" class="n-link" style="font-size:11px" onclick="runMacroCalendarNow(this)" title="매크로 일정만 다시 생성(주 1회 자동 갱신, 필요하면 수동으로도)">매크로 일정 다시 생성</button></div>
@@ -6326,7 +6348,7 @@ function renderHomeCal() {
       <button type="button" class="n-btn sm" onclick="calMove(1)" aria-label="다음 달">▶</button>
     </div>
     <div class="hc-grid">${head}${cells}</div>
-    ${dayHtml}${foot}`;
+    ${dayHtml}${upHtml}${foot}`;
 }
 // 추가·수정 폼 — 명시적 동작(날짜 선택·추가·수정·저장·취소) 때만 다시 그린다(데이터 재렌더가 입력을 안 지운다).
 function renderHomeCalForm() {
@@ -6337,7 +6359,9 @@ function renderHomeCalForm() {
   if (_cal.editId !== 'new' && !rec) { box.innerHTML = ''; return; }
   box.innerHTML = `<form class="hc-form" onsubmit="event.preventDefault();calSave(this)">
       <span class="n-sub" style="font-size:12px">${rec ? '일정 수정' : '일정 추가'} · ${rec ? rec.date : _cal.sel}</span>
-      <input name="title" maxlength="100" required placeholder="제목(한 줄)" value="${_escapeHtml(rec ? rec.title : '')}">
+      <input name="title" maxlength="100" required placeholder="제목(한 줄) — 예: 크래프톤 구름 모양 확인" value="${_escapeHtml(rec ? rec.title : '')}">
+      <input name="ticker" maxlength="16" placeholder="재확인 종목(선택) — 259960.KS / AAPL" value="${_escapeHtml(rec && rec.ticker ? rec.ticker : '')}" autocapitalize="characters" spellcheck="false">
+      <textarea name="memo" maxlength="500" rows="2" placeholder="메모(선택) — 왜 등록했는지. 예: 일목 선행구름 두꺼움, 이날 구름 꼬임 여부" style="width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:6px 8px;font-size:12px;font-family:inherit;resize:none">${_escapeHtml(rec && rec.memo ? rec.memo : '')}</textarea>
       <div style="display:flex;gap:6px;align-items:center">
         <input name="time" type="time" value="${rec && rec.time ? rec.time : ''}" aria-label="시간(선택, KST)" style="flex:0 0 auto"><span class="n-sub" style="font-size:12px">KST · 선택</span>
         <span style="flex:1"></span>

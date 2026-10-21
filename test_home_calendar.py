@@ -99,12 +99,63 @@ def test_deleted_event_is_not_resurrected(store):
     ({"title": "  "}, "제목"), ({"title": "두\n줄"}, "한 줄"), ({"title": "x" * 101}, "100자"),
     ({"time": "24:00"}, "HH:MM"), ({"time": "9:00"}, "HH:MM"), ({"date": "2026-02-30"}, "YYYY-MM-DD"),
     ({"id": "../x"}, "ue_"), ({"color": "red"}, "알 수 없는 필드"),
+    # v5.354 재확인 종목·메모
+    ({"ticker": "259960.ks"}, "티커"), ({"ticker": "크래프톤"}, "티커"), ({"ticker": ".KS"}, "티커"),
+    ({"memo": "x" * 501}, "500자"), ({"memo": 123}, "문자열"),
 ])
 def test_validation(store, bad, msg):
     rec = {**EV, **bad}
     r = asyncio.run(app.user_event_put(rec["id"], _Req({"record": rec, "base_rev": None})))
     assert r.status_code == 400 and msg in json.loads(r.body)["error"]
     assert not (store / "user_events.json").exists()
+
+
+# ── v5.354 재확인 종목 ──────────────────────────────────────────
+RC = {"id": "ue_rc1", "date": "2026-12-29", "title": "크래프톤 구름 모양 확인", "time": None,
+      "ticker": "259960.KS", "memo": "일목 선행구름 두꺼움\n이날 구름 꼬임 여부"}
+
+
+def test_recheck_ticker_and_memo_round_trip(store):
+    s, d = _put(RC, None)
+    assert s == 200 and d["record"]["ticker"] == "259960.KS" and "\n" in d["record"]["memo"]
+    got = _get()[0]
+    assert got["ticker"] == "259960.KS" and got["memo"] == RC["memo"]
+    s, d = _put({**RC, "ticker": None, "memo": None}, 1)          # 종목 지우면 보통 일정으로
+    assert s == 200 and d["record"]["ticker"] is None
+
+
+def _due(date):
+    return json.loads(asyncio.run(app.user_events_due(date)).body)
+
+
+def test_due_returns_only_that_date_tickers_first(store):
+    _put(RC, None)
+    _put({**RC, "id": "ue_rc2", "title": "FOMC", "ticker": None, "memo": None, "time": "03:00"}, None)
+    _put({**RC, "id": "ue_rc3", "date": "2026-12-30"}, None)
+    d = _due("2026-12-29")
+    assert d["ok"] and d["date"] == "2026-12-29"
+    assert [e["id"] for e in d["events"]] == ["ue_rc1", "ue_rc2"]      # 종목 있는 것 먼저
+    assert _due("2026-12-31")["events"] == []
+    r = asyncio.run(app.user_events_due("12/29"))
+    assert r.status_code == 400
+
+
+def test_due_defaults_to_today_kst(store, monkeypatch):
+    class _Now:
+        @staticmethod
+        def now(tz=None):
+            from datetime import datetime as _dt
+            return _dt(2026, 12, 29, 8, 45, tzinfo=tz)
+    _put(RC, None)
+    monkeypatch.setattr(app, "datetime", _Now)
+    assert [e["id"] for e in _due("")["events"]] == ["ue_rc1"]
+
+
+def test_due_is_open_to_bot_and_read_only():
+    assert "/api/user-events/due" in app._BOT_READ_EXACT_PATHS
+    import inspect
+    body = inspect.getsource(app.user_events_due)
+    assert not re.search(r"_rec_list_write|json\.dump|os\.replace", body)
 
 
 def test_uses_shared_record_store_functions():
@@ -149,7 +200,8 @@ def _js(expr):
     if not shutil.which("node"):
         pytest.skip("node 미설치")
     pre = "const _escapeHtml = s => String(s);\n" + "\n".join(
-        _fn(f) for f in ("calSystemEvents", "calEventsByDate", "calShiftMonth", "calMonthGrid", "calApplyEventEdit"))
+        _fn(f) for f in ("calSystemEvents", "calEventsByDate", "calShiftMonth", "calMonthGrid", "calApplyEventEdit",
+                         "calTickerMarket", "calUpcomingTickerEvents"))
     p = subprocess.run(["node", "-e", pre + f"\nconsole.log(JSON.stringify({expr}));"], capture_output=True, text=True, timeout=20)
     assert p.returncode == 0, p.stderr
     return json.loads(p.stdout)
@@ -205,10 +257,10 @@ def test_system_and_user_events_coexist_same_day():
 
 def test_apply_event_edit():
     new = _js("calApplyEventEdit(null, {title: '  실적\\n 발표 ', time: '', date: '2026-10-08'}, 'ue_new1')")
-    assert new == {"id": "ue_new1", "date": "2026-10-08", "title": "실적 발표", "time": None}
+    assert new == {"id": "ue_new1", "date": "2026-10-08", "title": "실적 발표", "time": None, "ticker": None, "memo": None}   # v5.354: ticker·memo 추가
     old = {"id": "ue_x", "date": "2026-10-08", "title": "a", "time": None, "rev": 3}
     e = _js(f"calApplyEventEdit({json.dumps(old)}, {{title: 'b', time: '09:05'}}, 'ue_ignored')")
-    assert e == {**old, "title": "b", "time": "09:05"}                               # id·날짜·rev 유지
+    assert e == {**old, "title": "b", "time": "09:05", "ticker": None, "memo": None}  # id·날짜·rev 유지
     for fields, msg in (("{title: ' '}", "제목"), ("{title: 'x', time: '25:00'}", "HH:MM"), ("{title: 'x'}", "날짜")):
         got = _js(f"(() => {{ try {{ calApplyEventEdit(null, {fields}, 'ue_1'); return null; }} catch (e) {{ return e.message; }} }})()")
         assert got and msg in got
@@ -288,3 +340,32 @@ def test_calendar_css_uses_theme_tokens():
 
 def test_user_events_loaded_on_home_entry():
     assert "loadUserEvents();" in _fn("onEnterCalendarTab")
+
+
+# ── v5.354 프론트: 종목 정규화·재확인 예정 목록 ──────────────────────
+def test_apply_event_edit_ticker_normalized():
+    out = _js("calApplyEventEdit(null, {title:'구름', date:'2026-12-29', ticker:' 259960.ks ', memo:'a\\r\\nb'}, 'ue_x')")
+    assert out["ticker"] == "259960.KS" and out["memo"] == "a\nb" and out["time"] is None
+    out = _js("calApplyEventEdit(null, {title:'FOMC', date:'2026-12-29', ticker:'', memo:''}, 'ue_x')")
+    assert out["ticker"] is None and out["memo"] is None
+    p = subprocess.run(["node", "-e", _fn("calApplyEventEdit") + "\ntry{calApplyEventEdit(null,{title:'x',date:'2026-12-29',ticker:'크래프톤'},'ue_x');console.log('ok')}catch(e){console.log('ERR '+e.message)}"],
+                       capture_output=True, text=True, timeout=20)
+    assert p.stdout.startswith("ERR") and "티커" in p.stdout
+
+
+def test_ticker_market_kr_detection():
+    assert _js("[calTickerMarket('259960'), calTickerMarket('259960.KQ'), calTickerMarket('AAPL'), calTickerMarket('KRW-BTC')]") == ["kr", "kr", None, None]
+
+
+def test_upcoming_ticker_events_from_today_sorted_limited():
+    evs = "[{date:'2026-12-30',title:'b',ticker:'A'},{date:'2026-10-20',title:'past',ticker:'P'},{date:'2026-10-21',title:'t',ticker:'T'},{date:'2026-12-29',title:'c',ticker:null},{date:'2026-12-29',title:'a',ticker:'K'}]"
+    out = _js(f"calUpcomingTickerEvents({evs}, '2026-10-21', 2).map(e => e.ticker)")
+    assert out == ["T", "K"]
+
+
+def test_form_has_ticker_and_memo_fields_and_day_row_links_ticker():
+    form = _fn("renderHomeCalForm")
+    assert 'name="ticker"' in form and 'name="memo"' in form and "f.get('ticker')" in _fn("calSave")
+    cal = _fn("renderHomeCal")
+    assert cal.count("calTickerHtml(e.ticker)") == 2                  # 그날 목록 + 재확인 예정
+    assert "tvUrl(t, calTickerMarket(t))" in _fn("calTickerHtml")
