@@ -51,7 +51,7 @@ REVIEW_MAX = 200                                # "한 줄 복기" 입력 상한
 STATUS_OPEN, STATUS_PARTIAL, STATUS_CLOSED = "진행중", "일부 청산", "종료"
 STATUS_TRIMMED = STATUS_PARTIAL                 # 옛 이름 호환
 EXITS_MAX = 4
-MARGIN_DEFAULT = 35                             # v5.352 1단위 35 USDT(사용자 계획)
+MARGIN_DEFAULT = 56                             # v5.355 1단위 = 시드 10%(사용자 2026-10-22: 시드 558 → 56. 1,000까지 불린 뒤 수익 저금)
 CLOSED_EPS = 0.01                               # pct 합 100±이 범위면 종료
 ADD_KEYS = ("add1", "add2")
 
