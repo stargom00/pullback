@@ -577,16 +577,18 @@ h1 .ver{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(-
 .fund-box .vd.exp{color:var(--px-down);border:1px solid var(--px-down)}
 .fund-box .note{display:block;margin-top:4px;font-size:11px;opacity:max(.75,var(--fade-floor))}
 .journal-btn{width:100%;margin-top:10px;padding:7px;background:transparent;
-/* v5.346 카드 "🗞 왜?" — 뉴스 원인 3줄 요약 */
+  border:1px dashed var(--line);color:var(--muted);border-radius:8px;font-size:12px;
+  cursor:pointer;font-family:inherit;transition:all .12s}
+.journal-btn:hover{border-color:var(--amber);color:var(--amber)}
+/* v5.346 카드 "🗞 왜?" — 뉴스 원인 3줄 요약.
+   v5.356: 이 블록이 .journal-btn{...} 선언 안에 끼어 있어 브라우저가 6개 규칙 전부를 버렸다(글자가 기본 크기로 나옴).
+   규칙 밖으로 옮기고 본문 12px(.n-sub와 동일)로 통일. test_news_why_css.py가 중첩을 막는다. */
 .news-why{margin-top:10px}
-.news-why-out{margin-top:6px;font-size:12.5px;line-height:1.5}
+.news-why-out{margin-top:6px;font-size:12px;line-height:1.5;color:var(--n-muted)}
 .news-why-out:empty{display:none}
 .news-why-lines div{margin:1px 0}
 .news-why-meta{color:var(--muted);font-size:11px;margin:4px 0}
 .news-why-err{color:var(--c-red-fg2);font-size:12px;margin:4px 0}
-  border:1px dashed var(--line);color:var(--muted);border-radius:8px;font-size:12px;
-  cursor:pointer;font-family:inherit;transition:all .12s}
-.journal-btn:hover{border-color:var(--amber);color:var(--amber)}
 /* v5.290: ABC 탭 필터 칩 — 예전엔 `.journal-btn`(width:100%)을 재사용해
    버튼 11개가 각각 화면 전체 폭을 차지하고 `margin-top:10px`까지 붙어
    화면 절반을 필터가 먹었다. 전용 클래스로 분리(journal-btn은 불변 —
@@ -1434,7 +1436,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.355</span>
+      <span class="ver mono" id="verBadge">v5.356</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">

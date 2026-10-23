@@ -5,6 +5,12 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.356 [카드 "🗞 왜?" 요약 글자 크기 — 사용자 지시 2026-10-24 "글자크기 작게 줄여줘. 다른거랑 통일성있게"] 원인: v5.346의
+  .news-why* CSS 6개 규칙이 static/index.html의 .journal-btn{...} 선언 블록 안에 삽입돼 있었다(background:transparent; 와
+  border: 사이). CSS 파서가 선언 안의 중괄호 블록을 무효 선언으로 버려 6개 규칙 전부와 .journal-btn의 border 선언까지
+  사라졌고, 요약 본문이 카드 기본 글자 크기로 나왔다. 수정: 블록을 .journal-btn:hover 뒤(최상위)로 이동, 본문 12px
+  (.n-sub와 동일)·메타 11px. 새 test_news_why_css.py — 중괄호 깊이를 세어 .news-why* 규칙이 최상위(depth 0)에 있는지,
+  .journal-btn 블록 안에 중첩 규칙이 없는지 고정(사보타주: 블록을 다시 .journal-btn 안으로 넣으면 FAIL).
 v5.355 [코인 일지 증거금 기본값 35 → 56 — 사용자 지시 2026-10-22 "시드 1000까지 불리고 그 다음부터 수익 저금. 1단위 = 시드 10%, 일지 기본값
   56으로"] coin_journal.MARGIN_DEFAULT만 변경(화면 빠른 입력 기본값). 계산·검증 변경 없음.
 v5.354 [달력 재확인 종목 + 봇 알림 — 사용자 지시 2026-10-21 "저점종목 매수기법 정립·공부. 구름 두꺼운 종목을 12월 29일에 다시 열어 구름
@@ -9090,7 +9096,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.355"
+VERSION = "v5.356"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
