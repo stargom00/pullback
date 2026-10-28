@@ -113,3 +113,15 @@ def test_table_omits_sector_when_null():
 def test_table_escapes_sector_text():
     html = _table([{**_ROW, "sector": "<b>x</b>"}], "KR")
     assert "&lt;b&gt;x&lt;/b&gt;" in html and "<b>x</b>" not in html
+
+
+# ── v5.359 줄간격 ───────────────────────────────────────────────────
+def test_table_has_nl_table_class_and_css():
+    html = _table([dict(_ROW)], "KR")
+    assert 'class="jr-table lpt-table nl-table"' in html
+    css = SRC[SRC.index("<style"):SRC.index("</style>")]
+    for rule in (".nl-table td{padding:7px 12px}", ".nl-table th{padding:8px 12px}", ".nl-table .jr-s{margin-top:1px}"):
+        assert css.count(rule) == 1, rule
+        # 다른 규칙 안에 끼어 있지 않아야 한다(v5.356 .news-why 사고와 같은 유형)
+        depth = css[:css.index(rule)].count("{") - css[:css.index(rule)].count("}")
+        assert depth == 0, f"{rule} 가 depth {depth}에 중첩"

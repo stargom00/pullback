@@ -5,6 +5,9 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.359 [신규상장 표 줄간격 — 사용자 지시 2026-10-28 "줄간격이 너무 넓어. 좁혀줘"] 표에 .nl-table 클래스 추가, td 16→7px·th 10→8px·
+  보조줄(.jr-s) 상단 여백 4→1px. jr-table을 쓰는 다른 표(일지 등)는 불변. test_newlisting_sector.py에 클래스 존재와 CSS 규칙
+  최상위 여부 테스트 추가.
 v5.358 [신규상장 개월 창 13~20 → 13~36 — 사용자 지시 2026-10-28 "일단 개월차만 36개월로 늘리자"(수가 적어서)] newlisting.MONTHS_MAX
   20→36. 하락률(신고가 대비 −50%)·급등 전력 제외(5배/365일)는 그대로. 가격 조회 창(KR 1900일·US 5년)이 36개월을 덮으므로
   첫 봉 = 첫 거래일 전제 유지. 탭 툴팁·제목 문구 갱신. test_newlisting 경계 21·36 포함, 37 제외로 갱신. ⚠ 결과 파일은
@@ -9106,7 +9109,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.358"
+VERSION = "v5.359"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

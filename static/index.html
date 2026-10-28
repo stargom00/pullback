@@ -1303,6 +1303,10 @@ table.jr-table.lpt-table tbody tr.lpt-hit td{background:var(--n-hit-tint)}   /* 
 .lpt-table tr.lpt-sep td{padding:6px 12px 6px 24px;border-bottom:1px solid var(--n-line2)}
 .lpt-table tr.lpt-sep span{font-size:11px;color:var(--n-muted);letter-spacing:.4px}
 .lpt-table tr.lpt-sell td{background:var(--c-blue-bg7)}
+/* v5.359 신규상장 표 — 사용자 지시 2026-10-28 "줄간격이 너무 넓어. 좁혀줘". jr-table 기본 td 16px → 7px(다른 표는 불변) */
+.nl-table td{padding:7px 12px}
+.nl-table th{padding:8px 12px}
+.nl-table .jr-s{margin-top:1px}
 /* ── 내 일지(#journalView) ── */
 /* applyTabViewState가 style.display='block'을 넣으므로 flex gap 대신 형제 여백으로 간격을 둔다 */
 #journalView{background:var(--n-bg);color:var(--n-text);padding:32px var(--n-gutter) 48px}
@@ -1436,7 +1440,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.358</span>
+      <span class="ver mono" id="verBadge">v5.359</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -9069,7 +9073,7 @@ function _nlTable(rows, mkt) {
       + `<td class="r" title="${r.peak_close != null ? `상장 후 최고 종가(${r.peak_close_date}) ${_lptFmt(r.peak_close, mkt)} → 기준일(${r.ref_close_date}) ${_lptFmt(r.ref_close, mkt)}` : '최고 종가 없음'}">${_lptPct(r.drawdown_pct)}${r.first_close_date && r.first_close_date !== r.listed ? `<div class="jr-s">첫 봉 ${r.first_close_date}</div>` : ''}</td></tr>`;
   }).join('');
   const arrow = _nl.sortKey === 'dd' ? (_nl.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
-  return `<div class="jr-table-wrap"><table class="jr-table lpt-table"><thead><tr><th>종목</th><th>상장일</th>`
+  return `<div class="jr-table-wrap"><table class="jr-table lpt-table nl-table"><thead><tr><th>종목</th><th>상장일</th>`
     + `<th class="r">개월수</th><th class="r">종가</th>`
     + `<th class="r">신고가</th>`
     + `<th class="r"><button type="button" class="n-link" style="font-size:12px" onclick="nlToggleDdSort()" title="상장 후 최고 종가 대비 기준일 종가 — 클릭해 정렬">하락률${arrow}</button></th>`
