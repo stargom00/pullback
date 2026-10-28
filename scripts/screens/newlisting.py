@@ -1,4 +1,4 @@
-"""신규상장 스크린 — 상장 13~20개월차 KR·US 전 상장종목 (v5.314, 사용자 지시).
+"""신규상장 스크린 — 상장 13~36개월차 KR·US 전 상장종목 (v5.314 13~20 → v5.358 13~36, 사용자 지시).
 
 사용자 지시 원문 요약: "매월 말 장 마감 후, KR·US 전 상장종목 중 상장 13~20개월차 종목을
 보고 싶다(신규상장 베이스 탐색). 유니버스 컷 무관하게 전 목록 대상."
@@ -23,7 +23,7 @@
       첫 거래일은 바뀌지 않는 값이라 심볼별로 캐시해 다음 달엔 새 심볼만 묻는다.
 
 [종가·하락률] 필터를 통과한 종목**만** 저점 스크린의 fetch_kr(naver 일봉 1900일)/fetch_us(yahoo 5년)로
-받는다(전수 조회 없음). 13~20개월 종목은 상장일이 이 기간 안이라 그 시계열의 **첫 봉 = 첫 거래일**이고,
+받는다(전수 조회 없음). 13~36개월 종목은 상장일이 이 기간 안이라(KR 1900일·US 5년 > 36개월) 그 시계열의 **첫 봉 = 첫 거래일**이고,
 같은 응답에서 세 값을 뽑는다(추가 요청 0): 최신 종가(close), 기준일 종가(기준일 이하 마지막 봉),
 첫 거래일 종가(첫 봉), 상장 후 최고 종가(첫 봉~기준일 최댓값)와 그 날짜. v5.315(사용자 지시)부터
 하락률 = (기준일 종가 − 상장 후 최고 종가)/최고 종가 — "고점에서 반토막 이상 난 종목"을 보려는 것이라
@@ -53,7 +53,7 @@ import lowpoint as lp   # noqa: E402 — KIND·US 목록·종가 조회를 그�
 
 PUBLISH_PATH = os.path.join(_ROOT, "data", "newlisting_latest.json")
 FIRST_TRADE_SEED_PATH = os.path.join(_ROOT, "data", "us_first_trade_dates.json")
-MONTHS_MIN, MONTHS_MAX = 13, 20          # 사용자 지시 "상장 13~20개월차"
+MONTHS_MIN, MONTHS_MAX = 13, 36          # 사용자 지시 "상장 13~20개월차"(v5.314) → v5.358 "일단 개월차만 36개월로 늘리자"(2026-10-28)
 KR_MARKET_NAME = {"kospi": "KOSPI", "kosdaq": "KOSDAQ"}
 US_DATE_CAVEAT = ("US 상장일 = yahoo firstTradeDate(첫 거래일). IPO일의 근사치 — 티커 변경·재상장·"
                   "SPAC 합병 상장은 실제 IPO일과 다를 수 있다.")
@@ -335,7 +335,7 @@ def build(ref: date, *, us_listings_path: str | None = None, cache_paths: list |
                    "yahoo_seconds": round(us_secs, 1), "hits": sum(r["market"] == "US" for r in rows)},
             "no_close": sum(r.get("close") is None for r in rows),
             "no_drawdown": sum(r.get("drawdown_pct") is None for r in rows),
-            # 급등 전력으로 목록에서 빠지는 13~20개월 종목 수(시장별)
+            # 급등 전력으로 목록에서 빠지는 창 안(MONTHS_MIN~MAX) 종목 수(시장별)
             "excluded_surge": {"kr": sum(bool(r.get("surge_excluded")) and r["market"] != "US" for r in rows),
                                "us": sum(bool(r.get("surge_excluded")) and r["market"] == "US" for r in rows)},
             # 첫 봉 날짜가 상장일과 다르면(데이터가 상장일보다 늦게 시작) 그 하락률은 첫 거래일 기준이 아니다 — 건수로 드러낸다

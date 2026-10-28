@@ -1,4 +1,4 @@
-"""v5.314 — 신규상장 스크린(상장 13~20개월차) · 서버 러너 · 탭.
+"""v5.314 — 신규상장 스크린(상장 13~20개월차, v5.358부터 13~36) · 서버 러너 · 탭.
 
 개월수 정의(newlisting.py docstring): months = 기준월 − 상장월(월 산술, 기준일=월말 → 상장일의
 일(day)은 무관), 13 ≤ months ≤ 20 포함.
@@ -48,8 +48,10 @@ def _k(s):
     ("2025-08-31", 13, True),    # 같은 달 말일도 13(일 무관)
     ("2025-01-01", 20, True),    # 정확히 20 → 포함
     ("2025-01-31", 20, True),
-    ("2024-12-31", 21, False),   # 21 → 제외
-    ("2024-12-01", 21, False),
+    ("2024-12-31", 21, True),    # v5.358: 21~36 포함
+    ("2024-12-01", 21, True),
+    ("2023-09-30", 36, True),    # 36 → 포함(경계)
+    ("2023-08-31", 37, False),   # 37 → 제외
 ])
 def test_window_boundaries(listed, months, inside):
     m = nl.months_since(date.fromisoformat(listed), REF)
@@ -58,8 +60,8 @@ def test_window_boundaries(listed, months, inside):
 
 
 def test_window_values_are_user_given():
-    assert (nl.MONTHS_MIN, nl.MONTHS_MAX) == (13, 20)
-    assert [m for m in range(0, 30) if nl.in_window(m)] == list(range(13, 21))
+    assert (nl.MONTHS_MIN, nl.MONTHS_MAX) == (13, 36)   # v5.358 사용자 지시 "일단 개월차만 36개월로"
+    assert [m for m in range(0, 50) if nl.in_window(m)] == list(range(13, 37))
 
 
 def test_months_across_year_and_february():
@@ -72,9 +74,9 @@ def test_months_across_year_and_february():
 def test_select_boundaries_and_order():
     rows = [{"market": "KOSDAQ", "code": f"{i:06d}.KQ", "name": n, "listed": d}
             for i, (n, d) in enumerate([("a12", "2025-09-15"), ("b13", "2025-08-20"), ("c20", "2025-01-02"),
-                                        ("d21", "2024-12-30"), ("e15", "2025-06-05"), ("f13b", "2025-08-01")])]
+                                        ("d37", "2023-08-30"), ("e15", "2025-06-05"), ("f13b", "2025-08-01")])]
     got = nl.select(rows, REF)
-    assert [r["name"] for r in got] == ["f13b", "b13", "e15", "c20"]   # 개월수 오름차순(같으면 상장일 순)
+    assert [r["name"] for r in got] == ["f13b", "b13", "e15", "c20"]   # d37(37개월)은 v5.358 창 밖   # 개월수 오름차순(같으면 상장일 순)
     assert [r["months"] for r in got] == [13, 13, 15, 20]
 
 
@@ -164,10 +166,10 @@ def fake_sources(monkeypatch):
 
 def test_build_end_to_end_with_fakes(fake_sources, tmp_path):
     cache = tmp_path / "c.json"
-    lookup = {"CRCL": date(2025, 6, 5), "AAPL": date(1980, 12, 12), "OLDX": date(2024, 12, 31)}.get
+    lookup = {"CRCL": date(2025, 6, 5), "AAPL": date(1980, 12, 12), "OLDX": date(2023, 8, 31)}.get
     e = nl.build(REF, cache_paths=[str(cache)], cache_write_path=str(cache), us_lookup=lookup, check_us_ready=False)
     assert [(r["code"], r["months"]) for r in e["rows"]] == [("111111.KS", 13), ("CRCL", 15), ("333333.KQ", 20)]
-    assert e["ref_date"] == "2026-09-30" and e["months_window"] == [13, 20]
+    assert e["ref_date"] == "2026-09-30" and e["months_window"] == [13, 36]
     assert "근사치" in e["us_date_caveat"] and "이전상장" in e["kr_date_caveat"]
     assert e["counts"]["kr"]["hits"] == 2 and e["counts"]["us"]["hits"] == 1
     assert json.loads(cache.read_text())["dates"]["CRCL"] == "2025-06-05"   # 다음 달엔 묻지 않는다
@@ -191,7 +193,7 @@ def test_rate_limit_fails_the_run_but_keeps_progress(fake_sources, tmp_path):
 
     def second(s):
         asked.append(s)
-        return {"AAPL": date(1980, 12, 12), "OLDX": date(2024, 12, 31)}[s]
+        return {"AAPL": date(1980, 12, 12), "OLDX": date(2023, 8, 31)}[s]
     e = nl.build(REF, cache_paths=[str(cache)], cache_write_path=str(cache), us_lookup=second, check_us_ready=False)
     assert sorted(asked) == ["AAPL", "OLDX"] and e["counts"]["us"]["hits"] == 1
 

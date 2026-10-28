@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.358 [신규상장 개월 창 13~20 → 13~36 — 사용자 지시 2026-10-28 "일단 개월차만 36개월로 늘리자"(수가 적어서)] newlisting.MONTHS_MAX
+  20→36. 하락률(신고가 대비 −50%)·급등 전력 제외(5배/365일)는 그대로. 가격 조회 창(KR 1900일·US 5년)이 36개월을 덮으므로
+  첫 봉 = 첫 거래일 전제 유지. 탭 툴팁·제목 문구 갱신. test_newlisting 경계 21·36 포함, 37 제외로 갱신. ⚠ 결과 파일은
+  다음 월말 실행(10-31) 때 새 창으로 만들어진다 — 그 전에 보려면 맥에서 `python3 scripts/screens/newlisting.py --ref
+  2026-09-30 --publish` 후 커밋(US 첫 거래일 조회가 약 2년치 늘어 yahoo 429면 받은 만큼 캐시 후 재실행).
 v5.357 [신규상장 표에 섹터 — 사용자 지시 2026-10-28 "종목 이름옆에 섹터를 표시하고싶어"] GET /api/newlisting이 응답 시점에
   행마다 sector(_sector_of, 미매핑 "기타"는 null)를 붙인다 — 스크린 결과 파일은 불변(재실행 불필요). 화면: 종목명 옆
   작은 글씨(.jr-s) 섹터, null이면 생략. 커버리지는 KR 정적 맵 ~88%(74건 중 65건), US는 서버 업종 캐시에 의존해 빈 칸
@@ -9101,7 +9106,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.357"
+VERSION = "v5.358"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
