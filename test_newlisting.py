@@ -230,7 +230,9 @@ def test_view_prefers_data_then_repo(nl_paths):
     assert app._newlisting_view()["missing"] is True
     nl_paths["repo"].write_text(json.dumps({"ref_date": "2026-09-30", "rows": [{"code": "R"}]}))
     v = app._newlisting_view()
-    assert v["source"] == "repo" and v["rows"] == [{"code": "R"}]
+    # v5.357: 응답 행에는 sector 키가 덧붙는다(값은 _sector_of 결과 — 여기선 검사 안 함, test_newlisting_sector.py)
+    assert v["source"] == "repo" and [{k: r[k] for k in r if k != "sector"} for r in v["rows"]] == [{"code": "R"}]
+    assert "sector" in v["rows"][0]
     nl_paths["data"].write_text(json.dumps({"ref_date": "2026-10-31", "rows": [{"code": "D"}]}))
     v = app._newlisting_view()
     assert v["source"] == "data" and v["ref_date"] == "2026-10-31"

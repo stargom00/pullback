@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.357 [신규상장 표에 섹터 — 사용자 지시 2026-10-28 "종목 이름옆에 섹터를 표시하고싶어"] GET /api/newlisting이 응답 시점에
+  행마다 sector(_sector_of, 미매핑 "기타"는 null)를 붙인다 — 스크린 결과 파일은 불변(재실행 불필요). 화면: 종목명 옆
+  작은 글씨(.jr-s) 섹터, null이면 생략. 커버리지는 KR 정적 맵 ~88%(74건 중 65건), US는 서버 업종 캐시에 의존해 빈 칸
+  가능. 새 test_newlisting_sector.py — 서버(_newlisting_view가 sector를 붙이고 "기타"→null)·프론트(_nlTable을 Node로
+  실행해 섹터 텍스트가 종목명 옆에 들어가고 null이면 빠지는지).
 v5.356 [카드 "🗞 왜?" 요약 글자 크기 — 사용자 지시 2026-10-24 "글자크기 작게 줄여줘. 다른거랑 통일성있게"] 원인: v5.346의
   .news-why* CSS 6개 규칙이 static/index.html의 .journal-btn{...} 선언 블록 안에 삽입돼 있었다(background:transparent; 와
   border: 사이). CSS 파서가 선언 안의 중괄호 블록을 무효 선언으로 버려 6개 규칙 전부와 .journal-btn의 border 선언까지
@@ -9096,7 +9101,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.356"
+VERSION = "v5.357"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -18592,7 +18597,20 @@ def _newlisting_view() -> dict:
               if st.get("status") in ("failed", "data_not_ready") else None)
     if not isinstance(entry, dict):
         return {"ok": True, "missing": True, "refresh_failed": failed}
-    return {"ok": True, **entry, "source": src, "refresh_failed": failed}
+    # v5.357(사용자 지시 2026-10-28 "종목 이름옆에 섹터를 표시하고싶어"): 응답 시점에 _sector_of()로 붙인다 —
+    # 스크린 결과 파일(/data·repo)은 그대로(재실행 불필요). "기타"(미매핑)는 None → 프론트가 표시 생략.
+    # 커버리지: KR은 kr_sectors_auto 정적 맵(2026-10 repo 결과 74건 중 65건), US는 /data us_industry_cache
+    # (월 1회 서버 빌드) → sectors.py → us_sectors_auto 순 폴백이라 신규 상장주는 빈 칸이 많을 수 있다.
+    rows = [{**r, "sector": _nl_sector(r.get("code"))} for r in (entry.get("rows") or [])]
+    return {"ok": True, **entry, "rows": rows, "source": src, "refresh_failed": failed}
+
+
+def _nl_sector(code) -> "str | None":
+    """신규상장 행의 섹터 라벨 — _sector_of() 그대로, 미매핑("기타")·빈 코드는 None."""
+    if not code:
+        return None
+    s = _sector_of(str(code))
+    return s if s and s != "기타" else None
 
 
 @app.get("/api/newlisting")
