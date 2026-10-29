@@ -54,6 +54,30 @@ EXITS_MAX = 4
 MARGIN_DEFAULT = 56                             # v5.355 1단위 = 시드 10%(사용자 2026-10-22: 시드 558 → 56. 1,000까지 불린 뒤 수익 저금)
 CLOSED_EPS = 0.01                               # pct 합 100±이 범위면 종료
 ADD_KEYS = ("add1", "add2")
+# v5.356 강제청산가(격리·1단계 구간). 바이낸스 격리 공식: 롱 = 평단×(1−1/배율)/(1−MMR), 숏 = 평단×(1+1/배율)/(1+MMR).
+# MMR 0.2%의 출처: 사용자 실제 화면(2026-10-29 숏 20배 진입 79,852.19 → 바이낸스 표시 청산가 83,660.76)에서 역산한 값
+# 0.22%를 반올림. 바이낸스 공식 구간표(BTCUSDT 1단계)는 이 세션에서 직접 확인하지 못함 — 표시 청산가와 ±0.05% 안에서
+# 맞는지 보고 어긋나면 이 값부터 의심할 것. 증거금 추가(격리 마진 추가)는 반영 안 함(초기 증거금 = 명목÷배율 가정).
+MMR_DEFAULT = 0.002
+LIQ_LEVERAGES = (5, 10, 20, 25, 50, 75, 100, 125)   # 배율별 청산 거리 표(표시용)
+
+
+def liq_price(entry: float, lev: float, side: str, mmr: float = MMR_DEFAULT) -> "float | None":
+    """격리 강제청산가. 배율 1 이하·입력 없음이면 None(롱 1배는 0까지 안 가니 청산가 의미 없음)."""
+    entry, lev = _num(entry), _num(lev)
+    if not entry or not lev or entry <= 0 or lev <= 1:
+        return None
+    return entry * (1 - 1 / lev) / (1 - mmr) if side == "long" else entry * (1 + 1 / lev) / (1 + mmr)
+
+
+def liq_pct(lev: float, side: str, mmr: float = MMR_DEFAULT) -> "float | None":
+    """진입가 대비 청산가까지 거리 %(롱은 음수, 숏은 양수). 진입가와 무관하게 배율만으로 정해진다."""
+    p = liq_price(100.0, lev, side, mmr)
+    return None if p is None else p - 100.0
+
+
+def liq_table(mmr: float = MMR_DEFAULT) -> list:
+    return [{"leverage": l, "long_pct": liq_pct(l, "long", mmr), "short_pct": liq_pct(l, "short", mmr)} for l in LIQ_LEVERAGES]
 
 
 def _num(v):
@@ -252,7 +276,9 @@ def calc(rec: dict) -> dict:
     out = {"avg_entry": avg, "margin_total": sum(m for _, _, m, _ in ls), "notional_total": notional,
            "n_adds": sum(1 for k in ADD_KEYS if rec.get(k)), "status": status_of(rec),
            "tp_roi_pct": tp_roi_pct(_num(rec.get("tp_pct"))), "tp_roi_leverage": TP_ROI_LEVERAGE,
-           "closed_pct": done, "remaining_pct": max(0.0, 100 - done)}
+           "closed_pct": done, "remaining_pct": max(0.0, 100 - done),
+           # v5.356 평단 기준 격리 청산가(추가 진입은 증거금도 같이 들어오므로 평단·같은 배율로 계산)
+           "liq_price": liq_price(avg, lev, rec.get("side")), "liq_pct": liq_pct(lev, rec.get("side")), "mmr": MMR_DEFAULT}
     per, pnl = [], 0.0
     for i, x in enumerate(exits, 1):
         px, pct = _num(x["price"]), _num(x.get("pct")) or 0

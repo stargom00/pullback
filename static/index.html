@@ -1440,7 +1440,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.360</span>
+      <span class="ver mono" id="verBadge">v5.361</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -7587,6 +7587,7 @@ function _cjCardHtml(r) {
       <span>평단 <b class="num">${cjNum(c.avg_entry, 1)}</b></span>
       <span>증거금 <b class="num">${c.margin_total ?? '—'}</b> USDT</span>
       ${cjTpLine(r)}
+      ${c.liq_price != null && open ? `<span>💀 청산 <b class="num">${cjNum(c.liq_price, 1)}</b> <span class="n-sub">(${cjSignedPct(c.liq_pct)})</span></span>` : ''}
     </div>
     <div class="jr-table-wrap"><table class="jr-table lpt-table cj-table"><thead><tr><th></th><th class="r">가격</th><th class="r">증거금 / 비중</th><th>시각 (NZ)</th></tr></thead><tbody>
       ${entryRow('1차 진입', r.entry)}${entryRow('추가 1', r.add1)}${entryRow('추가 2', r.add2)}${exitRows}
@@ -7596,6 +7597,30 @@ function _cjCardHtml(r) {
     ${r.review ? `<div style="margin-top:4px">복기: ${_escapeHtml(r.review)}</div>` : ''}
     ${_cj.editing === rid ? _cjEditFormHtml(r) : ''}
   </section>`;
+}
+// v5.356 격리 강제청산가 — 서버 coin_journal.liq_price와 같은 공식(test_coin_journal.py가 node로 이 원문을 실행해 대조).
+// 입력 중 미리보기 전용. 저장된 기록의 값은 서버 calc.liq_price를 쓴다. 배율 1 이하·빈 값이면 null.
+function cjLiqPrice(price, lev, side, mmr) {
+  const p = Number(price), l = Number(lev), m = Number(mmr);
+  if (!(p > 0) || !(l > 1) || !(m >= 0)) return null;
+  return side === 'long' ? p * (1 - 1 / l) / (1 - m) : p * (1 + 1 / l) / (1 + m);
+}
+function cjSignedPct(v, d = 2) { return v == null ? '—' : (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(d) + '%'; }
+function cjLiqPreview(form, outId) {
+  // 새 진입·추가 진입 폼에서 진입가/배율/방향을 치는 대로 청산가 표시. 추가 진입은 평단이 바뀌므로 "이 가격 단독" 기준이라고 적는다.
+  const m = _cj.meta || {};
+  const price = form.price ? form.price.value : form.add_price.value;
+  const lev = form.leverage ? form.leverage.value : form.dataset.leverage;
+  const side = form.side ? form.side.value : form.dataset.side;
+  const lp = cjLiqPrice(price, lev, side, m.mmr ?? 0.002);
+  const el = document.getElementById(outId);
+  if (!el) return;
+  el.innerHTML = lp == null ? '' : `💀 청산 <b class="num">${lp.toFixed(1)}</b> <span class="n-sub">(${cjSignedPct((lp / Number(price) - 1) * 100)}${form.add_price ? ' · 이 가격 단독 기준, 저장 뒤 평단으로 다시 계산' : ''})</span>`;
+}
+function cjLiqTableHtml() {
+  const t = (_cj.meta || {}).liq_table || [];
+  if (!t.length) return '';
+  return `<div class="n-sub" style="margin-top:8px">배율별 청산 거리(격리) — 롱 ${t.map(x => `×${x.leverage} <span class="num">${cjSignedPct(x.long_pct, 1)}</span>`).join(' · ')}<br>숏 ${t.map(x => `×${x.leverage} <span class="num">${cjSignedPct(x.short_pct, 1)}</span>`).join(' · ')}</div>`;
 }
 function cjTpLine(r) {
   // TP 가격·20배 ROI는 서버 값(tp_price, calc.tp_roi_pct) 표시만. TP %가 없는 v5.347 기록은 옛 "목표"가 있으면 그걸 보인다.
@@ -7642,9 +7667,10 @@ function _cjAddModalHtml(r) {
   const key = r.add1 ? '추가 2' : '추가 1';
   const m = _cj.meta || {};
   return _cjModal(`${key} — ${_escapeHtml(r.symbol)} ${CJ_SIDE_LABEL[r.side] || r.side}`, `
-      <form class="lpt-form cj-form" onsubmit="event.preventDefault();cjSaveAdd(this, ${Number(r.id)})">
+      <form class="lpt-form cj-form" data-leverage="${r.leverage}" data-side="${_escapeHtml(r.side)}" oninput="cjLiqPreview(this,'cjAddLiq')" onsubmit="event.preventDefault();cjSaveAdd(this, ${Number(r.id)})">
         <label>진입 가격<input name="add_price" inputmode="decimal" required autofocus></label>
         <label>증거금 (USDT)<input name="add_margin" inputmode="decimal" value="${m.margin_default ?? 35}" required></label>
+        <div id="cjAddLiq" style="flex:1 1 100%"></div>
         <div class="n-sub" style="flex:1 1 100%">규칙: 평단 대비 −0.5% 이상 역행 + 새 신호일 때만. 시각은 지금(NZ).</div>
         <button type="submit" class="n-btn primary">저장</button>
         <button type="button" class="n-btn" onclick="_cj.adding=null;renderCoinJournal()">취소</button>
@@ -7693,7 +7719,7 @@ function renderCoinJournal() {
   const opt = (arr, cur, lab) => (arr || []).map(v => `<option value="${_escapeHtml(v)}"${v === cur ? ' selected' : ''}>${_escapeHtml(lab ? lab[v] || v : v)}</option>`).join('');
   const quick = `<section class="n-card" style="padding:16px 20px">
     <div class="n-sub" style="margin-bottom:8px"><b>새 진입</b> — 진입 시각은 지금(NZ). TP 가격은 저장 때 1차 진입가 기준으로 계산.</div>
-    <form class="lpt-form cj-form" onsubmit="event.preventDefault();cjQuickAdd(this)">
+    <form class="lpt-form cj-form" oninput="cjLiqPreview(this,'cjQuickLiq')" onsubmit="event.preventDefault();cjQuickAdd(this)">
       <label>방향<select name="side">${opt(m.sides || ['long', 'short'], 'long', CJ_SIDE_LABEL)}</select></label>
       <label>진입가<input name="price" inputmode="decimal" required autocomplete="off"></label>
       <label>증거금 (USDT)<input name="margin" inputmode="decimal" value="${m.margin_default ?? 35}" required></label>
@@ -7703,6 +7729,8 @@ function renderCoinJournal() {
       <label>심볼<input name="symbol" value="BTCUSDT"></label>
       <button type="submit" class="n-btn primary">기록</button>
     </form>
+    <div id="cjQuickLiq" style="margin-top:6px"></div>
+    ${cjLiqTableHtml()}
     ${_cj.msg ? `<div class="st-dot st-bad" style="margin-top:8px">${_escapeHtml(_cj.msg)}</div>` : ''}
   </section>`;
   const recs = [..._cj.records].sort((a, b) => String(b.entry && b.entry.time).localeCompare(String(a.entry && a.entry.time)));

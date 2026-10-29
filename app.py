@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.361 [코인 일지 강제청산가 — 사용자 지시 2026-10-29 "레버리지 별 강제청산비율 계산해서, 코인일지에 진입가 적으면 강제청산가까지
+  계산해서 보여줘"] coin_journal.liq_price/liq_pct/liq_table(격리 공식, MMR_DEFAULT 0.2% — 출처: 사용자 실제 화면 숏 ×20 79,852.19 →
+  83,660.76 역산 0.22% 반올림, 바이낸스 공식 구간표 미확인). calc()에 liq_price(평단 기준)·liq_pct·mmr. 메타에 mmr·liq_table.
+  화면: 카드 💀 청산 가격(진행 중만), 새 진입·추가 진입 폼 입력 중 미리보기(cjLiqPrice — 서버와 같은 공식, test_coin_journal.py가
+  node로 대조), 배율별 청산 거리 표.
 v5.360 [신규상장 표 같은 종목 2줄 — 사용자 지적 2026-10-28 화면의 대한조선(439260) 중복] 원인: 2026-09-30 실행 때 KIND
   corpList(KOSPI)가 439260을 2행으로 내보냈다(결과 파일에 완전히 같은 행 2개; 2026-10-28 맥에서 재조회하면 829행 중 1행).
   저점 유니버스 lp.kr_universe()는 dict({ticker: name})라 자연히 고유코드가 되는데, newlisting.kr_listings()는 list에
@@ -9114,7 +9119,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.360"
+VERSION = "v5.361"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -20607,7 +20612,9 @@ def _coin_view(records: list) -> dict:
             "tp_roi_leverage": coin_journal.TP_ROI_LEVERAGE,
             # v5.352 화면 기본값·상한(계산 사본 아님)
             "margin_default": coin_journal.MARGIN_DEFAULT, "leverage_default": coin_journal.LEVERAGE_DEFAULT,
-            "exits_max": coin_journal.EXITS_MAX}
+            "exits_max": coin_journal.EXITS_MAX,
+            # v5.356 청산가: 화면 즉시 미리보기용 MMR + 배율별 거리 표(서버 liq_price와 같은 공식 — test_coin_journal.py가 JS와 대조)
+            "mmr": coin_journal.MMR_DEFAULT, "liq_table": coin_journal.liq_table()}
 
 
 @app.get("/api/coin-journal")

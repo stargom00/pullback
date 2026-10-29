@@ -322,3 +322,48 @@ def test_stats_month_year_pnl(monkeypatch):
     ca, cb = cj.calc(a), cj.calc(b)
     assert st["pnl_month"]["n"] == 1 and st["pnl_month"]["pnl"] == pytest.approx(ca["pnl"]) and st["pnl_month"]["pnl_net"] == pytest.approx(ca["pnl_net"])
     assert st["pnl_year"]["n"] == 2 and st["pnl_year"]["pnl"] == pytest.approx(ca["pnl"] + cb["pnl"])
+
+
+# ── v5.356 격리 강제청산가 ───────────────────────────────────────────
+def test_liq_price_matches_binance_screen():
+    # 사용자 실제 화면 2026-10-29: 숏 ×20 진입 79,852.19 → 바이낸스 표시 청산가 83,660.76. MMR 0.2% 상수의 근거(역산 0.22%).
+    lp = cj.liq_price(79852.19, 20, "short")
+    assert abs(lp / 83660.76 - 1) < 0.0005
+    assert cj.liq_price(80000, 20, "long") == pytest.approx(80000 * 0.95 / 0.998)
+    assert cj.liq_price(80000, 1, "long") is None and cj.liq_price(None, 20, "long") is None
+    assert cj.liq_pct(20, "long") < 0 < cj.liq_pct(20, "short")
+    t = cj.liq_table()
+    assert [x["leverage"] for x in t] == list(cj.LIQ_LEVERAGES)
+    assert t[2]["short_pct"] == pytest.approx((1.05 / 1.002 - 1) * 100)
+
+
+def test_calc_liq_uses_avg_and_only_from_adds():
+    r = _rec(side="short", leverage=20, entry={"price": 80000, "margin": 56, "time": "2026-10-14T10:05"},
+             add1={"price": 80400, "margin": 56, "time": "2026-10-14T10:30"})
+    c = cj.calc(r)
+    assert c["liq_price"] == pytest.approx(cj.liq_price(c["avg_entry"], 20, "short"))
+    assert c["liq_pct"] == pytest.approx(cj.liq_pct(20, "short")) and c["mmr"] == cj.MMR_DEFAULT
+    # 평단만 바뀌어야 한다 — 진입가 단독으로 계산한 값과 달라야 함(평단 반영 확인)
+    assert c["liq_price"] != pytest.approx(cj.liq_price(80000, 20, "short"))
+
+
+def test_front_liq_matches_server():
+    if not shutil.which("node"):
+        pytest.skip("node 미설치")
+    src = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+    code = "\n".join(_fn(src, n) for n in ("cjLiqPrice", "cjSignedPct"))
+    expr = ('[cjLiqPrice("79852.19", "20", "short", 0.002), cjLiqPrice(80000, 20, "long", 0.002), cjLiqPrice("", 20, "long", 0.002), '
+            'cjLiqPrice(80000, 1, "long", 0.002), cjSignedPct(-4.761), cjSignedPct(4.79, 1), cjSignedPct(null)]')
+    p = subprocess.run(["node", "-e", code + f"\nconsole.log(JSON.stringify({expr}));"], capture_output=True, text=True, timeout=20)
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+    assert out[0] == pytest.approx(cj.liq_price(79852.19, 20, "short")) and out[1] == pytest.approx(cj.liq_price(80000, 20, "long"))
+    assert out[2] is None and out[3] is None and out[4:] == ["−4.76%", "+4.8%", "—"]
+    # 카드·폼 양쪽에서 쓰인다(존재가 아니라 개수 — 한쪽이 지워져도 잡히게)
+    assert src.count("cjLiqPreview(this,") >= 2 and src.count("c.liq_price") >= 1
+
+
+def test_view_meta_has_liq(api):
+    app, run, _ = api
+    st, d = run(app.coin_journal_list())
+    assert st == 200 and d["mmr"] == cj.MMR_DEFAULT and len(d["liq_table"]) == len(cj.LIQ_LEVERAGES)
