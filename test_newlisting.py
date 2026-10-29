@@ -218,6 +218,39 @@ def test_kr_parse_reuses_lowpoint_kind_definitions():
     assert src.count("lp.FETCH_CONCURRENCY") == 1
 
 
+def test_kr_listings_drops_duplicate_codes(monkeypatch):
+    """v5.360: KIND corpList가 같은 코드를 2행으로 낸 날(2026-09-30 대한조선 439260)이 결과 표 2줄로 나왔다.
+    저점 유니버스(dict)와 같은 계약 — 코드당 1행(첫 행 유지), 걷어낸 티커는 meta에."""
+    import pandas as pd
+
+    class _Resp:
+        status_code = 200
+        text = ""
+        encoding = None
+
+        def raise_for_status(self):
+            pass
+
+    tables = {
+        "stockMkt": pd.DataFrame({"종목코드": ["439260", "005930", "439260"],
+                                  "회사명": ["대한조선", "삼성전자", "대한조선"],
+                                  "상장일": ["2025-08-01", "1975-06-11", "2025-08-01"]}),
+        "kosdaqMkt": pd.DataFrame({"종목코드": ["111111"], "회사명": ["가"], "상장일": ["2025-07-01"]}),
+    }
+    calls = []
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        calls.append(params["marketType"])
+        return _Resp()
+    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr(nl.lp, "_read_kind_table", lambda text: tables[calls[-1]])
+    monkeypatch.setattr(nl.lp, "KR_BOARDS", {"kospi": ("stockMkt", "1", ".KS", 1), "kosdaq": ("kosdaqMkt", "2", ".KQ", 1)})
+    rows, meta = nl.kr_listings()
+    codes = [r["code"] for r in rows]
+    assert codes == ["439260.KS", "005930.KS", "111111.KQ"], codes
+    assert meta["duplicates_dropped"] == ["439260.KS"] and meta["total"] == 3
+
+
 # ── /data 우선 · 레포 폴백 ──────────────────────────────────────────
 @pytest.fixture
 def nl_paths(tmp_path, monkeypatch):

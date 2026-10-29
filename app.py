@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.360 [신규상장 표 같은 종목 2줄 — 사용자 지적 2026-10-28 화면의 대한조선(439260) 중복] 원인: 2026-09-30 실행 때 KIND
+  corpList(KOSPI)가 439260을 2행으로 내보냈다(결과 파일에 완전히 같은 행 2개; 2026-10-28 맥에서 재조회하면 829행 중 1행).
+  저점 유니버스 lp.kr_universe()는 dict({ticker: name})라 자연히 고유코드가 되는데, newlisting.kr_listings()는 list에
+  그대로 담아 중복이 통과했다. 수정: kr_listings가 코드당 첫 행만 유지(seen), 걷어낸 티커를 meta duplicates_dropped와
+  로그에 남긴다. 기존 결과 파일은 다음 월말 실행(또는 --publish 재실행) 때 정리된다. test_newlisting에 중복 픽스처 테스트.
 v5.359 [신규상장 표 줄간격 — 사용자 지시 2026-10-28 "줄간격이 너무 넓어. 좁혀줘"] 표에 .nl-table 클래스 추가, td 16→7px·th 10→8px·
   보조줄(.jr-s) 상단 여백 4→1px. jr-table을 쓰는 다른 표(일지 등)는 불변. test_newlisting_sector.py에 클래스 존재와 CSS 규칙
   최상위 여부 테스트 추가.
@@ -9109,7 +9114,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.359"
+VERSION = "v5.360"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

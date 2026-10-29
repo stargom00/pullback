@@ -127,7 +127,8 @@ def first_trade_date_from_epoch(epoch) -> date | None:
 def kr_listings() -> tuple[list, dict]:
     """KIND corpList(공개 다운로드)에서 KOSPI·KOSDAQ 전 종목의 코드·이름·시장·상장일."""
     import requests
-    rows, bad = [], []
+    rows, bad, dup = [], [], []
+    seen = set()
     for board in ("kospi", "kosdaq"):
         corp_mt, _admin_mt, suffix, min_n = lp.KR_BOARDS[board]
         r = requests.get(lp.KIND_CORPLIST_URL, params={"method": "download", "marketType": corp_mt},
@@ -143,9 +144,20 @@ def kr_listings() -> tuple[list, dict]:
             if d is None:
                 bad.append(f"{code}{suffix}")
                 continue
-            rows.append({"market": KR_MARKET_NAME[board], "code": f"{code}{suffix}", "name": str(name).strip(),
+            ticker = f"{code}{suffix}"
+            if ticker in seen:
+                # v5.360: KIND corpList가 같은 코드를 2행으로 내보낸 날이 있었다(2026-09-30 실행에 대한조선
+                # 439260 2행 → 결과 표에 같은 종목 2줄, 2026-10-28 재조회 땐 1행). 저점 유니버스(lp.kr_universe)는
+                # dict로 묶여 고유코드가 되는데 여기는 list라 그대로 통과했다. 같은 계약(코드당 1행, 첫 행 유지)으로
+                # 맞추고 걷어낸 건 meta에 남긴다.
+                dup.append(ticker)
+                continue
+            seen.add(ticker)
+            rows.append({"market": KR_MARKET_NAME[board], "code": ticker, "name": str(name).strip(),
                          "listed": d.isoformat()})
-    return rows, {"total": len(rows), "date_unparsed": bad}
+    if dup:
+        print(f"[newlisting] KIND 중복 코드 {len(dup)}건 제거: {', '.join(dup[:10])}")
+    return rows, {"total": len(rows), "date_unparsed": bad, "duplicates_dropped": dup}
 
 
 # ── US ────────────────────────────────────────────────────────────────
