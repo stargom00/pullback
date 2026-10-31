@@ -5,6 +5,12 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.362 [신규상장 표 US 열 정렬·섹터 한글 — 사용자 지시 2026-10-31 "미장 종목 이름이 길어서… 날짜가 두줄로 안보이게" · "섹터는
+  한글로"] ① 표 레이아웃: .nl-table 종목 칸 max-width 320px + 이름 2줄 말줄임(-webkit-line-clamp), 상장일·개월수·종가·신고가·
+  하락률 칸 white-space:nowrap — 긴 US 이름이 다른 열을 밀어 날짜가 두 줄로 꺾이던 것. KR 표도 같은 규칙(변화 없음).
+  ② 섹터 한글: 새 us_industry_ko.py(Morningstar 145 industry → 한글, 번역은 AI가 붙인 것·표만 고치면 됨). _nl_sector가
+  to_ko()를 거친다 — KR 업종·sectors.py 버킷은 이미 한글이라 통과, 표에 없는 영문은 원문 유지. 5탭 카드의 섹터 표기는
+  이번 범위 밖(그대로 영문). 테스트: 145건 전부 한글 포함·중복 없음, 미매핑 원문 통과, 표 셀 클래스.
 v5.361 [코인 일지 강제청산가 — 사용자 지시 2026-10-29 "레버리지 별 강제청산비율 계산해서, 코인일지에 진입가 적으면 강제청산가까지
   계산해서 보여줘"] coin_journal.liq_price/liq_pct/liq_table(격리 공식, MMR_DEFAULT 0.2% — 출처: 사용자 실제 화면 숏 ×20 79,852.19 →
   83,660.76 역산 0.22% 반올림, 바이낸스 공식 구간표 미확인). calc()에 liq_price(평단 기준)·liq_pct·mmr. 메타에 mmr·liq_table.
@@ -9119,7 +9125,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.361"
+VERSION = "v5.362"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -18628,7 +18634,10 @@ def _nl_sector(code) -> "str | None":
     if not code:
         return None
     s = _sector_of(str(code))
-    return s if s and s != "기타" else None
+    if not s or s == "기타":
+        return None
+    from us_industry_ko import to_ko   # v5.362: yfinance 영문 industry → 한글(표에 없으면 원문)
+    return to_ko(s)
 
 
 @app.get("/api/newlisting")

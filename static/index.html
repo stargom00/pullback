@@ -1307,6 +1307,10 @@ table.jr-table.lpt-table tbody tr.lpt-hit td{background:var(--n-hit-tint)}   /* 
 .nl-table td{padding:7px 12px}
 .nl-table th{padding:8px 12px}
 .nl-table .jr-s{margin-top:1px}
+/* v5.362 긴 US 종목명이 열을 밀어 날짜·개월수가 두 줄로 꺾이던 것 — 종목 칸 폭 상한 + 이름 2줄 말줄임, 숫자·날짜 칸 줄바꿈 금지 */
+.nl-table td.nl-name{max-width:320px}
+.nl-table .nl-title{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.35}
+.nl-table td.nowrap,.nl-table th.nowrap{white-space:nowrap}
 /* ── 내 일지(#journalView) ── */
 /* applyTabViewState가 style.display='block'을 넣으므로 flex gap 대신 형제 여백으로 간격을 둔다 */
 #journalView{background:var(--n-bg);color:var(--n-text);padding:32px var(--n-gutter) 48px}
@@ -1440,7 +1444,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.361</span>
+      <span class="ver mono" id="verBadge">v5.362</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -9090,20 +9094,20 @@ function _nlTable(rows, mkt) {
   if (!rows.length) return '<div class="n-sub" style="padding:14px 0">해당 종목 없음</div>';
   const body = rows.map(r => {
     const code = mkt === 'KR' ? String(r.code).split('.')[0] : r.code;
-    return `<tr><td><b><a class="name-link" href="${tvUrl(r.code, mkt)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기">${_escapeHtml(r.name || r.code)}</a></b>`
-      + `${r.sector ? ` <span class="jr-s nl-sector" title="섹터">${_escapeHtml(r.sector)}</span>` : ''}`
+    return `<tr><td class="nl-name"><div class="nl-title"><b><a class="name-link" href="${tvUrl(r.code, mkt)}" target="_blank" rel="noopener" title="${_newsAttr(r.name || r.code)} — 트레이딩뷰 차트 열기">${_escapeHtml(r.name || r.code)}</a></b>`
+      + `${r.sector ? ` <span class="jr-s nl-sector" title="섹터">${_escapeHtml(r.sector)}</span>` : ''}</div>`
       + `<div class="jr-s num">${_escapeHtml(code)}${mkt === 'KR' ? ' · ' + _escapeHtml(r.market) : ''}</div></td>`
-      + `<td class="num">${r.listed}</td><td class="num r">${r.months}개월</td>`
-      + `<td class="num r">${r.close == null ? '<span class="n-sub">—</span>' : _lptFmt(r.close, mkt)}`
+      + `<td class="num nowrap">${r.listed}</td><td class="num r nowrap">${r.months}개월</td>`
+      + `<td class="num r nowrap">${r.close == null ? '<span class="n-sub">—</span>' : _lptFmt(r.close, mkt)}`
       + `${r.close_date ? `<div class="jr-s">${r.close_date}</div>` : ''}</td>`
-      + `<td class="num r">${r.peak_close == null ? '<span class="n-sub">—</span>' : _lptFmt(r.peak_close, mkt)}`
+      + `<td class="num r nowrap">${r.peak_close == null ? '<span class="n-sub">—</span>' : _lptFmt(r.peak_close, mkt)}`
       + `${r.peak_close_date ? `<div class="jr-s">${r.peak_close_date}</div>` : ''}</td>`
-      + `<td class="r" title="${r.peak_close != null ? `상장 후 최고 종가(${r.peak_close_date}) ${_lptFmt(r.peak_close, mkt)} → 기준일(${r.ref_close_date}) ${_lptFmt(r.ref_close, mkt)}` : '최고 종가 없음'}">${_lptPct(r.drawdown_pct)}${r.first_close_date && r.first_close_date !== r.listed ? `<div class="jr-s">첫 봉 ${r.first_close_date}</div>` : ''}</td></tr>`;
+      + `<td class="r nowrap" title="${r.peak_close != null ? `상장 후 최고 종가(${r.peak_close_date}) ${_lptFmt(r.peak_close, mkt)} → 기준일(${r.ref_close_date}) ${_lptFmt(r.ref_close, mkt)}` : '최고 종가 없음'}">${_lptPct(r.drawdown_pct)}${r.first_close_date && r.first_close_date !== r.listed ? `<div class="jr-s">첫 봉 ${r.first_close_date}</div>` : ''}</td></tr>`;
   }).join('');
   const arrow = _nl.sortKey === 'dd' ? (_nl.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
-  return `<div class="jr-table-wrap"><table class="jr-table lpt-table nl-table"><thead><tr><th>종목</th><th>상장일</th>`
-    + `<th class="r">개월수</th><th class="r">종가</th>`
-    + `<th class="r">신고가</th>`
+  return `<div class="jr-table-wrap"><table class="jr-table lpt-table nl-table"><thead><tr><th>종목</th><th class="nowrap">상장일</th>`
+    + `<th class="r nowrap">개월수</th><th class="r nowrap">종가</th>`
+    + `<th class="r nowrap">신고가</th>`
     + `<th class="r"><button type="button" class="n-link" style="font-size:12px" onclick="nlToggleDdSort()" title="상장 후 최고 종가 대비 기준일 종가 — 클릭해 정렬">하락률${arrow}</button></th>`
     + `</tr></thead><tbody>${body}</tbody></table></div>`;
 }

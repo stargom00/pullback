@@ -46,7 +46,7 @@ def test_view_attaches_sector_and_nulls_unmapped(monkeypatch):
             {"market": "KOSPI", "code": "222222.KS", "name": "나"}]
     out = _view_with(monkeypatch, rows, {"111111.KQ": "2차전지", "NEWU": "Software - Application"})
     got = {r["code"]: r["sector"] for r in out["rows"]}
-    assert got == {"111111.KQ": "2차전지", "NEWU": "Software - Application", "222222.KS": None}
+    assert got == {"111111.KQ": "2차전지", "NEWU": "응용 소프트웨어", "222222.KS": None}   # v5.362: 영문 industry는 한글로
     # 저장된 행(entry)은 그대로 — 파일에 sector를 써넣지 않는다
     assert all("sector" not in r for r in rows)
 
@@ -72,6 +72,7 @@ _STUBS = """
 const _nl = {sortKey: 'months', sortDir: 'asc'};
 function _escapeHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function tvUrl(c, m){return 'tv://' + c;}
+function _newsAttr(v){return _escapeHtml(v).replace(/'/g,'&#39;');}
 function _lptFmt(v, m){return String(v);}
 function _lptPct(v){return v==null?'—':String(v)+'%';}
 function nlToggleDdSort(){}
@@ -125,3 +126,32 @@ def test_table_has_nl_table_class_and_css():
         # 다른 규칙 안에 끼어 있지 않아야 한다(v5.356 .news-why 사고와 같은 유형)
         depth = css[:css.index(rule)].count("{") - css[:css.index(rule)].count("}")
         assert depth == 0, f"{rule} 가 depth {depth}에 중첩"
+
+
+# ── v5.362 섹터 한글 · US 열 정렬 ────────────────────────────────────
+def test_us_industry_ko_table_is_complete_and_korean():
+    import re
+    from us_industry_ko import US_INDUSTRY_KO
+    assert len(US_INDUSTRY_KO) == 145, "Morningstar industry 145개"
+    assert len(set(US_INDUSTRY_KO.values())) == len(US_INDUSTRY_KO), "한글 라벨 중복"
+    for en, ko in US_INDUSTRY_KO.items():
+        assert re.search(r"[가-힣]", ko), f"{en!r} → {ko!r} 한글 아님"
+        assert "  " not in en and en == en.strip()
+
+
+def test_nl_sector_translates_english_and_passes_korean(monkeypatch):
+    monkeypatch.setattr(app, "_sector_of", lambda t: {
+        "PMI": "Medical Devices", "X.KS": "자동차부품", "ODD": "Not A Real Industry", "Z": "기타"}.get(t, "기타"))
+    assert app._nl_sector("PMI") == "의료기기"
+    assert app._nl_sector("X.KS") == "자동차부품"
+    assert app._nl_sector("ODD") == "Not A Real Industry"   # 표에 없으면 원문 유지(조용히 비우지 않는다)
+    assert app._nl_sector("Z") is None
+
+
+def test_table_cells_use_nowrap_and_name_clamp():
+    html = _table([{**_ROW, "name": "Eastern International Ltd. - Ordinary Shares", "sector": "진단·연구"}], "US")
+    assert 'class="nl-name"' in html and 'class="nl-title"' in html
+    assert html.count('nowrap') >= 5, "상장일·개월수·종가·신고가·하락률 칸이 nowrap이어야 한다"
+    css = SRC[SRC.index("<style"):SRC.index("</style>")]
+    for rule in (".nl-table td.nl-name{max-width:320px}", "-webkit-line-clamp:2", ".nl-table td.nowrap,.nl-table th.nowrap{white-space:nowrap}"):
+        assert rule in css, rule
