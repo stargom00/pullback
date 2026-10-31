@@ -5,6 +5,12 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.363 [신규상장 US 섹터 빈 칸 — 사용자 지적 2026-10-31 "미장 섹터가 아직도 한글로 안보여"] 원인은 번역이 아니라 커버리지: 섹터 소스
+  us_industry_cache(yfinance industry)가 스캔 유니버스 기준이라 신규 상장주가 거의 없다(화면에 한글로 뜬 MNTN·ETOR 2건만
+  캐시에 있던 종목). 수정: _newlisting_fill_us_industry() — 신규상장 결과의 US 티커 중 캐시에 없는 것만(최대 300) yfinance
+  industry를 받아 같은 캐시에 병합(us_industry_cache.build_cache, 기존 위 갱신·락 사용·월간 재빌드 중이면 건너뜀), 끝나면
+  메모리 재로드. 호출: ① 신규상장 월말 작업 끝 ② 스케줄러 하루 1회(KST 마커, _LOWPOINT_EXECUTOR) — 배포 직후 첫 틱에
+  이번 달 결과부터 채운다. 0건이어도 "대상 N건 중 M건" 로그. 테스트: 부족분만 요청·상한·락이면 건너뜀·마커·작업 연동.
 v5.362 [신규상장 표 US 열 정렬·섹터 한글 — 사용자 지시 2026-10-31 "미장 종목 이름이 길어서… 날짜가 두줄로 안보이게" · "섹터는
   한글로"] ① 표 레이아웃: .nl-table 종목 칸 max-width 320px + 이름 2줄 말줄임(-webkit-line-clamp), 상장일·개월수·종가·신고가·
   하락률 칸 white-space:nowrap — 긴 US 이름이 다른 열을 밀어 날짜가 두 줄로 꺾이던 것. KR 표도 같은 규칙(변화 없음).
@@ -9125,7 +9131,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.362"
+VERSION = "v5.363"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -13469,6 +13475,7 @@ async def _scheduler_loop():
             _daily_backup(LP_RANK_PATH, "lowpoint_rankings", lock=_LP_RANK_LOCK)   # v5.341 순위
             _daily_backup(COIN_JOURNAL_PATH, "coin_journal", lock=_COIN_JOURNAL_LOCK)   # v5.347 코인 일지
             asyncio.create_task(_maybe_run_lowpoint())   # v5.301: 저점종목 토요일 자동 실행(백그라운드)
+            asyncio.create_task(_maybe_fill_newlisting_industry())   # v5.363: 신규상장 US 업종 채우기(하루 1회)
         except Exception as e:
             print(f"[scheduler] loop error: {e}")
         await asyncio.sleep(240)  # 4분
@@ -18536,7 +18543,81 @@ def _newlisting_job_blocking(tf: str, now: "datetime") -> dict:
                      cache_paths=[US_FIRST_TRADE_PATH, US_FIRST_TRADE_SEED_PATH],
                      cache_write_path=US_FIRST_TRADE_PATH, is_trading_day=is_trading_day)
     nl.write_publish(entry, path=NEWLISTING_DATA_PATH)
-    return {"bar_date": entry["ref_date"], "rows": len(entry["rows"]), "counts": entry["counts"]}
+    fill = _newlisting_fill_us_industry()   # v5.363: 결과 US 종목의 업종을 캐시에 채워 섹터 칸이 비지 않게
+    return {"bar_date": entry["ref_date"], "rows": len(entry["rows"]), "counts": entry["counts"],
+            "industry_fill": fill}
+
+
+NEWLISTING_INDUSTRY_FILL_MAX = 300          # 한 번에 받을 최대 종목 수(0.5초 스로틀 → 최대 ~5분, AI 어림값)
+NEWLISTING_INDUSTRY_FILL_MARKER = _resolve_persistent_path("newlisting_industry_fill.marker")
+_nl_industry_fill_running = False
+
+
+def _newlisting_fill_us_industry(max_n: int = NEWLISTING_INDUSTRY_FILL_MAX) -> dict:
+    """v5.363(사용자 지적 2026-10-31 "미장 섹터가 아직도 한글로 안보여"): 신규상장 결과의 US 종목은 스캔
+    유니버스 기반 us_industry_cache에 거의 없어 섹터 칸이 비었다(표시된 2건만 캐시에 있던 종목). 결과 파일의
+    US 티커 중 캐시에 없는 것만 yfinance industry를 받아 **같은 캐시 파일에 병합**한다(us_industry_cache.build_cache
+    = 기존 위에 갱신) → _sector_of가 그대로 찾고 _nl_sector가 한글로 옮긴다. 블로킹이라 _LOWPOINT_EXECUTOR에서만
+    부른다. 월간 재빌드 프로세스가 락을 쥐고 있으면 건너뛴다(그 프로세스가 끝에 자기 사본을 저장해 덮을 수 있음 —
+    다음 날 마커가 지나면 다시 채운다). 0건이어도 "대상 N건 중 M건"을 남긴다."""
+    entry = _lowpoint_read(NEWLISTING_DATA_PATH) or _lowpoint_read(NEWLISTING_LATEST_PATH)
+    rows = (entry or {}).get("rows") or []
+    have = us_industry_cache.load_cache()
+    us = sorted({str(r.get("code")).upper() for r in rows if r.get("market") == "US" and r.get("code")})
+    missing = [t for t in us if t not in have]
+    out = {"us_rows": len(us), "missing": len(missing), "asked": 0, "filled": 0, "skipped": None}
+    if not missing:
+        print(f"[newlisting] 업종 채우기 — 대상 {len(us)}건 중 0건 필요", flush=True)
+        _touch_nl_fill_marker()
+        return out
+    if not us_industry_cache.acquire_lock():
+        out["skipped"] = "locked"
+        print(f"[newlisting] 업종 채우기 건너뜀 — 캐시 락(월간 재빌드 중), 부족 {len(missing)}건", flush=True)
+        return out
+    try:
+        ask = missing[:max_n]
+        before = len(have)
+        after = us_industry_cache.build_cache(ask, throttle=0.5, save_every=50)
+        out.update(asked=len(ask), filled=sum(1 for t in ask if t in after))
+        print(f"[newlisting] 업종 채우기 — 대상 {len(us)}건 중 부족 {len(missing)}건, 요청 {len(ask)}건, "
+              f"채움 {out['filled']}건 (캐시 {before}→{len(after)})", flush=True)
+    finally:
+        us_industry_cache.release_lock()
+    _reload_us_industry_cache_if_updated()
+    _touch_nl_fill_marker()
+    return out
+
+
+def _touch_nl_fill_marker() -> None:
+    try:
+        with open(NEWLISTING_INDUSTRY_FILL_MARKER, "w") as f:
+            f.write(datetime.now(KST).strftime("%Y-%m-%d"))
+    except OSError:
+        pass
+
+
+def _nl_fill_marker_is_today() -> bool:
+    try:
+        with open(NEWLISTING_INDUSTRY_FILL_MARKER) as f:
+            return f.read().strip() == datetime.now(KST).strftime("%Y-%m-%d")
+    except OSError:
+        return False
+
+
+async def _maybe_fill_newlisting_industry() -> None:
+    """스케줄러 루프에서 부른다 — 하루 1회(KST 날짜 마커), 캐시 파일이 있을 때만, 한 번에 하나만."""
+    global _nl_industry_fill_running
+    if _nl_industry_fill_running or _nl_fill_marker_is_today():
+        return
+    if not os.path.exists(us_industry_cache.cache_path()):
+        return   # 최초 빌드 전엔 손대지 않는다(_ensure_us_industry_cache_fresh와 같은 원칙)
+    _nl_industry_fill_running = True
+    try:
+        await asyncio.get_running_loop().run_in_executor(_LOWPOINT_EXECUTOR, _newlisting_fill_us_industry)
+    except Exception as e:
+        print(f"[newlisting] 업종 채우기 실패: {type(e).__name__}: {e}", flush=True)
+    finally:
+        _nl_industry_fill_running = False
 
 
 def _lowpoint_data_not_ready_error():

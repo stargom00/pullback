@@ -155,3 +155,69 @@ def test_table_cells_use_nowrap_and_name_clamp():
     css = SRC[SRC.index("<style"):SRC.index("</style>")]
     for rule in (".nl-table td.nl-name{max-width:320px}", "-webkit-line-clamp:2", ".nl-table td.nowrap,.nl-table th.nowrap{white-space:nowrap}"):
         assert rule in css, rule
+
+
+# ── v5.363 US 업종 채우기 ───────────────────────────────────────────
+@pytest.fixture
+def fill_env(monkeypatch, tmp_path):
+    import us_industry_cache as uic
+    rows = [{"market": "US", "code": "PMI"}, {"market": "US", "code": "ELOG"}, {"market": "US", "code": "MNTN"},
+            {"market": "KOSDAQ", "code": "111111.KQ"}]
+    monkeypatch.setattr(app, "_lowpoint_read", lambda path: {"rows": rows} if path == app.NEWLISTING_DATA_PATH else None)
+    cache = {"MNTN": "Software - Application"}
+    asked = []
+
+    def fake_build(tickers, throttle=0.5, save_every=50):
+        asked.extend(tickers)
+        cache.update({t: "Medical Devices" for t in tickers})
+        return dict(cache)
+    monkeypatch.setattr(uic, "load_cache", lambda: dict(cache))
+    monkeypatch.setattr(uic, "build_cache", fake_build)
+    monkeypatch.setattr(uic, "cache_path", lambda: str(tmp_path / "us_industry_cache.json"))
+    monkeypatch.setattr(uic, "lock_path", lambda: str(tmp_path / "us_industry_cache.lock"))
+    monkeypatch.setattr(app, "NEWLISTING_INDUSTRY_FILL_MARKER", str(tmp_path / "fill.marker"))
+    reloaded = []
+    monkeypatch.setattr(app, "_reload_us_industry_cache_if_updated", lambda: reloaded.append(1))
+    return {"asked": asked, "cache": cache, "reloaded": reloaded, "tmp": tmp_path, "uic": uic}
+
+
+def test_fill_requests_only_missing_us_tickers(fill_env):
+    out = app._newlisting_fill_us_industry()
+    assert fill_env["asked"] == ["ELOG", "PMI"], "캐시에 없는 US만, KR 제외"
+    assert out["us_rows"] == 3 and out["missing"] == 2 and out["asked"] == 2 and out["filled"] == 2
+    assert fill_env["reloaded"] == [1]
+    assert (fill_env["tmp"] / "fill.marker").exists() and app._nl_fill_marker_is_today()
+    assert not (fill_env["tmp"] / "us_industry_cache.lock").exists(), "락 해제"
+
+
+def test_fill_respects_cap(fill_env):
+    out = app._newlisting_fill_us_industry(max_n=1)
+    assert fill_env["asked"] == ["ELOG"] and out["asked"] == 1 and out["missing"] == 2
+
+
+def test_fill_skips_when_locked(fill_env):
+    fill_env["uic"].acquire_lock()
+    out = app._newlisting_fill_us_industry()
+    assert out["skipped"] == "locked" and fill_env["asked"] == []
+    assert not (fill_env["tmp"] / "fill.marker").exists(), "건너뛴 날은 마커를 안 찍어 다음 틱에 다시 시도"
+
+
+def test_fill_nothing_missing_still_marks(fill_env):
+    fill_env["cache"].update({"PMI": "x", "ELOG": "y"})
+    out = app._newlisting_fill_us_industry()
+    assert out["missing"] == 0 and fill_env["asked"] == [] and app._nl_fill_marker_is_today()
+
+
+def test_newlisting_job_calls_fill(monkeypatch):
+    import types
+    calls = []
+    monkeypatch.setattr(app, "_newlisting_fill_us_industry", lambda max_n=300: calls.append(1) or {"filled": 0})
+    fake_nl = types.SimpleNamespace(
+        build=lambda ref, **kw: {"ref_date": "2026-10-31", "rows": [], "counts": {}},
+        write_publish=lambda entry, path=None: None)
+    import sys as _sys
+    monkeypatch.setitem(_sys.modules, "newlisting", fake_nl)
+    monkeypatch.setattr(app, "_lowpoint_last_slot", lambda tf, now: (now, "2026-10-31"))
+    from datetime import datetime
+    out = app._newlisting_job_blocking("newlisting", datetime(2026, 11, 1, 10, 0))
+    assert calls == [1] and "industry_fill" in out
