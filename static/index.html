@@ -1444,7 +1444,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.363</span>
+      <span class="ver mono" id="verBadge">v5.364</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -9075,8 +9075,35 @@ function nlSortRows(rows, key, dir) {
     return sign * (x - y);
   });
 }
-let _nl = { data: null, error: null, ddLevel: 50, sortKey: 'months', sortDir: 'asc' };
-function nlSetLevel(lv) { _nl.ddLevel = lv; renderNewlisting(); }
+let _nl = { data: null, error: null, ddLevel: 50, sortKey: 'months', sortDir: 'asc', query: '' };
+let _nlComposing = false;
+// v5.364(사용자 지시 2026-11-02 "종목이 많아서 검색창이 필요함"): 종목명·코드·섹터 부분일치. 검색 중엔 하락률 칩을 무시하고
+// 급등 제외 종목도 포함해 전체에서 찾는다(ABC 검색과 같은 규칙 — "검색은 칩 무시"). 입력칸은 다시 그리지 않는다(값·포커스·한글 조합 유지).
+function nlSearchMatch(r, q) {
+  const s = String(q || '').trim().toLowerCase();
+  if (!s) return true;
+  const code = String(r.code || '').toLowerCase();
+  return String(r.name || '').toLowerCase().includes(s) || code.includes(s) || code.split('.')[0].includes(s)
+    || String(r.sector || '').toLowerCase().includes(s);
+}
+function nlSearching() { return !!String(_nl.query || '').trim(); }
+function nlOnSearchInput(e) {
+  if (_nlComposing || (e && e.isComposing)) return;
+  nlSetQuery(e.target.value);
+}
+function nlBindSearch() {
+  const el = document.getElementById('nlSearch');
+  if (!el || el._nlBound) return;
+  el._nlBound = true;
+  el.addEventListener('compositionstart', () => { _nlComposing = true; });
+  el.addEventListener('compositionend', (e) => { _nlComposing = false; nlSetQuery(e.target.value); });
+}
+function nlSetQuery(v) {
+  if (_nl.query === v) return;
+  _nl.query = v;
+  nlRefreshSections();
+}
+function nlSetLevel(lv) { _nl.ddLevel = lv; renderNewlisting(); }   // 칩 건수 표시가 바뀌므로 전체 다시 그림(입력값은 _nl.query로 복원)
 function nlToggleDdSort() {
   if (_nl.sortKey !== 'dd') { _nl.sortKey = 'dd'; _nl.sortDir = 'asc'; }
   else if (_nl.sortDir === 'asc') _nl.sortDir = 'desc';
@@ -9123,11 +9150,7 @@ function renderNewlisting() {
     return;
   }
   const shown = (d.rows || []).filter(r => (market === 'us') ? r.market === 'US' : (market === 'kr') ? r.market !== 'US' : true);
-  const split = nlSurgeSplit(d.rows);
   const counts = nlChipCounts(nlSurgeSplit(shown).kept);   // 칩 건수 = 실제로 보이는 목록(급등 제외 후)
-  const by = nlSplitRows(nlFilterByDrawdown(split.kept, _nl.ddLevel));
-  const exBy = nlSplitRows(nlFilterByDrawdown(split.excluded, _nl.ddLevel));   // 같은 하락 조건인데 급등 전력으로 빠진 것
-  by.KR = nlSortRows(by.KR, _nl.sortKey, _nl.sortDir); by.US = nlSortRows(by.US, _nl.sortKey, _nl.sortDir);
   const c = d.counts || {}, cu = c.us || {}, ck = c.kr || {};
   const showKr = market !== 'us', showUs = market !== 'kr';
   const fail = d.refresh_failed
@@ -9141,13 +9164,44 @@ function renderNewlisting() {
       <div class="n-sub" style="font-size:12px">${d.source === 'repo' ? '레포 결과(로컬 실행분)' : '서버 자동 실행 결과'} · 실행 ${_escapeHtml((d.run_stamp && d.run_stamp.run_at_kst) || '')}</div>
       ${fail}
     </section>`;
-  const sec = (label, rows, mkt, total, hits, exN) => `<section class="n-card" style="padding:18px 22px">
-      <div class="jr-card-h" style="padding:0 0 10px"><span class="n-h">${label}</span><span class="n-sub">−${_nl.ddLevel}% 이상 하락 ${rows.length}종목 · 급등 제외 ${exN}종목 · 13~36개월 ${hits ?? '—'}종목 중(전체 상장 ${total ?? '—'}) · ${_nl.sortKey === 'dd' ? (_nl.sortDir === 'asc' ? '하락 큰 순' : '하락 작은 순') : '개월수 오름차순'}</span></div>
-      ${_nlTable(rows, mkt)}</section>`;
   const chips = `<div class="lp-chips" role="group" aria-label="하락률 필터">${NL_DD_LEVELS.map(lv =>
       `<button type="button" class="jr-pill${_nl.ddLevel === lv ? ' on' : ''}" onclick="nlSetLevel(${lv})">−${lv}% 이상(${counts[lv]})</button>`).join('')}</div>`;
-  wrap.innerHTML = head + meta + chips + (showKr ? sec('한국', by.KR, 'KR', ck.listed_total, ck.hits, exBy.KR.length) : '')
+  const search = `<div class="abc-chiprow" style="margin:8px 0 10px"><span class="abc-lbl">검색</span>
+      <input id="nlSearch" type="search" placeholder="종목명·코드·섹터 일부" value="${_newsAttr(_nl.query)}"
+        oninput="nlOnSearchInput(event)" autocomplete="off"
+        style="min-height:28px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:12px;width:min(260px,70vw)">
+      <span class="n-sub" style="font-size:11px">검색 중엔 하락률 칩 무시 · 급등 제외분 포함</span></div>`;
+  wrap.innerHTML = head + meta + chips + search + `<div id="nlSections">${nlSectionsHtml()}</div>`;
+  nlBindSearch();
+}
+function nlSectionsHtml() {
+  const d = _nl.data || {};
+  const c = d.counts || {}, cu = c.us || {}, ck = c.kr || {};
+  const showKr = market !== 'us', showUs = market !== 'kr';
+  const split = nlSurgeSplit(d.rows);
+  let by, exBy, label;
+  if (nlSearching()) {
+    const q = _nl.query;
+    const hit = (d.rows || []).filter(r => nlSearchMatch(r, q));           // 급등 제외분 포함, 하락률 칩 무시
+    by = nlSplitRows(hit); exBy = { KR: [], US: [] };
+    label = (n) => `'${_escapeHtml(q.trim())}' 검색 ${n}종목 (하락률 칩 무시 · 급등 제외분 포함)`;
+  } else {
+    by = nlSplitRows(nlFilterByDrawdown(split.kept, _nl.ddLevel));
+    exBy = nlSplitRows(nlFilterByDrawdown(split.excluded, _nl.ddLevel));
+    label = null;
+  }
+  by.KR = nlSortRows(by.KR, _nl.sortKey, _nl.sortDir); by.US = nlSortRows(by.US, _nl.sortKey, _nl.sortDir);
+  const sec = (name, rows, mkt, total, hits, exN) => `<section class="n-card" style="padding:18px 22px">
+      <div class="jr-card-h" style="padding:0 0 10px"><span class="n-h">${name}</span><span class="n-sub">${label ? label(rows.length)
+        : `−${_nl.ddLevel}% 이상 하락 ${rows.length}종목 · 급등 제외 ${exN}종목 · 13~36개월 ${hits ?? '?'}종목 중(전체 상장 ${total ?? '?'}) · 개월수 오름차순`}</span></div>
+      ${_nlTable(rows, mkt)}</section>`;
+  return (showKr ? sec('한국', by.KR, 'KR', ck.listed_total, ck.hits, exBy.KR.length) : '')
     + (showUs ? sec('미국', by.US, 'US', cu.listed_total, cu.hits, exBy.US.length) : '');
+}
+function nlRefreshSections() {
+  const el = document.getElementById('nlSections');
+  if (!el) { renderNewlisting(); return; }
+  el.innerHTML = nlSectionsHtml();
 }
 
 // 앱 시작 시 서버에서 일지 로드 + 구 localStorage 데이터 마이그레이션

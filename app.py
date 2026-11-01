@@ -5,6 +5,12 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.364 [신규상장 검색창 — 사용자 지시 2026-11-02 "종목이 많아서 검색창이 필요함"(−50% 372·−70% 272종목)] 하락률 칩 아래 검색칸.
+  종목명·코드(접미사 유무 무관)·섹터 부분일치(nlSearchMatch). 검색 중엔 ABC 검색과 같은 규칙으로 하락률 칩을 무시하고 급등
+  제외분도 포함해 전체에서 찾는다(섹션 제목에 명시). 입력칸은 전체 렌더에서만 만들고 타이핑 중엔 #nlSections만 다시 그린다
+  (nlRefreshSections — 값·포커스·한글 IME 조합 보존, compositionstart/end는 addEventListener로). 표 렌더 코드를
+  nlSectionsHtml()로 분리(동작 불변). 테스트: nlSearchMatch·nlSectionsHtml을 Node로 실행 — 이름/코드/섹터/접미사 없는 코드 매칭,
+  검색 시 칩 무시·급등분 포함, 빈 검색은 기존과 동일.
 v5.363 [신규상장 US 섹터 빈 칸 — 사용자 지적 2026-10-31 "미장 섹터가 아직도 한글로 안보여"] 원인은 번역이 아니라 커버리지: 섹터 소스
   us_industry_cache(yfinance industry)가 스캔 유니버스 기준이라 신규 상장주가 거의 없다(화면에 한글로 뜬 MNTN·ETOR 2건만
   캐시에 있던 종목). 수정: _newlisting_fill_us_industry() — 신규상장 결과의 US 티커 중 캐시에 없는 것만(최대 300) yfinance
@@ -9131,7 +9137,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.363"
+VERSION = "v5.364"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

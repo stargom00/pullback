@@ -612,7 +612,8 @@ def test_tab_hides_surge_rows_and_reports_count():
     p = subprocess.run(["node", "-e", js], capture_output=True, text=True, timeout=20)
     assert p.returncode == 0, p.stderr
     assert json.loads(p.stdout) == [["b", "c"], ["a"]]
-    body = _fn("renderNewlisting")
+    body = _fn("nlSectionsHtml")   # v5.364: 표 행 구성은 nlSectionsHtml로 분리됐다
     assert "nlFilterByDrawdown(split.kept, _nl.ddLevel)" in body, "목록이 급등 제외 전 행으로 그려진다"
-    assert "nlChipCounts(nlSurgeSplit(shown).kept)" in body
-    assert "급등 제외 ${exN}종목" in body and "d.surge_definition" in body
+    assert "급등 제외 ${exN}종목" in body
+    render = _fn("renderNewlisting")
+    assert "nlChipCounts(nlSurgeSplit(shown).kept)" in render and "d.surge_definition" in render

@@ -221,3 +221,53 @@ def test_newlisting_job_calls_fill(monkeypatch):
     from datetime import datetime
     out = app._newlisting_job_blocking("newlisting", datetime(2026, 11, 1, 10, 0))
     assert calls == [1] and "industry_fill" in out
+
+
+# ── v5.364 검색 ─────────────────────────────────────────────────────
+def _nl_js(expr, extra_src=""):
+    if not shutil.which("node"):
+        pytest.skip("node 미설치")
+    state = SRC[SRC.index("let _nl = {"):SRC.index("\n", SRC.index("let _nl = {")) + 1]
+    stubs = _STUBS.replace("const _nl = {sortKey: 'months', sortDir: 'asc'};\n", "")   # 실제 _nl 선언을 쓴다
+    src = stubs + state + "let _nlComposing=false; let market='all'; const NL_DD_LEVELS = [50, 70];\n" + "\n".join(
+        _fn(n) for n in ("nlSearchMatch", "nlSearching", "nlSurgeSplit", "nlSplitRows", "nlFilterByDrawdown",
+                         "nlSortRows", "nlSectionsHtml", "_nlTable")) + extra_src
+    p = subprocess.run(["node", "-e", src + f"\nconsole.log(JSON.stringify({expr}));"], capture_output=True, text=True, timeout=20)
+    assert p.returncode == 0, p.stderr
+    return json.loads(p.stdout)
+
+
+def test_nl_search_match_name_code_sector():
+    r = {"name": "Picard Medical, Inc.", "code": "PMI", "sector": "의료기기"}
+    assert _nl_js(f"[nlSearchMatch({json.dumps(r)}, 'picard'), nlSearchMatch({json.dumps(r)}, 'pmi'), "
+                  f"nlSearchMatch({json.dumps(r)}, '의료'), nlSearchMatch({json.dumps(r)}, 'xyz'), nlSearchMatch({json.dumps(r)}, '')]") \
+        == [True, True, True, False, True]
+    kr = {"name": "대한조선", "code": "439260.KS", "sector": "조선"}
+    assert _nl_js(f"[nlSearchMatch({json.dumps(kr)}, '439260'), nlSearchMatch({json.dumps(kr)}, '조선')]") == [True, True]
+
+
+_ROWS = [
+    {**_ROW, "code": "A.KQ", "name": "에이", "market": "KOSDAQ", "drawdown_pct": -55.0, "surge_excluded": False},
+    {**_ROW, "code": "B.KQ", "name": "비이", "market": "KOSDAQ", "drawdown_pct": -30.0, "surge_excluded": False},   # 칩(−50)에 안 걸림
+    {**_ROW, "code": "C.KQ", "name": "씨이", "market": "KOSDAQ", "drawdown_pct": -80.0, "surge_excluded": True},    # 급등 제외
+    {**_ROW, "code": "PMI", "name": "Picard", "market": "US", "drawdown_pct": -90.0, "surge_excluded": False},
+]
+
+
+def _sections(query):
+    return _nl_js("nlSectionsHtml()", extra_src=f"\n_nl.data={{rows:{json.dumps(_ROWS)}}}; _nl.query={json.dumps(query)};")
+
+
+def test_nl_sections_without_query_keep_chip_and_surge_rules():
+    html = _sections("")
+    assert "에이" in html and "Picard" in html
+    assert "비이" not in html and "씨이" not in html, "빈 검색: −50% 칩·급등 제외 규칙 그대로"
+    assert "검색" not in html.split("<table")[0] or "'" not in html.split("<table")[0]
+
+
+def test_nl_sections_with_query_ignore_chip_and_include_surge():
+    html = _sections("이")
+    assert "에이" in html and "비이" in html and "씨이" in html, "검색 중: 칩 무시·급등 제외분 포함"
+    assert "Picard" not in html
+    assert "'이' 검색" in html
+    assert _sections("pmi").count("<tr><td") == 1   # 코드 검색 → 1행(이름은 링크 title에도 들어가 문자열 수로 세지 않는다)
