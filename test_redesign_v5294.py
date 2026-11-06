@@ -29,6 +29,7 @@ EXISTING_MODES = {
     "breakdown", "pattern", "stage2", "ibd9", "strong_pivot", "earnings", "surge",
     "lowpoint_track",   # v5.302 신설, v5.303부터 오른쪽 작은 메뉴(일지 옆) — 새 키는 여기 명시적으로 추가해야 통과
     "newlisting",       # v5.314 신설(더보기) → v5.315 메인 줄(추세전환 옆) — 신규상장 13~20개월차
+    "lowpoint_floor",   # v5.365 신설 — 메인 줄 신규상장 옆(사용자 지시 2026-11-07 "새로운 탭을 하나 만들자. 저점관리종목")
     "coin_journal",     # v5.347 신설 — 오른쪽 작은 메뉴(저점일지 옆), 바이낸스 선물 연습 기록
 }
 
@@ -47,7 +48,7 @@ def test_main_tab_row_is_exactly_six_buttons():
     body = _element("modeTabs", "</nav>")
     labels = [re.sub(r"<[^>]+>", "", b).strip()
               for b in re.findall(r"<button\b[^>]*>(.*?)</button>", body, re.S)]
-    assert labels == ["홈", "US눌림목", "ABC", "신규상장", "더보기"], labels   # v5.348 추세전환 → 더보기(이동)
+    assert labels == ["홈", "US눌림목", "ABC", "신규상장", "저점관리", "더보기"], labels   # v5.348 추세전환 → 더보기(이동) · v5.365 저점관리
 
 
 def test_newlisting_moved_out_of_more_panel():
@@ -159,7 +160,7 @@ def test_tab_owned_banners_are_hidden_on_tab_switch():
     src = _fn("applyTabViewState")
     assert "Object.entries(TAB_OWNED_BANNERS)" in src and "mode !== owner" in src
     assert "IDXBAR_HIDDEN_MODES.has(mode)" in src
-    assert "const IDXBAR_HIDDEN_MODES = new Set(['calendar', 'journal', 'lowpoint_track', 'newlisting', 'coin_journal']);" in TEXT   # v5.347 코인 일지
+    assert "const IDXBAR_HIDDEN_MODES = new Set(['calendar', 'journal', 'lowpoint_track', 'newlisting', 'lowpoint_floor', 'coin_journal']);" in TEXT   # v5.347 코인 일지 · v5.365 저점관리
 
 
 def test_journal_table_is_six_columns_everywhere():

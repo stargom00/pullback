@@ -5,6 +5,16 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.365 [저점관리 탭 — 사용자 지시 2026-11-07 "신규상장 탭·저점종목(매주·매월 홈) 종목들을 추적해서 데이터를 쌓아줘. 무효선을
+  깨고 다시 올라오는지, 일정한 자리를 오르락내리락하면서 지키고 있는지 걸러주고 무효선과의 거리를 %로. 새 탭 — 저점관리종목 등"]
+  신설 scripts/screens/lowpoint_floor.py(순수). 바닥선 = 가장 최근 저점 히트 봉(주봉 우선, 없으면 월봉 — lp 판정 함수 그대로)의 일봉
+  최저가(app._downcast 정제 뒤). 확정 일봉 종가로 지킴(+지지 테스트: 저가가 바닥선 +3% 안, 종가 지킴) / 이탈 / 스프링(10거래일 안 종가
+  회복 + 거래량 ≥ 이탈 봉 + 종가 위쪽 절반) / 약한 회복 / 늦은 회복 / 재이탈(회복 뒤 새 바닥선 = 이탈 중 최저가를 종가로 깸).
+  거리 % = 마지막 확정 종가 / 현재 기준선 − 1. 이름: 관찰의 invalid_line(숨고르기 무효선)과 다른 값이라 floor_line·"바닥선".
+  10거래일·3%는 어림값(출처 모듈 docstring) — 표시·필터 전용, 측정 전. 대상 = 관찰 레코드 전 종목 + 신규상장 결과 + 이전 추적
+  종목(빠져도 계속 — 쌓기). /data/lowpoint_floor.json(first_seen·transitions 이어받음, 날짜별 사본). 저점 관찰 작업(매일 07:00 KST)과
+  관찰 수동 갱신 끝에 같이 돈다(실패해도 관찰 결과는 유지). GET /api/lowpoint/floor. 탭 "저점관리"(신규상장 옆): 상태 칩·시장 필터·
+  거리 정렬. [테스트] test_lowpoint_floor.py.
 v5.364 [신규상장 검색창 — 사용자 지시 2026-11-02 "종목이 많아서 검색창이 필요함"(−50% 372·−70% 272종목)] 하락률 칩 아래 검색칸.
   종목명·코드(접미사 유무 무관)·섹터 부분일치(nlSearchMatch). 검색 중엔 ABC 검색과 같은 규칙으로 하락률 칩을 무시하고 급등
   제외분도 포함해 전체에서 찾는다(섹션 제목에 명시). 입력칸은 전체 렌더에서만 만들고 타이핑 중엔 #nlSections만 다시 그린다
@@ -9137,7 +9147,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.364"
+VERSION = "v5.365"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -13477,6 +13487,7 @@ async def _scheduler_loop():
             _daily_backup(LP_EVALS_PATH, "lowpoint_evals", lock=_LP_EVALS_LOCK)      # v5.317
             _daily_backup(USER_EVENTS_PATH, "user_events", lock=_USER_EVENTS_LOCK)   # v5.322 홈 달력
             _daily_backup(LP_WATCH_PATH, "lowpoint_watch", lock=_LP_WATCH_LOCK)       # v5.325 저점 관찰
+            _daily_backup(LP_FLOOR_PATH, "lowpoint_floor", lock=_LP_WATCH_LOCK)       # v5.365 저점관리(쌓이는 전환 기록)
             _daily_backup(LP_INTEREST_PATH, "lowpoint_interest", lock=_LP_INTEREST_LOCK)   # v5.328 관심 추적
             _daily_backup(LP_RANK_PATH, "lowpoint_rankings", lock=_LP_RANK_LOCK)   # v5.341 순위
             _daily_backup(COIN_JOURNAL_PATH, "coin_journal", lock=_COIN_JOURNAL_LOCK)   # v5.347 코인 일지
@@ -20936,6 +20947,9 @@ LP_WATCH_DELETE_LOG_PATH = os.path.join(os.path.dirname(LP_WATCH_PATH), "lowpoin
 # v5.327 보유 추적 결과(서버 계산값 — 사용자 기록 아님): {"checked_at", "prices": {code: {mkt, last_close, last_date,
 # checked_at}}, "failed": [...]}. 매매 기록 파일은 건드리지 않는다(rev 충돌 없음). 원자적 저장(_save_json_atomic).
 LP_HOLD_TRACK_PATH = _resolve_persistent_path("lowpoint_holdings_track.json")
+# v5.365 저점관리 — 바닥선(저점 히트 봉 저가) 지킴·이탈·스프링 추적 결과(서버 계산값). {"checked_at", "rows": {code: 행},
+# "summary"}. 행의 first_seen·transitions는 이전 결과에서 이어받아 쌓는다(사용자 지시 "데이터를 쌓아줘") — 날짜별 사본 보관.
+LP_FLOOR_PATH = _resolve_persistent_path("lowpoint_floor.json")
 _LP_WATCH_LOCK = _threading.RLock()
 
 
@@ -21061,8 +21075,46 @@ def _lp_watch_job_blocking(tf: str, now: "datetime") -> dict:
     # v5.341: 순위 결과(확정 종가 D+N 수익률) — 관찰 단계를 다 갱신한 뒤에(리뷰가 같은 관찰 레코드를 참조)
     _lp_rank_ensure(now)
     rank = _lp_rank_results_blocking(now)
+    # v5.365 저점관리 — 같은 작업 끝에(관찰 레코드가 갱신된 뒤). 실패해도 관찰 결과는 이미 저장됐으니 작업을 실패로 만들지 않는다
+    try:
+        floor = _lp_floor_job_blocking(now)
+    except Exception as e:
+        floor = {"error": f"{type(e).__name__}: {e}"[:300]}
+        print(f"[lowpoint-floor] ⚠️ 저점관리 추적 실패(이전 결과 유지): {floor['error']}", flush=True)
     return {"bar_date": today.isoformat(), "rows": summary["active"],
-            "counts": {**summary, "seeded": seeded, "holdings": hold, "rank": rank}}
+            "counts": {**summary, "seeded": seeded, "holdings": hold, "rank": rank, "floor": floor}}
+
+
+def _lp_floor_mod():
+    _lp_watch_mod()                     # sys.path 준비(scripts/screens·measurements)
+    import lowpoint_floor
+    return lowpoint_floor
+
+
+def _lp_floor_read() -> "dict | None":
+    try:
+        with open(LP_FLOOR_PATH, encoding="utf-8") as f:
+            d = _json.load(f)
+        return d if isinstance(d, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _lp_floor_job_blocking(now: "datetime") -> dict:
+    """v5.365 저점관리(사용자 지시 2026-11-07) — 대상 = 저점 관찰 레코드 전 종목 + 신규상장 결과 + 이전에 추적하던 종목.
+    대상 종목만 조회(lowpoint_floor.fetch_daily). 0건이어도 집계를 남긴다(침묵 ≠ 성공)."""
+    fl = _lp_floor_mod()
+    w = _lp_watch_mod()
+    prev = (_lp_floor_read() or {}).get("rows") or {}
+    nl = _lowpoint_read(NEWLISTING_DATA_PATH) or _lowpoint_read(NEWLISTING_LATEST_PATH) or {}
+    targets = fl.targets_from(_rec_list_load(LP_WATCH_PATH), nl.get("rows") or [], prev)
+    rows, summary = fl.track(targets, prev, now.astimezone(KST), _downcast, w.confirmed_through)
+    _save_json_atomic(LP_FLOOR_PATH, {"checked_at": now.astimezone(KST).isoformat(), "rows": rows, "summary": summary})
+    c = summary["counts"]
+    print(f"[lowpoint-floor] 추적 — 대상 {summary['targets']}종목 · 조회 {summary['fetched']} · 실패 {len(summary['failed'])} · "
+          + " · ".join(f"{fl.STATE_LABEL[k]} {c[k]}" for k in fl.STATES) + f" · 히트 없음 {c['no_hit']}", flush=True)
+    print(f"[lowpoint-floor] 상태 전환 {len(summary['changes'])}건: {', '.join(summary['changes']) or '없음'}", flush=True)
+    return {k: summary[k] for k in ("targets", "fetched", "counts")} | {"changes": len(summary["changes"]), "failed": len(summary["failed"])}
 
 
 def _lp_hold_track_read() -> "dict | None":
@@ -21094,6 +21146,19 @@ async def lp_watch_list():
     return JSONResponse(_clean_nan({"ok": True, "records": recs, "reach_pct": _lp_watch_mod().REACH_PCT,
                                     "schedule_hm": LOWPOINT_SCHEDULE_HM["watch"],
                                     "last_run": {k: st.get(k) for k in ("target", "status", "finished_at", "error")}}))
+
+
+@app.get("/api/lowpoint/floor")
+async def lp_floor_get():
+    """v5.365 저점관리 탭 — 서버 추적 결과(매일 07:00 KST 저점 관찰 작업 끝 · 관찰 수동 갱신과 같이)."""
+    d = _lp_floor_read()
+    fl = _lp_floor_mod()
+    base = {"ok": True, "definition": fl.DEFINITION, "state_label": fl.STATE_LABEL, "spring_max_days": fl.SPRING_MAX_DAYS,
+            "test_pct": fl.TEST_PCT, "schedule_hm": LOWPOINT_SCHEDULE_HM["watch"]}
+    if not d:
+        return JSONResponse({**base, "missing": True, "rows": []})
+    return JSONResponse(_clean_nan({**base, "checked_at": d.get("checked_at"), "summary": d.get("summary"),
+                                    "rows": list((d.get("rows") or {}).values())}))
 
 
 @app.post("/api/lowpoint/watch/refresh")
