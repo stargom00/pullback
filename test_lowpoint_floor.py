@@ -339,3 +339,38 @@ def test_floor_tab_market_buttons_use_header_toggle():
     body = _fn("renderLowpointFloor")
     assert body.count("lfSetMarket(") == 1 and "'국장'" in body and "'미장'" in body
     assert "button.tab[data-market=" in _fn("lfSetMarket")
+
+
+def test_prior_low_is_min_low_before_hit_bar_and_break_date():
+    """v5.369 전저점 = 히트 봉 구간 전 PRIOR_LOW_DAYS 최저가(참고선). 히트 이후 종가가 처음 그 아래로 마감한 날 기록."""
+    pre = [(1000, 1010, 990, 1000, 100)] * 10 + [(1000, 1005, 900, 980, 100)] + [(990, 1000, 980, 990, 100)] * 4
+    hit_week = [(960, 1000, 950, 990, 100)] + [(990, 1000, 970, 995, 100)] * 4
+    after = [(990, 995, 920, 930, 100), (930, 940, 880, 890, 100), (890, 900, 880, 895, 100)]
+    d = _days(pre + hit_week + after, start="2025-12-08")
+    hit = {"tf": "week", "label": "2026-01-02", "bar_date": str(d.index[19].date()), "prev_bar_date": str(d.index[14].date()), "close0": 995.0}
+    out = fl.prior_low(d, hit, str(d.index[-1].date()))
+    assert out["prior_low"] == 900.0 and out["prior_low_date"] == str(d.index[10].date())
+    assert out["prior_break_date"] == str(d.index[21].date())                    # 890 < 900 (920 저가는 장중이라 아님)
+    assert out["prior_dist_pct"] == round((895 / 900 - 1) * 100, 2)
+
+
+def test_regular_frame_drives_floor_and_distance_not_integrated():
+    """v5.369 — 히트는 통합(raw) 종가로 찾고, 바닥선·상태·거리는 정규장(reg) 일봉으로(꿈비 11-06 통합 1,770 vs 정규장 1,650)."""
+    df = _hit_series()
+    now = (df.index[-1] + pd.Timedelta(days=10)).to_pydatetime().replace(tzinfo=KST)
+    through = str(df.index[-1].date())
+    reg = df.copy()
+    reg.loc[reg.index[-1], "Close"] = df["Close"].iloc[-1] * 0.9                   # 마지막 날 정규장 종가만 다름
+    a = fl.evaluate(df, "kr", now, through, _identity)
+    b = fl.evaluate(df, "kr", now, through, _identity, reg=reg)
+    assert a["hit"] == b["hit"]                                                       # 히트는 같은 입력(통합)
+    assert b["last_close"] == reg["Close"].iloc[-1] and a["last_close"] == df["Close"].iloc[-1]
+    rows, _ = fl.track({"X.KQ": {"code": "X.KQ", "name": "X", "market": "KOSDAQ", "mkt": "KR", "sources": []}}, {}, now,
+                       _identity, lambda m, n: through, fetch=lambda items, today: {"X.KQ": {"raw": df, "reg": reg, "note": "경고"}})
+    assert rows["X.KQ"]["last_close"] == reg["Close"].iloc[-1] and rows["X.KQ"]["price_note"] == "경고"
+
+
+def test_floor_table_shows_prior_low_and_price_note():
+    body = _fn("_lfTable")
+    assert body.count("r.prior_low") >= 2 and "r.prior_break_date" in body and "r.price_note" in body
+    assert "전저점</th>" in body

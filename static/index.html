@@ -1447,7 +1447,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.368</span>
+      <span class="ver mono" id="verBadge">v5.369</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -9202,11 +9202,14 @@ function _lfTable(rows) {
       + `<td class="num r nowrap">${_lptFmt(line, m)}<div class="jr-s">${moved ? `새 바닥선 · 원래 ${_lptFmt(r.floor_line, m)}` : `${h.tf === 'month' ? '월봉' : '주봉'} 히트 ${_escapeHtml(h.label || '')}`}</div></td>`
       + `<td class="num r nowrap">${_lptFmt(r.last_close, m)}<div class="jr-s">${_escapeHtml(r.last_date || '')}</div></td>`
       + `<td class="r nowrap">${_lptPct(r.dist_pct)}</td>`
-      + `<td class="jr-s">${_escapeHtml(lfDetail(r))}<div>추적 ${r.days_tracked || 0}거래일 · 등록 ${_escapeHtml(r.first_seen || '')}</div></td></tr>`;
+      + `<td class="num r nowrap">${r.prior_low != null ? `${_lptFmt(r.prior_low, m)} ${_lptPct(r.prior_dist_pct)}<div class="jr-s">${_escapeHtml(r.prior_low_date || '')}${r.prior_break_date ? ` · 종가 이탈 ${_escapeHtml(r.prior_break_date)}` : ' · 지킴'}</div>` : '—'}</td>`
+      + `<td class="jr-s">${_escapeHtml(lfDetail(r))}<div>추적 ${r.days_tracked || 0}거래일 · 등록 ${_escapeHtml(r.first_seen || '')}</div>`
+      + `${r.price_note ? `<div class="st-dot st-warn">${_escapeHtml(r.price_note)}</div>` : ''}</td></tr>`;
   }).join('');
   return `<div class="jr-table-wrap"><table class="jr-table lpt-table nl-table"><thead><tr><th>종목</th><th>상태</th>`
     + `<th class="r nowrap">기준선</th><th class="r nowrap">종가</th>`
     + `<th class="r"><button type="button" class="n-link" style="font-size:12px" onclick="lfToggleSort()" title="기준선 대비 마지막 확정 종가 — 클릭해 정렬(가까운 순/먼 순)">거리${_lf.sortDir === 'asc' ? ' ▲' : ' ▼'}</button></th>`
+    + `<th class="r nowrap" title="히트 봉 직전 120거래일 최저가와 그 대비 거리 — 참고선(상태 판정엔 안 씀)">전저점</th>`
     + `<th>내용</th></tr></thead><tbody>${body}</tbody></table></div>`;
 }
 function renderLowpointFloor() {

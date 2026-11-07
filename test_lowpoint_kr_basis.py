@@ -146,6 +146,13 @@ def test_inactive_b_option_has_no_callers():
         assert bad == [], f"{path}: 비활성 B안 호출 {bad}"
 
 
+def test_b_option_only_sanctioned_caller_is_lowpoint_floor():
+    """v5.369 사용자 지시(2026-11-07 "종가로") — 저점관리 탭만 정규장 일봉(splice_regular)을 쓴다. 다른 KR 경로는 통합 그대로라
+    위 테스트가 막고, 저점관리는 실제로 이 함수를 부르는지 여기서 고정한다(지우면 탭이 조용히 통합 시세로 돌아간다)."""
+    src = open(os.path.join(ROOT, "scripts/screens/lowpoint_floor.py"), encoding="utf-8").read()
+    assert src.count("reg, info = lp.splice_regular(df, r)") == 1 and src.count("\"note\": lp.price_note(info)") == 1
+
+
 # ── 이음새(2025-03-04) ────────────────────────────────────────────
 def _seam_case(nv_mult, pre_noise=None, n_pre=60, n_post=60):
     idx = pd.bdate_range(end=lp.NXT_START - pd.Timedelta(days=1), periods=n_pre).append(

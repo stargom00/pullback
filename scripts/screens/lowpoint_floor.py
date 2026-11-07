@@ -9,9 +9,9 @@
 같은 이름을 쓰지 않는다(CLAUDE.md "필드 이름이 의미와 어긋나면 이름을 바꾼다").
 
 정의(전부 확정 일봉 종가 — 장중 값은 안 본다):
-  히트      저점 스크린 함수 그대로(lp.resample_bars · rsi_wilder_sma · lowpoint_signal, 진행 중 봉 제외) — 가장 최근 **주봉**
-            히트, 주봉 히트가 없으면 가장 최근 월봉 히트.
-  바닥선    그 히트 봉 구간(주·월)의 일봉 최저가(app._downcast 정제 뒤 — naver 무거래일 OHLC=0 봉 제외).
+  히트      저점 스크린 함수 그대로(lp.resample_bars · rsi_wilder_sma · lowpoint_signal, 진행 중 봉 제외) — 주봉·월봉 각각의
+            마지막 히트 중 더 최근 것(v5.366, 같은 날이면 주봉).
+  바닥선    그 히트 봉 구간(주·월)의 일봉 최저가(정규장 일봉, app._downcast 정제 뒤 — 무거래일 OHLC=0 봉 제외).
   추적      히트 봉 마지막 거래일 **다음 날**부터 확정 일봉을 차례로:
     holding        종가가 바닥선 아래로 마감한 적 없음. 저가가 바닥선 +TEST_PCT% 안으로 내려왔다 종가가 지킨 날 = "지지 테스트"
     broken         종가 < 바닥선(이탈). 이탈일 거래량 기록, 이탈 중 최저가 추적
@@ -27,7 +27,17 @@
   TEST_PCT = 3.0 — "일정한 자리를 오르락내리락하면서 지키는" 근접 범위. AI 판단 어림값(근거 없음) — 재검토 대상.
   회복 조건(거래량 ≥ 이탈 봉, 종가 위쪽 절반) — 같은 대화의 설명("회복 봉 거래량 ≥ 이탈 봉 거래량, 종가는 그 봉의 위쪽에서
             마감")을 옮긴 것. 근거 없음.
+  PRIOR_LOW_DAYS = 120 — 전저점 창(v5.369). 사용자 지시 2026-11-07 "바닥선: 둘다표시"(히트 봉 저가 + 직전 전저점) — 계기는
+            꿈비 "전저점이 1604인데 지금 1650 — 저점보다 위에 있는 거 아냐?"(8월 저점). 창 길이 120거래일(약 6개월)은 AI 판단
+            어림값(그 8월 저점을 포함하는 길이) — 근거 없음, 재검토 대상.
 이 상태들은 **관심 분류·표시 전용**이다 — 측정 전, 승률·우위 주장 금지.
+
+가격 기준(v5.369, 사용자 지시 2026-11-07 "종가로" — 저점관리 탭만 정규장 종가):
+  히트(언제 저점 신호가 떴나)는 저점 스크린과 같은 naver 통합 종가로 찾는다(목록과 같은 히트 날짜). 바닥선·전저점·상태·거리는
+  **KR 정규장 일봉**(lp.splice_regular — 2025-03-04 NXT 개장 전 naver, 이후 yfinance auto_adjust=False)으로 계산한다.
+  계기: 꿈비 11-06 통합 종가 1,770(애프터마켓 얇은 체결) vs 정규장 1,650 — 탭 거리가 실제와 달랐다.
+  정규장 시세가 없는 종목은 통합 시세로 계산하고 행에 price_note를 남긴다(조용히 섞지 않는다). US는 원래 정규장(yfinance).
+  다른 KR 경로(5탭·저점 스크린·관찰)는 그대로 naver 통합이다 — 이 결정은 저점관리 탭 범위만.
 """
 from __future__ import annotations
 
@@ -39,6 +49,7 @@ import lowpoint as lp
 
 SPRING_MAX_DAYS = 10
 TEST_PCT = 3.0
+PRIOR_LOW_DAYS = 120
 STATES = ("holding", "broken", "spring", "weak_recovery", "late_recovery", "rebroken")
 RECOVERED = ("spring", "weak_recovery", "late_recovery")
 STATE_LABEL = {"holding": "지킴", "broken": "이탈", "spring": "스프링", "weak_recovery": "약한 회복",
@@ -48,7 +59,9 @@ DEFINITION = ("바닥선 = 가장 최근 저점 히트 봉(주봉·월봉 중 �
               f"종가가 지킨 날). 이탈 = 종가 < 바닥선. 스프링 = 이탈 후 {SPRING_MAX_DAYS}거래일 안에 종가 회복 + 그 봉 거래량 ≥ 이탈 봉 + "
               f"종가가 봉 위쪽 절반. 약한 회복 = {SPRING_MAX_DAYS}거래일 안 회복이지만 거래량·종가 위치 미달. 늦은 회복 = "
               f"{SPRING_MAX_DAYS}거래일 뒤 회복(새 바닥). 회복 뒤 기준선 = 이탈 중 최저가, 그것도 종가로 깨면 재이탈. "
-              f"기간({SPRING_MAX_DAYS}거래일)·테스트 범위({TEST_PCT:g}%)는 어림값 — 관심 분류일 뿐 측정 전.")
+              f"전저점 = 히트 봉 직전 {PRIOR_LOW_DAYS}거래일 최저가(참고선 — 상태 판정엔 안 씀). "
+              f"KR 가격은 정규장(15:30) 일봉 — 애프터마켓 체결 제외. "
+              f"기간({SPRING_MAX_DAYS}·{PRIOR_LOW_DAYS}거래일)·테스트 범위({TEST_PCT:g}%)는 어림값 — 관심 분류일 뿐 측정 전.")
 
 
 def _confirmed(df: "pd.DataFrame | None", through: "str | None") -> "pd.DataFrame | None":
@@ -158,18 +171,43 @@ def classify(clean: pd.DataFrame, hit: dict, floor: float, through: str) -> dict
     return out
 
 
-def evaluate(df: "pd.DataFrame | None", market: str, now: datetime, through: "str | None", downcast) -> dict:
-    """원본 일봉 한 종목 → {hit, …classify}. downcast = app._downcast(사본 금지 — 호출부가 넘긴다)."""
+def prior_low(clean: pd.DataFrame, hit: dict, through: "str | None") -> dict:
+    """전저점 = 히트 봉 구간 시작 전(prev_bar_date까지) PRIOR_LOW_DAYS 거래일의 일봉 최저가(정제된 일봉, 0 이하 제외).
+    히트 이후 확정 종가가 처음 그 아래로 마감한 날 = prior_break_date. 참고선 — 상태 판정엔 쓰지 않는다."""
+    out = {"prior_low": None, "prior_low_date": None, "prior_break_date": None, "prior_dist_pct": None}
+    seg = clean[clean.index <= pd.Timestamp(hit["prev_bar_date"])]["Low"].dropna()
+    seg = seg[seg > 0].iloc[-PRIOR_LOW_DAYS:]
+    if seg.empty:
+        return out
+    pl = float(seg.min())
+    out.update(prior_low=pl, prior_low_date=str(pd.Timestamp(seg.idxmin()).date()))
+    d = _confirmed(clean, through)
+    if d is None or d.empty:
+        return out
+    after = d[d.index > pd.Timestamp(hit["bar_date"])]["Close"].dropna()
+    below = after[after < pl]
+    if len(below):
+        out["prior_break_date"] = str(pd.Timestamp(below.index[0]).date())
+    last = d["Close"].dropna()
+    if len(last):
+        out["prior_dist_pct"] = round((float(last.iloc[-1]) / pl - 1) * 100, 2)
+    return out
+
+
+def evaluate(df: "pd.DataFrame | None", market: str, now: datetime, through: "str | None", downcast,
+             reg: "pd.DataFrame | None" = None) -> dict:
+    """원본 일봉 한 종목 → {hit, …classify, …prior_low}. downcast = app._downcast(사본 금지 — 호출부가 넘긴다).
+    df = 히트를 찾는 일봉(KR naver 통합 — 저점 스크린과 같은 입력). reg = 바닥선·상태·거리를 잴 정규장 일봉(없으면 df)."""
     if df is None or df.empty or not through:
         return {"status": "no_data"}
     hit = latest_hit(df["Close"].dropna(), market, now)
     if hit is None:
         return {"status": "no_hit"}
-    clean = downcast(df)
+    clean = downcast(reg if reg is not None and not reg.empty else df)
     floor = floor_of(clean, hit)
     if floor is None:
         return {"status": "no_floor", "hit": hit}
-    return {"status": "ok", "hit": hit, **classify(clean, hit, floor, through)}
+    return {"status": "ok", "hit": hit, **classify(clean, hit, floor, through), **prior_low(clean, hit, through)}
 
 
 # ── 대상 모으기 · 조회 · 추적(서버 작업이 부른다) ─────────────────────────────
@@ -199,7 +237,9 @@ def targets_from(watch_records: list, newlisting_rows: list, prev: dict) -> dict
 
 
 def fetch_daily(targets: list, today: date) -> dict:
-    """저점 스크린과 같은 창(KR naver 통합 KR_DAYS["week"], US yfinance 배당 미조정 US_PERIOD["week"])으로 대상만 조회."""
+    """대상만 조회 → {code: {"raw": 히트용 일봉, "reg": 정규장 일봉, "note": 데이터 경고|None}}.
+    KR: raw = naver 통합(저점 스크린과 같은 창 KR_DAYS["week"]), reg = lp.splice_regular(naver, yfinance auto_adjust=False).
+    US: raw = reg = yfinance 배당 미조정(원래 정규장)."""
     import harness
     import naver_kr
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -212,13 +252,24 @@ def fetch_daily(targets: list, today: date) -> dict:
             return code, naver_kr.fetch_history(code, days=lp.KR_DAYS["week"])
         except Exception:
             return code, None
+    nv = {}
     with ThreadPoolExecutor(max_workers=lp.FETCH_CONCURRENCY) as ex:
         for f in as_completed([ex.submit(one, c) for c in kr]):
             code, df = f.result()
             if df is not None and not df.empty:
-                out[code] = df
+                nv[code] = df
+    rg = {}
+    for i in range(0, len(kr), 100):
+        rg.update(harness._fetch_us_batch(kr[i:i + 100], period=lp.US_PERIOD["week"], auto_adjust=False))
+    for code, df in nv.items():
+        r = rg.get(code)
+        if r is not None:
+            r = r[[c for c in ("Open", "High", "Low", "Close", "Volume") if c in r.columns]].dropna(subset=["Close"])
+        reg, info = lp.splice_regular(df, r)
+        out[code] = {"raw": df, "reg": reg, "note": lp.price_note(info)}
     for i in range(0, len(us), 100):
-        out.update(harness._fetch_us_batch(us[i:i + 100], period=lp.US_PERIOD["week"], auto_adjust=lp.US_AUTO_ADJUST))
+        for code, df in harness._fetch_us_batch(us[i:i + 100], period=lp.US_PERIOD["week"], auto_adjust=lp.US_AUTO_ADJUST).items():
+            out[code] = {"raw": df, "reg": df, "note": None}
     return out
 
 
@@ -235,9 +286,13 @@ def track(targets: dict, prev: dict, now: datetime, downcast, confirmed_through,
     for t in items:
         p = (prev or {}).get(t["code"]) or {}
         through = confirmed_through(t["mkt"], now_iso)
-        r = evaluate(data.get(t["code"]), "us" if t["mkt"] == "US" else "kr", now, through, downcast)
+        got = data.get(t["code"])
+        if isinstance(got, pd.DataFrame):           # 일봉 하나만 준 호출(테스트·옛 경로) — 히트·계산 같은 일봉
+            got = {"raw": got, "reg": got, "note": None}
+        got = got or {}
+        r = evaluate(got.get("raw"), "us" if t["mkt"] == "US" else "kr", now, through, downcast, reg=got.get("reg"))
         row = {**t, "first_seen": p.get("first_seen") or str(today), "checked_at": now_iso,
-               "transitions": list(p.get("transitions") or [])}
+               "transitions": list(p.get("transitions") or []), "price_note": got.get("note")}
         if r["status"] != "ok":
             if r["status"] == "no_data":
                 failed.append(t["code"])
