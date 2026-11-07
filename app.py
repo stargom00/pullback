@@ -5,6 +5,12 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.377 [빗각×기준선 수렴 → 홈 달력 + 봇 알림 — 사용자 지시 2026-11-07 "빗갓이랑 사이가 좁아질때(변곡점 가까이 올때,) 홈화면에
+  달력이 있거든. 거기에 추가해주고 알림봇으로 알림도 보내줘. 추가되면". 저점관리 매일 추적에서 자동 하락 빗각(lowpoint_floor.downtrend_line
+  — 최근 52주 최고 고점 A에서, 그 사이 고가를 위에서 감싸는 가장 완만한 선; 규칙 전부 AI 판단·검증 전)과 기준선(active_line)이
+  CONVERGE_ALERT_WEEKS(2주, 어림값) 안에 만나면 만나는 주 금요일로 홈 달력 일정(source auto_converge, 종목·메모 포함)을 만든다.
+  id = 종목+만나는 주라 한 번만, 지운 일정은 다시 안 만듦. GET /api/user-events/added(봇 읽기) — 얼마냐봇 v2.53이 아침에 "새로 추가된
+  수렴 종목"을 보내고, 만나는 날엔 기존 재확인 알림(/due)이 다시 보낸다. 저점관리 요약 칸에 "빗각 N주" 칩.]
 v5.376 [저점관리 표 머리 고정 — 사용자 "상단메뉴(종목 상태 기준선...메누) 스크롤해도 고정되서 보이게해줘". thead th sticky,
   top = 고정 헤더 높이(--sticky-top, ResizeObserver로 갱신). 좁은 화면(가로 스크롤 상자)에선 고정 안 됨.]
 v5.375 [저점 신호 조건 B 완화 — 사용자 지시 2026-11-07 "2주 연속 rsi가 30미만이고 다음봉이 양봉이면 이것도 잡아야되는데".
@@ -9026,6 +9032,8 @@ _BOT_READ_EXACT_PATHS = {
     "/api/coin-journal",
     # v5.354(사용자 지시 2026-10-21): 달력에 등록한 "오늘 열어볼 종목"을 얼마냐봇이 아침에 읽어 보낸다. GET·읽기 전용.
     "/api/user-events/due",
+    # v5.377: 서버가 자동으로 만든 달력 일정(빗각 수렴) — 봇이 아침에 "새로 추가" 알림. GET·읽기 전용.
+    "/api/user-events/added",
 }
 _BOT_READ_PATH_PREFIXES = ("/api/dist/", "/api/ma/", "/api/pullback-signal/", "/api/vol/")
 
@@ -9190,7 +9198,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.376"
+VERSION = "v5.377"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -21183,6 +21191,11 @@ def _lp_floor_job_blocking(now: "datetime") -> dict:
     rows, summary = fl.track(targets, prev, now.astimezone(KST), _downcast, w.confirmed_through)
     summary["spac_excluded"] = len(spacs)
     print(f"[lowpoint-floor] 스팩 제외 {len(spacs)}종목: {', '.join(spacs[:20]) or '없음'}{' …' if len(spacs) > 20 else ''}", flush=True)
+    try:
+        summary["converge_events"] = len(_lp_converge_events(rows, now))   # v5.377 빗각 수렴 → 홈 달력(봇이 아침에 알림)
+    except Exception as e:
+        summary["converge_events"] = f"실패 — {type(e).__name__}: {e}"[:200]
+        print(f"[lowpoint-floor] ⚠️ 빗각 수렴 일정 실패: {summary['converge_events']}", flush=True)
     _save_json_atomic(LP_FLOOR_PATH, {"checked_at": now.astimezone(KST).isoformat(), "rows": rows, "summary": summary})
     c = summary["counts"]
     print(f"[lowpoint-floor] 추적 — 대상 {summary['targets']}종목 · 조회 {summary['fetched']} · 실패 {len(summary['failed'])} · "
@@ -21691,6 +21704,63 @@ USER_EVENTS_DELETE_LOG_PATH = os.path.join(os.path.dirname(USER_EVENTS_PATH), "u
 _USER_EVENTS_LOCK = _threading.RLock()
 USER_EVENT_TITLE_MAX = 100   # 제목 한 줄 상한(AI 판단 어림값 — 달력 칸 표시용, 재검토 가능)
 USER_EVENT_MEMO_MAX = 500    # v5.354 재확인 메모 상한(AI 판단 어림값 — 텔레그램 한 줄에 실릴 길이, 재검토 가능)
+USER_EVENT_SOURCES = {"auto_converge"}   # v5.377 서버가 만든 일정의 출처(사용자 일정은 source 없음)
+
+
+def _user_event_deleted_ids() -> set:
+    """사용자가 지운 일정 id — 삭제 로그(한 줄 = JSON). 자동 일정은 지운 뒤 다시 만들지 않는다."""
+    out = set()
+    try:
+        with open(USER_EVENTS_DELETE_LOG_PATH, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    out.add(_json.loads(line).get("id"))
+                except ValueError:
+                    continue
+    except OSError:
+        pass
+    return out
+
+
+def _lp_converge_events(rows: dict, now: "datetime") -> list:
+    """v5.377(사용자 지시 2026-11-07 "빗각이랑 사이가 좁아질때(변곡점 가까이 올때) 홈화면 달력에 추가해주고 알림봇으로 알림도 보내줘.
+    추가되면") — 저점관리 행 중 자동 빗각과 기준선이 CONVERGE_ALERT_WEEKS 안에 만나는 종목을 홈 달력 일정(만나는 주 금요일)으로.
+    id = 종목·만나는 주로 고정 → 같은 수렴은 한 번만, 사용자가 지운 id는 다시 안 만든다. 반환: 새로 만든 일정 목록(로그용)."""
+    import re as _re
+    fl = _lp_floor_mod()
+    created = []
+    with _USER_EVENTS_LOCK:
+        events = _rec_list_load(USER_EVENTS_PATH)
+        have = {e.get("id") for e in events} | _user_event_deleted_ids()
+        for code, r in sorted(rows.items()):
+            cv = r.get("converge") or {}
+            if r.get("status") != "ok" or not cv.get("near"):
+                continue
+            rid = "ue_auto_conv_" + _re.sub(r"[^A-Za-z0-9_-]", "-", code) + "_" + cv["meet_week"].replace("-", "")
+            if rid in have:
+                continue
+            m = r.get("mkt")
+            f = (lambda x: f"{x:,.0f}") if m != "US" else (lambda x: f"{x:,.2f}")
+            dt = r.get("dtline") or {}
+            rec = {"id": rid, "date": cv["meet_week"], "time": None, "ticker": code.upper(),
+                   "title": f"📐 빗각×기준선 수렴 · {r.get('name') or code}"[:USER_EVENT_TITLE_MAX],
+                   "memo": (f"빗각 {f(cv['line_now'])} (주당 {cv['slope_week']:+,.2f} · {dt.get('a_date')} 고점 → {dt.get('b_date')} 고점) · "
+                            f"기준선 {f(cv['base'])} · 종가 {f(r.get('last_close'))} · 약 {cv['weeks']:.1f}주 뒤 만남. "
+                            f"그 주 종가가 빗각 위면 돌파, 기준선 아래면 저점 무효 — 자동 빗각(검증 전 규칙)")[:USER_EVENT_MEMO_MAX],
+                   "source": "auto_converge", "created_at": now.astimezone(KST).isoformat()}
+            bad = _user_event_invalid({**rec, "rev": 1})
+            if bad:
+                print(f"[lowpoint-floor] ⚠️ 수렴 일정 검증 실패 {code}: {bad}", flush=True)
+                continue
+            rec["rev"] = 1
+            rec["updated_at"] = _now_iso()
+            events.append(rec)
+            created.append(rec)
+        if created:
+            _rec_list_write(USER_EVENTS_PATH, events)
+    print(f"[lowpoint-floor] 빗각 수렴 일정: 대상 {sum(1 for r in rows.values() if (r.get('converge') or {}).get('near'))}종목 중 "
+          f"{len(created)}건 새로 등록{(' — ' + ', '.join(e['ticker'] + ' ' + e['date'] for e in created[:10])) if created else ''}", flush=True)
+    return created
 
 
 def _user_event_invalid(rec: dict) -> "str | None":
@@ -21724,7 +21794,10 @@ def _user_event_invalid(rec: dict) -> "str | None":
         return "메모는 문자열"
     if memo is not None and len(memo) > USER_EVENT_MEMO_MAX:
         return f"메모는 {USER_EVENT_MEMO_MAX}자 이하"
-    extra = set(rec) - {"id", "date", "title", "time", "ticker", "memo", "rev", "updated_at"}
+    src = rec.get("source")
+    if src is not None and src not in USER_EVENT_SOURCES:
+        return f"source는 {sorted(USER_EVENT_SOURCES)} 중 하나"
+    extra = set(rec) - {"id", "date", "title", "time", "ticker", "memo", "rev", "updated_at", "source", "created_at"}
     if extra:
         return f"알 수 없는 필드: {sorted(extra)}"
     return None
@@ -21746,6 +21819,33 @@ async def user_events_due(date: str = ""):
     due = [e for e in events if e.get("date") == d]
     due.sort(key=lambda e: (0 if e.get("ticker") else 1, e.get("time") or "99:99", str(e.get("title") or "")))
     return JSONResponse({"ok": True, "date": d, "events": due})
+
+
+@app.get("/api/user-events/added")
+async def user_events_added(since: str = "", source: str = "auto_converge"):
+    """v5.377 — since(ISO, 기본 24시간 전) 이후 서버가 새로 만든 일정(source). 얼마냐봇이 아침에 읽어 "새로 달력에 추가된 종목"으로 보낸다
+    (_BOT_READ_EXACT_PATHS, 읽기 전용)."""
+    try:
+        t0 = datetime.fromisoformat(since) if since else datetime.now(KST) - timedelta(hours=24)
+        if t0.tzinfo is None:
+            t0 = t0.replace(tzinfo=KST)
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "since는 ISO 시각"}, status_code=400)
+    try:
+        events = _rec_list_load(USER_EVENTS_PATH)
+    except (OSError, ValueError) as e:
+        return JSONResponse({"ok": False, "error": f"일정 읽기 실패: {e}"}, status_code=500)
+    out = []
+    for e in events:
+        if e.get("source") != source or not e.get("created_at"):
+            continue
+        try:
+            if datetime.fromisoformat(e["created_at"]) > t0:
+                out.append(e)
+        except ValueError:
+            continue
+    out.sort(key=lambda e: (e.get("date") or "", e.get("ticker") or ""))
+    return JSONResponse({"ok": True, "since": t0.isoformat(), "events": out})
 
 
 @app.get("/api/user-events")

@@ -549,3 +549,90 @@ def test_floor_table_header_is_sticky_below_page_header():
     assert _fn("_lfTable").count("lf-table") == 1
     assert "table.lf-table thead th{position:sticky;top:var(--sticky-top,0px)" in src
     assert "'--sticky-top'" in _fn("syncStickyTop")
+
+
+def _weekly_df(highs, closes=None, start="2025-11-07"):
+    """주봉 고가 목록 → 주마다 월~금 5일 일봉(금요일 고가 = 그 주 고가)."""
+    rows, idx = [], []
+    for k, h in enumerate(highs):
+        c = (closes[k] if closes else h * 0.95)
+        for dd in range(5):
+            day = pd.Timestamp(start) + pd.Timedelta(weeks=k) - pd.Timedelta(days=4 - dd)
+            hi = h if dd == 4 else min(h, c) * 0.99
+            rows.append((c, hi, min(c, hi) * 0.98, c, 100.0))
+            idx.append(day)
+    return pd.DataFrame(rows, columns=["Open", "High", "Low", "Close", "Volume"], index=pd.DatetimeIndex(idx))
+
+
+def test_downtrend_line_picks_gentlest_line_over_intermediate_highs_and_detects_break():
+    """v5.377 자동 빗각: A = 최고 고점, B = 그 사이 고가를 위에서 감싸는 가장 완만한 피벗."""
+    highs = [100, 120, 110, 105, 100, 98, 96, 104, 95, 92, 90, 94, 88, 86, 83, 79, 75, 71, 67, 63]
+    d = _weekly_df(highs)
+    hit = {"bar_date": str(d.index[-1].date())}
+    dt = fl.downtrend_line(d, hit, str(d.index[-1].date()))
+    assert dt["a_high"] == 120 and dt["b_high"] == 94                       # 120→94가 104(7주차)를 아래에 두는 가장 완만한 선
+    assert dt["slope_week"] == round((94 - 120) / 10, 4)
+    assert dt["broken_date"] is None
+    closes = [h * 0.95 for h in highs[:-1]] + [100.0]                        # 마지막 주 종가가 선 위
+    d2 = _weekly_df(highs[:-1] + [101], closes)
+    dt2 = fl.downtrend_line(d2, hit, str(d2.index[-1].date()))
+    assert dt2["broken_date"] == str(d2.index[-1].date())
+
+
+def test_converge_info_weeks_and_near():
+    dt = {"slope_week": -447.0, "line_now": 9474.0, "week_date": "2026-11-06", "broken_date": None}
+    cv = fl.converge_info(dt, 8460.0, 8900.0, "holding")
+    assert cv["weeks"] == round(1014 / 447, 2) and cv["meet_week"] == "2026-11-27" and cv["near"] is False
+    cv2 = fl.converge_info({**dt, "line_now": 9000.0}, 8460.0, 8900.0, "spring")
+    assert cv2["near"] is True and cv2["meet_week"] == "2026-11-20"
+    assert fl.converge_info({**dt, "broken_date": "2026-11-06"}, 8460.0, 8900.0, "holding") is None
+    assert fl.converge_info(dt, 8460.0, 8300.0, "holding") is None                   # 가격이 기준선 아래
+    assert fl.converge_info(dt, 8460.0, 8900.0, "rebroken") is None
+
+
+def test_converge_events_create_once_and_respect_deletions(monkeypatch, tmp_path):
+    p = tmp_path / "user_events.json"
+    log = tmp_path / "user_events_deletions.log"
+    monkeypatch.setattr(app, "USER_EVENTS_PATH", str(p))
+    monkeypatch.setattr(app, "USER_EVENTS_DELETE_LOG_PATH", str(log))
+    rows = {"036890.KQ": {"status": "ok", "name": "진성티이씨", "mkt": "KR", "last_close": 8900.0,
+                          "dtline": {"a_date": "2026-05-08", "b_date": "2026-08-14"},
+                          "converge": {"near": True, "meet_week": "2026-11-20", "weeks": 1.2, "line_now": 9000.0,
+                                       "slope_week": -447.0, "base": 8460.0}},
+            "VTSI": {"status": "ok", "mkt": "US", "converge": {"near": False, "meet_week": "2027-01-01"}}}
+    now = datetime(2026, 11, 8, 7, 0, tzinfo=app.KST)
+    made = app._lp_converge_events(rows, now)
+    assert [e["id"] for e in made] == ["ue_auto_conv_036890-KQ_20261120"]
+    ev = json.load(open(p))
+    assert ev[0]["date"] == "2026-11-20" and ev[0]["ticker"] == "036890.KQ" and ev[0]["source"] == "auto_converge"
+    assert app._user_event_invalid(ev[0]) is None                          # 사용자가 화면에서 고쳐 저장해도 통과
+    assert app._lp_converge_events(rows, now) == []                        # 같은 수렴은 한 번만
+    p.write_text("[]")
+    log.write_text(json.dumps({"id": "ue_auto_conv_036890-KQ_20261120"}) + "\n")
+    assert app._lp_converge_events(rows, now) == []                        # 지운 일정은 다시 안 만든다
+
+
+def test_added_endpoint_filters_by_source_and_since(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+    p = tmp_path / "user_events.json"
+    p.write_text(json.dumps([
+        {"id": "ue_a", "date": "2026-11-20", "title": "x", "source": "auto_converge", "created_at": "2026-11-08T07:00:00+09:00"},
+        {"id": "ue_b", "date": "2026-11-20", "title": "y", "source": "auto_converge", "created_at": "2026-11-01T07:00:00+09:00"},
+        {"id": "ue_c", "date": "2026-11-20", "title": "z"}]))
+    monkeypatch.setattr(app, "USER_EVENTS_PATH", str(p))
+    assert "/api/user-events/added" in app._BOT_READ_EXACT_PATHS
+    import asyncio as _a
+    res = _a.run(app.user_events_added(since="2026-11-07T08:45:00+09:00"))
+    body = json.loads(res.body)
+    assert [e["id"] for e in body["events"]] == ["ue_a"]
+
+
+def test_chip_shows_converge_weeks():
+    if not shutil.which("node"):
+        pytest.skip("node 미설치")
+    src = _fn("lfTestCount") + "\n" + _fn("lfChips")
+    r = "{state:'holding',test_episodes:[],converge:{weeks:1.2,near:true,meet_week:'2026-11-20',line_now:9000,slope_week:-447,base:8460}}"
+    p = subprocess.run(["node", "-e", src + f"\nconsole.log(JSON.stringify(lfChips({r}).map(c=>c.t+'/'+c.tone)))"],
+                       capture_output=True, text=True, timeout=20)
+    assert p.returncode == 0, p.stderr
+    assert "빗각 1.2주/bad" in json.loads(p.stdout)

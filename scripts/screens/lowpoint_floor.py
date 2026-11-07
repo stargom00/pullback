@@ -56,6 +56,10 @@ SPRING_MAX_DAYS = 10
 TEST_PCT = 3.0
 PRIOR_LOW_DAYS = 120
 FAR_PCT = 30.0     # 멀어짐 = 기준선 대비 +30% 이상(v5.370 — AI 판단 어림값, 근거 없음, 재검토 대상)
+DT_LOOKBACK_WEEKS = 52    # 자동 빗각을 찾는 주봉 창(약 1년) — v5.377 AI 판단 어림값(2년이면 이미 지난 큰 추세의 선이 잡혀 지금 가격과 너무 멀었다 — 31종목 시험), 재검토 대상
+DT_PIVOT_HALF = 2          # 피벗 고점 = 앞뒤 2주보다 높은 주봉 고가 — AI 판단 어림값
+DT_TOL = 0.01              # 빗각 위로 1%까지 삐져나온 고가는 허용 — AI 판단 어림값
+CONVERGE_ALERT_WEEKS = 2.0 # 빗각이 기준선과 이 주 수 안에 만나면 달력·알림 — 사용자 지시 2026-11-07 "빗각이랑 사이가 좁아질때(변곡점 가까이 올때)", 2주는 AI 판단 어림값
 NEAR_PCT = 10.0    # 가까움 = 기준선 ±10% 안(v5.370 — AI 판단 어림값, 근거 없음, 재검토 대상)
 STATES = ("holding", "broken", "spring", "weak_recovery", "late_recovery", "rebroken")
 RECOVERED = ("spring", "weak_recovery", "late_recovery")
@@ -251,6 +255,72 @@ def pre_low(clean: pd.DataFrame, hit: dict, through: "str | None") -> dict:
     return out
 
 
+def weekly_bars(clean: pd.DataFrame, through: "str | None") -> pd.DataFrame:
+    """확정 일봉 → 주봉(W-FRI) o/h/l/c + bar_date(그 주 마지막 거래일)."""
+    d = _confirmed(clean, through)
+    if d is None or d.empty:
+        return pd.DataFrame(columns=["o", "h", "l", "c", "bar_date"])
+    d = d.dropna(subset=["Close"])
+    d = d[(d["Low"] > 0) & (d["High"] > 0)]
+    g = d.assign(bar_date=d.index).resample("W-FRI")
+    w = pd.DataFrame({"o": g["Open"].first(), "h": g["High"].max(), "l": g["Low"].min(), "c": g["Close"].last(),
+                      "bar_date": g["bar_date"].last()}).dropna()
+    return w
+
+
+def downtrend_line(clean: pd.DataFrame, hit: dict, through: "str | None") -> "dict | None":
+    """자동 하락 빗각(v5.377, 사용자 지시 2026-11-07 "빗각이랑 사이가 좁아질때(변곡점 가까이 올때) 홈화면 달력에 추가하고 알림봇으로
+    알림도") — 훈련장에서 그은 방식을 규칙으로: 최근 DT_LOOKBACK_WEEKS 주봉에서
+      A = 신호 주(히트 봉이 든 주)까지의 최고 고가 주,
+      B = A 뒤 4주 넘게 지난 피벗 고점(앞뒤 DT_PIVOT_HALF주보다 높음) 중, A→B 선 위로 그 사이 고가가 DT_TOL 넘게 안 나오는 것 가운데
+          **가장 완만한** 선(하락 추세 고점들을 위에서 감싸는 선).
+    B 뒤 종가가 선 위로 마감하면 broken(돌파됨). 표시·달력 알림 전용 — 상태 판정엔 안 쓴다. 규칙 전체가 AI 판단(검증 전)."""
+    w = weekly_bars(clean, through)
+    if len(w) < 12:
+        return None
+    w = w.iloc[-DT_LOOKBACK_WEEKS:]
+    H, C = w["h"].to_numpy(float), w["c"].to_numpy(float)
+    n = len(w)
+    hb = pd.Timestamp(hit["bar_date"])
+    k = int((w["bar_date"] <= hb).sum()) - 1
+    if k < 0:
+        return None
+    a = int(H[:k + 1].argmax())
+    best = None
+    for j in range(a + 5, n - 1):
+        lo, hi = max(0, j - DT_PIVOT_HALF), min(n, j + DT_PIVOT_HALF + 1)
+        if H[j] < H[lo:hi].max() or H[j] >= H[a]:
+            continue
+        sl = (H[j] - H[a]) / (j - a)
+        if any(H[i] > (H[a] + sl * (i - a)) * (1 + DT_TOL) for i in range(a + 1, j)):
+            continue
+        if best is None or sl > best[1]:
+            best = (j, sl)
+    if best is None:
+        return None
+    b, sl = best
+    line = lambda i: H[a] + sl * (i - a)
+    broken = next((i for i in range(b + 1, n) if C[i] > line(i)), None)
+    d = lambda i: str(pd.Timestamp(w["bar_date"].iloc[i]).date())
+    return {"a_date": d(a), "a_high": float(H[a]), "b_date": d(b), "b_high": float(H[b]), "slope_week": round(float(sl), 4),
+            "line_now": round(float(line(n - 1)), 4), "line_next": round(float(line(n)), 4), "week_date": d(n - 1),
+            "broken_date": d(broken) if broken is not None else None}
+
+
+def converge_info(dt: "dict | None", active_line: "float | None", last_close: "float | None", state: str) -> "dict | None":
+    """빗각(매주 내려옴)과 기준선(수평)이 만나는 시점. 아직 돌파 전이고 가격이 두 선 사이일 때만. 기준선 = 지금 상태의 active_line."""
+    if not dt or dt.get("broken_date") or active_line is None or last_close is None or state in ("broken", "rebroken"):
+        return None
+    sl, ln = dt["slope_week"], dt["line_now"]
+    if sl >= 0 or ln <= active_line or not (active_line <= last_close <= ln):
+        return None
+    import math
+    weeks = (ln - active_line) / -sl
+    meet = (pd.Timestamp(dt["week_date"]) + pd.offsets.Week(weekday=4) * max(1, math.ceil(weeks)))
+    return {"weeks": round(weeks, 2), "meet_week": str(meet.date()), "near": weeks <= CONVERGE_ALERT_WEEKS,
+            "line_now": ln, "slope_week": sl, "base": active_line}
+
+
 def evaluate(df: "pd.DataFrame | None", market: str, now: datetime, through: "str | None", downcast,
              reg: "pd.DataFrame | None" = None) -> dict:
     """원본 일봉 한 종목 → {hit, …classify, …prior_low}. downcast = app._downcast(사본 금지 — 호출부가 넘긴다).
@@ -264,8 +334,10 @@ def evaluate(df: "pd.DataFrame | None", market: str, now: datetime, through: "st
     floor = floor_of(clean, hit)
     if floor is None:
         return {"status": "no_floor", "hit": hit}
-    return {"status": "ok", "hit": hit, **classify(clean, hit, floor, through), **prior_low(clean, hit, through),
-            **pre_low(clean, hit, through)}
+    cls = classify(clean, hit, floor, through)
+    dt = downtrend_line(clean, hit, through)
+    return {"status": "ok", "hit": hit, **cls, **prior_low(clean, hit, through), **pre_low(clean, hit, through),
+            "dtline": dt, "converge": converge_info(dt, cls.get("active_line"), cls.get("last_close"), cls.get("state"))}
 
 
 # ── 대상 모으기 · 조회 · 추적(서버 작업이 부른다) ─────────────────────────────

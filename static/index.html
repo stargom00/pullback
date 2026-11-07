@@ -1454,7 +1454,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.376</span>
+      <span class="ver mono" id="verBadge">v5.377</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -9261,6 +9261,9 @@ function lfChips(r, fmt) {
     if (r.recover_vol_ratio != null) out.push({ t: `거래량 ${r.recover_vol_ratio}배`, tone: r.recover_vol_ratio >= 1 ? 'good' : 'bad', title: '회복 봉 거래량 ÷ 이탈 봉 거래량' });
   }
   if (r.pre_break_date) out.push({ t: '직전봉 깸', tone: 'bad', title: `직전봉 저가 ${f(r.pre_low)}(${r.pre_low_date})을 ${r.pre_break_date} 종가로 깸` });
+  const cv = r.converge;   // v5.377 자동 빗각과 기준선이 만나는 시점(검증 전 규칙)
+  if (cv && typeof cv.weeks === 'number') out.push({ t: `빗각 ${cv.weeks < 1 ? '이번 주' : cv.weeks.toFixed(1) + '주'}`, tone: cv.near ? 'bad' : '',
+    title: `자동 빗각 ${f(cv.line_now)}(주당 ${cv.slope_week})이 기준선 ${f(cv.base)}과 ${cv.meet_week} 주에 만남${cv.near ? ' — 달력에 등록' : ''}` });
   if (r.prior_break_date) out.push({ t: '전저점 깸', tone: 'bad', title: `전저점 ${f(r.prior_low)}(${r.prior_low_date})을 ${r.prior_break_date} 종가로 깸` });
   return out;
 }
