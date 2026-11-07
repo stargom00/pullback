@@ -333,3 +333,9 @@ def test_floor_tab_has_own_refresh_button():
     assert body.count('onclick="lfRefresh()"') == 1
     assert "/api/lowpoint/watch/refresh" in _fn("lfRefresh")
     assert "저점일지 관찰 탭의" not in src
+
+
+def test_floor_tab_market_buttons_use_header_toggle():
+    body = _fn("renderLowpointFloor")
+    assert body.count("lfSetMarket(") == 1 and "'국장'" in body and "'미장'" in body
+    assert "button.tab[data-market=" in _fn("lfSetMarket")

@@ -5,6 +5,8 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.368 [저점관리 탭 안 시장 버튼 — 사용자 지시 2026-11-07 "국장 미장 선택할수잇는 버튼 만들어줘". 전체/국장/미장(건수) 칩.
+  상단 전체/한국/미국과 같은 market 상태 — 칩이 상단 버튼을 눌러 저장·다시 그리기를 한 경로로(lfSetMarket).]
 v5.367 [저점관리 탭이 비어 있던 이유 — v5.365가 07:56 KST에 배포돼 그날 07:00 작업을 놓쳤고, 수동 갱신은 다른 탭(저점일지
   관찰)에만 있었다. ① 저점관리 탭에 "지금 갱신" 버튼(관찰과 같은 POST /api/lowpoint/watch/refresh — 끝에 저점관리 추적).
   ② 결과 파일이 없을 때만 서버 시작 30초 뒤 1회 따라잡기(_lp_floor_catchup — 저점 작업과 같은 잠금·워커, 파일 있으면 안 돎).
@@ -9155,7 +9157,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.367"
+VERSION = "v5.368"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

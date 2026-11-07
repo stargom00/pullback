@@ -1447,7 +1447,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.367</span>
+      <span class="ver mono" id="verBadge">v5.368</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -9174,6 +9174,12 @@ async function lfRefresh() {
     renderLowpointFloor();
   }
 }
+// v5.368(사용자 지시 "국장 미장 선택할수잇는 버튼") — 탭 안 시장 버튼. 상단 전체/한국/미국과 같은 상태(market)를 쓴다:
+// 상단 버튼을 그대로 눌러 저장·강제 탭 규칙·다시 그리기를 한 경로로(사본 금지).
+function lfSetMarket(m) {
+  const b = document.querySelector(`button.tab[data-market="${m}"]`);
+  if (b) b.click(); else { setMarket(m); renderLowpointFloor(); }
+}
 function lfSetFilter(k) { _lf.filter = k; renderLowpointFloor(); }
 function lfToggleSort() { _lf.sortDir = _lf.sortDir === 'asc' ? 'desc' : 'asc'; renderLowpointFloor(); }
 function lfDetail(r) {
@@ -9215,7 +9221,11 @@ function renderLowpointFloor() {
     wrap.innerHTML = head + `<section class="n-card" style="padding:18px 22px"><div class="n-sub">${msg}</div>${d.definition ? `<div class="n-sub" style="font-size:12px;margin-top:8px">${_escapeHtml(d.definition)}</div>` : ''}</section>`;
     return;
   }
-  const all = (d.rows || []).filter(r => (market === 'us') ? r.mkt === 'US' : (market === 'kr') ? r.mkt !== 'US' : true);
+  const rowsAll = d.rows || [];
+  const all = rowsAll.filter(r => (market === 'us') ? r.mkt === 'US' : (market === 'kr') ? r.mkt !== 'US' : true);
+  const nUs = rowsAll.filter(r => r.mkt === 'US').length;
+  const mkts = `<div class="lp-chips" role="group" aria-label="시장" style="margin-bottom:6px">${[['all', '전체', rowsAll.length], ['kr', '국장', rowsAll.length - nUs], ['us', '미장', nUs]].map(([k, lbl, n]) =>
+      `<button type="button" class="jr-pill${market === k ? ' on' : ''}" onclick="lfSetMarket('${k}')">${lbl}(${n})</button>`).join('')}</div>`;
   const q = String(_lf.query || '').trim().toLowerCase();
   const searched = q ? all.filter(r => String(r.name || '').toLowerCase().includes(q) || String(r.code || '').toLowerCase().includes(q)) : all;
   const s = d.summary || {};
@@ -9229,7 +9239,7 @@ function renderLowpointFloor() {
       <input id="lfSearch" type="search" placeholder="종목명·코드 일부" value="${_newsAttr(_lf.query)}" autocomplete="off"
         style="min-height:28px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:12px;width:min(260px,70vw)"></div>`;
   const rows = lfSort(lfFilter(searched, _lf.filter), _lf.sortDir);
-  wrap.innerHTML = head + meta + chips + search + `<section class="n-card" style="padding:18px 22px">${_lfTable(rows)}</section>`;
+  wrap.innerHTML = head + meta + mkts + chips + search + `<section class="n-card" style="padding:18px 22px">${_lfTable(rows)}</section>`;
   const el = document.getElementById('lfSearch');
   if (el) {
     let composing = false;
