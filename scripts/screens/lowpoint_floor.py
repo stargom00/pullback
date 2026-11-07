@@ -30,6 +30,8 @@
   PRIOR_LOW_DAYS = 120 — 전저점 창(v5.369). 사용자 지시 2026-11-07 "바닥선: 둘다표시"(히트 봉 저가 + 직전 전저점) — 계기는
             꿈비 "전저점이 1604인데 지금 1650 — 저점보다 위에 있는 거 아냐?"(8월 저점). 창 길이 120거래일(약 6개월)은 AI 판단
             어림값(그 8월 저점을 포함하는 길이) — 근거 없음, 재검토 대상.
+  FAR_PCT = 30 / NEAR_PCT = 10 — 표시 묶음(v5.370). 사용자 지시 2026-11-07 "해줘. 정렬을 할수잇게. 바닥봉에서의 거리 뿐만아니라
+            상태도" — 계기는 바이오비쥬(바닥선 5,630, +134%인데 "지킴"). 숫자 둘은 AI 판단 어림값 — 근거 없음, 재검토 대상.
 이 상태들은 **관심 분류·표시 전용**이다 — 측정 전, 승률·우위 주장 금지.
 
 가격 기준(v5.369, 사용자 지시 2026-11-07 "종가로" — 저점관리 탭만 정규장 종가):
@@ -50,6 +52,8 @@ import lowpoint as lp
 SPRING_MAX_DAYS = 10
 TEST_PCT = 3.0
 PRIOR_LOW_DAYS = 120
+FAR_PCT = 30.0     # 멀어짐 = 기준선 대비 +30% 이상(v5.370 — AI 판단 어림값, 근거 없음, 재검토 대상)
+NEAR_PCT = 10.0    # 가까움 = 기준선 ±10% 안(v5.370 — AI 판단 어림값, 근거 없음, 재검토 대상)
 STATES = ("holding", "broken", "spring", "weak_recovery", "late_recovery", "rebroken")
 RECOVERED = ("spring", "weak_recovery", "late_recovery")
 STATE_LABEL = {"holding": "지킴", "broken": "이탈", "spring": "스프링", "weak_recovery": "약한 회복",
@@ -234,6 +238,27 @@ def targets_from(watch_records: list, newlisting_rows: list, prev: dict) -> dict
     for r in newlisting_rows or []:
         add(r.get("code"), r.get("name"), r.get("market"), "신규상장")
     return out
+
+
+_US_SPAC_RE = __import__("re").compile(r"\bacquisition\s+(corp|corporation|co|company|inc|ltd|limited)\b|\bspac\b", __import__("re").I)
+
+
+def is_spac(t: dict) -> bool:
+    """스팩(기업인수목적회사) — v5.370 사용자 지시 2026-11-07 "그리고 스팩은 제외시켜줘".
+    KR: 종목명에 "스팩" 또는 "기업인수목적"(측정 스크립트 2026-10-09_ipo_decline_recovery_exploration.py와 같은 규칙).
+    US: 이름에 "Acquisition Corp/Co/Inc/Ltd…" 또는 "SPAC"(미국 스팩 관례 이름 — AI 판단 규칙, 이름에 안 드러나는 스팩은 못 거른다)."""
+    name = str(t.get("name") or "")
+    if t.get("mkt") == "US":
+        return bool(_US_SPAC_RE.search(name))
+    return "스팩" in name or "기업인수목적" in name
+
+
+def drop_spacs(targets: dict) -> tuple[dict, list]:
+    """→ (스팩 뺀 대상, 뺀 코드 목록). 이전에 추적하던 스팩도 여기서 빠진다(다음 저장부터 행이 사라짐)."""
+    out, gone = {}, []
+    for code, t in targets.items():
+        (gone.append(code) if is_spac(t) else out.__setitem__(code, t))
+    return out, sorted(gone)
 
 
 def fetch_daily(targets: list, today: date) -> dict:

@@ -302,8 +302,33 @@ def test_front_filters():
 
 
 def test_front_sort_by_abs_distance_nulls_last():
-    assert _js(f"lfSort(lfFilter({ROWS},'all'),'asc').map(r=>r.code)") == ["b", "d", "a", "g", "c", "e"]
-    assert _js(f"lfSort(lfFilter({ROWS},'all'),'desc').map(r=>r.code)") == ["c", "g", "a", "d", "b", "e"]
+    assert _js(f"lfSort(lfFilter({ROWS},'all'),'near','asc').map(r=>r.code)") == ["b", "d", "a", "g", "c", "e"]
+
+
+def test_front_sort_signed_distance_state_and_prior():
+    """v5.370 — 거리 부호 그대로(위로 먼 순/아래로 먼 순), 상태 순서(같은 상태는 가까운 순), 전저점 거리. 값 없음은 항상 뒤."""
+    assert _js(f"lfSort(lfFilter({ROWS},'all'),'dist','desc').map(r=>r.code)") == ["c", "a", "d", "b", "g", "e"]
+    assert _js(f"lfSort(lfFilter({ROWS},'all'),'dist','asc').map(r=>r.code)") == ["g", "b", "d", "a", "c", "e"]
+    assert _js(f"lfSort(lfFilter({ROWS},'all'),'state','asc').map(r=>r.code)") == ["b", "a", "c", "d", "e", "g"]
+    assert _js(f"lfSort(lfFilter({ROWS},'all'),'state','desc').map(r=>r.code)") == ["g", "e", "d", "c", "b", "a"]
+    rows = "[{code:'p',status:'ok',prior_dist_pct:5},{code:'q',status:'ok',prior_dist_pct:-3},{code:'r',status:'ok'}]"
+    assert _js(f"lfSort({rows},'prior','desc').map(r=>r.code)") == ["p", "q", "r"]
+
+
+def test_front_far_and_near_filters_use_server_thresholds():
+    rows = ("[{code:'x',status:'ok',state:'holding',dist_pct:134},{code:'y',status:'ok',state:'holding',dist_pct:29},"
+            "{code:'z',status:'ok',state:'broken',dist_pct:-9},{code:'w',status:'ok',state:'holding',dist_pct:null}]")
+    assert _js(f"lfFilter({rows},'far',{{far:30,near:10}}).map(r=>r.code)") == ["x"]
+    assert _js(f"lfFilter({rows},'near',{{far:30,near:10}}).map(r=>r.code)") == ["z"]
+    assert _js(f"lfFilter({rows},'far',{{far:20,near:10}}).map(r=>r.code)") == ["x", "y"]     # 서버 값이 바뀌면 따라간다
+
+
+def test_floor_api_sends_thresholds_and_state_order():
+    import inspect
+    src = inspect.getsource(app.lp_floor_get)
+    assert '"far_pct": fl.FAR_PCT' in src and '"near_pct": fl.NEAR_PCT' in src and '"state_order": list(fl.STATES)' in src
+    body = _fn("renderLowpointFloor")
+    assert "d.far_pct" in body and "d.near_pct" in body and "d.state_order" in body
 
 
 def test_tab_wired():
@@ -373,4 +398,30 @@ def test_regular_frame_drives_floor_and_distance_not_integrated():
 def test_floor_table_shows_prior_low_and_price_note():
     body = _fn("_lfTable")
     assert body.count("r.prior_low") >= 2 and "r.prior_break_date" in body and "r.price_note" in body
-    assert "전저점</th>" in body
+    assert "sb('prior', '전저점'" in body
+
+
+def test_spacs_excluded_kr_and_us():
+    """v5.370 사용자 지시 "스팩은 제외시켜줘"."""
+    t = fl.targets_from([{"code": "1.KQ", "name": "엔에이치스팩31호", "market": "KOSDAQ"},
+                         {"code": "2.KQ", "name": "꿈비", "market": "KOSDAQ"},
+                         {"code": "SPAQ", "name": "Example Acquisition Corp", "market": "US"},
+                         {"code": "ACQ", "name": "Acquisition Holdings Bank", "market": "US"}],
+                        [{"code": "3.KS", "name": "기업인수목적9호", "market": "KOSPI"}],
+                        {"4.KQ": {"name": "하나스팩5호", "market": "KOSDAQ"}})
+    kept, gone = fl.drop_spacs(t)
+    assert sorted(kept) == ["2.KQ", "ACQ"] and gone == ["1.KQ", "3.KS", "4.KQ", "SPAQ"]
+
+
+def test_floor_job_drops_spacs_before_tracking(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(app, "LP_FLOOR_PATH", str(tmp_path / "f.json"))
+    monkeypatch.setattr(app, "_rec_list_load", lambda p: [{"code": "1.KQ", "name": "엔에이치스팩31호", "market": "KOSDAQ", "tf": "week"},
+                                                          {"code": "2.KQ", "name": "꿈비", "market": "KOSDAQ", "tf": "week"}])
+    monkeypatch.setattr(app, "_lowpoint_read", lambda p: {"rows": []})
+    fl_mod = app._lp_floor_mod()
+    monkeypatch.setattr(fl_mod, "fetch_daily", lambda items, today: seen.setdefault("codes", [i["code"] for i in items]) and {})
+    app._lp_floor_job_blocking(datetime.now(KST))
+    assert seen["codes"] == ["2.KQ"]
+    saved = json.load(open(tmp_path / "f.json"))
+    assert saved["summary"]["spac_excluded"] == 1

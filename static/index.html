@@ -1447,7 +1447,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.369</span>
+      <span class="ver mono" id="verBadge">v5.370</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -9125,6 +9125,8 @@ function nlToggleDdSort() {
 // 무효선과의 거리를 %로". 판정은 scripts/screens/lowpoint_floor.py(서버) — 프론트에 판정 사본 없음.
 const LF_FILTERS = [
   { key: 'all', label: '전체' },
+  { key: 'near', label: '가까움' },
+  { key: 'far', label: '멀어짐' },
   { key: 'holding', label: '지킴' },
   { key: 'tested', label: '지킴·테스트 2회+' },
   { key: 'broken', label: '이탈' },
@@ -9132,25 +9134,40 @@ const LF_FILTERS = [
   { key: 'recovery', label: '약한·늦은 회복' },
   { key: 'rebroken', label: '재이탈' },
 ];
-// 순수 — 필터 키로 행 고르기(테스트 대상)
-function lfFilter(rows, key) {
+// v5.370(사용자 지시 "멀어진 종목 따로 · 정렬 — 바닥봉에서의 거리뿐 아니라 상태도"). 기준값은 서버(lowpoint_floor.FAR_PCT·
+// NEAR_PCT)가 내려준다 — 여기 기본값은 서버 값이 없을 때(테스트)만.
+// 순수 — 필터 키로 행 고르기(테스트 대상). opt = {far, near}(%)
+function lfFilter(rows, key, opt) {
+  const far = (opt && opt.far) ?? 30, near = (opt && opt.near) ?? 10;
   const ok = (rows || []).filter(r => r && r.status === 'ok');
+  const num = v => typeof v === 'number';
   if (key === 'all') return ok;
+  if (key === 'far') return ok.filter(r => num(r.dist_pct) && r.dist_pct >= far);
+  if (key === 'near') return ok.filter(r => num(r.dist_pct) && Math.abs(r.dist_pct) <= near);
   if (key === 'tested') return ok.filter(r => r.state === 'holding' && (r.tests || 0) >= 2);
   if (key === 'recovery') return ok.filter(r => r.state === 'weak_recovery' || r.state === 'late_recovery');
   return ok.filter(r => r.state === key);
 }
-// 순수 — 거리 정렬(가까운 순 = |거리| 오름차순, 값 없음은 뒤)
-function lfSort(rows, dir) {
+// 순수 — 정렬(값 없음은 항상 뒤). key: near(|거리| 가까운 순) · dist(거리 부호 그대로, dir) · state(상태 순서, 같은 상태는
+// |거리| 가까운 순) · prior(전저점 거리, dir). order = 상태 순서 배열(서버 STATES).
+function lfSort(rows, key, dir, order) {
   const sign = dir === 'desc' ? -1 : 1;
+  const ord = order || ['holding', 'spring', 'weak_recovery', 'late_recovery', 'broken', 'rebroken'];
+  const num = v => typeof v === 'number';
+  const byNum = (x, y, f) => (!num(x) ? (!num(y) ? 0 : 1) : !num(y) ? -1 : f(x, y));
+  const near = (a, b) => byNum(a.dist_pct, b.dist_pct, (x, y) => Math.abs(x) - Math.abs(y));
+  const tie = (a, b) => String(a.code).localeCompare(String(b.code));
   return rows.slice().sort((a, b) => {
-    const x = a.dist_pct, y = b.dist_pct;
-    if (typeof x !== 'number') return typeof y !== 'number' ? 0 : 1;
-    if (typeof y !== 'number') return -1;
-    return sign * (Math.abs(x) - Math.abs(y)) || String(a.code).localeCompare(String(b.code));
+    if (key === 'state') {
+      const i = ord.indexOf(a.state), j = ord.indexOf(b.state);
+      return sign * ((i < 0 ? 99 : i) - (j < 0 ? 99 : j)) || near(a, b) || tie(a, b);
+    }
+    if (key === 'dist') return byNum(a.dist_pct, b.dist_pct, (x, y) => sign * (x - y)) || tie(a, b);
+    if (key === 'prior') return byNum(a.prior_dist_pct, b.prior_dist_pct, (x, y) => sign * (x - y)) || tie(a, b);
+    return near(a, b) || tie(a, b);
   });
 }
-let _lf = { data: null, error: null, filter: 'all', sortDir: 'asc', query: '', busy: false, msg: '' };
+let _lf = { data: null, error: null, filter: 'all', sortKey: 'near', sortDir: 'asc', query: '', busy: false, msg: '' };
 async function onEnterLowpointFloorTab() {
   const wrap = document.getElementById('lowpointFloorView');
   wrap.innerHTML = '<div class="loading"><div class="spinner"></div>불러오는 중…</div>';
@@ -9181,7 +9198,16 @@ function lfSetMarket(m) {
   if (b) b.click(); else { setMarket(m); renderLowpointFloor(); }
 }
 function lfSetFilter(k) { _lf.filter = k; renderLowpointFloor(); }
-function lfToggleSort() { _lf.sortDir = _lf.sortDir === 'asc' ? 'desc' : 'asc'; renderLowpointFloor(); }
+// 정렬 머리 클릭 — 거리: 가까운 순 → 위로 먼 순 → 아래로 먼 순 → (처음으로). 상태·전저점: 같은 머리 다시 누르면 방향 반대.
+function lfSortBy(key) {
+  if (key === 'dist') {
+    if (_lf.sortKey === 'near') { _lf.sortKey = 'dist'; _lf.sortDir = 'desc'; }
+    else if (_lf.sortKey === 'dist' && _lf.sortDir === 'desc') _lf.sortDir = 'asc';
+    else { _lf.sortKey = 'near'; _lf.sortDir = 'asc'; }
+  } else if (_lf.sortKey === key) _lf.sortDir = _lf.sortDir === 'asc' ? 'desc' : 'asc';
+  else { _lf.sortKey = key; _lf.sortDir = key === 'prior' ? 'desc' : 'asc'; }
+  renderLowpointFloor();
+}
 function lfDetail(r) {
   const m = r.mkt;
   if (r.state === 'holding') return `지지 테스트 ${r.tests || 0}회${r.last_test_date ? ` · 마지막 ${r.last_test_date}` : ''}`;
@@ -9193,12 +9219,14 @@ function lfDetail(r) {
 function _lfTable(rows) {
   if (!rows.length) return '<div class="n-sub" style="padding:14px 0">해당 종목 없음</div>';
   const lbl = (_lf.data && _lf.data.state_label) || {};
+  const far = (_lf.data && _lf.data.far_pct) ?? 30;
   const body = rows.map(r => {
     const m = r.mkt, code = _lptCode(r), h = r.hit || {};
     const line = r.active_line, moved = r.active_line != null && r.floor_line != null && r.active_line !== r.floor_line;
     return `<tr><td class="nl-name"><div class="nl-title"><b><a class="name-link" href="${tvUrl(r.code, m === 'KR' ? 'KR' : 'US')}" target="_blank" rel="noopener" title="${_newsAttr(r.name || r.code)} — 트레이딩뷰 차트 열기">${_escapeHtml(r.name || r.code)}</a></b></div>`
       + `<div class="jr-s num">${_escapeHtml(code)}${m === 'KR' && r.market ? ' · ' + _escapeHtml(r.market) : ''}${(r.sources || []).length ? ' · ' + _escapeHtml(r.sources.join('·')) : ''}</div></td>`
-      + `<td class="nowrap"><span class="lf-state lf-${r.state}">${_escapeHtml(lbl[r.state] || r.state)}</span></td>`
+      + `<td class="nowrap"><span class="lf-state lf-${r.state}">${_escapeHtml(lbl[r.state] || r.state)}</span>`
+      + `${typeof r.dist_pct === 'number' && r.dist_pct >= far ? `<div class="jr-s" title="기준선에서 +${far}% 이상 — 바닥선 지킴 여부가 지금 가격과 멀다">멀어짐</div>` : ''}</td>`
       + `<td class="num r nowrap">${_lptFmt(line, m)}<div class="jr-s">${moved ? `새 바닥선 · 원래 ${_lptFmt(r.floor_line, m)}` : `${h.tf === 'month' ? '월봉' : '주봉'} 히트 ${_escapeHtml(h.label || '')}`}</div></td>`
       + `<td class="num r nowrap">${_lptFmt(r.last_close, m)}<div class="jr-s">${_escapeHtml(r.last_date || '')}</div></td>`
       + `<td class="r nowrap">${_lptPct(r.dist_pct)}</td>`
@@ -9206,10 +9234,14 @@ function _lfTable(rows) {
       + `<td class="jr-s">${_escapeHtml(lfDetail(r))}<div>추적 ${r.days_tracked || 0}거래일 · 등록 ${_escapeHtml(r.first_seen || '')}</div>`
       + `${r.price_note ? `<div class="st-dot st-warn">${_escapeHtml(r.price_note)}</div>` : ''}</td></tr>`;
   }).join('');
-  return `<div class="jr-table-wrap"><table class="jr-table lpt-table nl-table"><thead><tr><th>종목</th><th>상태</th>`
+  const k = _lf.sortKey, ar = _lf.sortDir === 'asc' ? ' ▲' : ' ▼';
+  const distLbl = k === 'near' ? '거리 · 가까운 순' : k === 'dist' ? (_lf.sortDir === 'desc' ? '거리 · 위로 먼 순' : '거리 · 아래로 먼 순') : '거리';
+  const sb = (key, lbl, title) => `<button type="button" class="n-link" style="font-size:12px" onclick="lfSortBy('${key}')" title="${title}">${lbl}</button>`;
+  return `<div class="jr-table-wrap"><table class="jr-table lpt-table nl-table"><thead><tr><th>종목</th>`
+    + `<th class="nowrap">${sb('state', '상태' + (k === 'state' ? ar : ''), '상태 순서(지킴→스프링→약한·늦은 회복→이탈→재이탈)로 정렬 — 같은 상태는 가까운 순')}</th>`
     + `<th class="r nowrap">기준선</th><th class="r nowrap">종가</th>`
-    + `<th class="r"><button type="button" class="n-link" style="font-size:12px" onclick="lfToggleSort()" title="기준선 대비 마지막 확정 종가 — 클릭해 정렬(가까운 순/먼 순)">거리${_lf.sortDir === 'asc' ? ' ▲' : ' ▼'}</button></th>`
-    + `<th class="r nowrap" title="히트 봉 직전 120거래일 최저가와 그 대비 거리 — 참고선(상태 판정엔 안 씀)">전저점</th>`
+    + `<th class="r nowrap">${sb('dist', distLbl, '기준선 대비 마지막 확정 종가 — 클릭할 때마다 가까운 순 → 위로 먼 순 → 아래로 먼 순')}</th>`
+    + `<th class="r nowrap">${sb('prior', '전저점' + (k === 'prior' ? ar : ''), '히트 봉 직전 120거래일 최저가와 그 대비 거리 — 참고선(상태 판정엔 안 씀). 클릭해 거리로 정렬')}</th>`
     + `<th>내용</th></tr></thead><tbody>${body}</tbody></table></div>`;
 }
 function renderLowpointFloor() {
@@ -9232,16 +9264,17 @@ function renderLowpointFloor() {
   const q = String(_lf.query || '').trim().toLowerCase();
   const searched = q ? all.filter(r => String(r.name || '').toLowerCase().includes(q) || String(r.code || '').toLowerCase().includes(q)) : all;
   const s = d.summary || {};
+  const opt = { far: d.far_pct ?? 30, near: d.near_pct ?? 10 };
   const meta = `<section class="n-card" style="padding:14px 22px;display:flex;flex-direction:column;gap:6px">
-      <div><b>마지막 갱신 ${_escapeHtml((d.checked_at || '').replace('T', ' ').slice(0, 16))} KST</b> <span class="n-sub">· 대상 ${s.targets ?? '?'}종목 · 조회 실패 ${(s.failed || []).length}종목 · 히트 없음 ${(s.counts || {}).no_hit ?? 0}종목</span></div>
+      <div><b>마지막 갱신 ${_escapeHtml((d.checked_at || '').replace('T', ' ').slice(0, 16))} KST</b> <span class="n-sub">· 대상 ${s.targets ?? '?'}종목 · 조회 실패 ${(s.failed || []).length}종목 · 히트 없음 ${(s.counts || {}).no_hit ?? 0}종목${s.spac_excluded != null ? ` · 스팩 제외 ${s.spac_excluded}종목` : ''}</span></div>
       <div class="n-sub" style="font-size:12px">${_escapeHtml(d.definition || '')}</div>
     </section>`;
   const chips = `<div class="lp-chips" role="group" aria-label="상태 필터">${LF_FILTERS.map(f =>
-      `<button type="button" class="jr-pill${_lf.filter === f.key ? ' on' : ''}" onclick="lfSetFilter('${f.key}')">${f.label}(${lfFilter(searched, f.key).length})</button>`).join('')}</div>`;
+      `<button type="button" class="jr-pill${_lf.filter === f.key ? ' on' : ''}" onclick="lfSetFilter('${f.key}')"${f.key === 'far' ? ` title="기준선에서 +${opt.far}% 이상"` : f.key === 'near' ? ` title="기준선 ±${opt.near}% 안"` : ''}>${f.label}(${lfFilter(searched, f.key, opt).length})</button>`).join('')}</div>`;
   const search = `<div class="abc-chiprow" style="margin:8px 0 10px"><span class="abc-lbl">검색</span>
       <input id="lfSearch" type="search" placeholder="종목명·코드 일부" value="${_newsAttr(_lf.query)}" autocomplete="off"
         style="min-height:28px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:12px;width:min(260px,70vw)"></div>`;
-  const rows = lfSort(lfFilter(searched, _lf.filter), _lf.sortDir);
+  const rows = lfSort(lfFilter(searched, _lf.filter, opt), _lf.sortKey, _lf.sortDir, d.state_order);
   wrap.innerHTML = head + meta + mkts + chips + search + `<section class="n-card" style="padding:18px 22px">${_lfTable(rows)}</section>`;
   const el = document.getElementById('lfSearch');
   if (el) {

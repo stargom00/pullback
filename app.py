@@ -5,6 +5,12 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.370 [저점관리 묶음·정렬 — 사용자 지시 2026-11-07 "해줘. 정렬을 할수잇게. 바닥봉에서의 거리 뿐만아니라 상태도"(계기: 바이오비쥬
+  바닥선 5,630 · +134%인데 "지킴"). 필터 칩 "가까움(±10%)"·"멀어짐(+30%↑)" + 상태 칸에 "멀어짐" 표시. 정렬 머리 3개 — 상태
+  (지킴→스프링→약한·늦은 회복→이탈→재이탈, 같은 상태는 가까운 순) · 거리(가까운 순 → 위로 먼 순 → 아래로 먼 순) · 전저점 거리.
+  30/10은 lowpoint_floor.FAR_PCT/NEAR_PCT(AI 어림값) — API로 내려줘 화면에 사본 없음.
+  스팩 제외 — 사용자 지시 "그리고 스팩은 제외시켜줘". 대상에서 KR 이름 "스팩"/"기업인수목적", US 이름 "Acquisition Corp…"/"SPAC"
+  (lowpoint_floor.is_spac). 이전에 추적하던 스팩 행도 다음 갱신에서 사라짐. 제외 수는 로그·상단 요약에.]
 v5.369 [저점관리 정규장 종가 + 전저점 — 사용자 지시 2026-11-07 "1. 둘다표시. 2. 종가로". 계기: 꿈비 탭 종가 1,770(통합, 애프터마켓
   얇은 체결) vs 차트 1,650, "전저점이 1604인데 지금 1650 — 저점보다 위 아냐?". ① 바닥선·상태·거리를 KR 정규장 일봉으로
   (lp.splice_regular — NXT 전 naver, 이후 yfinance auto_adjust=False). 히트 찾기는 저점 스크린과 같은 통합 종가 그대로(목록과
@@ -9162,7 +9168,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.369"
+VERSION = "v5.370"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -21144,8 +21150,10 @@ def _lp_floor_job_blocking(now: "datetime") -> dict:
     w = _lp_watch_mod()
     prev = (_lp_floor_read() or {}).get("rows") or {}
     nl = _lowpoint_read(NEWLISTING_DATA_PATH) or _lowpoint_read(NEWLISTING_LATEST_PATH) or {}
-    targets = fl.targets_from(_rec_list_load(LP_WATCH_PATH), nl.get("rows") or [], prev)
+    targets, spacs = fl.drop_spacs(fl.targets_from(_rec_list_load(LP_WATCH_PATH), nl.get("rows") or [], prev))   # v5.370 스팩 제외
     rows, summary = fl.track(targets, prev, now.astimezone(KST), _downcast, w.confirmed_through)
+    summary["spac_excluded"] = len(spacs)
+    print(f"[lowpoint-floor] 스팩 제외 {len(spacs)}종목: {', '.join(spacs[:20]) or '없음'}{' …' if len(spacs) > 20 else ''}", flush=True)
     _save_json_atomic(LP_FLOOR_PATH, {"checked_at": now.astimezone(KST).isoformat(), "rows": rows, "summary": summary})
     c = summary["counts"]
     print(f"[lowpoint-floor] 추적 — 대상 {summary['targets']}종목 · 조회 {summary['fetched']} · 실패 {len(summary['failed'])} · "
@@ -21191,7 +21199,8 @@ async def lp_floor_get():
     d = _lp_floor_read()
     fl = _lp_floor_mod()
     base = {"ok": True, "definition": fl.DEFINITION, "state_label": fl.STATE_LABEL, "spring_max_days": fl.SPRING_MAX_DAYS,
-            "test_pct": fl.TEST_PCT, "schedule_hm": LOWPOINT_SCHEDULE_HM["watch"]}
+            "test_pct": fl.TEST_PCT, "schedule_hm": LOWPOINT_SCHEDULE_HM["watch"],
+            "far_pct": fl.FAR_PCT, "near_pct": fl.NEAR_PCT, "state_order": list(fl.STATES)}
     if not d:
         return JSONResponse({**base, "missing": True, "rows": []})
     return JSONResponse(_clean_nan({**base, "checked_at": d.get("checked_at"), "summary": d.get("summary"),
