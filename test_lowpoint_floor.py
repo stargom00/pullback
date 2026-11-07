@@ -162,6 +162,37 @@ def test_evaluate_uses_downcast_so_zero_bars_do_not_make_floor_zero():
     assert raw["floor_line"] > 0                                       # floor_of 자체도 0 이하 저가는 뺀다(2차 방어)
 
 
+def test_no_days_after_hit_uses_hit_close_for_distance():
+    """히트 봉 직후(추적일 0) — 거리는 히트 봉 마지막 종가로(v5.366, 인바이오젠 11-06 주봉 실데이터에서 '—'로 나옴)."""
+    d = _with_hit_week([])
+    out = fl.classify(d, HIT, FLOOR, str(d.index[-1].date()))
+    assert out["state"] == "holding" and out["days_tracked"] == 0
+    assert out["last_close"] == 995.0 and out["last_date"] == "2026-01-09"
+    assert out["dist_pct"] == round((995 / 950 - 1) * 100, 2)
+
+
+def test_latest_hit_takes_most_recent_across_week_and_month(monkeypatch):
+    """옛 주봉 히트가 최근 월봉 히트를 가리면 안 된다(v5.366 — 하이딥 실데이터: 7월 주봉 히트로 추적됨)."""
+    import numpy as np
+    rng = np.random.default_rng(7)
+    idx = pd.bdate_range("2023-01-02", periods=700)
+    c = pd.Series(1000 * np.exp(np.cumsum(rng.normal(0, 0.01, len(idx)))), index=idx)
+    now = (idx[-1] + pd.Timedelta(days=40)).to_pydatetime().replace(tzinfo=KST)
+    wk = lp.drop_in_progress(lp.resample_bars(c, "week"), "kr", now)
+    mo = lp.drop_in_progress(lp.resample_bars(c, "month"), "kr", now)
+    old_week = float(wk["close"].iloc[40])
+    j = next(j for j in range(len(mo) - 2, 0, -1) if pd.Timestamp(mo["bar_date"].iloc[j]).weekday() != 4)  # 금요일 아닌 월말
+    last_month = float(mo["close"].iloc[j])
+    assert last_month not in set(wk["close"].astype(float))                       # 주봉 종가와 겹치지 않는 월봉
+    real = lp.lowpoint_signal
+    monkeypatch.setattr(lp, "lowpoint_signal", lambda c0, c1, r1, r2: c0 in (old_week, last_month))
+    hit = fl.latest_hit(c, "kr", now)
+    assert hit["tf"] == "month" and hit["close0"] == last_month
+    monkeypatch.setattr(lp, "lowpoint_signal", lambda c0, c1, r1, r2: c0 in (old_week,))
+    assert fl.latest_hit(c, "kr", now)["tf"] == "week"
+    monkeypatch.setattr(lp, "lowpoint_signal", real)
+
+
 def test_no_hit_and_no_data():
     up = pd.DataFrame({"Close": [1000 * 1.002 ** i for i in range(400)]}, index=pd.bdate_range("2025-01-06", periods=400))
     up["Open"] = up["High"] = up["Low"] = up["Close"]

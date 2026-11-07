@@ -58,8 +58,11 @@ def _confirmed(df: "pd.DataFrame | None", through: "str | None") -> "pd.DataFram
 
 
 def latest_hit(close: pd.Series, market: str, now: datetime) -> "dict | None":
-    """원본 종가(저점 스크린과 같은 입력) → 가장 최근 히트 {tf, label, bar_date, prev_bar_date, close0}. 주봉 먼저, 없으면 월봉.
+    """원본 종가(저점 스크린과 같은 입력) → 가장 최근 히트 {tf, label, bar_date, prev_bar_date, close0}.
+    주봉·월봉 각각의 마지막 히트 중 bar_date가 늦은 쪽(같으면 주봉). v5.366 전엔 '주봉 먼저'라 몇 달 전 주봉 히트가
+    이번 달 월봉 히트를 가렸다(하이딥 실데이터 — 7월 주봉 히트로 추적).
     market: 'kr' | 'us'(lp 규칙 — 마감 시각 판정)."""
+    found = []
     for tf in ("week", "month"):
         bars = lp.drop_in_progress(lp.resample_bars(close, tf), market, now)
         n_min = max(lp.MIN_BARS[tf], 3)
@@ -72,9 +75,12 @@ def latest_hit(close: pd.Series, market: str, now: datetime) -> "dict | None":
             if r1 != r1 or r2 != r2:
                 continue
             if lp.lowpoint_signal(float(c.iloc[i]), float(c.iloc[i - 1]), r1, r2):
-                return {"tf": tf, "label": str(bars.index[i].date()), "bar_date": str(pd.Timestamp(bars["bar_date"].iloc[i]).date()),
-                        "prev_bar_date": str(pd.Timestamp(bars["bar_date"].iloc[i - 1]).date()), "close0": float(c.iloc[i])}
-    return None
+                found.append({"tf": tf, "label": str(bars.index[i].date()), "bar_date": str(pd.Timestamp(bars["bar_date"].iloc[i]).date()),
+                              "prev_bar_date": str(pd.Timestamp(bars["bar_date"].iloc[i - 1]).date()), "close0": float(c.iloc[i])})
+                break
+    if not found:
+        return None
+    return max(found, key=lambda h: (h["bar_date"], h["tf"] == "week"))
 
 
 def floor_of(clean: pd.DataFrame, hit: dict) -> "float | None":
@@ -93,6 +99,12 @@ def classify(clean: pd.DataFrame, hit: dict, floor: float, through: str) -> dict
            "recover_vol_ratio": None, "rebreak_date": None, "days_tracked": 0, "max_close": None, "max_close_date": None,
            "last_close": None, "last_date": None, "dist_pct": None, "events": []}
     if d is None or d.empty:
+        # 히트 봉 직후라 추적할 날이 아직 없다 — 거리는 히트 봉 마지막 종가로(v5.366 전엔 거리 비어 '—')
+        h = clean[clean.index <= pd.Timestamp(hit["bar_date"])]["Close"].dropna()
+        if len(h):
+            lc = float(h.iloc[-1])
+            out.update(last_close=lc, last_date=str(pd.Timestamp(h.index[-1]).date()),
+                       dist_pct=round((lc / floor - 1) * 100, 2) if floor else None)
         return out
     state, active = "holding", floor
     brk_i = brk_vol = lowest = None
