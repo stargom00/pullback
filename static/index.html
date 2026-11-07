@@ -1272,6 +1272,9 @@ table.jr-table.lpw-table th.lpw-sort{cursor:pointer;user-select:none}
 .lf-state{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap;border:1px solid currentColor}
 .lf-holding{color:var(--c-green-fg2)} .lf-broken{color:var(--c-blue-fg4)} .lf-spring{color:var(--c-red-fg3)}
 .lf-weak_recovery,.lf-late_recovery{color:var(--n-muted)} .lf-rebroken{color:var(--c-blue-fg4);opacity:max(.75,var(--fade-floor))}
+.lf-chips{display:flex;flex-wrap:wrap;gap:4px}
+.lf-c{display:inline-block;padding:1px 7px;border-radius:6px;font-size:11.5px;white-space:nowrap;background:var(--n-chip);color:var(--n-muted)}
+.lf-c.good{color:var(--c-green-fg2)} .lf-c.bad{color:var(--c-blue-fg4)}
 /* v5.352 코인 일지 — 카드·수정 폼 격자 정렬 */
 .cj-pnlbox{padding:14px 20px;display:flex;flex-wrap:wrap;gap:8px 40px;align-items:flex-start}
 .cj-pnl{font-size:22px;font-weight:700;margin:2px 0}
@@ -1447,7 +1450,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.371</span>
+      <span class="ver mono" id="verBadge">v5.372</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -9140,18 +9143,6 @@ const LF_FILTERS = [
 function lfTestCount(r) {
   return Array.isArray(r && r.test_episodes) ? r.test_episodes.length : ((r && r.tests) || 0);
 }
-// 순수 — 회차 요약 문구: "지지 테스트 3회차(7일) · 거래량 ↓↑ · 저가 ↑↓ · 반등 최대 +4.1% · 마지막 11-06"
-function lfTestText(r) {
-  const eps = Array.isArray(r.test_episodes) ? r.test_episodes : null;
-  if (!eps) return `지지 테스트 ${r.tests || 0}일${r.last_test_date ? ` · 마지막 ${r.last_test_date}` : ''}`;
-  if (!eps.length) return '지지 테스트 없음';
-  const ar = d => d === 'up' ? '↑' : d === 'down' ? '↓' : d === 'flat' ? '→' : '';
-  const days = eps.reduce((a, e) => a + (e.days || 0), 0);
-  const vol = eps.slice(1).map(e => ar(e.vol_dir)).join(''), low = eps.slice(1).map(e => ar(e.low_dir)).join('');
-  const b = eps.map(e => e.bounce_pct).filter(x => typeof x === 'number');
-  return `지지 테스트 ${eps.length}회차(${days}일)` + (vol ? ` · 거래량 ${vol}` : '') + (low ? ` · 저가 ${low}` : '')
-    + (b.length ? ` · 반등 최대 +${Math.max(...b).toFixed(1)}%` : ' · 반등 없음') + ` · 마지막 ${eps[eps.length - 1].end}`;
-}
 // 순수 — 필터 키로 행 고르기(테스트 대상). opt = {far, near}(%)
 function lfFilter(rows, key, opt) {
   const far = (opt && opt.far) ?? 30, near = (opt && opt.near) ?? 10;
@@ -9224,13 +9215,40 @@ function lfSortBy(key) {
   else { _lf.sortKey = key; _lf.sortDir = key === 'prior' ? 'desc' : 'asc'; }
   renderLowpointFloor();
 }
-function lfDetail(r) {
-  const m = r.mkt;
-  if (r.state === 'holding') return lfTestText(r);
-  if (r.state === 'broken') return `이탈 ${r.break_date} 종가 ${_lptFmt(r.break_close, m)}${r.new_line != null ? ` · 이탈 중 최저 ${_lptFmt(r.new_line, m)}` : ''}`;
-  if (r.state === 'rebroken') return `회복 ${r.recover_date} → 재이탈 ${r.rebreak_date}`;
-  const vr = r.recover_vol_ratio != null ? ` · 거래량 ${r.recover_vol_ratio}배(이탈 봉 대비)` : '';
-  return `이탈 ${r.break_date} → 회복 ${r.recover_date}(${r.recover_days}거래일)${vr}`;
+// v5.372(사용자 "내용이 한눈에 안 들어와. 간단하게") — 내용 칸을 짧은 칩으로. 순수(테스트 대상).
+// → [{t: 칩 글자, tone: 'good'|'bad'|'', title: 마우스 올리면 보일 설명}]. 좋고 나쁨 색은 앞 설명(테스트 거래량↓·저가↑ = 단단함)
+// 기준일 뿐 측정 전.
+function lfChips(r, fmt) {
+  const f = fmt || (x => String(x));
+  const out = [];
+  const eps = Array.isArray(r.test_episodes) ? r.test_episodes : null;
+  if (r.state === 'holding') {
+    const n = eps ? eps.length : (r.tests || 0);
+    if (!n) out.push({ t: '테스트 없음', tone: '', title: '바닥선 +3% 안으로 내려온 날 없음' });
+    else out.push({ t: `테스트 ${n}회`, tone: '', title: eps ? eps.map((e, i) => `${i + 1}회차 ${e.start}~${e.end}(${e.days}일)`).join(' · ') : `${n}일` });
+    const last = eps && eps.length >= 2 ? eps[eps.length - 1] : null;
+    if (last) {
+      out.push(last.vol_dir === 'down' ? { t: '거래량↓', tone: 'good', title: '앞 회차보다 테스트 날 거래량이 줄었음' }
+        : last.vol_dir === 'up' ? { t: '거래량↑', tone: 'bad', title: '앞 회차보다 테스트 날 거래량이 늘었음' } : { t: '거래량→', tone: '', title: '앞 회차와 같음' });
+      out.push(last.low_dir === 'up' ? { t: '저가↑', tone: 'good', title: '앞 회차보다 저가가 높아졌음' }
+        : last.low_dir === 'down' ? { t: '저가↓', tone: 'bad', title: '앞 회차보다 저가가 낮아졌음' } : { t: '저가→', tone: '', title: '앞 회차와 같음' });
+    }
+    if (eps && eps.length) {
+      const b = eps.map(e => e.bounce_pct).filter(x => typeof x === 'number');
+      out.push(b.length ? { t: `반등 +${Math.max(...b).toFixed(0)}%`, tone: '', title: '테스트 뒤 바닥선 대비 가장 높았던 종가' }
+        : { t: '반등 없음', tone: 'bad', title: '테스트 뒤 바닥선 +3% 밖으로 벗어난 종가가 아직 없음' });
+    }
+  } else if (r.state === 'broken') {
+    out.push({ t: `이탈 ${String(r.break_date || '').slice(5)}`, tone: 'bad', title: `이탈 ${r.break_date} 종가 ${f(r.break_close)}` });
+    if (r.new_line != null) out.push({ t: `최저 ${f(r.new_line)}`, tone: '', title: '이탈 중 최저가 — 회복하면 새 바닥선' });
+  } else if (r.state === 'rebroken') {
+    out.push({ t: `재이탈 ${String(r.rebreak_date || '').slice(5)}`, tone: 'bad', title: `회복 ${r.recover_date} → 재이탈 ${r.rebreak_date}` });
+  } else {
+    out.push({ t: `${r.recover_days ?? '?'}일 만에 회복`, tone: r.state === 'late_recovery' ? '' : 'good', title: `이탈 ${r.break_date} → 회복 ${r.recover_date}` });
+    if (r.recover_vol_ratio != null) out.push({ t: `거래량 ${r.recover_vol_ratio}배`, tone: r.recover_vol_ratio >= 1 ? 'good' : 'bad', title: '회복 봉 거래량 ÷ 이탈 봉 거래량' });
+  }
+  if (r.prior_break_date) out.push({ t: '전저점 깸', tone: 'bad', title: `전저점 ${f(r.prior_low)}(${r.prior_low_date})을 ${r.prior_break_date} 종가로 깸` });
+  return out;
 }
 function _lfTable(rows) {
   if (!rows.length) return '<div class="n-sub" style="padding:14px 0">해당 종목 없음</div>';
@@ -9239,16 +9257,18 @@ function _lfTable(rows) {
   const body = rows.map(r => {
     const m = r.mkt, code = _lptCode(r), h = r.hit || {};
     const line = r.active_line, moved = r.active_line != null && r.floor_line != null && r.active_line !== r.floor_line;
-    return `<tr><td class="nl-name"><div class="nl-title"><b><a class="name-link" href="${tvUrl(r.code, m === 'KR' ? 'KR' : 'US')}" target="_blank" rel="noopener" title="${_newsAttr(r.name || r.code)} — 트레이딩뷰 차트 열기">${_escapeHtml(r.name || r.code)}</a></b></div>`
-      + `<div class="jr-s num">${_escapeHtml(code)}${m === 'KR' && r.market ? ' · ' + _escapeHtml(r.market) : ''}${(r.sources || []).length ? ' · ' + _escapeHtml(r.sources.join('·')) : ''}</div></td>`
+    const chips = lfChips(r, x => _lptFmt(x, m)).map(c => `<span class="lf-c ${c.tone}" title="${_newsAttr(c.title || '')}">${_escapeHtml(c.t)}</span>`).join('');
+    const src = (r.sources || []).map(x => x.replace('저점 ', '')).join('·');
+    return `<tr title="추적 ${r.days_tracked || 0}거래일 · 등록 ${_newsAttr(r.first_seen || '')} · 종가 ${_newsAttr(r.last_date || '')}">`
+      + `<td class="nl-name"><div class="nl-title"><b><a class="name-link" href="${tvUrl(r.code, m === 'KR' ? 'KR' : 'US')}" target="_blank" rel="noopener" title="${_newsAttr(r.name || r.code)} — 트레이딩뷰 차트 열기">${_escapeHtml(r.name || r.code)}</a></b></div>`
+      + `<div class="jr-s num">${_escapeHtml(code)}${src ? ' · ' + _escapeHtml(src) : ''}</div></td>`
       + `<td class="nowrap"><span class="lf-state lf-${r.state}">${_escapeHtml(lbl[r.state] || r.state)}</span>`
       + `${typeof r.dist_pct === 'number' && r.dist_pct >= far ? `<div class="jr-s" title="기준선에서 +${far}% 이상 — 바닥선 지킴 여부가 지금 가격과 멀다">멀어짐</div>` : ''}</td>`
-      + `<td class="num r nowrap">${_lptFmt(line, m)}<div class="jr-s">${moved ? `새 바닥선 · 원래 ${_lptFmt(r.floor_line, m)}` : `${h.tf === 'month' ? '월봉' : '주봉'} 히트 ${_escapeHtml(h.label || '')}`}</div></td>`
-      + `<td class="num r nowrap">${_lptFmt(r.last_close, m)}<div class="jr-s">${_escapeHtml(r.last_date || '')}</div></td>`
+      + `<td class="num r nowrap">${_lptFmt(line, m)}<div class="jr-s">${moved ? `<span title="원래 바닥선 ${_newsAttr(_lptFmt(r.floor_line, m))} — 이탈 후 회복해서 이탈 중 최저가로 바뀜">새 바닥선</span>` : `${h.tf === 'month' ? '월봉' : '주봉'} ${_escapeHtml(String(h.label || '').slice(2))}`}</div></td>`
+      + `<td class="num r nowrap">${_lptFmt(r.last_close, m)}</td>`
       + `<td class="r nowrap">${_lptPct(r.dist_pct)}</td>`
-      + `<td class="num r nowrap">${r.prior_low != null ? `${_lptFmt(r.prior_low, m)} ${_lptPct(r.prior_dist_pct)}<div class="jr-s">${_escapeHtml(r.prior_low_date || '')}${r.prior_break_date ? ` · 종가 이탈 ${_escapeHtml(r.prior_break_date)}` : ' · 지킴'}</div>` : '—'}</td>`
-      + `<td class="jr-s">${_escapeHtml(lfDetail(r))}<div>추적 ${r.days_tracked || 0}거래일 · 등록 ${_escapeHtml(r.first_seen || '')}</div>`
-      + `${r.price_note ? `<div class="st-dot st-warn">${_escapeHtml(r.price_note)}</div>` : ''}</td></tr>`;
+      + `<td class="num r nowrap"${r.prior_low != null ? ` title="전저점 ${_newsAttr(_lptFmt(r.prior_low, m))} · ${_newsAttr(r.prior_low_date || '')}${r.prior_break_date ? ` · 종가 이탈 ${_newsAttr(r.prior_break_date)}` : ''}"` : ''}>${r.prior_low != null ? `${_lptPct(r.prior_dist_pct)}<div class="jr-s">${_lptFmt(r.prior_low, m)}</div>` : '—'}</td>`
+      + `<td><div class="lf-chips">${chips}${r.price_note ? `<span class="lf-c bad" title="${_newsAttr(r.price_note)}">⚠ 시세</span>` : ''}</div></td></tr>`;
   }).join('');
   const k = _lf.sortKey, ar = _lf.sortDir === 'asc' ? ' ▲' : ' ▼';
   const distLbl = k === 'near' ? '거리 · 가까운 순' : k === 'dist' ? (_lf.sortDir === 'desc' ? '거리 · 위로 먼 순' : '거리 · 아래로 먼 순') : '거리';
@@ -9258,7 +9278,7 @@ function _lfTable(rows) {
     + `<th class="r nowrap">기준선</th><th class="r nowrap">종가</th>`
     + `<th class="r nowrap">${sb('dist', distLbl, '기준선 대비 마지막 확정 종가 — 클릭할 때마다 가까운 순 → 위로 먼 순 → 아래로 먼 순')}</th>`
     + `<th class="r nowrap">${sb('prior', '전저점' + (k === 'prior' ? ar : ''), '히트 봉 직전 120거래일 최저가와 그 대비 거리 — 참고선(상태 판정엔 안 씀). 클릭해 거리로 정렬')}</th>`
-    + `<th>내용</th></tr></thead><tbody>${body}</tbody></table></div>`;
+    + `<th>요약 <span class="jr-s" style="font-weight:400">(칩·행에 마우스 올리면 날짜)</span></th></tr></thead><tbody>${body}</tbody></table></div>`;
 }
 function renderLowpointFloor() {
   const wrap = document.getElementById('lowpointFloorView');

@@ -446,16 +446,30 @@ def test_test_days_grouped_into_episodes_with_volume_low_and_bounce():
     json.dumps(out)
 
 
-def test_front_episode_text_and_tested_filter():
+def test_front_chips_and_tested_filter():
+    """v5.372 — 내용 칸 칩(lfChips). 상태별 칩 글자·색 방향, 회차 없는 옛 행은 날짜 수로."""
     if not shutil.which("node"):
         pytest.skip("node 미설치")
-    src = _fn("lfTestCount") + "\n" + _fn("lfTestText") + "\n" + _fn("lfFilter")
+    src = _fn("lfTestCount") + "\n" + _fn("lfChips") + "\n" + _fn("lfFilter")
     r = ("{code:'a',status:'ok',state:'holding',tests:3,test_episodes:[{start:'d1',end:'d2',days:2,low:970,vol_avg:200,bounce_pct:10.53,vol_dir:null,low_dir:null},"
          "{start:'d5',end:'d5',days:1,low:972,vol_avg:80,bounce_pct:4.74,vol_dir:'down',low_dir:'up'}]}")
     old = "{code:'b',status:'ok',state:'holding',tests:5}"
-    p = subprocess.run(["node", "-e", src + f"\nconsole.log(JSON.stringify([lfTestText({r}), lfFilter([{r},{old}],'tested').map(x=>x.code), lfTestText({old})]));"],
+    nob = "{code:'n',status:'ok',state:'holding',test_episodes:[{start:'d1',end:'d3',days:3,low:1,vol_avg:1,bounce_pct:null}]}"
+    brk = "{code:'c',status:'ok',state:'broken',break_date:'2026-11-03',break_close:1818,new_line:1815,prior_break_date:'2026-11-04',prior_low:1800,prior_low_date:'x'}"
+    spr = "{code:'s',status:'ok',state:'spring',break_date:'x',recover_date:'y',recover_days:5,recover_vol_ratio:1.57}"
+    weak = "{code:'w',status:'ok',state:'weak_recovery',recover_days:1,recover_vol_ratio:0.99}"
+    reb = "{code:'r',status:'ok',state:'rebroken',recover_date:'x',rebreak_date:'2026-11-05'}"
+    expr = f"[{r},{old},{nob},{brk},{spr},{weak},{reb}].map(x=>lfChips(x).map(c=>c.t+'/'+c.tone))"
+    p = subprocess.run(["node", "-e", src + f"\nconsole.log(JSON.stringify([{expr}, lfFilter([{r},{old}],'tested').map(x=>x.code)]));"],
                        capture_output=True, text=True, timeout=20)
     assert p.returncode == 0, p.stderr
-    text, tested, old_text = json.loads(p.stdout)
-    assert text == "지지 테스트 2회차(3일) · 거래량 ↓ · 저가 ↑ · 반등 최대 +10.5% · 마지막 d5"
-    assert tested == ["a", "b"] and old_text == "지지 테스트 5일"
+    chips, tested = json.loads(p.stdout)
+    assert chips == [["테스트 2회/", "거래량↓/good", "저가↑/good", "반등 +11%/"],
+                     ["테스트 5회/"],
+                     ["테스트 1회/", "반등 없음/bad"],
+                     ["이탈 11-03/bad", "최저 1815/", "전저점 깸/bad"],
+                     ["5일 만에 회복/good", "거래량 1.57배/good"],
+                     ["1일 만에 회복/good", "거래량 0.99배/bad"],
+                     ["재이탈 11-05/bad"]]
+    assert tested == ["a", "b"]
+    assert _fn("_lfTable").count("lfChips(r") == 1
