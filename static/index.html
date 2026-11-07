@@ -1447,7 +1447,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.370</span>
+      <span class="ver mono" id="verBadge">v5.371</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -9128,7 +9128,7 @@ const LF_FILTERS = [
   { key: 'near', label: '가까움' },
   { key: 'far', label: '멀어짐' },
   { key: 'holding', label: '지킴' },
-  { key: 'tested', label: '지킴·테스트 2회+' },
+  { key: 'tested', label: '지킴·테스트 2회차+' },
   { key: 'broken', label: '이탈' },
   { key: 'spring', label: '스프링' },
   { key: 'recovery', label: '약한·늦은 회복' },
@@ -9136,6 +9136,22 @@ const LF_FILTERS = [
 ];
 // v5.370(사용자 지시 "멀어진 종목 따로 · 정렬 — 바닥봉에서의 거리뿐 아니라 상태도"). 기준값은 서버(lowpoint_floor.FAR_PCT·
 // NEAR_PCT)가 내려준다 — 여기 기본값은 서버 값이 없을 때(테스트)만.
+// 순수 — 지지 테스트 회차 수(v5.371: 연속된 테스트 날 = 1회차). 회차 기록이 없는 옛 행은 날짜 수로.
+function lfTestCount(r) {
+  return Array.isArray(r && r.test_episodes) ? r.test_episodes.length : ((r && r.tests) || 0);
+}
+// 순수 — 회차 요약 문구: "지지 테스트 3회차(7일) · 거래량 ↓↑ · 저가 ↑↓ · 반등 최대 +4.1% · 마지막 11-06"
+function lfTestText(r) {
+  const eps = Array.isArray(r.test_episodes) ? r.test_episodes : null;
+  if (!eps) return `지지 테스트 ${r.tests || 0}일${r.last_test_date ? ` · 마지막 ${r.last_test_date}` : ''}`;
+  if (!eps.length) return '지지 테스트 없음';
+  const ar = d => d === 'up' ? '↑' : d === 'down' ? '↓' : d === 'flat' ? '→' : '';
+  const days = eps.reduce((a, e) => a + (e.days || 0), 0);
+  const vol = eps.slice(1).map(e => ar(e.vol_dir)).join(''), low = eps.slice(1).map(e => ar(e.low_dir)).join('');
+  const b = eps.map(e => e.bounce_pct).filter(x => typeof x === 'number');
+  return `지지 테스트 ${eps.length}회차(${days}일)` + (vol ? ` · 거래량 ${vol}` : '') + (low ? ` · 저가 ${low}` : '')
+    + (b.length ? ` · 반등 최대 +${Math.max(...b).toFixed(1)}%` : ' · 반등 없음') + ` · 마지막 ${eps[eps.length - 1].end}`;
+}
 // 순수 — 필터 키로 행 고르기(테스트 대상). opt = {far, near}(%)
 function lfFilter(rows, key, opt) {
   const far = (opt && opt.far) ?? 30, near = (opt && opt.near) ?? 10;
@@ -9144,7 +9160,7 @@ function lfFilter(rows, key, opt) {
   if (key === 'all') return ok;
   if (key === 'far') return ok.filter(r => num(r.dist_pct) && r.dist_pct >= far);
   if (key === 'near') return ok.filter(r => num(r.dist_pct) && Math.abs(r.dist_pct) <= near);
-  if (key === 'tested') return ok.filter(r => r.state === 'holding' && (r.tests || 0) >= 2);
+  if (key === 'tested') return ok.filter(r => r.state === 'holding' && lfTestCount(r) >= 2);
   if (key === 'recovery') return ok.filter(r => r.state === 'weak_recovery' || r.state === 'late_recovery');
   return ok.filter(r => r.state === key);
 }
@@ -9210,7 +9226,7 @@ function lfSortBy(key) {
 }
 function lfDetail(r) {
   const m = r.mkt;
-  if (r.state === 'holding') return `지지 테스트 ${r.tests || 0}회${r.last_test_date ? ` · 마지막 ${r.last_test_date}` : ''}`;
+  if (r.state === 'holding') return lfTestText(r);
   if (r.state === 'broken') return `이탈 ${r.break_date} 종가 ${_lptFmt(r.break_close, m)}${r.new_line != null ? ` · 이탈 중 최저 ${_lptFmt(r.new_line, m)}` : ''}`;
   if (r.state === 'rebroken') return `회복 ${r.recover_date} → 재이탈 ${r.rebreak_date}`;
   const vr = r.recover_vol_ratio != null ? ` · 거래량 ${r.recover_vol_ratio}배(이탈 봉 대비)` : '';

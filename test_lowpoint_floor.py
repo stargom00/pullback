@@ -285,7 +285,7 @@ def _fn(name):
 def _js(expr):
     if not shutil.which("node"):
         pytest.skip("node 미설치")
-    p = subprocess.run(["node", "-e", _fn("lfFilter") + "\n" + _fn("lfSort") + f"\nconsole.log(JSON.stringify({expr}));"],
+    p = subprocess.run(["node", "-e", _fn("lfTestCount") + "\n" + _fn("lfFilter") + "\n" + _fn("lfSort") + f"\nconsole.log(JSON.stringify({expr}));"],
                        capture_output=True, text=True, timeout=20)
     assert p.returncode == 0, p.stderr
     return json.loads(p.stdout)
@@ -425,3 +425,37 @@ def test_floor_job_drops_spacs_before_tracking(monkeypatch, tmp_path):
     assert seen["codes"] == ["2.KQ"]
     saved = json.load(open(tmp_path / "f.json"))
     assert saved["summary"]["spac_excluded"] == 1
+
+
+def test_test_days_grouped_into_episodes_with_volume_low_and_bounce():
+    """v5.371 — 연속 테스트 날 = 1회차. 회차별 평균 거래량·최저가·반등, 앞 회차 대비 방향."""
+    after = [(1000, 1010, 975, 1000, 300),      # 회차1 (저가 975, 거래량 300)
+             (1000, 1005, 970, 990, 100),       # 회차1 이어짐 (저가 970) → 평균 200
+             (1000, 1040, 990, 1030, 100),      # 범위 밖 — 반등 +8.42%
+             (1030, 1060, 1000, 1050, 100),     # 반등 +10.53%
+             (1000, 1010, 972, 985, 80),        # 회차2 (저가 972 > 970 → ↑, 거래량 80 < 200 → ↓)
+             (990, 1000, 980, 995, 100)]        # 범위 밖 반등 +4.74%
+    d = _with_hit_week(after)
+    out = fl.classify(d, HIT, FLOOR, str(d.index[-1].date()))
+    eps = out["test_episodes"]
+    assert out["tests"] == 3 and len(eps) == 2
+    assert eps[0]["days"] == 2 and eps[0]["low"] == 970 and eps[0]["vol_avg"] == 200 and eps[0]["bounce_pct"] == round((1050 / 950 - 1) * 100, 2)
+    assert eps[0]["vol_dir"] is None and eps[1]["vol_dir"] == "down" and eps[1]["low_dir"] == "up"
+    assert eps[1]["bounce_pct"] == round((995 / 950 - 1) * 100, 2)
+    assert not any(k.startswith("_") for e in eps for k in e)      # 내부 키가 저장되지 않는다
+    json.dumps(out)
+
+
+def test_front_episode_text_and_tested_filter():
+    if not shutil.which("node"):
+        pytest.skip("node 미설치")
+    src = _fn("lfTestCount") + "\n" + _fn("lfTestText") + "\n" + _fn("lfFilter")
+    r = ("{code:'a',status:'ok',state:'holding',tests:3,test_episodes:[{start:'d1',end:'d2',days:2,low:970,vol_avg:200,bounce_pct:10.53,vol_dir:null,low_dir:null},"
+         "{start:'d5',end:'d5',days:1,low:972,vol_avg:80,bounce_pct:4.74,vol_dir:'down',low_dir:'up'}]}")
+    old = "{code:'b',status:'ok',state:'holding',tests:5}"
+    p = subprocess.run(["node", "-e", src + f"\nconsole.log(JSON.stringify([lfTestText({r}), lfFilter([{r},{old}],'tested').map(x=>x.code), lfTestText({old})]));"],
+                       capture_output=True, text=True, timeout=20)
+    assert p.returncode == 0, p.stderr
+    text, tested, old_text = json.loads(p.stdout)
+    assert text == "지지 테스트 2회차(3일) · 거래량 ↓ · 저가 ↑ · 반등 최대 +10.5% · 마지막 d5"
+    assert tested == ["a", "b"] and old_text == "지지 테스트 5일"

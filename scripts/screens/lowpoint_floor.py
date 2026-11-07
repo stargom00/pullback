@@ -14,6 +14,9 @@
   바닥선    그 히트 봉 구간(주·월)의 일봉 최저가(정규장 일봉, app._downcast 정제 뒤 — 무거래일 OHLC=0 봉 제외).
   추적      히트 봉 마지막 거래일 **다음 날**부터 확정 일봉을 차례로:
     holding        종가가 바닥선 아래로 마감한 적 없음. 저가가 바닥선 +TEST_PCT% 안으로 내려왔다 종가가 지킨 날 = "지지 테스트"
+                   (v5.371: 연속된 테스트 날을 한 **회차**로 묶는다 — test_episodes[{start,end,days,low,vol_avg,bounce_pct,
+                   vol_dir,low_dir}]. 회차 사이 반등 = 범위를 벗어난 뒤 다음 회차 전까지 최고 종가의 바닥선 대비 %.
+                   방향 = 앞 회차 대비 평균 거래량·최저가. 사용자 지시 2026-11-07 "해줘"(회차 + 거래량 방향 제안에 대한 답).)
     broken         종가 < 바닥선(이탈). 이탈일 거래량 기록, 이탈 중 최저가 추적
     spring         이탈 후 SPRING_MAX_DAYS 거래일 안에 종가 > 바닥선, 그 봉 거래량 ≥ 이탈 봉 거래량, 종가가 봉 범위 위쪽 절반
     weak_recovery  SPRING_MAX_DAYS 안에 종가 회복했지만 거래량 또는 종가 위치 조건 미달
@@ -112,6 +115,7 @@ def classify(clean: pd.DataFrame, hit: dict, floor: float, through: str) -> dict
     d = _confirmed(clean, through)
     d = d[d.index > pd.Timestamp(hit["bar_date"])] if d is not None else None
     out = {"state": "holding", "floor_line": floor, "active_line": floor, "new_line": None, "tests": 0, "last_test_date": None,
+           "test_episodes": [],
            "break_date": None, "break_close": None, "break_vol": None, "recover_date": None, "recover_days": None,
            "recover_vol_ratio": None, "rebreak_date": None, "days_tracked": 0, "max_close": None, "max_close_date": None,
            "last_close": None, "last_date": None, "dist_pct": None, "events": []}
@@ -141,6 +145,19 @@ def classify(clean: pd.DataFrame, hit: dict, floor: float, through: str) -> dict
             elif l <= floor * (1 + TEST_PCT / 100):
                 out["tests"] += 1
                 out["last_test_date"] = day
+                eps = out["test_episodes"]
+                if eps and eps[-1]["_open"]:                       # 연속된 테스트 날 = 한 회차
+                    e = eps[-1]
+                    e.update(end=day, days=e["days"] + 1, low=min(e["low"], l), _vsum=e["_vsum"] + v)
+                else:
+                    eps.append({"start": day, "end": day, "days": 1, "low": l, "_vsum": v, "bounce_pct": None, "_open": True})
+            else:
+                eps = out["test_episodes"]
+                if eps:
+                    eps[-1]["_open"] = False                       # 테스트 범위를 벗어남 — 회차 끝, 반등 높이 추적
+                    b = round((c / floor - 1) * 100, 2)
+                    if eps[-1]["bounce_pct"] is None or b > eps[-1]["bounce_pct"]:
+                        eps[-1]["bounce_pct"] = b
             continue
         if state == "broken":
             lowest = min(lowest, l)
@@ -165,6 +182,13 @@ def classify(clean: pd.DataFrame, hit: dict, floor: float, through: str) -> dict
             state = "rebroken"
             out["rebreak_date"] = day
             ev.append({"date": day, "ev": "rebroken", "close": c, "line": active})
+    prev_e = None
+    for e in out["test_episodes"]:                                 # 회차 요약 — 앞 회차 대비 거래량·저가 방향
+        e["vol_avg"] = round(e.pop("_vsum") / e["days"], 1)
+        e.pop("_open")
+        e["vol_dir"] = None if prev_e is None else ("up" if e["vol_avg"] > prev_e["vol_avg"] else "down" if e["vol_avg"] < prev_e["vol_avg"] else "flat")
+        e["low_dir"] = None if prev_e is None else ("up" if e["low"] > prev_e["low"] else "down" if e["low"] < prev_e["low"] else "flat")
+        prev_e = e
     last = d.iloc[-1]
     lc = float(last["Close"])
     out.update(state=state, active_line=active, days_tracked=len(d), last_close=lc,
