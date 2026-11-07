@@ -269,7 +269,7 @@ def evaluate(df: "pd.DataFrame | None", market: str, now: datetime, through: "st
 
 
 # ── 대상 모으기 · 조회 · 추적(서버 작업이 부른다) ─────────────────────────────
-def targets_from(watch_records: list, newlisting_rows: list, prev: dict) -> dict:
+def targets_from(watch_records: list, newlisting_rows: list, prev: dict, history: "list | None" = None) -> dict:
     """대상 종목 {code: {code,name,market,mkt,sources[]}} — 저점 관찰 레코드 전부(주·월 코호트) + 신규상장 결과 + **이전에 추적하던
     종목 전부**(사용자 지시 "데이터를 쌓아줘" — 목록에서 빠져도 추적은 계속)."""
     out = {}
@@ -291,6 +291,8 @@ def targets_from(watch_records: list, newlisting_rows: list, prev: dict) -> dict
         add(r.get("code"), r.get("name"), r.get("market"), f"저점 {'주봉' if r.get('tf') == 'week' else '월봉'}")
     for r in newlisting_rows or []:
         add(r.get("code"), r.get("name"), r.get("market"), "신규상장")
+    for r in history or []:   # v5.374 — 8월 이후 과거 히트(lowpoint 게시 week.history). market "KOSPI"/"KOSDAQ"/"US"
+        add(r.get("code"), r.get("name"), r.get("market"), f"저점 {'주봉' if r.get('tf') == 'week' else '월봉'}(과거)")
     return out
 
 

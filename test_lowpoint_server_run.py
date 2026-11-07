@@ -87,7 +87,7 @@ def test_month_due_window_first_day(now, due):
                 "started_at": _k("2026-09-05 11:20").isoformat()}}, "2026-09-30"),   # 지난달 시도 소진 — 새 달엔 무관
     ({"month": {"target": "2026-08-31", "status": "running", "attempts": 1,
                 "started_at": _k("2026-09-05 09:20").isoformat()}}, "2026-09-30"),   # 지난달 죽은 실행
-    ({"week": {"target": "2026-09-25", "status": "ok", "basis": "naver_integrated+wilder_sma+us_splits_only", "attempts": 1}}, "2026-09-30"),    # 주봉 기록만(현 운영 형태)
+    ({"week": {"target": "2026-09-25", "status": "ok", "basis": "naver_integrated+wilder_sma+us_splits_only", "schema": 2, "attempts": 1}}, "2026-09-30"),    # 주봉 기록만(현 운영 형태)
     ({}, "2026-09-30"),                                                                  # 상태 파일 없음/빈 파일
 ])
 def test_old_first_saturday_state_does_not_skip_oct1(old_state, due):
@@ -110,7 +110,7 @@ def test_schedule_times_unchanged():
 def test_due_rules():
     now = _k("2026-10-03 10:00")
     assert app._lowpoint_due("week", now, {}) == "2026-10-02"
-    assert app._lowpoint_due("week", now, {"week": {"target": "2026-10-02", "status": "ok", "basis": "naver_integrated+wilder_sma+us_splits_only"}}) is None
+    assert app._lowpoint_due("week", now, {"week": {"target": "2026-10-02", "status": "ok", "basis": "naver_integrated+wilder_sma+us_splits_only", "schema": 2}}) is None
     recent_fail = {"week": {"target": "2026-10-02", "status": "failed", "attempts": 1,
                             "started_at": _k("2026-10-03 09:30").isoformat()}}
     assert app._lowpoint_due("week", now, recent_fail) is None           # 60분 안 됨

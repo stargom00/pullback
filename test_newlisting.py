@@ -312,7 +312,7 @@ def test_newlisting_inherits_window_retry_and_kr_hours_block():
     assert app._lowpoint_due("newlisting", _k("2026-11-01 09:00"), done) is None
 
 
-WEEK_DONE = {"week": {"target": "2026-10-30", "status": "ok", "basis": "naver_integrated+wilder_sma+us_splits_only", "attempts": 1}}   # 10-31(토) 주봉은 끝난 상태
+WEEK_DONE = {"week": {"target": "2026-10-30", "status": "ok", "basis": "naver_integrated+wilder_sma+us_splits_only", "schema": 2, "attempts": 1}}   # 10-31(토) 주봉은 끝난 상태
 
 
 @pytest.fixture

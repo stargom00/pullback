@@ -204,6 +204,8 @@ def test_no_new_wait_constants_introduced():
         "LOWPOINT_JOBS", "LOWPOINT_SLOT_TF",
         # v5.321 가격 기준 → v5.323 계산 기준(가격+RSI) 표식(시간·임계값 아님) — 기준이 바뀐 결과를 창 안에서 다시 돌리는 데 쓴다
         "LOWPOINT_CALC_BASIS",
+        # v5.374 게시 형식(history) 표식 — 시간·임계값 아님(CALC_BASIS와 같은 재실행 규칙)
+        "LOWPOINT_RESULT_SCHEMA",
     }, f"저점 상수 집합이 바뀌었다: {sorted(names)}"
     assert src.count("LOWPOINT_SLOT_TF = {") == 1 and \
         'LOWPOINT_SLOT_TF = {"week": "week", "month": "month", "newlisting": "month"}' in src

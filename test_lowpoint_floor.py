@@ -498,3 +498,47 @@ def test_latest_hit_carries_prev2_and_table_shows_pre_low():
     body = _fn("_lfTable")
     assert body.count("r.pre_low") >= 2 and "직전봉 저가</th>" in body
     assert "r.pre_break_date" in _fn("lfChips")
+
+
+def test_history_hits_matches_evaluate_on_every_past_bar():
+    """v5.374 history_hits = 각 과거 시점에서 evaluate를 돌린 결과와 같다(같은 판정 — 사본 아님을 동작으로 확인)."""
+    df = _hit_series()
+    c = df["Close"]
+    now = (df.index[-1] + pd.Timedelta(days=10)).to_pydatetime().replace(tzinfo=KST)
+    got = lp.history_hits(c, "week", "kr", now, since="2000-01-01")
+    assert got, "합성 시계열에 신호가 하나도 없으면 테스트가 무의미"
+    bars = lp.drop_in_progress(lp.resample_bars(c, "week"), "kr", now)
+    expect = []
+    for i in range(len(bars)):
+        cut = c[c.index <= pd.Timestamp(bars["bar_date"].iloc[i])]
+        r = lp.evaluate(cut, "week", "kr", now)
+        if r["status"] == "hit":
+            expect.append(str(pd.Timestamp(r["bar_date"]).date()))
+    assert [h["bar_date"] for h in got] == expect
+    later = lp.history_hits(c, "week", "kr", now, since=got[-1]["label"])
+    assert [h["label"] for h in later] == [got[-1]["label"]]                       # since 이전 라벨은 제외
+
+
+def test_history_flows_into_floor_targets_and_schema_rerun():
+    t = fl.targets_from([], [], {}, history=[{"market": "KOSDAQ", "code": "217270.KQ", "name": "넵튠", "tf": "week"},
+                                             {"market": "US", "code": "VALE", "name": "Vale", "tf": "month"}])
+    assert t["217270.KQ"]["sources"] == ["저점 주봉(과거)"] and t["217270.KQ"]["mkt"] == "KR"
+    assert t["VALE"]["mkt"] == "US" and t["VALE"]["sources"] == ["저점 월봉(과거)"]
+    assert app.LOWPOINT_RESULT_SCHEMA == lp.RESULT_SCHEMA
+    entry = lp.publish_entry([{"market": "kosdaq", "rows": [], "universe": 1, "fetched": 1, "failed": [], "stale": {}, "short": {},
+                               "meta": {}, "history": [{"code": "X"}]}], "week", {"kosdaq": pd.Timestamp("2026-11-06")}, {})
+    assert entry["history"] == [{"code": "X"}] and entry["history_since"] == lp.HISTORY_SINCE
+    assert "history" not in lp.publish_entry([], "month", {"us": pd.Timestamp("2026-10-30")}, {})
+    import inspect
+    assert "history=hist" in inspect.getsource(app._lp_floor_job_blocking)
+
+
+def test_week_reruns_once_in_window_when_schema_old():
+    """v5.374 — 형식 변경 뒤 첫 실행(창 안). 이미 schema 2면 다시 안 돈다. 창 밖이면 안 돈다."""
+    now = datetime(2026, 11, 7, 18, 0, tzinfo=app.KST)
+    base = {"target": "2026-11-06", "status": "ok", "attempts": 1, "basis": app.LOWPOINT_CALC_BASIS}
+    assert app._lowpoint_due("week", now, {"week": base}) == "2026-11-06"
+    assert app._lowpoint_due("week", now, {"week": {**base, "schema": 2}}) is None
+    late = datetime(2026, 11, 9, 12, 0, tzinfo=app.KST)                  # 토 09:00 + 48h 지남
+    assert app._lowpoint_due("week", late, {"week": base}) is None
+    assert app._lowpoint_due("month", now, {"month": {**base, "target": "2026-10-31"}}) is None   # 월봉은 형식 변경과 무관

@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.374 [저점 8월 이후 과거 히트 — 사용자 지시 2026-11-07 "올해 8월이후 저점종목신호 나온 종목을 모두 잡을수있어?". 주봉 스캔이
+  이미 받은 일봉으로 2026-08-01 이후 주봉·월봉 신호 봉을 전부 찾아 게시 칸 week.history에 남기고(lowpoint.history_hits —
+  evaluate와 같은 판정, 추가 조회 0), 저점관리 대상에 합친다(출처 "저점 주봉(과거)"/"저점 월봉(과거)"). 관찰·순위 코호트엔 안 넣음.
+  게시 형식 변경(RESULT_SCHEMA 2)은 가격 기준 변경과 같은 규칙으로 창 안이면 그 주를 한 번 다시 만든다 — 이번 주(11-06) 슬롯은
+  월요일 09:00 KST까지 창 안이라 배포 후 자동 1회.]
 v5.373 [저점관리 "직전봉 저가" — 사용자 지시 2026-11-07 "응 표시해줘"(코오롱티슈진: 바닥선 13,770 = 신호 주 저가, 10-15 13,090 =
   직전 하락 주 저가). 신호 봉 바로 앞 봉(RSI 30 아래 마감 봉)의 일봉 최저가 열 + 거리 + "직전봉 깸" 칩. latest_hit에
   prev2_bar_date 추가. 참고선 — 상태 판정 불변.]
@@ -9179,7 +9184,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.373"
+VERSION = "v5.374"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -18462,6 +18467,7 @@ LOWPOINT_JOBS = ("week", "month", "newlisting", "watch")
 # 바뀌게(창이 지났으면 다음 예약 때). v5.321 "krx_regular"(KR 정규장) → v5.323 naver 통합 + 고전 Wilder RSI로 복귀·교체.
 # 가격 기준만 담던 옛 이름(v5.321 KR_PRICE_BASIS)을 계산 기준 전체(가격+RSI)를 뜻하는 이름으로 바꿨다.
 LOWPOINT_CALC_BASIS = "naver_integrated+wilder_sma+us_splits_only"   # v5.324: US 배당 미조정 추가
+LOWPOINT_RESULT_SCHEMA = 2   # = lowpoint.RESULT_SCHEMA(v5.374 history) — test_lowpoint_floor가 같은 값인지 고정
 LOWPOINT_SLOT_TF = {"week": "week", "month": "month", "newlisting": "month"}
 NEWLISTING_DATA_PATH = _resolve_persistent_path("newlisting_latest.json")
 NEWLISTING_LATEST_PATH = os.path.join(os.path.dirname(__file__), "data", "newlisting_latest.json")
@@ -18550,6 +18556,8 @@ def _lowpoint_due(tf: str, now: "datetime", state: dict) -> "str | None":
     if status == "ok":
         if tf in ("week", "month") and st.get("basis") != LOWPOINT_CALC_BASIS:
             return target   # 가격 기준이 바뀐 뒤의 첫 실행(창 안일 때만 — 위에서 이미 걸렀다)
+        if tf == "week" and int(st.get("schema") or 1) < LOWPOINT_RESULT_SCHEMA:
+            return target   # v5.374 게시 형식(과거 히트 history)이 바뀐 뒤의 첫 실행 — 같은 규칙(창 안일 때만)
         return None
     try:
         last = datetime.fromisoformat(st.get("started_at") or st.get("finished_at") or "")
@@ -18595,6 +18603,7 @@ def _lowpoint_job_blocking(tf: str, now: "datetime") -> dict:
         watch_added = f"등록 실패 — {type(e).__name__}: {e}"[:200]
         print(f"[lowpoint-watch] scan {tf} 등록 실패(다음 추적 때 재시도): {watch_added}", flush=True)
     return {"bar_date": entry["bar_date"], "rows": len(entry["rows"]), "watch_added": watch_added,
+            "history": len(entry.get("history") or []),
             "listings_refreshed": refresh,
             "counts": {m: {"universe": c["universe"], "fetched": c["fetched"], "failed": c["failed"]}
                        for m, c in entry["excluded_counts"].items()}}
@@ -18722,7 +18731,8 @@ async def _maybe_run_lowpoint(now: "datetime | None" = None, *, _job=None) -> "d
         attempts = (int(prev.get("attempts") or 0) + 1) if prev.get("target") == target else 1
         rec = {"target": target, "status": "running", "attempts": attempts,
                "started_at": now.isoformat(), "last_ok_at": prev.get("last_ok_at"),
-               "basis": LOWPOINT_CALC_BASIS if tf in ("week", "month") else None}
+               "basis": LOWPOINT_CALC_BASIS if tf in ("week", "month") else None,
+               "schema": LOWPOINT_RESULT_SCHEMA if tf == "week" else None}
         state[tf] = rec
         _lowpoint_save_state(state)
         _lowpoint_running = True
@@ -21161,7 +21171,9 @@ def _lp_floor_job_blocking(now: "datetime") -> dict:
     w = _lp_watch_mod()
     prev = (_lp_floor_read() or {}).get("rows") or {}
     nl = _lowpoint_read(NEWLISTING_DATA_PATH) or _lowpoint_read(NEWLISTING_LATEST_PATH) or {}
-    targets, spacs = fl.drop_spacs(fl.targets_from(_rec_list_load(LP_WATCH_PATH), nl.get("rows") or [], prev))   # v5.370 스팩 제외
+    lpd = _lowpoint_read(LOWPOINT_DATA_PATH) or {}
+    hist = ((lpd.get("week") or {}).get("history") or []) if isinstance(lpd.get("week"), dict) else []   # v5.374 8월 이후 과거 히트
+    targets, spacs = fl.drop_spacs(fl.targets_from(_rec_list_load(LP_WATCH_PATH), nl.get("rows") or [], prev, history=hist))   # v5.370 스팩 제외
     rows, summary = fl.track(targets, prev, now.astimezone(KST), _downcast, w.confirmed_through)
     summary["spac_excluded"] = len(spacs)
     print(f"[lowpoint-floor] 스팩 제외 {len(spacs)}종목: {', '.join(spacs[:20]) or '없음'}{' …' if len(spacs) > 20 else ''}", flush=True)

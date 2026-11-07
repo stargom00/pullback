@@ -266,7 +266,7 @@ def test_listed_after_seam_and_missing_regular():
     ("krx_regular", "2026-10-05 09:01", None),                         # 창(토 09:00 + 48시간) 밖 → 다음 예약 때
 ])
 def test_week_rerun_when_basis_changed(state_basis, now, due):
-    st = {"week": {"target": "2026-10-02", "status": "ok", "attempts": 1, **({"basis": state_basis} if state_basis else {})}}
+    st = {"week": {"target": "2026-10-02", "status": "ok", "attempts": 1, "schema": 2, **({"basis": state_basis} if state_basis else {})}}
     t = datetime.fromisoformat(now).replace(tzinfo=KST)
     assert app._lowpoint_due("week", t, st) == due
 

@@ -249,6 +249,24 @@ def evaluate(close: pd.Series, tf: str, market: str, now: datetime) -> dict:
             "r2": r2, "r1": r1, "r0": r0}
 
 
+def history_hits(close: pd.Series, tf: str, market: str, now: datetime, since: "str | None" = None) -> list:
+    """since 이후 라벨의 신호 봉 전부(evaluate와 같은 판정 — 확정 봉만, 같은 MIN_BARS) → [{tf, label, bar_date, close0, rsi1}]."""
+    since = since or HISTORY_SINCE
+    bars = drop_in_progress(resample_bars(close, tf), market, now)
+    if len(bars) < max(MIN_BARS[tf], 3):
+        return []
+    r = rsi_wilder_sma(bars["close"], RSI_PERIOD)
+    c = bars["close"]
+    out = []
+    for i in range(2, len(bars)):
+        if bars.index[i] < pd.Timestamp(since):
+            continue
+        if lowpoint_signal(float(c.iloc[i]), float(c.iloc[i - 1]), float(r.iloc[i - 1]), float(r.iloc[i - 2])):
+            out.append({"tf": tf, "label": str(bars.index[i].date()), "bar_date": str(pd.Timestamp(bars["bar_date"].iloc[i]).date()),
+                        "close0": round(float(c.iloc[i]), 4), "rsi1": round(float(r.iloc[i - 1]), 2)})
+    return out
+
+
 # ── 게시(--publish) ────────────────────────────────────────────────────
 
 def publish_entry(results: list, tf: str, labels: dict, stamp: dict) -> dict:
@@ -268,7 +286,10 @@ def publish_entry(results: list, tf: str, labels: dict, stamp: dict) -> dict:
         "short": len(res["short"]),
         "admin_excluded": len((res["meta"] or {}).get("admin_excluded") or {}),
     } for res in results}
+    history = [h for res in results for h in (res.get("history") or [])]
+    extra = {"history": history, "history_since": HISTORY_SINCE} if tf == "week" else {}
     return {
+        **extra,
         # 봉 구간 라벨(주봉=금요일, 월봉=말일) — 낡음 판정은 앱이 이 값으로 한다
         # (`_lowpoint_expected_label()`). 행마다 있는 bar_date(실제 마지막
         # 거래일)와 다른 값이므로 섞지 말 것.
@@ -414,6 +435,10 @@ def fetch_kr(tickers: list, tf: str, concurrency: int = FETCH_CONCURRENCY) -> tu
 # 미조정으로 추정(직접 확인은 못 함). yfinance auto_adjust=False의 Close = 분할만 반영된 종가. 상세: CLAUDE.md
 # "US 배당 기준" 절. 신규상장(newlisting)은 이 결정 범위 밖이라 auto_adjust=True를 명시해 그대로 둔다.
 US_AUTO_ADJUST = False
+# v5.374 과거 히트 — 사용자 지시 2026-11-07 "올해 8월이후 저점종목신호 나온 종목을 모두 잡을수있어?". 주봉 실행이 이미 받은 일봉으로
+# 이 날짜 이후 주봉·월봉 신호 봉을 전부 찾아 게시 칸 "history"에 남긴다(추가 조회 0). 저점관리 대상에만 쓴다 — 관찰·순위 코호트엔 안 넣는다.
+HISTORY_SINCE = "2026-08-01"
+RESULT_SCHEMA = 2      # 1 = rows만 · 2 = history 포함(v5.374). 서버가 상태에 기록 — 바뀌면 창 안에서 그 주를 다시 만든다(CALC_BASIS와 같은 규칙)
 CALC_BASIS = "naver_integrated+wilder_sma+us_splits_only"   # 서버 실행 상태에 기록 — 바뀌면 그 주·달 결과를 창 안에서 다시 만든다
 
 
@@ -603,10 +628,14 @@ def screen_market(market: str, tf: str, now: datetime, refresh_universe: bool = 
     session = last_dates.most_common(1)[0][0] if last_dates else None
     stale = {t: str(c.index[-1].date()) for t, c in data.items() if c.index[-1].normalize() < session}
 
-    rows, short = [], {}
+    rows, short, history = [], {}, []
     for t, c in data.items():
         if t in stale:
             continue
+        if tf == "week":   # v5.374 — 주봉 실행이 받은 일봉(KR 1900일·US 5년)으로 주·월 과거 신호까지(월봉 실행은 그대로)
+            for htf in ("week", "month"):
+                for h in history_hits(c, htf, clock_of(market), now):
+                    history.append({"market": market.upper(), "code": t, "name": uni.get(t, ""), **h})
         res = evaluate(c, tf, clock_of(market), now)
         if res["status"] == "short":
             short[t] = res["n_bars"]
@@ -619,7 +648,7 @@ def screen_market(market: str, tf: str, now: datetime, refresh_universe: bool = 
                          "RSI[0]": round(res["r0"], 2)})
     return {"market": market, "universe": len(uni), "fetched": len(data), "failed": sorted(failed),
             "session": session, "stale": stale, "short": short, "rows": rows, "meta": meta,
-            "opt_dropped": opt_dropped, "elapsed": time.time() - t0, "names": uni}
+            "opt_dropped": opt_dropped, "elapsed": time.time() - t0, "names": uni, "history": history}
 
 
 ALL_MARKETS = ["kospi", "kosdaq", "us"]

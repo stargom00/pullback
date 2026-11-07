@@ -230,7 +230,7 @@ def test_runner_daily_slot_at_0700():
 
 
 def test_runner_picks_watch_after_scans(store, monkeypatch):
-    done = {"target": None, "status": "ok", "attempts": 1, "basis": app.LOWPOINT_CALC_BASIS}
+    done = {"target": None, "status": "ok", "attempts": 1, "basis": app.LOWPOINT_CALC_BASIS, "schema": app.LOWPOINT_RESULT_SCHEMA}
     st = {"week": {**done, "target": "2026-10-02"}, "month": {**done, "target": "2026-09-30"},
           "newlisting": {**done, "target": "2026-09-30"}}
     (store / "state.json").write_text(json.dumps(st))
