@@ -123,7 +123,7 @@ def weekly_hits(close: pd.Series, now: datetime):
         r1, r2 = float(r.iloc[i - 1]), float(r.iloc[i - 2])
         if r1 != r1 or r2 != r2:
             continue
-        if lp.lowpoint_signal(float(c.iloc[i]), float(c.iloc[i - 1]), r1, r2):
+        if lp.lowpoint_signal_cross(float(c.iloc[i]), float(c.iloc[i - 1]), r1, r2):   # v5.375: 실행 당시 정의(하향돌파) 고정
             out.append((bars.index[i], bars["bar_date"].iloc[i], float(c.iloc[i])))
     return out
 

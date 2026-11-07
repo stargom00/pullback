@@ -5,6 +5,7 @@
 - 주·월 리샘플 경계: 금요일 휴장, 월말 주말, 월 경계, 확정 시각 1분 전/후
 - KR 확정 시각 사본이 app.py `KR_CLOSE_CONFIRMED_HM`과 같은지
 
+v5.375: B에서 RSI[2] >= 30 조건을 뺐다(사용자 지시) — 아래 ①은 그 이전 정의에 대한 기록.
 사보타주 확인(2026-09-27): ① lowpoint_signal에서 `r2 >= RSI_LEVEL` 제거
 ② drop_in_progress가 bars를 그대로 반환 ③ A 부등호 반전(c1 > c0) —
 세 경우 모두 이 파일에서 FAIL함을 확인하고 원복했다. ①이 처음엔 경계 단위 테스트
@@ -37,7 +38,8 @@ def test_b_rsi2_exactly_30_passes():
 
 def test_b_rsi2_below_30_fails():
     # RSI[2] >= 30 조건이 빠지면 이미 30 아래에 있던 종목이 잡힌다
-    assert lp.lowpoint_signal(c0=101, c1=100, r1=25.0, r2=29.99) is False
+    assert lp.lowpoint_signal(c0=101, c1=100, r1=25.0, r2=29.99) is True     # v5.375: 연속 30 미만도 잡는다(사용자 지시)
+    assert lp.lowpoint_signal_cross(c0=101, c1=100, r1=25.0, r2=29.99) is False   # 옛 정의(측정 재현용)는 그대로
 
 
 def test_b_rsi1_exactly_30_fails():
@@ -108,15 +110,16 @@ def test_hit_and_in_progress_week_dropped():
            {k: weekend[k] for k in ("label", "c0", "c1", "r2", "r1", "r0")}
 
 
-def test_rsi2_already_below_30_no_signal_end_to_end():
-    # 종목 흐름 전체(리샘플→진행 중 봉 제거→scanner.rsi→판정)에서 B의 RSI[2]>=30 확인
+def test_rsi2_already_below_30_signals_end_to_end():
+    # v5.375(사용자 지시 "2주 연속 rsi가 30미만이고 다음봉이 양봉이면 이것도 잡아야") — 종목 흐름 전체에서
+    # RSI[2]도 30 미만인 연속 구간 다음 상승 봉이 잡히는지. v5.374까지는 이 경우 "no"였다(하향돌파 조건).
     daily = _daily_from_weekly(_weekly_path(extra_drops=1))
     fri = daily.index[-1]
     now = datetime(fri.year, fri.month, fri.day, 21, 0, tzinfo=KST)
     res = lp.evaluate(daily, "week", "kr", now)
     assert res["bar_date"] == fri
     assert res["c1"] < res["c0"] and res["r1"] < 30 and res["r2"] < 30  # 픽스처 전제
-    assert res["status"] == "no"
+    assert res["status"] == "hit"
 
 
 def test_friday_before_confirm_time_drops_that_week():

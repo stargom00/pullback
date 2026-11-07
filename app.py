@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.375 [저점 신호 조건 B 완화 — 사용자 지시 2026-11-07 "2주 연속 rsi가 30미만이고 다음봉이 양봉이면 이것도 잡아야되는데".
+  B: RSI[1] < 30 AND RSI[2] >= 30(30 하향돌파, 키움 조건식 원문) → RSI[1] < 30. 계기: 11-06 주봉 채널 목록의 동구바이오제약·
+  노랑풍선이 하향돌파 조건에서 빠짐. 계산 기준 표식 LOWPOINT_CALC_BASIS에 "+rsi1_below30" — 창 안이면 이번 주 주봉을 다시 만든다
+  (월봉은 12-01부터). 옛 조건은 lowpoint.lowpoint_signal_cross로 남겨 2026-10-09·10-26 측정 스크립트가 그대로 재현되게 했다.]
 v5.374 [저점 8월 이후 과거 히트 — 사용자 지시 2026-11-07 "올해 8월이후 저점종목신호 나온 종목을 모두 잡을수있어?". 주봉 스캔이
   이미 받은 일봉으로 2026-08-01 이후 주봉·월봉 신호 봉을 전부 찾아 게시 칸 week.history에 남기고(lowpoint.history_hits —
   evaluate와 같은 판정, 추가 조회 0), 저점관리 대상에 합친다(출처 "저점 주봉(과거)"/"저점 월봉(과거)"). 관찰·순위 코호트엔 안 넣음.
@@ -9184,7 +9188,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.374"
+VERSION = "v5.375"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -18466,7 +18470,7 @@ LOWPOINT_JOBS = ("week", "month", "newlisting", "watch")
 # 다른 기준으로 만든 결과는 따라잡기 창 안이면 다시 돌린다 — 운영에 손으로 쓰지 않고 배포만으로 /data 결과가 새 기준으로
 # 바뀌게(창이 지났으면 다음 예약 때). v5.321 "krx_regular"(KR 정규장) → v5.323 naver 통합 + 고전 Wilder RSI로 복귀·교체.
 # 가격 기준만 담던 옛 이름(v5.321 KR_PRICE_BASIS)을 계산 기준 전체(가격+RSI)를 뜻하는 이름으로 바꿨다.
-LOWPOINT_CALC_BASIS = "naver_integrated+wilder_sma+us_splits_only"   # v5.324: US 배당 미조정 추가
+LOWPOINT_CALC_BASIS = "naver_integrated+wilder_sma+us_splits_only+rsi1_below30"   # v5.324: US 배당 미조정 추가 · v5.375: B = RSI[1] < 30(하향돌파 조건 제거)
 LOWPOINT_RESULT_SCHEMA = 2   # = lowpoint.RESULT_SCHEMA(v5.374 history) — test_lowpoint_floor가 같은 값인지 고정
 LOWPOINT_SLOT_TF = {"week": "week", "month": "month", "newlisting": "month"}
 NEWLISTING_DATA_PATH = _resolve_persistent_path("newlisting_latest.json")

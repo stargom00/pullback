@@ -2,11 +2,11 @@
 
 프로덕션(app.py·static)과 무관한 로컬 스크립트다 — 배포되지 않는다.
 
-조건(키움 조건식 그대로, 주봉·월봉 공통 — 사용자 지시 원문:
-"A: 1봉전 종가 < 0봉전 종가 / B: 1봉전 RSI(14) 30 하향돌파 (RSI[1] < 30
-AND RSI[2] >= 30)"):
+조건(주봉·월봉 공통):
   A: close[1] < close[0]
-  B: rsi[1] < 30 and rsi[2] >= 30
+  B: rsi[1] < 30            ← v5.375 사용자 지시 "2주 연속 rsi가 30미만이고 다음봉이 양봉이면 이것도 잡아야되는데"
+v5.374까지 B는 키움 조건식 원문 "B: 1봉전 RSI(14) 30 하향돌파 (RSI[1] < 30 AND RSI[2] >= 30)"였다
+(lowpoint_signal_cross — 측정 재현 전용).
 RSI는 **고전 Wilder**(v5.323, rsi_wilder_sma — 첫 14개 변화량의 단순평균으로 시작한 뒤 Wilder 평활) — 키움·트레이딩뷰
 (ta.rsi) 표준과 같은 시딩. 5탭 스캐너의 scanner.rsi()(첫 변화량부터 ewm)와는 시작부가 다르다(이력이 짧을수록 차이가
 크고, 길면 사라진다). 일봉 종가를 주봉(W-FRI)/월봉(ME)으로 리샘플한 뒤 계산한다. KR 가격은 naver 통합 시세(애프터
@@ -167,10 +167,17 @@ _KIND_HEADERS = {"User-Agent": "Mozilla/5.0 Chrome/124.0"}
 # ── 순수 로직 (테스트 대상) ─────────────────────────────────────────────
 
 def lowpoint_signal(c0: float, c1: float, r1: float, r2: float) -> bool:
-    """A: 1봉전 종가 < 0봉전 종가, B: RSI[1] < 30 and RSI[2] >= 30."""
-    cond_a = c1 < c0
-    cond_b = r1 < RSI_LEVEL and r2 >= RSI_LEVEL
-    return bool(cond_a and cond_b)
+    """A: 1봉전 종가 < 0봉전 종가, B: RSI[1] < 30 (v5.375부터 — RSI[2]는 보지 않는다).
+    v5.375 사용자 지시(2026-11-07): "2주 연속 rsi가 30미만이고 다음봉이 양봉이면 이것도 잡아야되는데" — 30 하향돌파
+    (RSI[2] >= 30)만 잡던 B를 "1봉전 RSI < 30"으로 넓혔다. 계기: 11-06 주봉 채널 목록의 동구바이오제약(RSI 27.9 → 27.0 → 30.9)·
+    노랑풍선이 하향돌파 조건에서 빠졌다. r2 인자는 호출부 호환으로 남긴다. 옛 조건은 lowpoint_signal_cross(측정 재현용)."""
+    return bool(c1 < c0 and r1 < RSI_LEVEL)
+
+
+def lowpoint_signal_cross(c0: float, c1: float, r1: float, r2: float) -> bool:
+    """v5.374까지의 조건(키움 조건식 원문 "B: 1봉전 RSI(14) 30 하향돌파 (RSI[1] < 30 AND RSI[2] >= 30)").
+    **측정 재현 전용** — 2026-10-09·10-26 저점 측정 스크립트가 이 정의로 실행됐다. 새 코드에서 쓰지 말 것."""
+    return bool(c1 < c0 and r1 < RSI_LEVEL and r2 >= RSI_LEVEL)
 
 
 def resample_bars(close: pd.Series, tf: str) -> pd.DataFrame:
@@ -439,7 +446,7 @@ US_AUTO_ADJUST = False
 # 이 날짜 이후 주봉·월봉 신호 봉을 전부 찾아 게시 칸 "history"에 남긴다(추가 조회 0). 저점관리 대상에만 쓴다 — 관찰·순위 코호트엔 안 넣는다.
 HISTORY_SINCE = "2026-08-01"
 RESULT_SCHEMA = 2      # 1 = rows만 · 2 = history 포함(v5.374). 서버가 상태에 기록 — 바뀌면 창 안에서 그 주를 다시 만든다(CALC_BASIS와 같은 규칙)
-CALC_BASIS = "naver_integrated+wilder_sma+us_splits_only"   # 서버 실행 상태에 기록 — 바뀌면 그 주·달 결과를 창 안에서 다시 만든다
+CALC_BASIS = "naver_integrated+wilder_sma+us_splits_only+rsi1_below30"   # 서버 실행 상태에 기록 — 바뀌면 그 주·달 결과를 창 안에서 다시 만든다
 
 
 # [비활성 — v5.321 B안, v5.323에 철회] 원래 주석:

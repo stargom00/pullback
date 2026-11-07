@@ -50,7 +50,7 @@ def yf_calls(monkeypatch):
 
 
 def test_basis_includes_us():
-    assert lp.CALC_BASIS == app.LOWPOINT_CALC_BASIS == "naver_integrated+wilder_sma+us_splits_only"
+    assert lp.CALC_BASIS == app.LOWPOINT_CALC_BASIS == "naver_integrated+wilder_sma+us_splits_only+rsi1_below30"
     assert lp.US_AUTO_ADJUST is False
 
 
