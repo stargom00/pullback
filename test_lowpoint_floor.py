@@ -309,3 +309,27 @@ def test_front_sort_by_abs_distance_nulls_last():
 def test_tab_wired():
     assert SRC.count('data-mode="lowpoint_floor"') == 1 and SRC.count('id="lowpointFloorView"') == 1
     assert "onEnterLowpointFloorTab();" in SRC and "'lowpoint_floor'" in SRC
+
+
+def test_startup_catchup_runs_only_when_file_missing(monkeypatch, tmp_path):
+    """v5.367 — 결과 파일이 없을 때만 시작 따라잡기가 돈다(재시작마다 돌면 안 된다)."""
+    calls = []
+    monkeypatch.setattr(app, "_lp_floor_job_blocking", lambda now: calls.append(now) or {"targets": 0})
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr(app.asyncio, "sleep", lambda s: real_sleep(0))
+    p = tmp_path / "lowpoint_floor.json"
+    monkeypatch.setattr(app, "LP_FLOOR_PATH", str(p))
+    p.write_text("{}")
+    asyncio.run(app._lp_floor_catchup())
+    assert calls == []
+    p.unlink()
+    asyncio.run(app._lp_floor_catchup())
+    assert len(calls) == 1 and app._lowpoint_running is False
+
+
+def test_floor_tab_has_own_refresh_button():
+    src = open(os.path.join(os.path.dirname(__file__), "static", "index.html"), encoding="utf-8").read()
+    body = _fn("renderLowpointFloor")
+    assert body.count('onclick="lfRefresh()"') == 1
+    assert "/api/lowpoint/watch/refresh" in _fn("lfRefresh")
+    assert "저점일지 관찰 탭의" not in src

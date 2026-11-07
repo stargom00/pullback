@@ -43,7 +43,7 @@ STATES = ("holding", "broken", "spring", "weak_recovery", "late_recovery", "rebr
 RECOVERED = ("spring", "weak_recovery", "late_recovery")
 STATE_LABEL = {"holding": "지킴", "broken": "이탈", "spring": "스프링", "weak_recovery": "약한 회복",
                "late_recovery": "늦은 회복", "rebroken": "재이탈"}
-DEFINITION = ("바닥선 = 가장 최근 저점 히트 봉(주봉 우선 — RSI14<30 마감 다음 양봉, 저점 스크린과 같은 판정)의 일봉 최저가. "
+DEFINITION = ("바닥선 = 가장 최근 저점 히트 봉(주봉·월봉 중 더 최근 — RSI14<30 마감 다음 양봉, 저점 스크린과 같은 판정)의 일봉 최저가. "
               f"확정 종가만 본다. 지킴 = 종가가 바닥선 아래로 마감한 적 없음(지지 테스트 = 저가가 바닥선 +{TEST_PCT:g}% 안까지 왔다가 "
               f"종가가 지킨 날). 이탈 = 종가 < 바닥선. 스프링 = 이탈 후 {SPRING_MAX_DAYS}거래일 안에 종가 회복 + 그 봉 거래량 ≥ 이탈 봉 + "
               f"종가가 봉 위쪽 절반. 약한 회복 = {SPRING_MAX_DAYS}거래일 안 회복이지만 거래량·종가 위치 미달. 늦은 회복 = "

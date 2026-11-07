@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.367 [저점관리 탭이 비어 있던 이유 — v5.365가 07:56 KST에 배포돼 그날 07:00 작업을 놓쳤고, 수동 갱신은 다른 탭(저점일지
+  관찰)에만 있었다. ① 저점관리 탭에 "지금 갱신" 버튼(관찰과 같은 POST /api/lowpoint/watch/refresh — 끝에 저점관리 추적).
+  ② 결과 파일이 없을 때만 서버 시작 30초 뒤 1회 따라잡기(_lp_floor_catchup — 저점 작업과 같은 잠금·워커, 파일 있으면 안 돎).
+  ③ 정의 문구 "주봉 우선" → "주봉·월봉 중 더 최근"(v5.366 판정과 일치).]
 v5.366 [저점관리 실데이터 점검 수정 2건 — 사용자 "실제종목으로 돌려봐야되는거아냐?" 2026-11-07. yahoo 일봉 10종목(꿈비·하이딥·
   인바이오젠·YELP·AVA·JBGS 등)으로 evaluate()를 돌려 발견. ① latest_hit이 '주봉 먼저'라 몇 달 전 주봉 히트가 최근 월봉 히트를
   가렸다 → 주봉·월봉 마지막 히트 중 bar_date가 늦은 쪽(같으면 주봉). ② 히트 봉 직후(추적일 0) 거리가 비어 '—' → 히트 봉 마지막
@@ -9151,7 +9155,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.366"
+VERSION = "v5.367"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -13567,7 +13571,29 @@ async def _start_scheduler():
         _lp_eval_migrate_dilution()    # v5.344: 평가 "희석 이력" → "희석 이력 없음" 값 반전 이관(멱등, 파일 작업만)
     except Exception as e:
         print(f"[lowpoint-evals] ⚠️ 희석 방향 이관 실패: {type(e).__name__}: {e}", flush=True)
+    asyncio.create_task(_lp_floor_catchup())   # v5.367: 저점관리 결과 파일이 아직 없으면 시작 직후 1회
     asyncio.create_task(_scheduler_loop())
+
+
+async def _lp_floor_catchup():
+    """v5.367 — 저점관리 결과 파일이 없을 때만(첫 배포·볼륨 초기화) 시작 직후 1회 추적. 파일이 있으면 아무것도 안 한다
+    (재시작마다 돌지 않는다). 저점 작업과 같은 진행중 잠금·같은 단일 워커 — 유료 API 아님(naver·yahoo 일봉).
+    v5.365는 07:56 KST에 배포돼 그날 07:00 작업을 놓쳐 탭이 하루 동안 비어 있었다."""
+    global _lowpoint_running
+    if os.path.exists(LP_FLOOR_PATH):
+        return
+    await asyncio.sleep(30)                 # 시작 직후 캐시 로드와 겹치지 않게
+    if _lowpoint_running or os.path.exists(LP_FLOOR_PATH):
+        print("[lowpoint-floor] 시작 따라잡기 건너뜀(저점 작업 진행 중 또는 이미 생성)", flush=True)
+        return
+    _lowpoint_running = True
+    try:
+        r = await asyncio.get_event_loop().run_in_executor(_LOWPOINT_EXECUTOR, _lp_floor_job_blocking, datetime.now(KST))
+        print(f"[lowpoint-floor] 시작 따라잡기 완료: {r}", flush=True)
+    except Exception as e:
+        print(f"[lowpoint-floor] ⚠️ 시작 따라잡기 실패(다음 07:00 KST에 재시도): {type(e).__name__}: {e}", flush=True)
+    finally:
+        _lowpoint_running = False
 
 
 def _resolve_persistent_path(filename: str) -> str:

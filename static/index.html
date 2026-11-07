@@ -1447,7 +1447,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.366</span>
+      <span class="ver mono" id="verBadge">v5.367</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -9150,13 +9150,29 @@ function lfSort(rows, dir) {
     return sign * (Math.abs(x) - Math.abs(y)) || String(a.code).localeCompare(String(b.code));
   });
 }
-let _lf = { data: null, error: null, filter: 'all', sortDir: 'asc', query: '' };
+let _lf = { data: null, error: null, filter: 'all', sortDir: 'asc', query: '', busy: false, msg: '' };
 async function onEnterLowpointFloorTab() {
   const wrap = document.getElementById('lowpointFloorView');
   wrap.innerHTML = '<div class="loading"><div class="spinner"></div>불러오는 중…</div>';
   _lf.error = null;
   try { _lf.data = await apiJson('/api/lowpoint/floor'); } catch (e) { _lf.error = e; }
   renderLowpointFloor();
+}
+async function lfRefresh() {
+  if (_lf.busy) return;
+  _lf.busy = true; _lf.msg = '갱신 중 — 관찰·보유·저점관리 종목을 조회해요(1~2분)'; renderLowpointFloor();
+  try {
+    const res = await fetch('/api/lowpoint/watch/refresh', { method: 'POST' });   // 관찰과 같은 추적 작업(끝에 저점관리)
+    const d = await apiParse(res, { allow: [409, 500] });
+    if (!d.ok) throw new Error(d.error || '갱신 실패');
+    const f = (d.summary && d.summary.counts && d.summary.counts.floor) || {};
+    _lf.msg = f.error ? '저점관리 추적 실패 — ' + f.error : `대상 ${f.targets ?? '?'}종목 · 조회 ${f.fetched ?? '?'} · 실패 ${f.failed ?? 0} · 상태 전환 ${f.changes ?? 0}건`;
+  } catch (e) { _lf.msg = '갱신 실패 — ' + e.message; }
+  finally {
+    _lf.busy = false;
+    try { _lf.data = await apiJson('/api/lowpoint/floor'); _lf.error = null; } catch (e) { _lf.error = e; }
+    renderLowpointFloor();
+  }
 }
 function lfSetFilter(k) { _lf.filter = k; renderLowpointFloor(); }
 function lfToggleSort() { _lf.sortDir = _lf.sortDir === 'asc' ? 'desc' : 'asc'; renderLowpointFloor(); }
@@ -9191,9 +9207,11 @@ function renderLowpointFloor() {
   const wrap = document.getElementById('lowpointFloorView');
   if (!wrap || wrap.style.display === 'none') return;
   const d = _lf.data || {};
-  const head = `<div class="jr-title"><h2>저점관리</h2><span class="n-sub" style="font-size:13px">저점종목·신규상장 종목이 바닥선(저점 히트 봉 저가)을 종가로 지키는지 · 매일 07:00 KST 갱신</span></div>`;
+  const head = `<div class="jr-title"><h2>저점관리</h2><span class="n-sub" style="font-size:13px">저점종목·신규상장 종목이 바닥선(저점 히트 봉 저가)을 종가로 지키는지 · 매일 07:00 KST 갱신</span>`
+    + `<button type="button" class="jr-pill" style="margin-left:auto" onclick="lfRefresh()"${_lf.busy ? ' disabled' : ''}>${_lf.busy ? '갱신 중…' : '지금 갱신'}</button></div>`
+    + (_lf.msg ? `<div class="n-sub" style="font-size:12px;margin:-4px 0 10px">${_escapeHtml(_lf.msg)}</div>` : '');
   if (_lf.error || d.missing) {
-    const msg = _lf.error ? _escapeHtml(_lf.error.message) : '아직 추적 결과가 없어요 — 저점일지 관찰 탭의 "갱신"을 누르거나 다음 07:00 KST 실행을 기다려 주세요';
+    const msg = _lf.error ? _escapeHtml(_lf.error.message) : '아직 추적 결과가 없어요 — 위 "지금 갱신"을 누르거나 다음 07:00 KST 실행을 기다려 주세요';
     wrap.innerHTML = head + `<section class="n-card" style="padding:18px 22px"><div class="n-sub">${msg}</div>${d.definition ? `<div class="n-sub" style="font-size:12px;margin-top:8px">${_escapeHtml(d.definition)}</div>` : ''}</section>`;
     return;
   }
