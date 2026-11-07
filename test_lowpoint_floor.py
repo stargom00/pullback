@@ -473,3 +473,28 @@ def test_front_chips_and_tested_filter():
                      ["재이탈 11-05/bad"]]
     assert tested == ["a", "b"]
     assert _fn("_lfTable").count("lfChips(r") == 1
+
+
+def test_pre_low_is_min_low_of_bar_before_hit_bar():
+    """v5.373 직전봉 저가 = 신호 봉 바로 앞 봉 구간 (prev2_bar_date, prev_bar_date]의 일봉 최저가(코오롱티슈진 10-15 13,090)."""
+    pre = [(1000, 1010, 800, 1000, 100)] * 5 + [(1000, 1005, 900, 980, 100)] + [(990, 1000, 940, 990, 100)] * 4
+    hit_week = [(960, 1000, 950, 990, 100)] * 5
+    after = [(990, 995, 935, 960, 100), (950, 960, 920, 930, 100)]
+    d = _days(pre + hit_week + after, start="2025-12-15")
+    hit = {"tf": "week", "label": "x", "bar_date": str(d.index[14].date()), "prev_bar_date": str(d.index[9].date()),
+           "prev2_bar_date": str(d.index[4].date()), "close0": 990.0}
+    out = fl.pre_low(d, hit, str(d.index[-1].date()))
+    assert out["pre_low"] == 900.0 and out["pre_low_date"] == str(d.index[5].date())   # 800은 그 앞 봉 — 제외
+    assert out["pre_break_date"] is None                                               # 930 > 900
+    assert out["pre_dist_pct"] == round((930 / 900 - 1) * 100, 2)
+    assert fl.pre_low(d, {**hit, "prev2_bar_date": None}, str(d.index[-1].date()))["pre_low"] is None
+
+
+def test_latest_hit_carries_prev2_and_table_shows_pre_low():
+    df = _hit_series()
+    now = (df.index[-1] + pd.Timedelta(days=10)).to_pydatetime().replace(tzinfo=KST)
+    h = fl.latest_hit(df["Close"], "kr", now)
+    assert h["prev2_bar_date"] < h["prev_bar_date"] < h["bar_date"]
+    body = _fn("_lfTable")
+    assert body.count("r.pre_low") >= 2 and "직전봉 저가</th>" in body
+    assert "r.pre_break_date" in _fn("lfChips")

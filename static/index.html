@@ -1450,7 +1450,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.372</span>
+      <span class="ver mono" id="verBadge">v5.373</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -9247,6 +9247,7 @@ function lfChips(r, fmt) {
     out.push({ t: `${r.recover_days ?? '?'}일 만에 회복`, tone: r.state === 'late_recovery' ? '' : 'good', title: `이탈 ${r.break_date} → 회복 ${r.recover_date}` });
     if (r.recover_vol_ratio != null) out.push({ t: `거래량 ${r.recover_vol_ratio}배`, tone: r.recover_vol_ratio >= 1 ? 'good' : 'bad', title: '회복 봉 거래량 ÷ 이탈 봉 거래량' });
   }
+  if (r.pre_break_date) out.push({ t: '직전봉 깸', tone: 'bad', title: `직전봉 저가 ${f(r.pre_low)}(${r.pre_low_date})을 ${r.pre_break_date} 종가로 깸` });
   if (r.prior_break_date) out.push({ t: '전저점 깸', tone: 'bad', title: `전저점 ${f(r.prior_low)}(${r.prior_low_date})을 ${r.prior_break_date} 종가로 깸` });
   return out;
 }
@@ -9267,6 +9268,7 @@ function _lfTable(rows) {
       + `<td class="num r nowrap">${_lptFmt(line, m)}<div class="jr-s">${moved ? `<span title="원래 바닥선 ${_newsAttr(_lptFmt(r.floor_line, m))} — 이탈 후 회복해서 이탈 중 최저가로 바뀜">새 바닥선</span>` : `${h.tf === 'month' ? '월봉' : '주봉'} ${_escapeHtml(String(h.label || '').slice(2))}`}</div></td>`
       + `<td class="num r nowrap">${_lptFmt(r.last_close, m)}</td>`
       + `<td class="r nowrap">${_lptPct(r.dist_pct)}</td>`
+      + `<td class="num r nowrap"${r.pre_low != null ? ` title="직전봉 저가 ${_newsAttr(_lptFmt(r.pre_low, m))} · ${_newsAttr(r.pre_low_date || '')}${r.pre_break_date ? ` · 종가 이탈 ${_newsAttr(r.pre_break_date)}` : ''}"` : ''}>${r.pre_low != null ? `${_lptPct(r.pre_dist_pct)}<div class="jr-s">${_lptFmt(r.pre_low, m)}</div>` : '—'}</td>`
       + `<td class="num r nowrap"${r.prior_low != null ? ` title="전저점 ${_newsAttr(_lptFmt(r.prior_low, m))} · ${_newsAttr(r.prior_low_date || '')}${r.prior_break_date ? ` · 종가 이탈 ${_newsAttr(r.prior_break_date)}` : ''}"` : ''}>${r.prior_low != null ? `${_lptPct(r.prior_dist_pct)}<div class="jr-s">${_lptFmt(r.prior_low, m)}</div>` : '—'}</td>`
       + `<td><div class="lf-chips">${chips}${r.price_note ? `<span class="lf-c bad" title="${_newsAttr(r.price_note)}">⚠ 시세</span>` : ''}</div></td></tr>`;
   }).join('');
@@ -9277,6 +9279,7 @@ function _lfTable(rows) {
     + `<th class="nowrap">${sb('state', '상태' + (k === 'state' ? ar : ''), '상태 순서(지킴→스프링→약한·늦은 회복→이탈→재이탈)로 정렬 — 같은 상태는 가까운 순')}</th>`
     + `<th class="r nowrap">기준선</th><th class="r nowrap">종가</th>`
     + `<th class="r nowrap">${sb('dist', distLbl, '기준선 대비 마지막 확정 종가 — 클릭할 때마다 가까운 순 → 위로 먼 순 → 아래로 먼 순')}</th>`
+    + `<th class="r nowrap" title="신호 봉 바로 앞 봉(RSI 30 아래로 마감한 하락 봉)의 저가와 그 대비 거리 — 참고선(상태 판정엔 안 씀)">직전봉 저가</th>`
     + `<th class="r nowrap">${sb('prior', '전저점' + (k === 'prior' ? ar : ''), '히트 봉 직전 120거래일 최저가와 그 대비 거리 — 참고선(상태 판정엔 안 씀). 클릭해 거리로 정렬')}</th>`
     + `<th>요약 <span class="jr-s" style="font-weight:400">(칩·행에 마우스 올리면 날짜)</span></th></tr></thead><tbody>${body}</tbody></table></div>`;
 }

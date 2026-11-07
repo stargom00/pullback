@@ -66,7 +66,8 @@ DEFINITION = ("바닥선 = 가장 최근 저점 히트 봉(주봉·월봉 중 �
               f"종가가 지킨 날). 이탈 = 종가 < 바닥선. 스프링 = 이탈 후 {SPRING_MAX_DAYS}거래일 안에 종가 회복 + 그 봉 거래량 ≥ 이탈 봉 + "
               f"종가가 봉 위쪽 절반. 약한 회복 = {SPRING_MAX_DAYS}거래일 안 회복이지만 거래량·종가 위치 미달. 늦은 회복 = "
               f"{SPRING_MAX_DAYS}거래일 뒤 회복(새 바닥). 회복 뒤 기준선 = 이탈 중 최저가, 그것도 종가로 깨면 재이탈. "
-              f"전저점 = 히트 봉 직전 {PRIOR_LOW_DAYS}거래일 최저가(참고선 — 상태 판정엔 안 씀). "
+              f"직전봉 = 신호 봉 바로 앞 봉(RSI 30 아래로 마감한 하락 봉)의 최저가. "
+              f"전저점 = 히트 봉 직전 {PRIOR_LOW_DAYS}거래일 최저가(둘 다 참고선 — 상태 판정엔 안 씀). "
               f"KR 가격은 정규장(15:30) 일봉 — 애프터마켓 체결 제외. "
               f"기간({SPRING_MAX_DAYS}·{PRIOR_LOW_DAYS}거래일)·테스트 범위({TEST_PCT:g}%)는 어림값 — 관심 분류일 뿐 측정 전.")
 
@@ -96,7 +97,8 @@ def latest_hit(close: pd.Series, market: str, now: datetime) -> "dict | None":
                 continue
             if lp.lowpoint_signal(float(c.iloc[i]), float(c.iloc[i - 1]), r1, r2):
                 found.append({"tf": tf, "label": str(bars.index[i].date()), "bar_date": str(pd.Timestamp(bars["bar_date"].iloc[i]).date()),
-                              "prev_bar_date": str(pd.Timestamp(bars["bar_date"].iloc[i - 1]).date()), "close0": float(c.iloc[i])})
+                              "prev_bar_date": str(pd.Timestamp(bars["bar_date"].iloc[i - 1]).date()),
+                              "prev2_bar_date": str(pd.Timestamp(bars["bar_date"].iloc[i - 2]).date()), "close0": float(c.iloc[i])})
                 break
     if not found:
         return None
@@ -222,6 +224,33 @@ def prior_low(clean: pd.DataFrame, hit: dict, through: "str | None") -> dict:
     return out
 
 
+def pre_low(clean: pd.DataFrame, hit: dict, through: "str | None") -> dict:
+    """직전 봉 저가(v5.373) = 신호 봉 바로 앞 봉(RSI14 < 30으로 마감한 하락 봉)의 일봉 최저가 — 구간 (prev2_bar_date,
+    prev_bar_date]. 사용자 지시 2026-11-07 "응 표시해줘"(제안: 신호 봉 저가보다 아래인 실제 최저점을 세 번째 선으로) — 계기는
+    코오롱티슈진 "전 저점은 10월 15일 13000원 부근이잖아"(바닥선 13,770 = 신호 주 저가, 10-15 13,090 = 직전 하락 주 저가).
+    히트 뒤 확정 종가가 처음 그 아래로 마감한 날 = pre_break_date. 참고선 — 상태 판정엔 쓰지 않는다."""
+    out = {"pre_low": None, "pre_low_date": None, "pre_break_date": None, "pre_dist_pct": None}
+    if not hit.get("prev2_bar_date"):
+        return out
+    seg = clean[(clean.index > pd.Timestamp(hit["prev2_bar_date"])) & (clean.index <= pd.Timestamp(hit["prev_bar_date"]))]["Low"].dropna()
+    seg = seg[seg > 0]
+    if seg.empty:
+        return out
+    pl = float(seg.min())
+    out.update(pre_low=pl, pre_low_date=str(pd.Timestamp(seg.idxmin()).date()))
+    d = _confirmed(clean, through)
+    if d is None or d.empty:
+        return out
+    after = d[d.index > pd.Timestamp(hit["bar_date"])]["Close"].dropna()
+    below = after[after < pl]
+    if len(below):
+        out["pre_break_date"] = str(pd.Timestamp(below.index[0]).date())
+    last = d["Close"].dropna()
+    if len(last):
+        out["pre_dist_pct"] = round((float(last.iloc[-1]) / pl - 1) * 100, 2)
+    return out
+
+
 def evaluate(df: "pd.DataFrame | None", market: str, now: datetime, through: "str | None", downcast,
              reg: "pd.DataFrame | None" = None) -> dict:
     """원본 일봉 한 종목 → {hit, …classify, …prior_low}. downcast = app._downcast(사본 금지 — 호출부가 넘긴다).
@@ -235,7 +264,8 @@ def evaluate(df: "pd.DataFrame | None", market: str, now: datetime, through: "st
     floor = floor_of(clean, hit)
     if floor is None:
         return {"status": "no_floor", "hit": hit}
-    return {"status": "ok", "hit": hit, **classify(clean, hit, floor, through), **prior_low(clean, hit, through)}
+    return {"status": "ok", "hit": hit, **classify(clean, hit, floor, through), **prior_low(clean, hit, through),
+            **pre_low(clean, hit, through)}
 
 
 # ── 대상 모으기 · 조회 · 추적(서버 작업이 부른다) ─────────────────────────────
