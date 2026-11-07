@@ -5,6 +5,8 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.376 [저점관리 표 머리 고정 — 사용자 "상단메뉴(종목 상태 기준선...메누) 스크롤해도 고정되서 보이게해줘". thead th sticky,
+  top = 고정 헤더 높이(--sticky-top, ResizeObserver로 갱신). 좁은 화면(가로 스크롤 상자)에선 고정 안 됨.]
 v5.375 [저점 신호 조건 B 완화 — 사용자 지시 2026-11-07 "2주 연속 rsi가 30미만이고 다음봉이 양봉이면 이것도 잡아야되는데".
   B: RSI[1] < 30 AND RSI[2] >= 30(30 하향돌파, 키움 조건식 원문) → RSI[1] < 30. 계기: 11-06 주봉 채널 목록의 동구바이오제약·
   노랑풍선이 하향돌파 조건에서 빠짐. 계산 기준 표식 LOWPOINT_CALC_BASIS에 "+rsi1_below30" — 창 안이면 이번 주 주봉을 다시 만든다
@@ -9188,7 +9190,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.375"
+VERSION = "v5.376"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

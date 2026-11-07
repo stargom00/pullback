@@ -542,3 +542,10 @@ def test_week_reruns_once_in_window_when_schema_old():
     late = datetime(2026, 11, 9, 12, 0, tzinfo=app.KST)                  # 토 09:00 + 48h 지남
     assert app._lowpoint_due("week", late, {"week": base}) is None
     assert app._lowpoint_due("month", now, {"month": {**base, "target": "2026-10-31"}}) is None   # 월봉은 형식 변경과 무관
+
+
+def test_floor_table_header_is_sticky_below_page_header():
+    src = open(os.path.join(os.path.dirname(__file__), "static", "index.html"), encoding="utf-8").read()
+    assert _fn("_lfTable").count("lf-table") == 1
+    assert "table.lf-table thead th{position:sticky;top:var(--sticky-top,0px)" in src
+    assert "'--sticky-top'" in _fn("syncStickyTop")

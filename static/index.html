@@ -1030,6 +1030,7 @@ tr.editing{background:var(--c-orange-a6)}
    범위 밖인 다른 탭 본문까지 색이 바뀐다. 헤더·홈(#calendarView)·일지
    (#journalView)만 이 토큰을 쓴다. 상승/하락 색은 기존 --px-up/--px-down 그대로. */
 :root{
+  --sticky-top:0px;   /* v5.376 고정 헤더 높이 — syncStickyTop()이 실제 값으로 덮는다 */
   --n-num:'IBM Plex Mono',ui-monospace,monospace;
   /* v5.295(사용자 지시): 숫자 타일 축소 비율 — 홈 시장 타일·오늘 할 일, 일지 리스크 5칸·
      R 누적의 여백·큰 숫자·높이만 이 값으로 줄인다(라벨·본문 글자는 그대로). */
@@ -1273,6 +1274,9 @@ table.jr-table.lpw-table th.lpw-sort{cursor:pointer;user-select:none}
 .lf-holding{color:var(--c-green-fg2)} .lf-broken{color:var(--c-blue-fg4)} .lf-spring{color:var(--c-red-fg3)}
 .lf-weak_recovery,.lf-late_recovery{color:var(--n-muted)} .lf-rebroken{color:var(--c-blue-fg4);opacity:max(.75,var(--fade-floor))}
 .lf-chips{display:flex;flex-wrap:wrap;gap:4px}
+/* v5.376(사용자 "상단메뉴(종목 상태 기준선...) 스크롤해도 고정되서 보이게") — 표 머리를 페이지 헤더 바로 아래에 고정.
+   top = 고정 헤더 높이(--sticky-top, syncStickyTop()이 헤더 크기 변화마다 갱신). 좁은 화면은 표가 가로 스크롤 상자라 고정이 안 된다. */
+table.lf-table thead th{position:sticky;top:var(--sticky-top,0px);z-index:5;background:var(--n-card);box-shadow:inset 0 -1px 0 var(--n-line)}
 .lf-c{display:inline-block;padding:1px 7px;border-radius:6px;font-size:11.5px;white-space:nowrap;background:var(--n-chip);color:var(--n-muted)}
 .lf-c.good{color:var(--c-green-fg2)} .lf-c.bad{color:var(--c-blue-fg4)}
 /* v5.352 코인 일지 — 카드·수정 폼 격자 정렬 */
@@ -1450,7 +1454,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.375</span>
+      <span class="ver mono" id="verBadge">v5.376</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -9204,6 +9208,15 @@ function lfSetMarket(m) {
   const b = document.querySelector(`button.tab[data-market="${m}"]`);
   if (b) b.click(); else { setMarket(m); renderLowpointFloor(); }
 }
+// v5.376 — 고정 헤더(header, position:sticky) 높이를 --sticky-top에 둔다(표 머리 고정 위치). 헤더가 줄바꿈으로 높이가 바뀌면 따라간다.
+function syncStickyTop() {
+  const hd = document.querySelector('header');
+  if (!hd) return;
+  const set = () => document.documentElement.style.setProperty('--sticky-top', hd.offsetHeight + 'px');
+  set();
+  try { new ResizeObserver(set).observe(hd); } catch (e) { window.addEventListener('resize', set); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', syncStickyTop); else syncStickyTop();
 function lfSetFilter(k) { _lf.filter = k; renderLowpointFloor(); }
 // 정렬 머리 클릭 — 거리: 가까운 순 → 위로 먼 순 → 아래로 먼 순 → (처음으로). 상태·전저점: 같은 머리 다시 누르면 방향 반대.
 function lfSortBy(key) {
@@ -9275,7 +9288,7 @@ function _lfTable(rows) {
   const k = _lf.sortKey, ar = _lf.sortDir === 'asc' ? ' ▲' : ' ▼';
   const distLbl = k === 'near' ? '거리 · 가까운 순' : k === 'dist' ? (_lf.sortDir === 'desc' ? '거리 · 위로 먼 순' : '거리 · 아래로 먼 순') : '거리';
   const sb = (key, lbl, title) => `<button type="button" class="n-link" style="font-size:12px" onclick="lfSortBy('${key}')" title="${title}">${lbl}</button>`;
-  return `<div class="jr-table-wrap"><table class="jr-table lpt-table nl-table"><thead><tr><th>종목</th>`
+  return `<div class="jr-table-wrap"><table class="jr-table lpt-table nl-table lf-table"><thead><tr><th>종목</th>`
     + `<th class="nowrap">${sb('state', '상태' + (k === 'state' ? ar : ''), '상태 순서(지킴→스프링→약한·늦은 회복→이탈→재이탈)로 정렬 — 같은 상태는 가까운 순')}</th>`
     + `<th class="r nowrap">기준선</th><th class="r nowrap">종가</th>`
     + `<th class="r nowrap">${sb('dist', distLbl, '기준선 대비 마지막 확정 종가 — 클릭할 때마다 가까운 순 → 위로 먼 순 → 아래로 먼 순')}</th>`
