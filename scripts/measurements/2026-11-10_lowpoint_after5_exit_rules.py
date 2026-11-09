@@ -37,6 +37,7 @@ Z_MIN = 2.50             # Bonferroni 4비교
 N_MIN = 100
 RULES = ("R1", "R2", "R3", "R4")
 SELF_CHECK_N = 300
+WARMUP_WEEKS = 104       # §1-구현 7: 조회 창에 잘린 종목은 RSI 시딩 영향이 사라질 때까지(약 2년) 히트를 안 센다
 SEED = 20261110
 OUT = os.path.join(HERE, os.path.basename(__file__).replace(".py", ".results.json"))
 
@@ -162,8 +163,14 @@ def main():
 
     # 히트 + stale 주 제외(10-09와 같은 규칙)
     hits_by_label = defaultdict(list)
+    window_start = pd.Timestamp(now.date()) - pd.Timedelta(days=base.KR_DAYS)
     for t, df in data.items():
+        truncated = df.index[0] <= window_start + pd.Timedelta(days=30)   # 상장일이 아니라 조회 창 시작에서 잘린 이력
+        wk_idx = lp.resample_bars(df["Close"], TF).index
         for label, bar_date, c0 in weekly_hits(df["Close"], now):
+            if truncated and wk_idx.get_loc(label) < WARMUP_WEEKS:
+                stats["hit_warmup_skip"] += 1
+                continue
             hits_by_label[label].append({"ticker": t, "label": label, "base_date": pd.Timestamp(bar_date), "base_price": c0})
     week_mode = {}
     for t, df in data.items():
@@ -251,7 +258,7 @@ def main():
               "universe": len(blob.get("names") or {}), "fetched": len(data), "bars_median": med,
               "elapsed_s": round(time.time() - t0),
               "params": {"GAP_SKIP": GAP_SKIP, "TARGET": TARGET, "HOLD_MAX": HOLD_MAX, "DEDUP_DAYS": DEDUP_DAYS,
-                         "MA_N": MA_N, "Z_MIN": Z_MIN, "N_MIN": N_MIN, "SEED": SEED},
+                         "MA_N": MA_N, "WARMUP_WEEKS": WARMUP_WEEKS, "Z_MIN": Z_MIN, "N_MIN": N_MIN, "SEED": SEED},
               "stats": dict(stats), "half_split_touch_date": split, "verdict": verdict, "record_only": record,
               "trades": trades}
     json.dump(result, open(OUT, "w"), ensure_ascii=False, indent=1, default=str)
