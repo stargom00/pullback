@@ -5,6 +5,13 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.379 [조용하던 종목 거래량 폭발 — 사용자 지시 2026-11-10 "거래량이 마르고 조용하던 종목이 어는날 거래량이 터졌을때, 그거잡을수있어?"
+  → 시점 "c"(장중+장마감 둘 다), 대상 "c 나스닥도"(KR 전체 + US). GET /api/quiet-surge?market=kr|us&mode=intraday|close(봇 읽기).
+  판정은 quiet_surge.py 순수 함수 하나: 직전 20봉 평균 ≤ 그 앞 60봉 평균×0.6(조용) · 그날 거래량 ≥ 20봉 평균×5(장중은 경과 비율로 환산)
+  · 양봉 · 종가 위치 ≥ 0.5 · 거래대금 KR 5억/US 200만달러 · 최근 6봉에 7일 넘는 공백 없음(정지 후 재개 제외) · 스팩 제외.
+  **숫자는 전부 AI 어림값, 측정 전 관심 신호.** close 모드는 확정 봉(confirmed_through)만 쓰고, 1~3거래일 전 급등 종목의 이후 거래량
+  배수·종가 변화를 followups로 같이 준다(상태 파일 없이 일봉에서 다시 계산). 얼마냐봇 v2.55가 KR 10:00·13:00·20:15 KST,
+  US 뉴욕 10:30·13:00·16:30에 보낸다.]
 v5.378 [보유 종목 바닥선 알림 — 사용자 지시 2026-11-10 "내가 보유한 종목 바닥가가 오면 알림받는걸 먼저만들자. 알림봇으로".
   보유 = 토스 동기화 잔고(positions.json) + 저점 매매 기록의 보유(sellDate 없음). ① 저점관리 매일 추적 대상에 보유 종목을 넣는다(출처 "보유" —
   예전엔 8월 이후 저점 히트·관찰·신규상장만 대상이라, 그 전에 신호가 난 보유 종목은 바닥선이 없었다). ② GET /api/lowpoint/held-floors(봇 읽기) —
@@ -9042,6 +9049,8 @@ _BOT_READ_EXACT_PATHS = {
     "/api/user-events/added",
     # v5.378: 보유 종목 바닥선(저점관리 행 결합) — 봇이 장중 접근·도달 알림. GET·읽기 전용.
     "/api/lowpoint/held-floors",
+    # v5.379: 조용하던 종목 거래량 폭발(장중·마감) — GET·읽기 전용.
+    "/api/quiet-surge",
 }
 _BOT_READ_PATH_PREFIXES = ("/api/dist/", "/api/ma/", "/api/pullback-signal/", "/api/vol/")
 
@@ -9206,7 +9215,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.378"
+VERSION = "v5.379"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -17351,6 +17360,91 @@ async def opening_surge():
         print(f"[opening-surge] 오늘({today}) 봉 있는 종목 0 — {n_stale}종목 전부 제외(휴장/캐시 낡음)",
               flush=True)
     return JSONResponse(body)
+
+
+def _us_session_elapsed_ratio(now: datetime) -> float:
+    """미국 정규장(뉴욕 09:30~16:00) 경과 비율. 장외는 1.0. _kr_session_elapsed_ratio의 US판(v5.379)."""
+    from zoneinfo import ZoneInfo
+    t = now.astimezone(ZoneInfo("America/New_York"))
+    open_min, close_min = 9 * 60 + 30, 16 * 60
+    cur = t.hour * 60 + t.minute
+    if cur < open_min or cur >= close_min:
+        return 1.0
+    return max(0.01, (cur - open_min) / (close_min - open_min))
+
+
+def quiet_surge_scan(data: dict, universe: dict, market: str, mode: str, now: datetime) -> dict:
+    """v5.379 조용하던 종목 거래량 폭발 스캔(순수 계산 — 엔드포인트·테스트 공용). market kr|us, mode intraday|close."""
+    import pandas as pd
+    import quiet_surge as qs
+    fl = _lp_floor_mod()
+    mkt = "US" if market == "us" else "KR"
+    if mode == "intraday":
+        if market == "us":
+            from zoneinfo import ZoneInfo
+            today = str(now.astimezone(ZoneInfo("America/New_York")).date())
+            elapsed = _us_session_elapsed_ratio(now)
+        else:
+            today = str(now.astimezone(KST).date())
+            elapsed = _kr_session_elapsed_ratio(now)
+        session = today
+    else:
+        session = _lp_watch_mod().confirmed_through(mkt, now.isoformat())
+        elapsed = 1.0
+    frames, n_stale, n_short = {}, 0, 0
+    for t, df in (data or {}).items():
+        if df is None or "Volume" not in df or len(df) == 0:
+            continue
+        if fl.is_spac({"name": universe.get(t, t), "mkt": mkt}):
+            continue
+        if mode == "close":
+            df = df[pd.DatetimeIndex(df.index).strftime("%Y-%m-%d") <= session]
+        if len(df) < qs.MIN_BARS:
+            n_short += 1
+            continue
+        frames[t] = df
+    if mode == "close" and frames:
+        # 확정 봉 중 가장 많은 종목의 마지막 날짜 = 이번 세션(휴장일이면 직전 거래일)
+        session = pd.Series([_last_bar_daykey(df) for df in frames.values()]).mode().iloc[0]
+    hits, follows = [], []
+    for t, df in frames.items():
+        if _last_bar_daykey(df) != session:
+            n_stale += 1
+            continue
+        n = len(df)
+        name = universe.get(t, t)
+        h = qs.evaluate_at(df, n - 1, market, elapsed)
+        if h:
+            hits.append({"ticker": t, "name": name, **h})
+        if mode == "close":
+            for k in range(1, qs.FOLLOW_DAYS + 1):
+                f = qs.followup(df, n - 1 - k, market)
+                if f:
+                    follows.append({"ticker": t, "name": name, "days_after": k, **f})
+    hits.sort(key=lambda r: -r["surge_ratio"])
+    follows.sort(key=lambda r: (r["days_after"], -r["surge_ratio"]))
+    body = {"ok": True, "market": market, "mode": mode, "asof": now.astimezone(KST).strftime("%Y-%m-%d %H:%M"),
+            "session_date": session, "elapsed_pct": round(elapsed * 100, 1), "n_checked": len(frames) - n_stale,
+            "n_stale_excluded": n_stale, "n_short_history": n_short, "hits": hits[:20], "n_hits": len(hits),
+            "followups": follows[:30],
+            "params": {"quiet_max": qs.QUIET_MAX, "surge_min": qs.SURGE_MIN, "quiet_short": qs.QUIET_SHORT,
+                       "quiet_long": qs.QUIET_LONG, "min_value": qs.MIN_VALUE[market]}}
+    if not frames or n_stale == len(frames):
+        body["reason"] = "no_session_bar"     # 0건과 "오늘 봉 자체가 없음"을 구분(침묵 ≠ 성공)
+    return body
+
+
+@app.get("/api/quiet-surge")
+async def quiet_surge_api(market: str = "kr", mode: str = "close"):
+    """v5.379 조용하던 종목 거래량 폭발 — 얼마냐봇 전용(GET·읽기). intraday는 그 시장 장중에만 의미가 있다."""
+    if market not in ("kr", "us") or mode not in ("intraday", "close"):
+        return JSONResponse({"ok": False, "error": "market=kr|us, mode=intraday|close"}, status_code=400)
+    now = datetime.now(KST)
+    bundle = await _fetch_market_data(market, wait_for_fresh=True) or {}
+    body = quiet_surge_scan(bundle.get("data") or {}, bundle.get("universe") or {}, market, mode, now)
+    print(f"[quiet-surge] {market}/{mode} 세션 {body['session_date']} 대상 {body['n_checked']} · 폭발 {body['n_hits']} · "
+          f"후속 {len(body['followups'])} · 오늘 봉 없음 {body['n_stale_excluded']}", flush=True)
+    return JSONResponse(_clean_nan(body))
 
 
 @app.get("/api/watch/positions")
