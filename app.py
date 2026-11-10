@@ -5,6 +5,12 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.378 [보유 종목 바닥선 알림 — 사용자 지시 2026-11-10 "내가 보유한 종목 바닥가가 오면 알림받는걸 먼저만들자. 알림봇으로".
+  보유 = 토스 동기화 잔고(positions.json) + 저점 매매 기록의 보유(sellDate 없음). ① 저점관리 매일 추적 대상에 보유 종목을 넣는다(출처 "보유" —
+  예전엔 8월 이후 저점 히트·관찰·신규상장만 대상이라, 그 전에 신호가 난 보유 종목은 바닥선이 없었다). ② GET /api/lowpoint/held-floors(봇 읽기) —
+  보유 종목마다 저점관리 행(기준선 active_line·원래 바닥선·상태·최근 신호)을 6자리 코드로 붙여 준다. 바닥선이 없으면 사유(no_row/no_hit 등)를
+  그대로 준다(침묵 ≠ 없음). 얼마냐봇 v2.54가 장중 2분마다 현재가로 "기준선 +3% 접근"·"기준선 도달(장중)"을 하루 1회씩, 매일 08:52 KST에
+  감시 목록 요약을 보낸다.]
 v5.377 [빗각×기준선 수렴 → 홈 달력 + 봇 알림 — 사용자 지시 2026-11-07 "빗갓이랑 사이가 좁아질때(변곡점 가까이 올때,) 홈화면에
   달력이 있거든. 거기에 추가해주고 알림봇으로 알림도 보내줘. 추가되면". 저점관리 매일 추적에서 자동 하락 빗각(lowpoint_floor.downtrend_line
   — 최근 52주 최고 고점 A에서, 그 사이 고가를 위에서 감싸는 가장 완만한 선; 규칙 전부 AI 판단·검증 전)과 기준선(active_line)이
@@ -9034,6 +9040,8 @@ _BOT_READ_EXACT_PATHS = {
     "/api/user-events/due",
     # v5.377: 서버가 자동으로 만든 달력 일정(빗각 수렴) — 봇이 아침에 "새로 추가" 알림. GET·읽기 전용.
     "/api/user-events/added",
+    # v5.378: 보유 종목 바닥선(저점관리 행 결합) — 봇이 장중 접근·도달 알림. GET·읽기 전용.
+    "/api/lowpoint/held-floors",
 }
 _BOT_READ_PATH_PREFIXES = ("/api/dist/", "/api/ma/", "/api/pullback-signal/", "/api/vol/")
 
@@ -9198,7 +9206,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.377"
+VERSION = "v5.378"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -21187,7 +21195,9 @@ def _lp_floor_job_blocking(now: "datetime") -> dict:
     nl = _lowpoint_read(NEWLISTING_DATA_PATH) or _lowpoint_read(NEWLISTING_LATEST_PATH) or {}
     lpd = _lowpoint_read(LOWPOINT_DATA_PATH) or {}
     hist = ((lpd.get("week") or {}).get("history") or []) if isinstance(lpd.get("week"), dict) else []   # v5.374 8월 이후 과거 히트
-    targets, spacs = fl.drop_spacs(fl.targets_from(_rec_list_load(LP_WATCH_PATH), nl.get("rows") or [], prev, history=hist))   # v5.370 스팩 제외
+    targets = fl.targets_from(_rec_list_load(LP_WATCH_PATH), nl.get("rows") or [], prev, history=hist)
+    _lp_floor_add_held(targets)   # v5.378 보유 종목도 추적(바닥선 알림용) — 스팩 제외보다 먼저 넣어 같은 규칙을 받게
+    targets, spacs = fl.drop_spacs(targets)   # v5.370 스팩 제외
     rows, summary = fl.track(targets, prev, now.astimezone(KST), _downcast, w.confirmed_through)
     summary["spac_excluded"] = len(spacs)
     print(f"[lowpoint-floor] 스팩 제외 {len(spacs)}종목: {', '.join(spacs[:20]) or '없음'}{' …' if len(spacs) > 20 else ''}", flush=True)
@@ -21233,6 +21243,104 @@ async def lp_watch_list():
     return JSONResponse(_clean_nan({"ok": True, "records": recs, "reach_pct": _lp_watch_mod().REACH_PCT,
                                     "schedule_hm": LOWPOINT_SCHEDULE_HM["watch"],
                                     "last_run": {k: st.get(k) for k in ("target", "status", "finished_at", "error")}}))
+
+
+def _base_code(code) -> str:
+    """'005930.KS'·'005930'·'A005930' → '005930', US 티커는 대문자 그대로. 저점관리 행 키와 토스·기록 코드를 맞추는 용도."""
+    c = str(code or "").strip().upper().split(".")[0]
+    if len(c) == 7 and c[0] == "A" and c[1:].isalnum():
+        c = c[1:]
+    return c
+
+
+def _held_items() -> list:
+    """v5.378 보유 목록 = 토스 동기화 잔고 + 저점 매매 기록 보유(sellDate 없음). 같은 종목은 하나로(토스 평단 우선)."""
+    out = {}
+    try:
+        for p in _load_positions_raw().get("positions") or []:
+            t = p.get("ticker")
+            if not t:
+                continue
+            mkt = "US" if (p.get("market") or "").upper() == "US" else "KR"
+            out[_base_code(t)] = {"code": t, "name": p.get("name") or t, "mkt": mkt, "avg_price": p.get("avg_price"),
+                                  "sources": ["토스"]}
+    except Exception as e:
+        print(f"[held-floors] 토스 잔고 읽기 실패: {type(e).__name__}: {e}", flush=True)
+    try:
+        for r in _rec_list_load(LP_TRADES_PATH):
+            if r.get("sellDate") or not r.get("code"):
+                continue
+            b = _base_code(r["code"])
+            if b in out:
+                if "저점 기록" not in out[b]["sources"]:
+                    out[b]["sources"].append("저점 기록")
+                continue
+            out[b] = {"code": r["code"], "name": r.get("name") or r["code"], "mkt": r.get("mkt") or "KR",
+                      "avg_price": _lp_num(r.get("buyPrice")), "sources": ["저점 기록"]}
+    except Exception as e:
+        print(f"[held-floors] 저점 기록 읽기 실패: {type(e).__name__}: {e}", flush=True)
+    return list(out.values())
+
+
+def _lp_floor_add_held(targets: dict) -> None:
+    """저점관리 추적 대상(targets, {code: …})에 보유 종목을 넣는다 — 이미 있으면 출처만 "보유" 추가(6자리 코드로 같은 종목 판정)."""
+    by_base = {_base_code(c): c for c in targets}
+    for h in _held_items():
+        b = _base_code(h["code"])
+        if b in by_base:
+            t = targets[by_base[b]]
+            if "보유" not in t.setdefault("sources", []):
+                t["sources"].append("보유")
+            continue
+        code, market = h["code"], "US"
+        if h["mkt"] != "US":
+            code = str(code).upper()
+            if not code.endswith((".KS", ".KQ")):      # 토스 KR 티커는 접미사 없는 6자리 — 시장을 naver로 확인(추측 금지)
+                try:
+                    import naver_kr
+                    basic = naver_kr.fetch_basic(b)
+                except Exception as e:
+                    basic = None
+                    print(f"[held-floors] {b} 시장 확인 실패: {type(e).__name__}: {e}", flush=True)
+                if not basic or not basic.get("suffix"):
+                    print(f"[held-floors] {b} 시장 확인 불가 — 저점관리 추적 대상에서 빠짐", flush=True)
+                    continue
+                code = b + basic["suffix"]
+            market = "KOSPI" if code.endswith(".KS") else "KOSDAQ"
+        targets[code] = {"code": code, "name": h["name"], "market": market, "mkt": "US" if market == "US" else "KR",
+                         "sources": ["보유"]}
+        by_base[b] = code
+
+
+def held_floor_rows(held: list, floor_rows: dict) -> list:
+    """보유 목록 × 저점관리 행(6자리 코드로 결합) → 봇용 행. 순수 함수(테스트 대상)."""
+    by_base = {_base_code(k): v for k, v in (floor_rows or {}).items()}
+    out = []
+    for h in held:
+        r = by_base.get(_base_code(h["code"]))
+        row = {"code": h["code"], "name": h["name"], "mkt": h["mkt"], "avg_price": h.get("avg_price"), "sources": h.get("sources") or []}
+        if not r:
+            row.update({"has_floor": False, "reason": "no_row"})          # 아직 추적 전(다음 07:00 작업부터)
+        elif r.get("status") != "ok" or r.get("active_line") is None:
+            row.update({"has_floor": False, "reason": r.get("status") or "no_line"})   # no_hit·no_floor·no_data
+        else:
+            hit = r.get("hit") or {}
+            row.update({"has_floor": True, "active_line": r.get("active_line"), "floor_line": r.get("floor_line"),
+                        "new_line": r.get("new_line"), "state": r.get("state"), "last_close": r.get("last_close"),
+                        "last_date": r.get("last_date"), "dist_pct": r.get("dist_pct"),
+                        "hit": {"tf": hit.get("tf"), "bar_date": hit.get("bar_date")}})
+        out.append(row)
+    return out
+
+
+@app.get("/api/lowpoint/held-floors")
+async def lp_held_floors():
+    """v5.378 보유 종목 바닥선 — 봇(얼마냐봇) 장중 접근·도달 알림용. GET·읽기 전용."""
+    d = _lp_floor_read() or {}
+    fl = _lp_floor_mod()
+    rows = held_floor_rows(_held_items(), d.get("rows") or {})
+    return JSONResponse(_clean_nan({"ok": True, "checked_at": d.get("checked_at"), "state_label": fl.STATE_LABEL,
+                                    "rows": rows, "n_with_floor": sum(r["has_floor"] for r in rows), "n": len(rows)}))
 
 
 @app.get("/api/lowpoint/floor")
