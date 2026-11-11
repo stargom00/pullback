@@ -35,7 +35,8 @@ COST = sysm.COST             # 매도 0.25%
 GAP_SKIP = m.GAP_SKIP
 DEDUP_DAYS = m.DEDUP_DAYS
 LISTED_MARGIN_DAYS = 30
-MERGER_WORDS = ("합병", "완전자회사", "지주회사", "주식교환", "주식이전")
+MERGER_WORDS = ("합병", "완전자회사", "지주회사", "주식교환", "주식이전", "자진")   # 보상(대가·공개매수)으로 끝나는 폐지 — §1-부록
+TRANSFER_WORDS = ("유가증권시장 상장", "코스닥시장 상장")                           # 이전상장 — 폐지가 아님, 제외 — §1-부록
 EXCLUDE_NAME = ("스팩", "ETN", "ETF", "리츠", "인프라", "선박", "기업인수목적")
 MIN_DELISTED_IN_WINDOW = 50
 MIN_DELISTED_FETCH_OK = 0.8
@@ -75,7 +76,7 @@ def load_listed(cache):
     return blob
 
 
-def load_delisted(window_start, cache, stats, log):
+def load_delisted(window_start, cache, stats, log, listed_codes=frozenset()):
     """KIND 상장폐지현황 목록 → 시세 naver → FDR(delisted_source). 하한 미달이면 하드 실패."""
     if cache and os.path.exists(cache):
         print(f"[cache] load {cache}", flush=True)
@@ -89,6 +90,12 @@ def load_delisted(window_start, cache, stats, log):
     f = f[~f["name"].str.contains("|".join(EXCLUDE_NAME))]
     f = f[f["code"].str[-1] == "0"]
     f = f.drop_duplicates("code", keep="last")
+    n0 = len(f)
+    f = f[~f["reason"].astype(str).str.contains("|".join(TRANSFER_WORDS))]
+    stats["delisted_transfer_excluded"] = n0 - len(f)
+    n1 = len(f)
+    f = f[~f["code"].isin(listed_codes)]                 # 같은 코드가 지금 상장 유니버스에 있으면 중복 — 제외
+    stats["delisted_dup_listed_excluded"] = n1 - len(f)
     stats["delisted_in_window"] = len(f)
     assert len(f) >= MIN_DELISTED_IN_WINDOW, f"창 안 상장폐지 보통주 {len(f)}건 — 목록 소스 실패 의심(하드 실패)"
     data, meta, fails, src = {}, {}, [], Counter()
@@ -263,7 +270,8 @@ def main():
     listed = load_listed(os.environ.get("MEAS_CACHE_LONG"))
     lc = os.environ.get("MEAS_CACHE_LONG")
     src_log = {}
-    dl = load_delisted(window_start, (lc + ".delisted") if lc else None, stats, src_log)
+    listed_codes = frozenset(t.split(".")[0] for t in listed["data"])
+    dl = load_delisted(window_start, (lc + ".delisted") if lc else None, stats, src_log, listed_codes)
     stamp = harness.run_stamp(listed["data"])
     m.self_check_hits(listed["data"], now, rng, stats)
     data = {**listed["data"], **dl["data"]}
@@ -283,7 +291,7 @@ def main():
         "stats": dict(stats), "delisted_source_log": {k: (v if k != "kind_attempts" else v[:12]) for k, v in src_log.items() if k in ("kind_variant", "kind_attempts")},
         "delisted_meta": dl["meta"], "delisted_fails": dl["fails"],
         "all": summarize(trades),
-        "excluding_merger_delisted": summarize([x for x in trades if not x["merger"]]),
+        "excluding_compensated_delisted": summarize([x for x in trades if not x["merger"]]),
         "excluding_gap_suspect": summarize([x for x in trades if not x["gap_suspect"]]),
         "listed_only": summarize([x for x in trades if not x["ticker"].endswith(".DL")]),
         "delisted_only": summarize([x for x in trades if x["ticker"].endswith(".DL")]),
