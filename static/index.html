@@ -1132,6 +1132,47 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .tile-foot{font-size:12px;color:var(--n-muted)}
 .tile-row{display:flex;justify-content:space-between;gap:8px;font-size:13px}
 .tile-row .k{color:var(--n-muted)}
+/* v5.380: 홈 브리핑(아침 시황형) — 번호 섹션 바 + 값 칸. 색은 기존 상승·하락 토큰(--px-up/--px-down). */
+.home-brief{display:flex;flex-direction:column;gap:14px;margin-bottom:20px}
+.bf-gate{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;font-size:13px;color:var(--n-sub)}
+.bf-sec{display:flex;flex-direction:column;gap:8px}
+.bf-head{display:flex;align-items:center;gap:10px;background:var(--n-card);border:1px solid var(--n-line);border-radius:999px;padding:6px 14px 6px 6px}
+.bf-no{width:26px;height:26px;border-radius:50%;border:2px solid var(--n-accent);display:inline-flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:700;color:var(--n-text);flex-shrink:0}
+.bf-title{font-size:15px;font-weight:700;color:var(--n-text)}
+.bf-meta{margin-left:auto;font-size:12px;color:var(--n-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bf-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.bf-grid.g6{grid-template-columns:repeat(6,minmax(0,1fr))}
+.bf-cell{background:var(--n-card);border:1px solid var(--n-line);border-radius:10px;padding:10px 14px;min-width:0;
+  display:flex;flex-direction:column;gap:2px;box-shadow:inset 3px 0 0 var(--n-line2)}
+.bf-cell.lv-good{box-shadow:inset 3px 0 0 var(--n-good)} .bf-cell.lv-neutral{box-shadow:inset 3px 0 0 var(--c-amber-fg2)}
+.bf-cell.lv-bad{box-shadow:inset 3px 0 0 var(--c-red-fg3)} .bf-cell.lv-unknown{box-shadow:inset 3px 0 0 var(--n-muted)}
+.bf-k{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:12px;color:var(--n-sub)}
+.bf-k .tile-name{font-size:12px}
+.bf-v{font-family:var(--n-num);font-size:22px;font-weight:700;color:var(--n-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bf-grid.g6 .bf-v{font-size:17px}
+.bf-chg{font-family:var(--n-num);font-size:14px;font-weight:700;white-space:nowrap}
+.bf-chg.up{color:var(--px-up)} .bf-chg.down{color:var(--px-down)} .bf-chg.flat{color:var(--n-muted)}
+.bf-foot{font-size:11.5px;color:var(--n-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bf-foot .bf-chg{font-size:11.5px}
+.bf-fg{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:13px;padding:2px 4px}
+.bf-fg b{font-size:14px}
+.bf-fgbar{position:relative;flex:1;min-width:160px;height:10px;border-radius:5px;
+  background:linear-gradient(90deg,var(--px-down) 0 25%,color-mix(in srgb,var(--px-down) 45%,transparent) 25% 45%,var(--n-line2) 45% 55%,
+  color-mix(in srgb,var(--px-up) 45%,transparent) 55% 75%,var(--px-up) 75% 100%)}
+.bf-fgbar i{position:absolute;top:50%;width:16px;height:16px;border-radius:50%;background:var(--n-accent);border:2px solid var(--n-card);transform:translate(-50%,-50%)}
+.bf-sched{display:flex;flex-direction:column;gap:4px;font-size:13px;padding:2px 6px}
+.bf-sched .row{display:flex;gap:10px;align-items:baseline}
+.bf-sched .d{flex-shrink:0;min-width:72px;font-weight:700;font-size:12px;color:var(--n-sub)}
+.bf-secgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.bf-sbox{background:var(--n-card);border:1px solid var(--n-line);border-radius:10px;padding:10px 12px;min-width:0;display:flex;flex-direction:column;gap:3px}
+.bf-sbox .bf-sh{display:flex;justify-content:space-between;gap:6px;font-weight:700;font-size:13px;margin-bottom:3px}
+.bf-sbox .bf-sh span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bf-sbox .bf-sr{display:flex;justify-content:space-between;gap:6px;font-size:12.5px}
+.bf-sbox .bf-sr a{color:var(--n-sub);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bf-tabs{margin-left:auto;display:flex;gap:4px}
+.bf-tabs button{background:none;border:1px solid var(--n-line2);color:var(--n-sub);border-radius:999px;font:inherit;font-size:12px;padding:2px 10px;min-height:26px;cursor:pointer}
+.bf-tabs button.on{background:var(--n-accent);border-color:var(--n-accent);color:var(--c-orange-bg3);font-weight:700}
 .home-search{display:flex;align-items:center;gap:12px;min-height:48px;padding:0 6px 0 18px;margin-bottom:24px;
   background:var(--n-card);border:1px solid var(--n-line);border-radius:12px}
 .home-search input{flex:1;min-width:0;background:none;border:0;outline:none;color:var(--n-text);font:inherit;font-size:14px;min-height:44px}
@@ -1208,6 +1249,11 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
   .tile-row{font-size:12px;flex-direction:column;gap:0}
   .tile-row .num{text-align:left}
   .home-grid{grid-template-columns:minmax(0,1fr)}
+  .bf-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .bf-grid.g6{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .bf-v{font-size:18px} .bf-grid.g6 .bf-v{font-size:16px}
+  .bf-secgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .bf-meta{display:none}
   .track-h{padding:0 16px 12px}
   .track-row{grid-template-columns:1.4fr 1fr 1fr;padding:8px 16px;gap:4px 8px}
   .track-head{display:none}
@@ -1454,7 +1500,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.379</span>
+      <span class="ver mono" id="verBadge">v5.380</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -1653,12 +1699,16 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
        #calendarDocTop/#calendarDocSide는 innerHTML로 통째로 다시 그려지므로
        그 안에 입력창을 두면 필터 클릭마다 입력·포커스가 끊긴다
        (test_redesign_v5294.py가 위치를 고정). -->
-  <section class="home-tiles" id="homeTiles" aria-label="시장"></section>
+  <!-- v5.380(사용자 지시 "눌림목페이지 이렇게 수정할수있지? 한눈에 보기 쉽네 이게" — 아침 시황형 브리핑):
+       타일 4칸 → 번호 섹션 ①미국 증시 ②국내 증시·환율 ③금리·원자재·심리 ④일정. ⑤섹터는 #homeSectorBox. -->
+  <section class="home-brief" id="homeTiles" aria-label="시장"></section>
   <div id="calSearchBox"></div>
   <div class="home-grid">
     <div class="home-col">
       <!-- 왼쪽: 경고(있을 때만) → 저점종목 → 내 추적 (v5.316: 오늘 할 일·후보 제거) -->
       <div id="calendarDocTop">불러오는 중…</div>
+      <!-- v5.380: 섹터별 특징 종목(브리핑 ⑤) — calendarDocTop 밖(재렌더와 분리, 탭 상태 유지) -->
+      <div id="homeSectorBox"></div>
     </div>
     <aside class="home-col home-side">
       <!-- 오른쪽: 달력 → 메모 → 종가베팅 실전 N/30 → 섹터 가속 (v5.322: 다가오는 일정 카드는 달력에 흡수).
@@ -6102,31 +6152,98 @@ function _nIdxName(name) {
   return sym ? `<a class="tile-name" href="${tvSymbolUrl(sym)}" target="_blank" rel="noopener" title="트레이딩뷰 차트 열기">${name}</a>`
              : `<span class="tile-name">${name}</span>`;
 }
-// 지수 3칸(코스피·코스닥·나스닥) + 4번째 칸(종합 게이트 + S&P500·닛케이·비트코인).
-// 지수 값·게이트 점은 loadIndices()가 받은 /api/indices + indexGateOf()(패널과 같은
-// 판정), 종합 게이트는 /api/calendar의 gate — 둘 다 이미 받는 데이터다.
+// v5.380(사용자 지시 2026-11-12 "눌림목페이지 이렇게 수정할수있지? 한눈에 보기 쉽네 이게" — 레냐봇 아침 시황 레이아웃):
+// 타일 4칸 → 번호 섹션 브리핑. ①미국 증시(S&P500·나스닥·다우 + 선물) ②국내 증시·환율(코스피·코스닥·원/달러)
+// ③금리·원자재·심리(미10년물·금·WTI·VIX·비트코인·닛케이 + 공포탐욕) ④오늘·이번 주 일정. ⑤섹터는 renderHomeSectors.
+// 값 출처: 지수·게이트 = /api/indices(+indexGateOf, 패널과 같은 판정), 그 밖 = /api/brief(yfinance·CNN),
+// 종합 게이트·일정 = /api/calendar. 표시 전용 — 판정에 쓰지 않는다.
+let _briefData = null;
+const BRIEF_DOW = ['일', '월', '화', '수', '목', '금', '토'];
+// 'YYYY-MM-DD' → '11/11(수)'. 형식이 다르면 ''.
+function briefDateLabel(d) {
+  if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(String(d))) return '';
+  const [y, m, dd] = String(d).split('-').map(Number);
+  return `${m}/${dd}(${BRIEF_DOW[new Date(Date.UTC(y, m - 1, dd)).getUTCDay()]})`;
+}
+// 등락 표시. unit 'pp'면 change(절대값, 금리용 %p), 아니면 change_pct(%).
+function briefChgHtml(it, unit) {
+  const v = !it ? null : (unit === 'pp' ? it.change : it.change_pct);
+  if (v == null || isNaN(v)) return '<span class="bf-chg flat">–</span>';
+  const cls = v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
+  return `<span class="bf-chg ${cls}">${v > 0 ? '▲' : v < 0 ? '▼' : ''}${Math.abs(v).toFixed(2)}${unit === 'pp' ? '%p' : '%'}</span>`;
+}
+// CNN 공포탐욕: API rating을 한글로, 없으면 CNN 구간(0–24/25–44/45–55/56–75/76–100)으로.
+const FG_RATING_KO = { 'extreme fear': '극단적 공포', 'fear': '공포', 'neutral': '중립', 'greed': '탐욕', 'extreme greed': '극단적 탐욕' };
+function fgLabel(fg) {
+  if (!fg || fg.score == null) return null;
+  const r = String(fg.rating || '').toLowerCase();
+  if (FG_RATING_KO[r]) return FG_RATING_KO[r];
+  const sc = Number(fg.score);
+  return sc < 25 ? '극단적 공포' : sc < 45 ? '공포' : sc <= 55 ? '중립' : sc <= 75 ? '탐욕' : '극단적 탐욕';
+}
+// 일정 → {today:[…], week:[…]}. week = 오늘 다음 날 ~ 그 주 일요일(KST 날짜 문자열 비교).
+function briefWeekEvents(evs, today) {
+  const out = { today: [], week: [] };
+  if (!today) return out;
+  const [y, m, d] = today.split('-').map(Number);
+  const base = new Date(Date.UTC(y, m - 1, d));
+  const dow = base.getUTCDay();                      // 0=일
+  const sun = new Date(base.getTime() + ((7 - dow) % 7) * 86400000).toISOString().slice(0, 10);
+  (evs || []).forEach(e => {
+    if (!e || !e.date) return;
+    if (e.date === today) out.today.push(e);
+    else if (e.date > today && e.date <= sun) out.week.push(e);
+  });
+  out.week.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  return out;
+}
+function _kstTodayStr() { return new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10); }
+// 값 칸 하나. o = {name|nameHtml, it, unit, pre, suf, gate, foot}
+function briefCellHtml(o) {
+  const it = o.it;
+  const val = it && it.value != null ? `${o.pre || ''}${_nIdxVal(it.value)}${o.suf || ''}` : '–';
+  const g = o.gate;
+  const lv = g ? (g.lv in _N_LV_CLASS ? g.lv : 'unknown') : '';
+  return `<div class="bf-cell${lv ? ' lv-' + lv : ''}"${g && g.html ? ` title="${String(o.name || '')} 게이트: ${String(g.html).replace(/"/g, '&quot;')}"` : ''}>
+    <div class="bf-k">${o.nameHtml || `<span>${o.name}</span>`}${g ? `<span class="st-dot ${_N_LV_CLASS[lv]}">${g.short}</span>` : ''}</div>
+    <div class="bf-v num">${val}</div>
+    ${briefChgHtml(it, o.unit)}
+    ${o.foot ? `<div class="bf-foot">${o.foot}</div>` : ''}
+  </div>`;
+}
+function _briefHead(no, title, meta, extra) {
+  return `<div class="bf-head"><span class="bf-no">${no}</span><span class="bf-title">${title}</span>${meta ? `<span class="bf-meta">${meta}</span>` : ''}${extra || ''}</div>`;
+}
 function renderHomeTiles() {
   const box = document.getElementById('homeTiles');
   if (!box) return;
   const list = _idxList || [];
   const find = nm => list.find(x => x.name === nm);
-  const idxTile = nm => {
-    const ix = find(nm);
-    const g = indexGateOf(ix) || { lv: 'unknown', short: '데이터 대기', html: '' };
-    const foot = [];
-    if (ix) {
-      if (ix.dist_days == null) foot.push('분산일 판정 불가');
-      else foot.push(`분산일 ${ix.dist_days}`);
-      if (ix.ftd) foot.push('FTD');
-    }
-    const stale = idxStaleInfo(ix);
-    const staleHtml = stale ? ` · <span class="st-warn">마지막 봉 ${stale.lb.slice(5)} (${stale.days}일 전)</span>` : '';
-    return `<div class="tile lv-${g.lv in _N_LV_CLASS ? g.lv : 'unknown'}" title="${nm} 게이트: ${(g.html || '').replace(/"/g, '&quot;')}">
-      <div class="tile-top">${_nIdxName(nm)}<span class="st-dot ${_N_LV_CLASS[g.lv]}">${g.short}</span></div>
-      <div class="tile-val"><span class="num v">${_nIdxVal(ix && ix.value)}</span>${_nPct(ix ? ix.change_pct : null)}</div>
-      <div class="tile-foot">${foot.join(' · ') || '&nbsp;'}${staleHtml}</div>
-    </div>`;
+  const bd = _briefData || {};
+  const b = bd.items || {};
+  const gateOf = ix => indexGateOf(ix) || { lv: 'unknown', short: '데이터 대기', html: '' };
+  const idxFoot = ix => {
+    if (!ix) return '';
+    const f = [ix.dist_days == null ? '분산일 판정 불가' : `분산일 ${ix.dist_days}`];
+    if (ix.ftd) f.push('FTD');
+    const st = idxStaleInfo(ix);
+    if (st) f.push(`<span class="st-warn">마지막 봉 ${st.lb.slice(5)} (${st.days}일 전)</span>`);
+    return f.join(' · ');
   };
+  const idxCell = (nm, futKey) => {
+    const ix = find(nm);
+    let foot = idxFoot(ix);
+    if (futKey) {
+      const fu = b[futKey];
+      foot = `선물 ${fu && fu.value != null ? _nIdxVal(fu.value) : '–'} ${briefChgHtml(fu)}` + (foot ? ` · ${foot}` : '');
+    }
+    return briefCellHtml({ name: nm, nameHtml: _nIdxName(nm), it: ix, gate: gateOf(ix), foot });
+  };
+  const sp = find('S&P500'), ks = find('코스피');
+  const usDate = briefDateLabel((sp && (sp.last_bar || sp.date)) || (b.dow && b.dow.date));
+  const krDate = briefDateLabel(ks && (ks.last_bar || ks.date));
+  const futTime = bd.fetched_at_kst ? bd.fetched_at_kst.slice(11) : '';
+  // 종합 게이트 줄(예전 4번째 칸)
   const gate = _calendarData && _calendarData.gate;
   const comb = gate ? gate.suggest : null;
   const combLv = _GATE_LV[comb] || 'unknown';
@@ -6137,15 +6254,90 @@ function renderHomeTiles() {
     gate && gate.why ? gate.why : null,
     ...['kr', 'us'].map(k => (mf[k] && mf[k].final_sentence) ? `${k.toUpperCase()}: ${mf[k].final_sentence}` : null),
   ].filter(Boolean).join('\n').replace(/"/g, '&quot;');
-  const miniRow = nm => {
-    const ix = find(nm);
-    return `<div class="tile-row"><span class="k">${nm}</span><span class="num">${_nIdxVal(ix && ix.value)} ${_nPct(ix ? ix.change_pct : null)}</span></div>`;
-  };
-  box.innerHTML = idxTile('코스피') + idxTile('코스닥') + idxTile('나스닥') + `
-    <div class="tile lv-${combLv in _N_LV_CLASS ? combLv : 'unknown'}" style="gap:8px" title="${gateTitle}">
-      <div class="tile-top"><span class="tile-name">시장 게이트</span><span class="st-dot ${_N_LV_CLASS[combLv]}">${combTxt}</span></div>
-      ${miniRow('S&P500')}${miniRow('닛케이')}${miniRow('비트코인')}
-    </div>`;
+  const src = bd.sources || {};
+  const srcWarn = !_briefData ? '<span class="n-sub">시세 불러오는 중…</span>'
+    : src.yahoo && src.yahoo !== 'ok' ? `<span class="st-warn" title="없는 항목: ${(src.yahoo_missing || []).join(', ')}">⚠ 일부 시세 없음 (${src.yahoo})</span>` : '';
+  const gateLine = `<div class="bf-gate" title="${gateTitle}"><span><span class="st-dot ${_N_LV_CLASS[combLv]}">시장 게이트 · ${combTxt}</span></span>${srcWarn}</div>`;
+  // ③ 공포탐욕
+  const fg = bd.fear_greed;
+  const fgl = fgLabel(fg);
+  const fgHtml = fgl
+    ? `<div class="bf-fg"><span>공포탐욕지수 <b>${fg.score} ${fgl}</b>${fg.previous_close != null ? ` <span class="n-sub">전일 ${fg.previous_close}</span>` : ''}</span>
+        <span class="bf-fgbar" title="CNN Fear &amp; Greed (0 극단적 공포 ~ 100 극단적 탐욕)"><i style="left:${Math.max(0, Math.min(100, fg.score))}%"></i></span></div>`
+    : (_briefData ? `<div class="bf-fg"><span class="st-warn" title="${_escapeHtml(src.fear_greed || '')}">⚠ 공포탐욕지수 불러오기 실패 (CNN)</span></div>` : '');
+  // ④ 일정
+  const ev = briefWeekEvents(_calendarData ? calSystemEvents(_calendarData) : [], _kstTodayStr());
+  const evRow = (d, e) => `<div class="row"><span class="d">${d}</span><span>${e.html}</span></div>`;
+  const sched = !_calendarData ? '<span class="n-sub">일정 불러오는 중…</span>'
+    : (ev.today.length ? ev.today.map(e => evRow('오늘', e)).join('') : evRow('오늘', { html: '<span class="n-sub">주요 일정 없음</span>' }))
+      + ev.week.map(e => evRow(briefDateLabel(e.date), e)).join('');
+  box.innerHTML = gateLine + `
+    <div class="bf-sec">${_briefHead(1, '미국 증시', [usDate && `${usDate} 종가`, futTime && `선물 ${futTime} KST`].filter(Boolean).join(' · '))}
+      <div class="bf-grid">${idxCell('S&P500', 'es')}${idxCell('나스닥', 'nq')}${briefCellHtml({ name: '다우', it: b.dow, foot: `선물 ${b.ym && b.ym.value != null ? _nIdxVal(b.ym.value) : '–'} ${briefChgHtml(b.ym)}` })}</div></div>
+    <div class="bf-sec">${_briefHead(2, '국내 증시 · 환율', krDate && `${krDate} 종가`)}
+      <div class="bf-grid">${idxCell('코스피')}${idxCell('코스닥')}${briefCellHtml({ name: '원/달러', it: b.usdkrw, suf: '원', foot: b.usdkrw && b.usdkrw.date ? `${briefDateLabel(b.usdkrw.date)} 기준` : '' })}</div></div>
+    <div class="bf-sec">${_briefHead(3, '금리 · 원자재 · 심리')}
+      <div class="bf-grid g6">${[
+        briefCellHtml({ name: '미 10년물', it: b.us10y, unit: 'pp', suf: '%', foot: b.us10y && b.us10y.date ? `${briefDateLabel(b.us10y.date)} 종가` : '' }),
+        briefCellHtml({ name: '금', it: b.gold, pre: '$', foot: b.gold && b.gold.date ? `${briefDateLabel(b.gold.date)} 종가` : '' }),
+        briefCellHtml({ name: 'WTI 유가', it: b.wti, pre: '$', foot: b.wti && b.wti.date ? `${briefDateLabel(b.wti.date)} 종가` : '' }),
+        briefCellHtml({ name: 'VIX', it: b.vix, foot: b.vix && b.vix.date ? `${briefDateLabel(b.vix.date)} 종가` : '' }),
+        briefCellHtml({ name: '비트코인', nameHtml: _nIdxName('비트코인'), it: find('비트코인'), pre: '$' }),
+        briefCellHtml({ name: '닛케이', nameHtml: _nIdxName('닛케이'), it: find('닛케이') }),
+      ].join('')}</div>${fgHtml}</div>
+    <div class="bf-sec">${_briefHead(4, '오늘 · 이번 주 일정', '한국시간')}<div class="bf-sched">${sched}</div></div>`;
+}
+async function loadBrief() {
+  try {
+    _briefData = await apiJson('/api/brief');
+  } catch (e) {
+    _briefData = { items: {}, sources: { yahoo: 'fail', fear_greed: 'fail: ' + (e && e.message || e) } };
+  }
+  renderHomeTiles();
+}
+
+// ⑤ 섹터별 특징 종목 — /api/sectors(섹터 요약 탭과 같은 데이터·같은 마감 스냅샷 규칙). 섹터는 평균 등락 순,
+// 종목은 서버가 준 상위 5(등락 높은 순). 미국은 티커, 한국은 종목명(섹터 요약 탭과 같은 규칙).
+let _homeSectors = null, _homeSectorsTs = 0;
+let homeSectorPanel = (() => { try { return localStorage.getItem('pb_home_sector_panel') || 'US'; } catch (e) { return 'US'; } })();
+const HOME_SECTOR_MAX = 12;
+function homeSectorGridHtml(rows, isUS, max) {
+  const chg = v => `<span class="bf-chg ${v > 0 ? 'up' : v < 0 ? 'down' : 'flat'}" style="font-size:12.5px">${v > 0 ? '▲' : v < 0 ? '▼' : ''}${Math.abs(v).toFixed(2)}%</span>`;
+  const boxes = (rows || []).slice(0, max || HOME_SECTOR_MAX).map(r => `<div class="bf-sbox">
+      <div class="bf-sh"><span title="${_escapeHtml(r.sector)} · ${r.n}종목 · 상승 ${r.up_pct}%">${_escapeHtml(r.sector)}</span>${chg(r.avg_chg)}</div>
+      ${(r.top || []).slice(0, 5).map(t => `<div class="bf-sr"><a href="${tvUrl(t)}" target="_blank" rel="noopener" title="${_escapeHtml(t.name || t.ticker)}">${_escapeHtml(isUS ? (t.ticker || t.name) : (t.name || t.ticker))}</a>${chg(t.chg)}</div>`).join('')}
+    </div>`);
+  return boxes.length ? `<div class="bf-secgrid">${boxes.join('')}</div>` : '<span class="n-sub">섹터 데이터 없음</span>';
+}
+function setHomeSectorPanel(p) {
+  homeSectorPanel = p;
+  try { localStorage.setItem('pb_home_sector_panel', p); } catch (e) {}
+  renderHomeSectors();
+}
+function renderHomeSectors() {
+  const box = document.getElementById('homeSectorBox');
+  if (!box) return;
+  const d = _homeSectors;
+  const tabs = `<span class="bf-tabs">${[['US', '미국'], ['KOSPI', '코스피'], ['KOSDAQ', '코스닥']].map(([k, l]) =>
+    `<button type="button" class="${homeSectorPanel === k ? 'on' : ''}" onclick="setHomeSectorPanel('${k}')">${l}</button>`).join('')}</span>`;
+  let body;
+  if (!d) body = '<span class="n-sub">섹터 불러오는 중…</span>';
+  else if (d.pending) body = '<span class="n-sub">섹터 집계 중(전체 데이터 수집 중) — 잠시 뒤 다시 그립니다</span>';
+  else if (d.error) body = `<span class="st-warn">섹터 불러오기 실패</span>`;
+  else body = homeSectorGridHtml((d.panels || {})[homeSectorPanel], homeSectorPanel === 'US', HOME_SECTOR_MAX);
+  const meta = d && d.asof ? `${String(d.asof).slice(5)} KST 수집 · 마지막 봉 등락` : '';
+  box.innerHTML = `<section class="bf-sec" aria-label="섹터별 특징 종목">${_briefHead(5, '섹터별 특징 종목', meta, tabs)}${body}</section>`;
+}
+async function loadHomeSectors(force) {
+  if (!force && _homeSectors && !_homeSectors.pending && Date.now() - _homeSectorsTs < 300000) return renderHomeSectors();
+  try {
+    _homeSectors = await apiJson('/api/sectors');
+  } catch (e) {
+    _homeSectors = { error: String(e && e.message || e) };
+  }
+  _homeSectorsTs = Date.now();
+  renderHomeSectors();
+  if (_homeSectors && _homeSectors.pending) setTimeout(() => loadHomeSectors(true), 30000);
 }
 
 // 오른쪽 1: 종가베팅 실전 기록 N/30 — /api/calendar jongga_forward.total_resolved.
@@ -12622,6 +12814,8 @@ async function loadIndices() {
     const list = (data.indices || []);
     _idxList = list;
     renderHomeTiles();
+    loadBrief();          // v5.380: 홈 브리핑 추가 시세(서버 5분 캐시)
+    loadHomeSectors();    // v5.380: 섹터별 특징 종목(5분 안이면 재요청 안 함)
     if (!list.length) { bar.style.display = 'none'; return; }
     bar.style.display = 'block';
     // v5.257: 지수 카드의 점은 아래 gateOf()와 **같은 판정**을 쓴다.
@@ -12706,6 +12900,7 @@ async function loadIndices() {
   } catch (e) {
     bar.style.display = 'none';
     renderHomeTiles();   // v5.294: 실패해도 타일은 '데이터 대기'로 그린다(조용히 사라지지 않게)
+    loadBrief(); loadHomeSectors();   // v5.380: 지수가 실패해도 브리핑·섹터는 따로 그린다
   }
 }
 loadIndices();

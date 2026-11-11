@@ -5,6 +5,13 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.380 [홈 상단 브리핑 — 사용자 지시 2026-11-12 "눌림목페이지 이렇게 수정할수있지? 한눈에 보기 쉽네 이게"(레냐봇 아침 시황 이미지)
+  → 홈 타일 4칸을 번호 섹션으로: ①미국 증시(S&P500·나스닥·다우 + ES/NQ/YM 선물) ②국내 증시·환율(코스피·코스닥·원/달러)
+  ③금리·원자재·심리(미10년물 %p·금·WTI·VIX·비트코인·닛케이 + CNN 공포탐욕 막대) ④오늘·이번 주 일정(/api/calendar 일정 그대로)
+  ⑤섹터별 특징 종목(/api/sectors, 미국/코스피/코스닥 탭, 섹터 12개 × 상위 5종목). 게이트 점·분산일·종합 게이트는 그대로 유지.
+  신규 GET /api/brief(5분 캐시): yfinance ^DJI·ES=F·NQ=F·YM=F·KRW=X·^TNX·GC=F·CL=F·^VIX + CNN 공포탐욕(비공식 JSON —
+  막히면 화면에 ⚠, 로그 [brief]에 소스 상태 매번 기록). _fetch_yf_index가 마지막 봉 date를 같이 준다. 표시 전용 — 판정 무관.
+  시황 요약 문장·핵심 뉴스(Claude API)는 이번엔 넣지 않음(유료 호출 가드 필요 — 별도 작업).]
 v5.379 [조용하던 종목 거래량 폭발 — 사용자 지시 2026-11-10 "거래량이 마르고 조용하던 종목이 어는날 거래량이 터졌을때, 그거잡을수있어?"
   → 시점 "c"(장중+장마감 둘 다), 대상 "c 나스닥도"(KR 전체 + US). GET /api/quiet-surge?market=kr|us&mode=intraday|close(봇 읽기).
   판정은 quiet_surge.py 순수 함수 하나: 직전 20봉 평균 ≤ 그 앞 60봉 평균×0.6(조용) · 그날 거래량 ≥ 20봉 평균×5(장중은 경과 비율로 환산)
@@ -9215,7 +9222,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.379"
+VERSION = "v5.380"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -15929,8 +15936,14 @@ def _fetch_yf_index(symbol: str, label: str, decimals: int = 2) -> dict | None:
             pct = (last / prev - 1) * 100 if prev > 0 else 0.0
         else:
             chg, pct = 0.0, 0.0  # 데이터 1개뿐이면 등락 0으로 표시(종가만이라도)
+        # v5.380: 마지막 봉 날짜 — 홈 브리핑이 "11/11 종가"처럼 기준일을 표시한다.
+        try:
+            last_date = closes.index[-1].strftime("%Y-%m-%d")
+        except Exception:
+            last_date = None
         return {"name": label, "value": round(last, decimals),
-                "change": round(chg, decimals), "change_pct": round(pct, 2)}
+                "change": round(chg, decimals), "change_pct": round(pct, 2),
+                "date": last_date}
     except Exception:
         return None
 
@@ -16436,6 +16449,87 @@ async def _indices_impl():
     data = _clean_nan(data)   # NaN/Inf 제거 (휴장일 빈 데이터로 인한 JSON 직렬화 실패 방지)
     _indices_cache["ts"] = now
     _indices_cache["data"] = data
+    return JSONResponse(data)
+
+
+# ── v5.380(사용자 지시 2026-11-12 "눌림목페이지 이렇게 수정할수있지? 한눈에 보기 쉽네 이게" — 레냐봇
+# 아침 시황 레이아웃): 홈 상단 브리핑에 쓰는 지수·선물·환율·금리·원자재·심리 값.
+# 코스피·코스닥·S&P500·나스닥(게이트 포함)·닛케이·비트코인은 /api/indices가 이미 주므로 여기선
+# 그 밖의 것만 받는다. 값은 전부 yfinance 마지막 봉 종가와 그 전 봉 대비 등락(_fetch_yf_index).
+# 공포탐욕지수는 CNN 비공식 JSON(production.dataviz.cnn.io) — 공식 API가 아니라 언제든 막힐 수
+# 있어 소스 상태(sources)·경고 로그·화면 배지를 같이 둔다(CLAUDE.md "새 외부 소스" 규칙).
+# 표시 전용: 스캔·게이트·진입 판정 어디에도 쓰지 않는다.
+BRIEF_SYMBOLS = {
+    # key: (yfinance 심볼, 라벨, 소수 자리)
+    "dow":    ("^DJI",  "다우", 2),
+    "es":     ("ES=F",  "S&P500 선물", 2),
+    "nq":     ("NQ=F",  "나스닥 선물", 2),
+    "ym":     ("YM=F",  "다우 선물", 2),
+    "usdkrw": ("KRW=X", "원/달러", 2),
+    "us10y":  ("^TNX",  "미 10년물", 2),   # 값 = 수익률(%) — 등락은 %p(change)로 표시
+    "gold":   ("GC=F",  "금", 2),
+    "wti":    ("CL=F",  "WTI 유가", 2),
+    "vix":    ("^VIX",  "VIX", 2),
+}
+FEAR_GREED_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
+_BRIEF_TTL = 300
+_brief_cache: dict = {}
+
+
+def _fetch_fear_greed() -> dict:
+    """CNN 공포탐욕지수. 실패하면 예외(호출부가 소스 상태로 기록)."""
+    import requests as _rq
+    r = _rq.get(FEAR_GREED_URL, timeout=8, headers={
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+        "Accept": "application/json", "Referer": "https://edition.cnn.com/"})
+    r.raise_for_status()
+    return _parse_fear_greed(r.json())
+
+
+def _parse_fear_greed(j) -> dict:
+    fg = (j or {}).get("fear_and_greed") or {}
+    score = fg.get("score")
+    if score is None:
+        raise ValueError("fear_and_greed.score 없음")
+    prev = fg.get("previous_close")
+    return {"score": round(float(score)),
+            "previous_close": round(float(prev)) if prev is not None else None,
+            "rating": fg.get("rating"),
+            "timestamp": fg.get("timestamp")}
+
+
+@app.get("/api/brief")
+async def brief():
+    """홈 브리핑(v5.380) — 다우·선물·원/달러·미10년물·금·WTI·VIX·공포탐욕. 5분 캐시."""
+    now = time.time()
+    if _brief_cache and now - _brief_cache.get("ts", 0) < _BRIEF_TTL:
+        return JSONResponse(_brief_cache["data"])
+    loop = asyncio.get_event_loop()
+    keys = list(BRIEF_SYMBOLS)
+    res = await asyncio.gather(
+        *[loop.run_in_executor(_executor, _fetch_yf_index, *BRIEF_SYMBOLS[k]) for k in keys],
+        loop.run_in_executor(_executor, _fetch_fear_greed),
+        return_exceptions=True,
+    )
+    items = {k: (None if isinstance(v, BaseException) else v) for k, v in zip(keys, res[:-1])}
+    missing = [k for k, v in items.items() if not isinstance(v, dict)]
+    fg_res = res[-1]
+    if isinstance(fg_res, BaseException):
+        fg, fg_src = None, f"fail: {type(fg_res).__name__}: {str(fg_res)[:120]}"
+    else:
+        fg, fg_src = fg_res, "ok"
+    yf_src = "ok" if not missing else (f"partial {len(keys) - len(missing)}/{len(keys)}"
+                                       if len(missing) < len(keys) else "fail")
+    # 0건이어도 남긴다(침묵 금지 — CLAUDE.md 사보타주 5번)
+    print(f"[brief] yahoo {yf_src} missing={missing} · fear_greed {fg_src}", flush=True)
+    data = _clean_nan({
+        "items": items, "fear_greed": fg,
+        "sources": {"yahoo": yf_src, "yahoo_missing": missing, "fear_greed": fg_src},
+        "fetched_at_kst": datetime.now(KST).strftime("%Y-%m-%d %H:%M"),
+    })
+    _brief_cache["ts"] = now
+    _brief_cache["data"] = data
     return JSONResponse(data)
 
 

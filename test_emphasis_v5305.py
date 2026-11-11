@@ -85,9 +85,10 @@ def test_rs_chip_and_sector_chip_contrast(sel):
 
 
 def test_tiles_get_state_stripe_class():
-    assert TEXT.count('class="tile lv-${') == 2   # 지수 타일 3개(같은 템플릿) + 시장 게이트 타일
+    # v5.380: 홈 타일이 브리핑 값 칸(.bf-cell)으로 바뀌었다 — 게이트 있는 칸(지수 4개)이 같은 템플릿으로 띠를 받는다.
+    assert TEXT.count("class=\"bf-cell${lv ? ' lv-' + lv : ''}\"") == 1
     for lv in ("good", "neutral", "bad", "unknown"):
-        assert f".tile.lv-{lv}{{box-shadow:inset 4px 0 0 var(--" in TEXT
+        assert f".bf-cell.lv-{lv}{{box-shadow:inset 3px 0 0 var(--" in TEXT
 
 
 @pytest.mark.parametrize("rs,want", [(95, " rs-hi"), (99, " rs-hi"), (94, ""), (94.9, ""), ("null", ""), ("'95'", "")])
