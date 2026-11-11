@@ -84,8 +84,10 @@ def collect_signals(data, now, stats):
     return out, window_start
 
 
-def run_portfolio(signals, start, end, N, stats):
-    size_frac = 1.0 / (2 * N)
+def run_portfolio(signals, start, end, N, stats, size_frac=None, tag=None):
+    # 2026-11-11: size_frac·tag 선택 인자 추가(기본값이면 11-10 실행과 같은 동작). 물타기 몫 측정(docs/lowpoint_portfolio_cash_reserve.md)용.
+    size_frac = 1.0 / (2 * N) if size_frac is None else size_frac
+    tag = tag or f"N{N}"
     by_day = defaultdict(list)
     for s in signals:
         d0 = s["path"].index[0]
@@ -153,8 +155,10 @@ def run_portfolio(signals, start, end, N, stats):
                     p["adds"] += 1
                     p["paid"] += need
                 else:
+                    if p["cash_short_adds"] == 0:
+                        stats[f"{tag}_add_skipped_positions"] += 1     # 물타기를 한 번이라도 못 한 종목 수
                     p["cash_short_adds"] += 1
-                    stats[f"N{N}_add_no_cash"] += 1
+                    stats[f"{tag}_add_no_cash"] += 1            # 물타기 못 한 일수(조건이 계속 성립하면 매일 셈)
             p["last"] = c
         eq = cash + sum(p["shares"] * p["last"] for p in pos.values())
         eq_curve.append((d, eq, len(pos), cash / eq if eq > 0 else 0))
@@ -164,8 +168,8 @@ def run_portfolio(signals, start, end, N, stats):
     dd = s / s.cummax() - 1
     yearly = {str(y): float(g.iloc[-1] / g.iloc[0] - 1) for y, g in s.groupby(s.index.year)}
     open_pos = [{"ticker": t, "entry": str(p["entry"].date()), "unrealized": p["shares"] * p["last"] / p["paid"] - 1,
-                 "days_held": (s.index[-1] - p["entry"]).days, "adds": p["adds"]} for t, p in pos.items()]
-    return {"N": N, "size_frac": size_frac, "start": str(s.index[0].date()), "end": str(s.index[-1].date()),
+                 "days_held": (s.index[-1] - p["entry"]).days, "adds": p["adds"], "cash_short_adds": p["cash_short_adds"]} for t, p in pos.items()]
+    return {"N": N, "size_frac": size_frac, "min_cash_ratio": min(r for *_, r in eq_curve), "start": str(s.index[0].date()), "end": str(s.index[-1].date()),
             "final_equity": float(s.iloc[-1]), "cagr": float(s.iloc[-1] ** (1 / years) - 1) if years and years > 0 else None,
             "max_drawdown": float(dd.min()), "max_dd_date": str(dd.idxmin().date()), "yearly": yearly,
             "trades_closed": len(trades), "win_rate_closed": sum(x["ret_on_paid"] > 0 for x in trades) / len(trades) if trades else None,
