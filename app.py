@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.381 [KR 전체 120·240일선 상향 돌파 — 사용자 지시 2026-11-12 "알림봇으로 120평, 240평을 아래에서 위로 뚫을때 알림오게할수있어?"
+  → "전종목은 무리인가? 코스피 코스닥". GET /api/ma-cross?mode=intraday|close(봇 읽기). 판정 ma_cross.cross_up 하나: 어제 종가 < 어제
+  w일선 AND 오늘 종가 ≥ 오늘 w일선(종가 단순평균, w=120·240). 대상 = 스캐너 KR 유니버스(시총 1000억 이상, 스팩 제외).
+  close는 확정 봉(confirmed_through)만, intraday는 오늘 진행 중 봉(잠정). 거래대금순 이평별 상위 25 + 전체 건수, 거래량 배수(직전 20봉 평균,
+  장중은 경과 비율 환산)는 표시 전용. **관심 신호 · 측정 전.** 얼마냐봇 v2.59가 KR 14:00(장중)·20:20(마감) KST에 보낸다.]
 v5.380 [홈 상단 브리핑 — 사용자 지시 2026-11-12 "눌림목페이지 이렇게 수정할수있지? 한눈에 보기 쉽네 이게"(레냐봇 아침 시황 이미지)
   → 홈 타일 4칸을 번호 섹션으로: ①미국 증시(S&P500·나스닥·다우 + ES/NQ/YM 선물) ②국내 증시·환율(코스피·코스닥·원/달러)
   ③금리·원자재·심리(미10년물 %p·금·WTI·VIX·비트코인·닛케이 + CNN 공포탐욕 막대) ④오늘·이번 주 일정(/api/calendar 일정 그대로)
@@ -9058,6 +9063,8 @@ _BOT_READ_EXACT_PATHS = {
     "/api/lowpoint/held-floors",
     # v5.379: 조용하던 종목 거래량 폭발(장중·마감) — GET·읽기 전용.
     "/api/quiet-surge",
+    # v5.381: KR 전체 120·240일선 상향 돌파(장중·마감) — GET·읽기 전용.
+    "/api/ma-cross",
 }
 _BOT_READ_PATH_PREFIXES = ("/api/dist/", "/api/ma/", "/api/pullback-signal/", "/api/vol/")
 
@@ -9222,7 +9229,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.380"
+VERSION = "v5.381"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -17538,6 +17545,62 @@ async def quiet_surge_api(market: str = "kr", mode: str = "close"):
     body = quiet_surge_scan(bundle.get("data") or {}, bundle.get("universe") or {}, market, mode, now)
     print(f"[quiet-surge] {market}/{mode} 세션 {body['session_date']} 대상 {body['n_checked']} · 폭발 {body['n_hits']} · "
           f"후속 {len(body['followups'])} · 오늘 봉 없음 {body['n_stale_excluded']}", flush=True)
+    return JSONResponse(_clean_nan(body))
+
+
+def ma_cross_scan(data: dict, universe: dict, mode: str, now: datetime) -> dict:
+    """v5.381 KR 전체 120·240일선 상향 돌파(순수 계산 — 엔드포인트·테스트 공용). mode intraday|close. quiet_surge_scan과 같은 세션 규칙."""
+    import pandas as pd
+    import ma_cross as mc
+    fl = _lp_floor_mod()
+    if mode == "intraday":
+        session, elapsed = str(now.astimezone(KST).date()), _kr_session_elapsed_ratio(now)
+    else:
+        session, elapsed = _lp_watch_mod().confirmed_through("KR", now.isoformat()), 1.0
+    frames, n_short = {}, 0
+    for t, df in (data or {}).items():
+        if df is None or "Close" not in df or len(df) == 0:
+            continue
+        if fl.is_spac({"name": universe.get(t, t), "mkt": "KR"}):
+            continue
+        if mode == "close":
+            df = df[pd.DatetimeIndex(df.index).strftime("%Y-%m-%d") <= session]
+        if len(df) < min(mc.WINDOWS) + 1:
+            n_short += 1
+            continue
+        frames[t] = df
+    if mode == "close" and frames:
+        session = pd.Series([_last_bar_daykey(df) for df in frames.values()]).mode().iloc[0]
+    hits, n_stale = {w: [] for w in mc.WINDOWS}, 0
+    for t, df in frames.items():
+        if _last_bar_daykey(df) != session:
+            n_stale += 1
+            continue
+        for w in mc.WINDOWS:
+            h = mc.cross_up(df, w, elapsed)
+            if h:
+                hits[w].append({"ticker": t, "name": universe.get(t, t), **h})
+    for w in hits:
+        hits[w].sort(key=lambda r: -r["value"])
+    body = {"ok": True, "market": "kr", "mode": mode, "asof": now.astimezone(KST).strftime("%Y-%m-%d %H:%M"),
+            "session_date": session, "elapsed_pct": round(elapsed * 100, 1), "n_checked": len(frames) - n_stale,
+            "n_stale_excluded": n_stale, "n_short_history": n_short,
+            "hits": {str(w): hits[w][:25] for w in hits}, "n_hits": {str(w): len(hits[w]) for w in hits}}
+    if not frames or n_stale == len(frames):
+        body["reason"] = "no_session_bar"     # 0건과 "오늘 봉 자체가 없음"을 구분(침묵 ≠ 성공)
+    return body
+
+
+@app.get("/api/ma-cross")
+async def ma_cross_api(mode: str = "close"):
+    """v5.381 KR 전체(스캐너 KR 유니버스 = 시총 1000억 이상) 120·240일선 상향 돌파 — 얼마냐봇 전용(GET·읽기)."""
+    if mode not in ("intraday", "close"):
+        return JSONResponse({"ok": False, "error": "mode=intraday|close"}, status_code=400)
+    now = datetime.now(KST)
+    bundle = await _fetch_market_data("kr", wait_for_fresh=True) or {}
+    body = ma_cross_scan(bundle.get("data") or {}, bundle.get("universe") or {}, mode, now)
+    print(f"[ma-cross] kr/{mode} 세션 {body['session_date']} 대상 {body['n_checked']} · 돌파 {body['n_hits']} · "
+          f"오늘 봉 없음 {body['n_stale_excluded']} · 봉 부족 {body['n_short_history']}", flush=True)
     return JSONResponse(_clean_nan(body))
 
 
