@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.382 [120·240일선 돌파 알림에 매물 소화 일수 — 사용자 지시 2026-11-14 "120선, 240선 돌파 알림 오잖아. 거기에 소화해야하는 기간도
+  추가할수있어?". ma_cross.overhang(): 지난 240봉(오늘 제외) 중 대표가 (고+저+종)/3 이 (오늘 종가, +10%] 안인 봉의 거래량 합 ÷ 직전 20봉
+  평균 = 소화 일수(평소 속도), ÷ 오늘 거래량(장중은 경과 환산) = 오늘 속도. **AI 어림값 · 표시 전용** — 이미 판 물량을 못 빼서 상한
+  추정이고, +10% 구간 폭도 근거 없는 값이다. /api/ma-cross hits에 overhang_shares·overhang_top·digest_days·digest_days_today 추가.]
 v5.381 [KR 전체 120·240일선 상향 돌파 — 사용자 지시 2026-11-12 "알림봇으로 120평, 240평을 아래에서 위로 뚫을때 알림오게할수있어?"
   → "전종목은 무리인가? 코스피 코스닥". GET /api/ma-cross?mode=intraday|close(봇 읽기). 판정 ma_cross.cross_up 하나: 어제 종가 < 어제
   w일선 AND 오늘 종가 ≥ 오늘 w일선(종가 단순평균, w=120·240). 대상 = 스캐너 KR 유니버스(시총 1000억 이상, 스팩 제외).
@@ -9229,7 +9233,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.381"
+VERSION = "v5.382"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

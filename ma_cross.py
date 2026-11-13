@@ -11,6 +11,30 @@ import pandas as pd
 
 WINDOWS = (120, 240)
 VOL_AVG = 20            # 거래량 배수 기준 = 직전 20봉 평균(표시 전용)
+# v5.382 매물 소화 일수 (사용자 지시 2026-11-14 "120선, 240선 돌파 알림 … 거기에 소화해야하는 기간도 추가할수있어?").
+# 정의(AI 어림값 — 웹 검색·측정 근거 없음, 표시 전용): 지난 OVERHANG_LOOKBACK봉(오늘 제외) 중 대표가 (고+저+종)/3 이
+# (오늘 종가, 오늘 종가 × (1+OVERHANG_ZONE)] 안에 있던 봉의 거래량 합 = "바로 위에 물린 물량"의 상한 추정.
+# 그 사이 이미 판 사람은 빼지 못하므로 실제 물량보다 크게 나온다. 소화 일수 = 그 물량 ÷ 직전 20봉 평균 거래량.
+OVERHANG_LOOKBACK = 240
+OVERHANG_ZONE = 0.10
+
+
+def overhang(df: pd.DataFrame, elapsed: float = 1.0) -> dict:
+    """마지막 봉 종가 바로 위(+OVERHANG_ZONE)의 지난 1년 거래량과 소화 일수. 내부 요구 봉 수 = VOL_AVG+1(부족하면 None 값)."""
+    c = df["Close"].astype(float).to_numpy()
+    h = df["High"].astype(float).to_numpy()
+    lo = df["Low"].astype(float).to_numpy()
+    v = df["Volume"].astype(float).to_numpy()
+    close = c[-1]
+    a = max(0, len(c) - 1 - OVERHANG_LOOKBACK)
+    tp = (h[a:-1] + lo[a:-1] + c[a:-1]) / 3
+    sel = (tp > close) & (tp <= close * (1 + OVERHANG_ZONE))
+    shares = float(v[a:-1][sel].sum())
+    avg = float(v[-VOL_AVG - 1:-1].mean()) if len(v) > VOL_AVG else 0.0
+    today = float(v[-1]) / max(elapsed, 0.01)
+    return {"overhang_shares": shares, "overhang_top": close * (1 + OVERHANG_ZONE),
+            "digest_days": shares / avg if avg > 0 else None,
+            "digest_days_today": shares / today if today > 0 else None}
 
 
 def cross_up(df: pd.DataFrame, w: int, elapsed: float = 1.0) -> "dict | None":
@@ -27,4 +51,4 @@ def cross_up(df: pd.DataFrame, w: int, elapsed: float = 1.0) -> "dict | None":
     return {"window": w, "close": float(c[-1]), "ma": ma_t, "dist_pct": (c[-1] / ma_t - 1) * 100,
             "change_pct": (c[-1] / c[-2] - 1) * 100 if c[-2] > 0 else None,
             "vol_x": (float(v[-1]) / (avg * max(elapsed, 0.01))) if avg > 0 else None,
-            "value": float(c[-1]) * float(v[-1])}
+            "value": float(c[-1]) * float(v[-1]), **overhang(df, elapsed)}

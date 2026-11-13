@@ -89,3 +89,32 @@ def test_intraday_vol_scaled():
 
 def test_bot_can_read_path():
     assert "/api/ma-cross" in app._BOT_READ_EXACT_PATHS
+
+
+def _ohlc(rows, end="2026-11-10"):
+    idx = pd.bdate_range(end=end, periods=len(rows))
+    return pd.DataFrame(rows, index=idx, columns=["Open", "High", "Low", "Close", "Volume"]).astype("float64")
+
+
+def test_overhang_counts_only_zone_above_and_excludes_today():
+    # 위 10% 안(105 근처) 2봉 × 1000주, 10% 밖(120) 1봉, 아래(95) 1봉, 평소 100주 · 오늘 500주
+    rows = [[100, 100, 100, 100, 100]] * 30 + [[105, 106, 104, 105, 1000]] * 2 + [[120, 121, 119, 120, 5000], [95, 96, 94, 95, 7000]] \
+        + [[100, 100, 100, 100, 100]] * 20 + [[100, 101, 99, 100, 500]]
+    o = mc.overhang(_ohlc(rows))
+    assert o["overhang_shares"] == 2000
+    assert o["digest_days"] == pytest.approx(2000 / 100)
+    assert o["digest_days_today"] == pytest.approx(2000 / 500)
+    assert mc.overhang(_ohlc(rows), elapsed=0.5)["digest_days_today"] == pytest.approx(2000 / 1000)
+
+
+def test_overhang_boundary_and_lookback():
+    # 종가와 같은 대표가(=100)는 위가 아니다(초과만), +10% 정확히(110)는 포함
+    rows = [[110, 110, 110, 110, 300]] + [[100, 100, 100, 100, 100]] * 21 + [[100, 100, 100, 100, 100]]
+    assert mc.overhang(_ohlc(rows))["overhang_shares"] == 300
+    old = [[105, 105, 105, 105, 9999]] + [[100, 100, 100, 100, 100]] * (mc.OVERHANG_LOOKBACK + 1)
+    assert mc.overhang(_ohlc(old))["overhang_shares"] == 0          # 240봉보다 오래된 봉은 안 셈
+
+
+def test_cross_hit_carries_overhang():
+    h = mc.cross_up(_cross_frame("2026-11-10"), 120)
+    assert {"overhang_shares", "digest_days", "digest_days_today", "overhang_top"} <= set(h)
