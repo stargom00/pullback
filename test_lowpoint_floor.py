@@ -606,6 +606,11 @@ def test_converge_events_create_once_and_respect_deletions(monkeypatch, tmp_path
     ev = json.load(open(p))
     assert ev[0]["date"] == "2026-11-20" and ev[0]["ticker"] == "036890.KQ" and ev[0]["source"] == "auto_converge"
     assert app._user_event_invalid(ev[0]) is None                          # 사용자가 화면에서 고쳐 저장해도 통과
+    assert ev[0]["conv"] == {"mkt": "KR", "name": "진성티이씨", "line": 9000.0, "base": 8460.0, "close": 8900.0,
+                             "weeks": 1.2, "a_date": "2026-05-08", "b_date": "2026-08-14"}  # v5.383 봇 표용 구조 필드
+    assert app._user_event_invalid({**ev[0], "source": None}) == "conv는 자동 수렴 일정에만(객체)"
+    assert app._user_event_invalid({**ev[0], "conv": {**ev[0]["conv"], "x": 1}}).startswith("conv 알 수 없는 키")
+    assert app._user_event_invalid({**ev[0], "conv": {**ev[0]["conv"], "line": "9000"}}) == "conv.line는 숫자"
     assert app._lp_converge_events(rows, now) == []                        # 같은 수렴은 한 번만
     p.write_text("[]")
     log.write_text(json.dumps({"id": "ue_auto_conv_036890-KQ_20261120"}) + "\n")

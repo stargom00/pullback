@@ -5,6 +5,8 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.383 [빗각×기준선 수렴 자동 일정에 구조 필드 conv(mkt·name·line·base·close·weeks·a_date·b_date) — 사용자 지시 2026-11-15 "알림봇에 이게
+  눈에 하나도 안들어옴. 눈에 읽히기 쉽게바꿔줘". 얼마냐봇 v2.82가 이 숫자로 날짜별·거리(%)순 표를 만든다. 메모·화면은 그대로.]
 v5.382 [120·240일선 돌파 알림에 매물 소화 일수 — 사용자 지시 2026-11-14 "120선, 240선 돌파 알림 오잖아. 거기에 소화해야하는 기간도
   추가할수있어?". ma_cross.overhang(): 지난 240봉(오늘 제외) 중 대표가 (고+저+종)/3 이 (오늘 종가, +10%] 안인 봉의 거래량 합 ÷ 직전 20봉
   평균 = 소화 일수(평소 속도), ÷ 오늘 거래량(장중은 경과 환산) = 오늘 속도. **AI 어림값 · 표시 전용** — 이미 판 물량을 못 빼서 상한
@@ -9233,7 +9235,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.382"
+VERSION = "v5.383"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -22110,7 +22112,11 @@ def _lp_converge_events(rows: dict, now: "datetime") -> list:
                    "memo": (f"빗각 {f(cv['line_now'])} (주당 {cv['slope_week']:+,.2f} · {dt.get('a_date')} 고점 → {dt.get('b_date')} 고점) · "
                             f"기준선 {f(cv['base'])} · 종가 {f(r.get('last_close'))} · 약 {cv['weeks']:.1f}주 뒤 만남. "
                             f"그 주 종가가 빗각 위면 돌파, 기준선 아래면 저점 무효 — 자동 빗각(검증 전 규칙)")[:USER_EVENT_MEMO_MAX],
-                   "source": "auto_converge", "created_at": now.astimezone(KST).isoformat()}
+                   "source": "auto_converge", "created_at": now.astimezone(KST).isoformat(),
+                   # v5.383 봇 알림을 숫자로 다시 짜기 위한 구조 필드(메모 문자열 파싱 금지 — 메모는 사람용)
+                   "conv": {"mkt": m, "name": r.get("name") or code, "line": cv["line_now"], "base": cv["base"],
+                            "close": r.get("last_close"), "weeks": cv["weeks"],
+                            "a_date": dt.get("a_date"), "b_date": dt.get("b_date")}}
             bad = _user_event_invalid({**rec, "rev": 1})
             if bad:
                 print(f"[lowpoint-floor] ⚠️ 수렴 일정 검증 실패 {code}: {bad}", flush=True)
@@ -22124,6 +22130,9 @@ def _lp_converge_events(rows: dict, now: "datetime") -> list:
     print(f"[lowpoint-floor] 빗각 수렴 일정: 대상 {sum(1 for r in rows.values() if (r.get('converge') or {}).get('near'))}종목 중 "
           f"{len(created)}건 새로 등록{(' — ' + ', '.join(e['ticker'] + ' ' + e['date'] for e in created[:10])) if created else ''}", flush=True)
     return created
+
+
+_USER_EVENT_CONV_KEYS = {"mkt", "name", "line", "base", "close", "weeks", "a_date", "b_date"}
 
 
 def _user_event_invalid(rec: dict) -> "str | None":
@@ -22160,7 +22169,20 @@ def _user_event_invalid(rec: dict) -> "str | None":
     src = rec.get("source")
     if src is not None and src not in USER_EVENT_SOURCES:
         return f"source는 {sorted(USER_EVENT_SOURCES)} 중 하나"
-    extra = set(rec) - {"id", "date", "title", "time", "ticker", "memo", "rev", "updated_at", "source", "created_at"}
+    # v5.383: 자동 수렴 일정의 구조 필드(봇 알림 표용). 자동 일정에만, 정해진 키·타입만.
+    cv = rec.get("conv")
+    if cv is not None:
+        if src != "auto_converge" or not isinstance(cv, dict):
+            return "conv는 자동 수렴 일정에만(객체)"
+        if set(cv) - _USER_EVENT_CONV_KEYS:
+            return f"conv 알 수 없는 키: {sorted(set(cv) - _USER_EVENT_CONV_KEYS)}"
+        for k in ("line", "base", "close", "weeks"):
+            if cv.get(k) is not None and (isinstance(cv[k], bool) or not isinstance(cv[k], (int, float))):
+                return f"conv.{k}는 숫자"
+        for k in ("mkt", "name", "a_date", "b_date"):
+            if cv.get(k) is not None and not isinstance(cv[k], str):
+                return f"conv.{k}는 문자열"
+    extra = set(rec) - {"id", "date", "title", "time", "ticker", "memo", "rev", "updated_at", "source", "created_at", "conv"}
     if extra:
         return f"알 수 없는 필드: {sorted(extra)}"
     return None
