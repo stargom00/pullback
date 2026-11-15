@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.384 [코인 일지 진입 이유 칩(여러 개 선택) — 사용자 2026-11-15 "숏포지션 들어간게 구름두껍고 20선깨고내려가서야. 그런데 일지에 그런 옵션이없어"]
+  coin_journal.ENTRY_REASONS(RSI 신호/구름 두꺼움/10선 돌파·이탈/20선 돌파·이탈/99선/스토캐스틱 0·100/추세 따라/채널 따라/기타 — 채널 판단 근거에서 Claude가 고른 목록) →
+  레코드 reasons[]. 새 진입 폼·수정 폼에 칩, 카드에 "진입 이유" 줄. 목록 밖 값은 거부(그 기록에 이미 있던 옛 값만 허용). 메타 entry_reasons.
+  코인 주간 리뷰(예약 작업)가 이유별 성적을 묶는다.
 v5.383 [빗각×기준선 수렴 자동 일정에 구조 필드 conv(mkt·name·line·base·close·weeks·a_date·b_date) — 사용자 지시 2026-11-15 "알림봇에 이게
   눈에 하나도 안들어옴. 눈에 읽히기 쉽게바꿔줘". 얼마냐봇 v2.82가 이 숫자로 날짜별·거리(%)순 표를 만든다. 메모·화면은 그대로.]
 v5.382 [120·240일선 돌파 알림에 매물 소화 일수 — 사용자 지시 2026-11-14 "120선, 240선 돌파 알림 오잖아. 거기에 소화해야하는 기간도
@@ -9235,7 +9239,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.383"
+VERSION = "v5.384"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -21057,6 +21061,7 @@ def _coin_view(records: list) -> dict:
             out.append({**r, "calc": None, "calc_error": f"{type(e).__name__}: {e}"})
     return {"ok": True, "records": out, "stats": coin_journal.stats([r for r in records if not r.get("calc_error")]),
             "exit_reasons": list(coin_journal.EXIT_REASONS), "timeframes": list(coin_journal.TIMEFRAMES),
+            "entry_reasons": list(coin_journal.ENTRY_REASONS),       # v5.384
             "sides": list(coin_journal.SIDES), "fee_roundtrip": coin_journal.FEE_ROUNDTRIP,
             "legacy_exit_reasons": list(coin_journal.LEGACY_EXIT_REASONS), "tp_pct_default": coin_journal.TP_PCT_DEFAULT,
             "tp_roi_leverage": coin_journal.TP_ROI_LEVERAGE,

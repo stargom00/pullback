@@ -48,6 +48,9 @@ TP_ROI_LEVERAGE = 20                            # "20배 ROI 표시" — 사용�
 TP_PCT_MAX = 50.0                               # 입력 상한(AI 판단 — 오타 방지용)
 FEE_ROUNDTRIP = 0.0012                          # "증거금×배율×0.0012(왕복, 상수)" — 사용자 지시
 REVIEW_MAX = 200                                # "한 줄 복기" 입력 상한(AI 판단)
+# v5.384 진입 이유(여러 개 선택). 사용자 2026-11-15 "숏포지션 들어간게 구름두껍고 20선깨고내려가서야. 그런데 일지에 그런 옵션이없어".
+# 항목은 채널(투결혼) 판단 근거에서 Claude가 고른 목록 — 주간 리뷰가 이유별 성적을 묶는 데 쓴다. 바꾸면 옛 기록의 값은 그대로 둔다(LEGACY와 같은 원칙).
+ENTRY_REASONS = ("RSI 신호", "구름 두꺼움", "10선 돌파·이탈", "20선 돌파·이탈", "99선", "스토캐스틱 0·100", "추세 따라", "채널 따라", "기타")
 STATUS_OPEN, STATUS_PARTIAL, STATUS_CLOSED = "진행중", "일부 청산", "종료"
 STATUS_TRIMMED = STATUS_PARTIAL                 # 옛 이름 호환
 EXITS_MAX = 4
@@ -182,6 +185,15 @@ def normalize(rec: dict, creating: bool = False) -> dict:
             out["tp_price"] = None
     out["exit_reason"] = rec.get("exit_reason") or None
     out["review"] = str(rec.get("review") or "").strip()
+    raw_r = rec.get("reasons") or []                # v5.384 진입 이유(순서 유지·중복 제거)
+    if isinstance(raw_r, str):
+        raw_r = [raw_r]
+    reasons = []
+    for x in raw_r:
+        x = str(x).strip()
+        if x and x not in reasons:
+            reasons.append(x)
+    out["reasons"] = reasons
     out["status"] = status_of(out)
     return out
 
@@ -229,6 +241,10 @@ def invalid(rec: dict, old: "dict | None" = None) -> "str | None":
         return f"TP %는 0 초과 {TP_PCT_MAX:g} 이하"
     if len(rec.get("review") or "") > REVIEW_MAX:
         return "복기가 너무 길어요"
+    old_reasons = set((old or {}).get("reasons") or [])
+    for x in rec.get("reasons") or []:
+        if x not in ENTRY_REASONS and x not in old_reasons:      # 목록에서 빠진 옛 값은 그 기록에 이미 있으면 허용
+            return f"진입 이유는 {' / '.join(ENTRY_REASONS)} 중에서"
     return None
 
 

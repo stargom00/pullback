@@ -1342,6 +1342,10 @@ table.lf-table thead th{position:sticky;top:var(--sticky-top,0px);z-index:5;back
 .cj-form input{width:120px}
 .cj-form input[name=review]{width:100%}
 .cj-pcts{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.cj-reasons{display:flex;gap:6px;flex-wrap:wrap;align-items:center;flex:1 1 100%}
+.cj-reasons label{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border:1px solid var(--n-line2);border-radius:999px;background:var(--n-chip);font-size:13px;cursor:pointer}
+.cj-reasons input{width:auto;margin:0}
+.cj-reasons label:has(input:checked){border-color:var(--n-accent);color:var(--n-accent-fg);font-weight:700}
 .cj-edit{margin-top:12px;border-top:1px solid var(--n-line2);padding-top:10px;display:grid;gap:8px}
 .cj-row{display:grid;grid-template-columns:72px repeat(auto-fit,minmax(130px,1fr));gap:8px 12px;align-items:end}
 .cj-rowlabel{font-size:13px;font-weight:600;padding-bottom:10px;color:var(--n-text)}
@@ -1500,7 +1504,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.383</span>
+      <span class="ver mono" id="verBadge">v5.384</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -7807,6 +7811,7 @@ function _cjCardHtml(r) {
     </tbody></table></div>
     ${c.calc_error || r.calc_error ? `<div class="st-dot st-bad">계산 불가 — ${_escapeHtml(r.calc_error || '')}</div>` : (result ? `<div class="cj-result">${result}</div>` : '')}
     ${r.status === '종료' ? `<div class="n-sub" style="margin-top:4px">종료 사유: ${_escapeHtml(r.exit_reason || '—')}</div>` : ''}
+    ${(r.reasons || []).length ? `<div style="margin-top:4px">진입 이유: ${r.reasons.map(_escapeHtml).join(' · ')}</div>` : ''}
     ${r.review ? `<div style="margin-top:4px">복기: ${_escapeHtml(r.review)}</div>` : ''}
     ${_cj.editing === rid ? _cjEditFormHtml(r) : ''}
   </section>`;
@@ -7817,6 +7822,12 @@ function cjLiqPrice(price, lev, side, mmr) {
   const p = Number(price), l = Number(lev), m = Number(mmr);
   if (!(p > 0) || !(l > 1) || !(m >= 0)) return null;
   return side === 'long' ? p * (1 - 1 / l) / (1 - m) : p * (1 + 1 / l) / (1 + m);
+}
+// v5.384 진입 이유 칩(여러 개). opts = 서버 meta.entry_reasons, sel = 그 기록의 reasons. 목록에 없는 옛 값도 체크된 채 보인다.
+function cjReasonChipsHtml(opts, sel) {
+  const chosen = Array.isArray(sel) ? sel : [];
+  const all = [...(opts || []), ...chosen.filter(v => !(opts || []).includes(v))];
+  return all.map(v => `<label><input type="checkbox" name="reasons" value="${_escapeHtml(v)}"${chosen.includes(v) ? ' checked' : ''}>${_escapeHtml(v)}</label>`).join('');
 }
 function cjSignedPct(v, d = 2) { return v == null ? '—' : (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(d) + '%'; }
 function cjLiqPreview(form, outId) {
@@ -7907,6 +7918,7 @@ function _cjEditFormHtml(r) {
       <label>봉<select name="tf">${opt(m.timeframes, r.tf)}</select></label>
       <label>배율<input name="leverage" inputmode="decimal" value="${r.leverage}"></label>
       <label>TP %<input name="tp_pct" inputmode="decimal" value="${r.tp_pct ?? ''}"></label>`)}
+    ${row('진입 이유', `<div class="cj-reasons">${cjReasonChipsHtml(m.entry_reasons, r.reasons)}</div>`)}
     ${row('1차 진입', entryCells('entry', r.entry))}
     ${row('추가 1', entryCells('add1', r.add1))}
     ${row('추가 2', entryCells('add2', r.add2))}
@@ -7940,6 +7952,7 @@ function renderCoinJournal() {
       <label>봉<select name="tf">${opt(m.timeframes || ['1m'], '1m')}</select></label>
       <label>TP %<input name="tp_pct" inputmode="decimal" value="${m.tp_pct_default ?? 0.5}"></label>
       <label>심볼<input name="symbol" value="BTCUSDT"></label>
+      <div class="cj-reasons"><span class="n-sub">진입 이유</span>${cjReasonChipsHtml(m.entry_reasons, [])}</div>
       <button type="submit" class="n-btn primary">기록</button>
     </form>
     <div id="cjQuickLiq" style="margin-top:6px"></div>
@@ -7966,7 +7979,8 @@ function _cjAfter(r, clearKey, what) {
 async function cjQuickAdd(form) {
   const f = new FormData(form);
   const rec = { symbol: f.get('symbol'), leverage: f.get('leverage'), tf: f.get('tf') || '1m', side: f.get('side') || 'long',
-    entry: cjLeg(f.get('price'), null, f.get('margin')), tp_pct: String(f.get('tp_pct') || '').trim() || null, exits: [] };
+    entry: cjLeg(f.get('price'), null, f.get('margin')), tp_pct: String(f.get('tp_pct') || '').trim() || null, exits: [],
+    reasons: f.getAll('reasons') };
   const r = await _cjSend('/api/coin-journal', 'POST', { record: rec });
   _cj.msg = r.ok ? '' : `저장 거부 — ${(r.d && r.d.error) || 'HTTP ' + r.status}`;
   await onEnterCoinJournalTab();
@@ -7987,6 +8001,7 @@ async function cjSaveEdit(form, rid) {
     exits,
     exit_reason: f.get('exit_reason') || null, review: f.get('review'),
     tp_pct: String(f.get('tp_pct') || '').trim() || null,
+    reasons: f.getAll('reasons'),
     created_at: srv.created_at };
   const r = await _cjSend(`/api/coin-journal/${rid}`, 'PUT', { record: rec, base_rev: srv.rev });
   _cjAfter(r, 'editing', '저장');

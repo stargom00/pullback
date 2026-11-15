@@ -367,3 +367,38 @@ def test_view_meta_has_liq(api):
     app, run, _ = api
     st, d = run(app.coin_journal_list())
     assert st == 200 and d["mmr"] == cj.MMR_DEFAULT and len(d["liq_table"]) == len(cj.LIQ_LEVERAGES)
+
+
+# ── v5.384 진입 이유 칩 ─────────────────────────────────────────────────
+def test_v5384_entry_reasons_server(api):
+    """사용자 2026-11-15 "숏포지션 들어간게 구름두껍고 20선깨고내려가서야. 그런데 일지에 그런 옵션이없어"."""
+    r = _rec(reasons=[" 구름 두꺼움", "20선 돌파·이탈", "구름 두꺼움", ""])
+    assert r["reasons"] == ["구름 두꺼움", "20선 돌파·이탈"] and cj.invalid(r) is None   # 정리·중복 제거, 순서 유지
+    assert _rec()["reasons"] == [] and _rec(reasons="추세 따라")["reasons"] == ["추세 따라"]
+    assert "진입 이유" in cj.invalid(_rec(reasons=["감"]))                              # 목록 밖 값 거부
+    old = _rec(reasons=["옛이유"])                                                     # 목록에서 빠진 옛 값은 그 기록에 있으면 허용
+    assert cj.invalid(old, old={"reasons": ["옛이유"]}) is None
+    app, run, tmp = api
+    st, d = run(app.coin_journal_create(_Req({"record": {**QUICK, "reasons": ["구름 두꺼움", "10선 돌파·이탈"]}})))
+    assert st == 200 and d["record"]["reasons"] == ["구름 두꺼움", "10선 돌파·이탈"]
+    st, d = run(app.coin_journal_create(_Req({"record": {**QUICK, "reasons": ["뇌피셜"]}})))
+    assert st == 400 and "진입 이유" in d["error"]
+    st, d = run(app.coin_journal_list())
+    assert d["entry_reasons"] == list(cj.ENTRY_REASONS) and "20선 돌파·이탈" in d["entry_reasons"]
+
+
+def test_v5384_entry_reason_chips_front():
+    if not shutil.which("node"):
+        pytest.skip("node 미설치")
+    src = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+    code = "\n".join(_fn(src, n) for n in ("_escapeHtml", "cjReasonChipsHtml"))
+    expr = '[cjReasonChipsHtml(["A","B<"], ["B<","옛"]), cjReasonChipsHtml(["A"], null), cjReasonChipsHtml(null, [])]'
+    p = subprocess.run(["node", "-e", code + f"\nconsole.log(JSON.stringify({expr}));"], capture_output=True, text=True, timeout=20)
+    assert p.returncode == 0, p.stderr
+    a, b, c = json.loads(p.stdout)
+    assert a.count('type="checkbox" name="reasons"') == 3                       # 목록 2 + 목록 밖 옛 값 1
+    assert 'value="A">A' in a and 'value="B&lt;" checked>B&lt;' in a and 'value="옛" checked>옛' in a
+    assert b == '<label><input type="checkbox" name="reasons" value="A">A</label>' and c == ""
+    # 폼 두 곳이 칩을 그리고, 저장 두 곳이 reasons를 보낸다
+    assert src.count("cjReasonChipsHtml(m.entry_reasons") == 2 and src.count("reasons: f.getAll('reasons')") == 2
+    assert "진입 이유: ${r.reasons.map(_escapeHtml).join(' · ')}" in src
