@@ -258,6 +258,47 @@ def fetch_quote(code: str) -> dict | None:
         return None
 
 
+def fetch_market_quotes(page_size: int = 100, workers: int = 16) -> tuple[dict, dict]:
+    """v5.396 KR 전 종목 현재가·화면 등락률을 한 번에 — marketValue 목록(코스피·코스닥)을 페이지로 훑는다.
+    반환 ({6자리 코드: parse_quote 결과}, stats{total, fetched, failed_pages}). 종목마다 basic을 부르면 테마 바구니 500여 종목에
+    500번 요청이 나가서(8 스레드 15~20초) 목록 약 30번으로 바꿨다. 등락률 뜻은 parse_quote와 같다(전일 정규장 종가 대비).
+    페이지가 일부 실패해도 받은 만큼 돌려주고 failed_pages에 남긴다 — 빠진 종목은 호출부가 fetch_quote로 채운다."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def page(market, n):
+        try:
+            r = requests.get(_MSTOCK_MARKETVALUE_URL.format(market=market), params={"page": n, "pageSize": page_size},
+                             headers=_HEADERS, timeout=_TIMEOUT)
+            r.raise_for_status()
+            return r.json()
+        except (requests.RequestException, ValueError):
+            return None
+
+    out, stats = {}, {"total": 0, "fetched": 0, "failed_pages": 0}
+    jobs = []
+    for market in ("KOSPI", "KOSDAQ"):
+        first = page(market, 1)
+        if not first:
+            stats["failed_pages"] += 1
+            continue
+        total = int(first.get("totalCount") or 0)
+        stats["total"] += total
+        jobs.append((market, 1, first))
+        jobs += [(market, n, None) for n in range(2, (total + page_size - 1) // page_size + 1)]
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        rest = list(ex.map(lambda j: j[2] or page(j[0], j[1]), jobs))
+    for data in rest:
+        if not data:
+            stats["failed_pages"] += 1
+            continue
+        for s in data.get("stocks") or []:
+            q = parse_quote(s)
+            if q and s.get("itemCode"):
+                out[str(s["itemCode"])] = q
+    stats["fetched"] = len(out)
+    return out, stats
+
+
 def _market_suffix_from_autocomplete(code: str) -> str | None:
     """`sosok`이 없을 때의 2차 소스 — 자동완성 API의 typeCode(KOSPI/KOSDAQ)."""
     try:

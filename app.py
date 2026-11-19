@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.396 [테마 종목 늘림 — 사용자 2026-11-20 "종목이 너무 적은데?"]
+  테마 11개·129종목 → 18개·692종목(겹침 빼고 567). 종목 출처 = 네이버 테마(m.stock.naver.com/api/stocks/theme/{no}) 구성 종목을
+  시가총액 큰 순으로 테마당 40개까지 + v5.395 목록. 새로 생긴 테마: 반도체 장비·소재, 전력, 원전, 방산, 조선, 2차전지, 비만치료제.
+  옛 씨앗(tb_*)은 손대지 않았으면 새 씨앗(tb2_*)으로 바꾼다. 가격은 종목마다 부르던 basic 대신 전 종목 목록(marketValue 약 30번,
+  naver_kr.fetch_market_quotes)에서 찾는다 — 500여 종목을 하나씩 부르면 15~20초라서.
 v5.395 [테마를 나누고 종목 추가 — 사용자 2026-11-19 "테마를 나누고 종목을 추가해야할거같아. 네가 종목 찾을수잇어?"(11-18 테마 표 첨부)]
   한한령 1개 → 엔터·콘텐츠·화장품·면세·카지노·여행 4개로 나누고, 로봇·반도체·제약바이오(아리바이오)·광통신·보안·우주항공·음식료 추가(11개, 130종목).
   종목 코드·시장은 naver basic으로 하나씩 대조(거래정지 2개·이름 다른 1개 제외). 목록은 Claude가 고른 것 + 첨부 표.
@@ -9281,7 +9286,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.395"
+VERSION = "v5.396"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -22556,9 +22561,30 @@ def _theme_baskets_load() -> list:
     return baskets
 
 
+_basket_kr_all: dict = {"ts": 0.0, "quotes": {}, "stats": None}
+_BASKET_KR_LOCK = _threading.Lock()
+
+
+def _basket_kr_quotes() -> dict:
+    """KR 전 종목 {코드: 화면 등락률} — naver marketValue 목록 약 30번 요청, 5분 캐시. 실패(0건)면 옛 값을 두고 로그."""
+    with _BASKET_KR_LOCK:
+        if time.time() - _basket_kr_all["ts"] < BASKET_PX_TTL and _basket_kr_all["quotes"]:
+            return _basket_kr_all["quotes"]
+        try:
+            quotes, stats = naver_kr.fetch_market_quotes()
+        except Exception as e:
+            quotes, stats = {}, {"error": str(e)}
+        if quotes:
+            _basket_kr_all.update(ts=time.time(), quotes=quotes, stats=stats)
+        if not quotes or stats.get("failed_pages"):
+            print(f"[theme-baskets] KR 전 종목 등락률 조회 — 받은 종목 {len(quotes)}개 · {stats}", flush=True)
+        return _basket_kr_all["quotes"]
+
+
 def _basket_quote(ticker: str):
-    """(현재가, 화면 등락률 %, 날짜) — KR은 naver basic(naver_kr.fetch_quote: 전일 정규장 종가 대비, 증권사 화면과 같은 값),
-    US는 마지막 일봉 종가 ÷ 전 봉 종가. 실패면 (None, None, None). 스캔 캐시는 쓰지 않는다(스캔 시각에 멈춘 값)."""
+    """(현재가, 화면 등락률 %, 날짜) — KR은 naver 화면 값(전일 정규장 종가 대비, 증권사 화면과 같은 값): 전 종목 목록
+    (_basket_kr_quotes)에서 찾고 없으면 종목 하나만 조회(naver_kr.fetch_quote). US는 마지막 일봉 종가 ÷ 전 봉 종가.
+    실패면 (None, None, None). 스캔 캐시는 쓰지 않는다(스캔 시각에 멈춘 값)."""
     t = ticker.upper().strip()
     hit = _basket_px_cache.get(t)
     if hit and time.time() - hit[0] < BASKET_PX_TTL:
@@ -22566,7 +22592,7 @@ def _basket_quote(ticker: str):
     out = (None, None, None)
     try:
         if naver_kr.is_kr(t) or (len(t) == 6 and t[0].isdigit() and "." not in t):
-            q = naver_kr.fetch_quote(t)
+            q = _basket_kr_quotes().get(naver_kr.to_code(t)) or naver_kr.fetch_quote(t)
             if q:
                 out = (q["close"], q["chg_pct"], q["date"])
         else:

@@ -2,6 +2,7 @@
 
 사보타주 확인(2026-11-19, 전부 FAIL 확인 후 원복): 점화 조건에서 비율(MIN_FRAC) 제거 / 옛 봉 줄을 요약에 포함 /
 엔드포인트가 종료 바구니도 가격 조회 / basketLine에서 가격 실패 표시 제거.
+v5.396: 목록 대신 항상 종목별 조회 / 0건일 때 옛 값 버림 / 실패 페이지를 세지 않음 — FAIL 확인 후 원복.
 v5.395: 씨앗 marker 무시(지운 바구니 부활) / replaces가 rev 무시 / sortBaskets 점화 우선 제거 — FAIL 확인 후 원복.
 v5.394: 등락률 대신 전일 대비 금액을 읽음 / KR을 일봉으로 계산 / 실패도 캐시 — 전부 FAIL 확인 후 원복.
 """
@@ -95,16 +96,25 @@ def test_parse_quote_uses_screen_ratio():
 def test_basket_quote_kr_screen_ratio_us_bars(monkeypatch):
     import pandas as pd
     monkeypatch.setattr(app, "_basket_px_cache", {})
-    seen = []
-    monkeypatch.setattr(app.naver_kr, "fetch_quote", lambda t: seen.append(t) or {"close": 30800.0, "chg_pct": 29.96, "date": "2026-11-19"})
+    monkeypatch.setattr(app, "_basket_kr_all", {"ts": 0.0, "quotes": {}, "stats": None})
+    bulk, single = [], []
+    monkeypatch.setattr(app.naver_kr, "fetch_market_quotes",
+                        lambda: bulk.append(1) or ({"253450": {"close": 30800.0, "chg_pct": 29.96, "date": "2026-11-19"}}, {"failed_pages": 0}))
+    monkeypatch.setattr(app.naver_kr, "fetch_quote", lambda t: single.append(t) or ({"close": 500.0, "chg_pct": 1.5, "date": "2026-11-19"} if t == "0035S0.KQ" else None))
     df = pd.DataFrame({"Close": [100.0, 110.0]}, index=pd.to_datetime(["2026-11-17", "2026-11-18"]))
     monkeypatch.setattr(app, "_fetch", lambda t: df if t == "NVDA" else (_ for _ in ()).throw(AssertionError("KR은 일봉으로 계산하지 않는다")))
     assert app._basket_quote("253450.kq") == (30800.0, 29.96, "2026-11-19") and app._basket_quote("253450") == (30800.0, 29.96, "2026-11-19")
+    assert single == []                                             # 목록에 있으면 종목별 조회 안 함
+    assert app._basket_quote("0035S0.KQ") == (500.0, 1.5, "2026-11-19") and single == ["0035S0.KQ"]   # 목록에 없으면 하나만 조회
     c, p, d = app._basket_quote("NVDA")
     assert (c, round(p, 6), d) == (110.0, 10.0, "2026-11-18")
-    assert app._basket_quote("253450.KQ") == (30800.0, 29.96, "2026-11-19") and seen == ["253450.KQ", "253450"]   # 5분 캐시
-    monkeypatch.setattr(app.naver_kr, "fetch_quote", lambda t: None)
     assert app._basket_quote("000001.KS") == (None, None, None) and "000001.KS" not in app._basket_px_cache    # 실패는 캐시 안 함
+    assert bulk == [1]                                              # 전 종목 목록은 5분 동안 한 번
+    # 목록 조회가 통째로 실패해도(0건) 옛 값으로 계속 답한다
+    monkeypatch.setattr(app, "_basket_px_cache", {})
+    app._basket_kr_all["ts"] = 0.0
+    monkeypatch.setattr(app.naver_kr, "fetch_market_quotes", lambda: ({}, {"failed_pages": 2}))
+    assert app._basket_quote("253450.KQ") == (30800.0, 29.96, "2026-11-19")
 
 
 @pytest.fixture
@@ -139,11 +149,46 @@ SEED23 = [{"ticker": t, "name": t} for t in ["352820.KS", "041510.KQ", "035900.K
 
 def test_real_seed_file_is_valid():
     seed = json.load(open(os.path.join(ROOT, "theme_baskets_seed.json"), encoding="utf-8"))
-    assert len(seed) == 11 and len({x["id"] for x in seed}) == 11 and len({x["name"] for x in seed}) == 11
+    assert len(seed) == 18 and len({x["id"] for x in seed}) == 18 and len({x["name"] for x in seed}) == 18
     for x in seed:
         assert tb.invalid(tb.clean({k: v for k, v in x.items() if k != "replaces"})) is None, x["id"]
         assert all(m["ticker"].endswith((".KS", ".KQ")) and m["name"] != m["ticker"] for m in x["members"]), x["id"]
-    assert [x["id"] for x in seed if x.get("replaces")] == ["tb_enter"]
+        assert len(x["members"]) >= 15, x["id"]
+    # v5.395 씨앗(tb_*) 11개는 전부 새 씨앗이 대신한다
+    assert sorted(o for x in seed for o in x.get("replaces") or []) == sorted(
+        ["tb_enter", "tb_content", "tb_cosmetic", "tb_travel", "tb_robot", "tb_semi", "tb_aribio", "tb_optic", "tb_security", "tb_space", "tb_food"])
+
+
+def test_fetch_market_quotes_pages_both_markets(monkeypatch):
+    import naver_kr
+    calls = []
+
+    class R:
+        def __init__(self, d):
+            self.d = d
+
+        def raise_for_status(self):
+            if self.d is None:
+                raise naver_kr.requests.RequestException("boom")
+
+        def json(self):
+            return self.d
+
+    def get(url, params=None, **kw):
+        mk, n = url.rsplit("/", 1)[1], params["page"]
+        calls.append((mk, n))
+        if (mk, n) == ("KOSDAQ", 2):
+            return R(None)                                       # 한 페이지 실패
+        total = {"KOSPI": 150, "KOSDAQ": 250}[mk]
+        rows = [{"itemCode": f"{mk[-1]}{n}{i:04d}", "closePrice": "1,000", "fluctuationsRatio": "-1.50" if i else "29.96",
+                 "localTradedAt": "2026-11-19T20:09:17+09:00"} for i in range(min(100, total - (n - 1) * 100))]
+        rows.append({"itemCode": "BAD", "closePrice": "", "fluctuationsRatio": "1"})   # 값 없는 줄은 버린다
+        return R({"totalCount": total, "stocks": rows})
+    monkeypatch.setattr(naver_kr.requests, "get", get)
+    q, st = naver_kr.fetch_market_quotes(workers=2)
+    assert sorted(calls) == [("KOSDAQ", 1), ("KOSDAQ", 2), ("KOSDAQ", 3), ("KOSPI", 1), ("KOSPI", 2)]
+    assert st == {"total": 400, "fetched": 300, "failed_pages": 1} and "BAD" not in q
+    assert q["I10000"] == {"close": 1000.0, "chg_pct": 29.96, "date": "2026-11-19"} and q["I20049"]["chg_pct"] == -1.5
 
 
 def test_seed_planted_once_per_id(store, tmp_path):
