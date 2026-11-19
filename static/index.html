@@ -1210,6 +1210,8 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
 .lp-chips a{font-size:12px;padding:5px 9px;border-radius:6px;background:var(--n-chip);color:var(--c-gray-fg3);text-decoration:none;min-height:28px;display:inline-flex;align-items:center}
 .lp-chips a:hover{color:var(--c-gray-fg1)}
 .lp-chips[hidden]{display:none}
+/* v5.387 주봉 저점종목이 수백 개일 때 홈을 덮는다(사용자 2026-11-19 "3줄만보여주고 접기로 접어줘") — 칩 높이 28px × 3줄 + 간격 6px × 2 */
+.lp-chips.lp-clamp{max-height:96px;overflow:hidden}
 .home .tile-name{color:var(--n-sub)}
 .home .tile-name:hover{color:var(--n-text)}
 .tile-row .k{white-space:nowrap}
@@ -1504,7 +1506,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.386</span>
+      <span class="ver mono" id="verBadge">v5.387</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
       <a class="hdr-guide" href="/track" target="_blank" title="추적 장부 — 내가 그은 선을 등록하면 봇이 접근·돌파·이탈을 알려 줌">추적</a>
     </div>
@@ -6086,6 +6088,16 @@ function toggleLowpointMonth(btn) {
   if (btn) btn.setAttribute('aria-expanded', _lpMonthOpen ? 'true' : 'false');
 }
 let _lpMonthOpen = false;
+// v5.387 주봉 칩 3줄 접기 — 기본 접힘. LP_CLAMP_MIN개 이하면 접을 필요가 없어 버튼을 안 보인다(어림값 — 3줄에 보통 20개 안팎).
+let _lpWeekOpen = false;
+const LP_CLAMP_MIN = 12;
+function toggleLowpointWeek(btn) {
+  _lpWeekOpen = !_lpWeekOpen;
+  const box = document.getElementById('lpWeekChips');
+  if (box) box.classList.toggle('lp-clamp', !_lpWeekOpen);
+  if (btn) { btn.setAttribute('aria-expanded', _lpWeekOpen ? 'true' : 'false'); btn.textContent = lpWeekToggleText(_lpWeekOpen, Number(btn.dataset.n)); }
+}
+function lpWeekToggleText(open, n) { return open ? '접기 ▴' : `${n}종목 모두 보기 ▾`; }
 function _lowpointSectionHtml(lp, tf) {
   const meta = _LOWPOINT_TF_META[tf];
   const raw = lp && lp[tf];
@@ -6116,8 +6128,10 @@ function _lowpointSectionHtml(lp, tf) {
     </div>`;
   }
   const head = `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--n-muted)">${labelHtml}${st.state === 'rows' ? `<span class="num">${st.count}</span>` : ''}</div>`;
+  const clamp = st.state === 'rows' && st.count > LP_CLAMP_MIN;   // 월봉(rows)은 위에서 이미 반환 — 여기 오는 rows는 주봉뿐
+  const wOpen = typeof _lpWeekOpen !== 'undefined' && _lpWeekOpen;
   const body = st.state === 'rows'
-    ? `<div class="lp-chips">${chips}</div>`
+    ? `<div class="lp-chips${clamp && !wOpen ? ' lp-clamp' : ''}"${tf === 'week' ? ' id="lpWeekChips"' : ''}>${chips}</div>${clamp ? `<button type="button" class="n-link" style="font-size:12px;min-height:32px;align-self:flex-start" data-n="${st.count}" aria-expanded="${wOpen}" onclick="toggleLowpointWeek(this)">${lpWeekToggleText(wOpen, st.count)}</button>` : ''}`
     : (st.state === 'empty' ? `<div class="n-sub">${st.text}</div>` : '');
   return `<div style="display:flex;flex-direction:column;gap:10px${tf === 'month' ? ';border-top:1px solid var(--n-line);padding-top:10px' : ''}">${failHtml}${head}${body}${ranHtml}</div>`;
 }

@@ -5,6 +5,8 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.387 [홈 저점종목 주봉 칩 3줄 접기 — 사용자 2026-11-19 "스캐너 홈에 종목이 왜저렇게 많이 보이는지 … 3줄만보여주고 접기로 접어줘"]
+  주봉 히트가 12개를 넘으면 칩을 3줄(96px)까지만 보이고 "N종목 모두 보기 ▾ / 접기 ▴". 기본 접힘. 표시만 — 스크린 결과·순서 불변.
 v5.386 [추적 장부 /track — 사용자 2026-11-19 "종목 추적이 잘안돼. 하이브도 내가 채널 다 그려놓고 까먹어서 매매못함" → "응 만들어"]
   내가 그은 선(빗각·채널 상단/하단·수평선)을 화면에서 등록 → 얼마냐봇이 읽어 접근·돌파·이탈 알림. track_lines.py(순수: 값·검증) +
   GET /api/track-lines(봇 읽기) · PUT/DELETE /api/track-lines/{id}(rev·삭제 로그) · static/track.html(양식 + 근접/위/아래 묶음).
@@ -9252,7 +9254,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.386"
+VERSION = "v5.387"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집

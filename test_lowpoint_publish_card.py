@@ -220,6 +220,15 @@ def _extract(name: str) -> str:
     raise AssertionError(f"{name}: 닫는 중괄호를 못 찾음")
 
 
+def _section_src() -> str:
+    """_lowpointSectionHtml + v5.387이 쓰는 상수·버튼 문구 함수(production 원문 그대로)."""
+    import re
+    src = IDX.read_text(encoding="utf-8")
+    m = re.search(r"^const LP_CLAMP_MIN = \d+;$", src, re.M)
+    assert m, "LP_CLAMP_MIN 상수를 못 찾음"
+    return m.group(0) + "\n" + _extract("lpWeekToggleText") + "\n" + _extract("_lowpointSectionHtml")
+
+
 def _meta_const() -> str:
     src = IDX.read_text(encoding="utf-8")
     start = src.index("const _LOWPOINT_TF_META = {")
@@ -273,7 +282,7 @@ def test_card_renders_without_json():
     """lp=null이어도 카드 자체는 사라지지 않는다(숨기면 안 돌린 걸 모른다)."""
     src = (_meta_const() + "\n" + _extract("lowpointSectionStatus") + "\n"
            + _extract("lpDisplayName") + "\n"
-           + _extract("_lowpointRowHtml") + "\n" + _extract("_lowpointSectionHtml") + "\n"
+           + _extract("_lowpointRowHtml") + "\n" + _section_src() + "\n"
            + _extract("renderLowpointHtml") + "\n"
            + "function tvUrl(t, m, iv) { return `tv:${t}:${m}:${iv}`; }\n"
            + "const html = renderLowpointHtml(null);"
@@ -288,7 +297,7 @@ def test_card_renders_without_json():
 def test_card_rows_link_interval_per_section():
     src = (_meta_const() + "\n" + _extract("lowpointSectionStatus") + "\n"
            + _extract("lpDisplayName") + "\n"
-           + _extract("_lowpointRowHtml") + "\n" + _extract("_lowpointSectionHtml") + "\n"
+           + _extract("_lowpointRowHtml") + "\n" + _section_src() + "\n"
            + _extract("renderLowpointHtml") + "\n"
            + "function tvUrl(t, m, iv) { return `tv|${t}|${m}|${iv}`; }\n"
            + "const row = {market:'KOSDAQ', code:'053260.KQ', name:'금강철강',"
@@ -320,3 +329,43 @@ def test_tv_interval_optional_keeps_old_url():
     assert got["plain"].endswith("?symbol=KRX%3A005930") and "interval" not in got["plain"]
     assert got["wk"] == got["plain"] + "&interval=1W"
     assert got["us"].endswith("?symbol=AAPL&interval=1M")
+
+
+# ── v5.387 주봉 칩 3줄 접기 ───────────────────────────────────────────
+# 사보타주 확인(2026-11-19, FAIL 확인 후 원복): ① LP_CLAMP_MIN 비교를 >= 로 ② 기본을 펼침으로(let _lpWeekOpen = true) ③ lp-clamp 클래스를 항상 붙임
+def _week_html(n_week, n_month=1, pre=""):
+    src = (_meta_const() + "\n" + _extract("lowpointSectionStatus") + "\n" + _extract("lpDisplayName") + "\n"
+           + _extract("_lowpointRowHtml") + "\n" + _section_src() + "\n" + _extract("renderLowpointHtml") + "\n"
+           + "function tvUrl(t, m, iv) { return `tv|${t}|${m}|${iv}`; }\n" + pre
+           + "const mk = i => ({market:'KOSDAQ', code:String(100000+i)+'.KQ', name:'종목'+i, close0:1, close1:1, rsi2:31, rsi1:28, rsi0:29});"
+           + f"const html = renderLowpointHtml({{week:{{bar_date:'2026-11-13',rows:Array.from({{length:{n_week}}},(_, i)=>mk(i)),stale:false}},"
+           + f" month:{{bar_date:'2026-10-30',rows:Array.from({{length:{n_month}}},(_, i)=>mk(900+i)),stale:false}}, expected:{{week:'2026-11-13',month:'2026-10-30'}}}});"
+           + "console.log(JSON.stringify({html}));")
+    out = subprocess.run(["node", "-e", src], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)["html"]
+
+
+@needs_node
+def test_week_chips_clamped_to_three_lines_when_many():
+    html = _week_html(418, n_month=30)
+    assert html.count('class="lp-chips lp-clamp" id="lpWeekChips"') == 1      # 주봉만 접힌다(월봉 칩 상자엔 lp-clamp 없음)
+    assert html.count("lp-clamp") == 1
+    assert "418종목 모두 보기 ▾" in html and 'onclick="toggleLowpointWeek(this)"' in html and 'data-n="418"' in html
+    assert html.count("종목417") == 1                                          # 접어도 칩 자체는 전부 들어 있다(펼치면 바로 보임)
+
+
+@needs_node
+def test_week_chips_not_clamped_when_few_or_open():
+    few = _week_html(12)                                                       # 경계: 12개는 그대로
+    assert "lp-clamp" not in few and "toggleLowpointWeek" not in few
+    assert "lp-clamp" in _week_html(13)
+    opened = _week_html(418, pre="var _lpWeekOpen = true;")
+    assert 'class="lp-chips" id="lpWeekChips"' in opened and "접기 ▴" in opened and 'aria-expanded="true"' in opened
+
+
+def test_clamp_css_is_three_rows():
+    src = IDX.read_text(encoding="utf-8")
+    assert src.count("let _lpWeekOpen = false;") == 1                           # 기본 접힘
+    assert ".lp-chips.lp-clamp{max-height:96px;overflow:hidden}" in src        # 28px × 3 + 간격 6px × 2
+    assert "min-height:28px" in src.split(".lp-chips a{")[1].split("}")[0]
