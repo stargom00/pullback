@@ -136,3 +136,5 @@ def test_page_and_header_link():
     assert html.count("/api/track-lines") >= 4 and "Coordinates" in html
     idx = open(os.path.join(ROOT, "static", "index.html"), encoding="utf-8").read()
     assert idx.count('href="/track"') == 1
+    util = idx[idx.index('id="utilTabs"'):idx.index("</nav>", idx.index('id="utilTabs"'))]
+    assert 'href="/track"' in util and "추적장부" in util            # v5.388 기록 탭 줄(코인일지 옆)에 있어야 눈에 띈다
