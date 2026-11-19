@@ -5,6 +5,12 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.393 [테마 바구니 + 테마 점화 — 사용자 2026-11-19 "국장엔 테마가있어 … 종목 추적이 잘안돼" 설계 2단계 → "이제 이거하자"]
+  theme_baskets.py(순수) + GET /api/theme-baskets(봇 읽기) · PUT/DELETE /api/theme-baskets/{id}(rev·삭제 로그) · /track에 "테마" 구역.
+  바구니 종목별 오늘 등락률(naver 통합 일봉 종가 ÷ 전 봉 통합 종가, 5분 캐시) → 강한 종목(+5%↑) 수·평균·대장. 점화 = 강한 종목 3개 이상이면서 30% 이상.
+  최근 5봉을 되짚어 "최근 점화" 날짜도 준다. 증권사 화면 등락률(전일 정규장 종가 대비)과 다를 수 있다 — 실측은 theme_baskets.py docstring.
+  첫 바구니 한한령 23종목(theme_baskets_seed.json — Claude가 고른 목록). 얼마냐봇 v2.91이 점화 알림·`테마` 명령.
+  상수 전부 AI 어림값(theme_baskets.py docstring). 관심 신호 · 측정 전.
 v5.392 [추적 장부 색을 매매 훈련 홈(일지)과 맞춤 — 사용자 2026-11-19 "색상을 이거랑 맞춰줘. 그리고 이 창이 더 보기좋아"]
   static/track.html 토큰만 교체(연녹 바탕·흰 카드·녹색 강조·명조 제목, 값은 훈련 홈 :root 그대로). 표시만.
 v5.391 [추적 장부 차트 — 사용자 2026-11-19 "차트에 빗각, 수평선 그려진걸 추가하는건 어렵지?" → "응"]
@@ -9076,6 +9082,8 @@ _BOT_READ_EXACT_PATHS = {
     "/api/rs-drawdown",
     # v5.386: 추적 장부 읽기(GET만 — PUT/DELETE는 경로가 /api/track-lines/{id}라 여기 안 걸리고 세션이 필요하다).
     "/api/track-lines",
+    # v5.393: 테마 바구니 읽기(GET만 — PUT/DELETE는 /api/theme-baskets/{id}라 세션이 필요하다).
+    "/api/theme-baskets",
     # v5.141: Claude API 일일 상한 경고/차단 텔레그램 발송도 마찬가지로
     # stock-alert 쪽에 이 경로를 폴링하는 코드가 추가돼야 실제 발송이 된다 —
     # 여기서는 데이터(pending_alert)만 열어둠.
@@ -9265,7 +9273,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.392"
+VERSION = "v5.393"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -22487,6 +22495,146 @@ async def track_line_delete(rid: str, request: Request):
         removed = lines.pop(idx)
         _rec_list_write(TRACK_LINES_PATH, lines)
         _rev_store_delete_log(TRACK_LINES_DELETE_LOG_PATH, rid, request, removed, "track-lines")
+    return JSONResponse({"ok": True, "deleted": rid})
+
+
+# ── v5.393 테마 바구니 — theme_baskets.py ────────────────────────────────────────────────
+THEME_BASKETS_PATH = _resolve_persistent_path("theme_baskets.json")
+THEME_BASKETS_DELETE_LOG_PATH = os.path.join(os.path.dirname(THEME_BASKETS_PATH), "theme_baskets_deletions.log")
+THEME_BASKETS_SEED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "theme_baskets_seed.json")
+_THEME_BASKETS_LOCK = _threading.RLock()
+_basket_px_cache: dict = {}         # ticker → (ts, [(날짜, 종가)…]) — 5분 캐시(표시·알림용, 매매 판정 아님)
+BASKET_PX_TTL = 300                 # 장중 점화 알림이 너무 늦지 않게 — AI 어림값
+
+
+def _theme_baskets_load() -> list:
+    """바구니 읽기. 파일이 아직 없으면 theme_baskets_seed.json(한한령)으로 한 번 만든다(rev 1)."""
+    import theme_baskets as tb
+    if os.path.exists(THEME_BASKETS_PATH):
+        return _rec_list_load(THEME_BASKETS_PATH)
+    out = []
+    for x in _rec_list_load(THEME_BASKETS_SEED_PATH):
+        rec = tb.clean(x)
+        bad = tb.invalid(rec)
+        if bad:
+            raise ValueError(f"theme_baskets_seed.json {x.get('id')}: {bad}")
+        rec["created_at"] = _now_iso()
+        rec["rev"], rec["updated_at"] = 1, _now_iso()
+        out.append(rec)
+    _rec_list_write(THEME_BASKETS_PATH, out)
+    print(f"[theme-baskets] 새로 만듦 — 바구니 {len(out)}개", flush=True)
+    return out
+
+
+def _basket_quote(ticker: str):
+    """최근 봉 [(날짜, 종가), …] 오름차순(RECENT_DAYS+1개) — 매번 _fetch(KR은 naver 통합 일봉: 오늘 봉이 장중·애프터에 갱신된다). 실패면 [].
+    스캔 캐시는 쓰지 않는다 — 스캔 시각에 멈춘 값이라 장중 등락률이 낡는다."""
+    import theme_baskets as tb
+    t = ticker.upper().strip()
+    hit = _basket_px_cache.get(t)
+    if hit and time.time() - hit[0] < BASKET_PX_TTL:
+        return hit[1]
+    try:
+        df = _fetch(t + ".KS" if (len(t) == 6 and t[0].isdigit() and "." not in t) else t)
+    except Exception as e:
+        print(f"[theme-baskets] {t} 가격 조회 실패: {e}", flush=True)
+        df = None
+    if df is None or len(df) < 2:
+        return []
+    tail = df["Close"].dropna().iloc[-(tb.RECENT_DAYS + 1):]
+    out = [(str(d)[:10], float(c)) for d, c in tail.items()]
+    _basket_px_cache[t] = (time.time(), out)
+    return out
+
+
+def _basket_today(members: list) -> str:
+    """바구니가 '오늘'로 볼 날짜 — 전부 미국 종목이면 뉴욕 날짜, 아니면 KST 날짜."""
+    if members and not any(naver_kr.is_kr(m["ticker"]) or (len(m["ticker"]) == 6 and m["ticker"][0].isdigit()) for m in members):
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    return datetime.now(KST).strftime("%Y-%m-%d")
+
+
+@app.get("/api/theme-baskets")
+async def theme_baskets_list(prices: int = 1):
+    """테마 바구니 전체(봇 읽기 개방 — GET·읽기 전용. 파일이 없을 때 한 번 심는 것 말고는 쓰기 없음).
+    prices=1이면 종목별 오늘 등락률(rows)과 요약(summary: 강한 종목 수·평균·대장·점화)을 붙인다. 관심 신호 · 측정 전."""
+    import theme_baskets as tb
+    with _THEME_BASKETS_LOCK:
+        try:
+            baskets = _theme_baskets_load()
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"바구니 읽기 실패: {e}"}, status_code=500)
+    try:
+        with _TRACK_LINES_LOCK:
+            lined = sorted({x["ticker"] for x in _track_lines_load() if x.get("status") != "종료"})
+    except (OSError, ValueError):
+        lined = []
+    out, n_fail = [], 0
+    if prices:
+        loop = asyncio.get_event_loop()
+        tks = sorted({m["ticker"] for b in baskets if b.get("status") != "종료" for m in b["members"]})
+        px = dict(zip(tks, await asyncio.gather(*[loop.run_in_executor(_executor, _basket_quote, t) for t in tks])))
+        for b in baskets:
+            if b.get("status") == "종료":
+                out.append({**b, "rows": [], "summary": None, "recent": [], "last_ignited": None})
+                continue
+            days = tb.daily(b["members"], {m["ticker"]: px.get(m["ticker"]) or [] for m in b["members"]})
+            rows = days[0]["rows"] if days else [tb.member_row(m, None, None, None) for m in b["members"]]
+            sm = days[0]["summary"] if days else tb.summary(rows)
+            sm["is_today"] = sm["date"] is not None and sm["date"] == _basket_today(b["members"])
+            n_fail += sm["n_failed"]
+            if sm["n_px"] == 0:
+                print(f"[theme-baskets] {b.get('name')} — 종목 {sm['n']}개 중 가격 받은 것 0개", flush=True)
+            recent = [{"date": d["date"], "strong": d["summary"]["strong"], "n_px": d["summary"]["n_px"],
+                       "avg_pct": d["summary"]["avg_pct"], "ignited": d["summary"]["ignited"]} for d in days]
+            out.append({**b, "rows": sorted(rows, key=lambda r: (r["chg_pct"] is None, -(r["chg_pct"] or 0))), "summary": sm,
+                        "recent": recent, "last_ignited": next((d for d in recent if d["ignited"]), None)})
+    else:
+        out = baskets
+    return JSONResponse(_clean_nan({"ok": True, "baskets": out, "n": len(out), "n_price_failed": n_fail, "lined": lined, "basis": "통합 종가(애프터 포함) ÷ 전 봉 통합 종가",
+                                    "rule": {"up_pct": tb.IGNITE_UP_PCT, "min_count": tb.IGNITE_MIN_COUNT, "min_frac": tb.IGNITE_MIN_FRAC}}))
+
+
+@app.put("/api/theme-baskets/{rid}")
+async def theme_basket_put(rid: str, request: Request):
+    import theme_baskets as tb
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "JSON 본문 필요"}, status_code=400)
+    rec = body.get("record") if isinstance(body, dict) else None
+    if not isinstance(rec, dict) or rec.get("id") != rid:
+        return JSONResponse({"ok": False, "error": "record.id가 경로 id와 같아야 함"}, status_code=400)
+    bad = tb.invalid(rec)
+    if bad:
+        return JSONResponse({"ok": False, "error": bad}, status_code=400)
+    rec = tb.clean(rec)
+    rec.setdefault("created_at", _now_iso())
+    with _THEME_BASKETS_LOCK:
+        try:
+            baskets = _theme_baskets_load()
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
+        status, payload, changed = _rev_store_put(baskets, rid, rec, body.get("base_rev"))
+        if changed:
+            _rec_list_write(THEME_BASKETS_PATH, baskets)
+        return JSONResponse(payload, status_code=status)
+
+
+@app.delete("/api/theme-baskets/{rid}")
+async def theme_basket_delete(rid: str, request: Request):
+    with _THEME_BASKETS_LOCK:
+        try:
+            baskets = _theme_baskets_load()
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
+        idx = next((i for i, r in enumerate(baskets) if r.get("id") == rid), None)
+        if idx is None:
+            return JSONResponse({"ok": True, "already_gone": True})
+        removed = baskets.pop(idx)
+        _rec_list_write(THEME_BASKETS_PATH, baskets)
+        _rev_store_delete_log(THEME_BASKETS_DELETE_LOG_PATH, rid, request, removed, "theme-baskets")
     return JSONResponse({"ok": True, "deleted": rid})
 
 

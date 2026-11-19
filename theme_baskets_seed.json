@@ -1,0 +1,17 @@
+[
+ {"id": "tb_hanhanryeong", "name": "한한령", "status": "추적",
+  "note": "엔터·콘텐츠·화장품·면세·카지노·여행. Claude가 고른 첫 목록(2026-11-19) — 빼고 넣어서 써.",
+  "members": [
+   {"ticker": "352820.KS", "name": "하이브"}, {"ticker": "041510.KQ", "name": "에스엠"},
+   {"ticker": "035900.KQ", "name": "JYP Ent."}, {"ticker": "122870.KQ", "name": "와이지엔터테인먼트"},
+   {"ticker": "182360.KQ", "name": "큐브엔터"}, {"ticker": "376300.KQ", "name": "디어유"},
+   {"ticker": "253450.KQ", "name": "스튜디오드래곤"}, {"ticker": "035760.KQ", "name": "CJ ENM"},
+   {"ticker": "036420.KS", "name": "콘텐트리중앙"}, {"ticker": "086980.KQ", "name": "쇼박스"},
+   {"ticker": "160550.KQ", "name": "NEW"}, {"ticker": "047820.KQ", "name": "초록뱀미디어"},
+   {"ticker": "068050.KQ", "name": "팬엔터테인먼트"}, {"ticker": "046390.KQ", "name": "삼화네트웍스"},
+   {"ticker": "090430.KS", "name": "아모레퍼시픽"}, {"ticker": "051900.KS", "name": "LG생활건강"},
+   {"ticker": "192820.KS", "name": "코스맥스"}, {"ticker": "161890.KS", "name": "한국콜마"},
+   {"ticker": "008770.KS", "name": "호텔신라"}, {"ticker": "034230.KS", "name": "파라다이스"},
+   {"ticker": "114090.KS", "name": "GKL"}, {"ticker": "032350.KS", "name": "롯데관광개발"},
+   {"ticker": "039130.KS", "name": "하나투어"}]}
+]

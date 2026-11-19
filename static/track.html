@@ -84,14 +84,27 @@ input:focus,select:focus{outline:2px solid var(--n-accent);outline-offset:-1px}
 .help{font-size:12px;color:var(--n-muted)}
 .msg{color:var(--n-bad);font-size:13px}
 .empty{color:var(--n-muted);text-align:center;padding:40px 0}
+/* v5.393 테마 바구니 */
+.th-hd{display:flex;align-items:center;gap:10px;margin-top:6px}.th-hd h2{font-family:'Gowun Batang','Nanum Myeongjo',serif;font-size:20px;margin:0;color:var(--n-accent)}.th-hd .sp{flex:1}
+.bk{background:var(--n-card);border:1px solid var(--n-line2);border-radius:16px;padding:12px 14px;display:flex;flex-direction:column;gap:9px;box-shadow:0 1px 2px rgba(0,0,0,.04),0 4px 14px rgba(0,0,0,.04)}
+.bk.fire{border-color:var(--c-up);box-shadow:0 0 0 2px color-mix(in srgb,var(--c-up) 18%,transparent)}
+.bk-hd{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}.bk-hd .nm{font-size:17px;font-weight:700}.bk-hd .sp{flex:1}
+.bk-st{font-size:12px;font-weight:700;border-radius:999px;padding:2px 10px;background:var(--n-chip);color:var(--n-accent-fg)}.bk-st.fire{background:var(--c-up);color:#fff}
+.bk-nums{font-size:13px;color:var(--n-sub)}.bk-nums b{color:var(--n-text)}
+.bk-ms{display:flex;flex-wrap:wrap;gap:6px}
+.mc{display:inline-flex;gap:6px;align-items:baseline;font-size:13px;text-decoration:none;color:var(--n-text);border:1px solid var(--n-line2);border-radius:999px;padding:3px 10px;background:var(--n-panel)}
+.mc:hover{border-color:var(--n-muted)}.mc .p{font-size:12px;font-weight:600}.mc.u .p{color:var(--c-up)}.mc.d .p{color:var(--c-dn)}.mc.s{border-color:var(--c-up);background:color-mix(in srgb,var(--c-up) 9%,var(--n-panel))}
+.mc.x{opacity:.55}.mc .ld{width:6px;height:6px;border-radius:50%;background:var(--n-accent);align-self:center}
+textarea{font:inherit;font-size:14px;color:var(--n-text);background:var(--n-panel);border:1px solid var(--n-line2);border-radius:8px;padding:8px 9px;width:100%;min-height:150px;resize:vertical}
 @media (max-width:760px){.frow{grid-template-columns:1fr 1fr}.wrap{padding:16px 14px 60px}.grid{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">
 <div class="top"><h1>추적 장부</h1><span class="sub" id="sum"></span><span class="sp"></span><a class="back" href="/">← 스캐너</a><button class="btn pri" onclick="openForm()">+ 선 등록</button></div>
 <div id="formBox"></div>
 <div id="nearBox"></div>
+<div id="themeBox"></div>
 <div class="tabs" id="tabs"></div>
 <div id="list"><div class="empty">불러오는 중…</div></div>
-<div class="sub">선을 등록하면 얼마냐봇이 접근(±<span id="np">3</span>%)·종가 돌파·이탈을 알려 줘요 · 봇에 <code>빗각</code> = 전체 현황 · 거리 = 지금 종가에서 선까지 · 표시·알림 전용(측정 전)</div>
+<div class="sub">선을 등록하면 얼마냐봇이 접근(±<span id="np">3</span>%)·종가 돌파·이탈을 알려 줘요 · 봇에 <code>빗각</code> = 전체 현황 · 거리 = 지금 종가에서 선까지 · 테마가 점화하면 봇이 알려 줘(봇에 <code>테마</code>) · 표시·알림 전용(측정 전)</div>
 </div>
 <script>
 // v5.390 추적 장부 — 값·거리 계산은 전부 서버(track_lines.py view)가 한다. 여기는 묶어서 보여 주기와 양식만.
@@ -113,6 +126,46 @@ function groupStocks(lines,theme,showEnd){const by={};
     const near=act.filter(l=>(l.view||{}).zone==='near');const ds=act.map(l=>Math.abs((l.view||{}).to_line_pct??1e9));
     return {ticker:tk,name:L.find(l=>l.name)?.name||tk,theme:L.find(l=>l.theme)?.theme||'',close:v.close??null,date:v.value_date||'',lines:L,near,minDist:ds.length?Math.min(...ds):1e9}})
   .sort((a,b)=>a.minDist-b.minDist)}   // 선까지 가까운 순(근처 ±3% 종목은 정의상 맨 앞에 온다)
+// ── v5.393 테마 바구니 — 등락률·요약·점화 판정은 전부 서버(theme_baskets.py). 여기는 보여 주기와 양식만.
+const B={baskets:[],lined:[],rule:null,form:null,msg:'',err:'',loading:true,delAsk:null};
+async function loadBaskets(){try{const r=await fetch('/api/theme-baskets');const j=await r.json();if(!j.ok)throw new Error(j.error||r.status);
+  B.baskets=j.baskets;B.lined=j.lined||[];B.rule=j.rule;B.err=''}catch(e){B.err='테마를 불러오지 못했어: '+e.message}B.loading=false;renderThemes()}
+const pctTxt=p=>p==null?'—':(p>0?'+':'')+p.toFixed(1)+'%';
+const hasLine=t=>B.lined.some(x=>x===t||(isKR(t)&&isKR(x)&&x.slice(0,6)===t.slice(0,6)));
+// 바구니 한 줄 요약 — 순수 함수(테스트: test_theme_baskets.py가 node로 그대로 실행)
+function basketLine(sm){if(!sm)return '';if(!sm.n_px)return '가격을 못 받았어';
+  return `강한 종목 <b>${sm.strong}/${sm.n_px}</b> · 오른 종목 ${sm.up} · 평균 <b>${pctTxt(sm.avg_pct)}</b>`+(sm.leader?` · 대장 ${esc(sm.leader.name)} <b>${pctTxt(sm.leader.chg_pct)}</b>`:'')
+    +(sm.n_failed?` · 가격 실패 ${sm.n_failed}`:'')+(sm.n_stale?` · 옛 봉 ${sm.n_stale}`:'')}
+function basketHTML(b){const sm=b.summary,end=b.status==='종료',fire=!end&&sm&&sm.ignited,up=B.rule?B.rule.up_pct:5;
+  return `<div class="bk${fire?' fire':''}"><div class="bk-hd"><span class="nm">${esc(b.name)}</span>${end?'<span class="bk-st">종료</span>':sm&&sm.n_px?`<span class="bk-st${fire?' fire':''}">${fire?'점화':'조용'}</span>`:''}
+    <span class="bk-nums">${end?'':basketLine(sm)}</span>${!end&&!fire&&b.last_ignited?`<span class="bk-st fire" style="opacity:.85">최근 점화 ${esc(b.last_ignited.date.slice(5))} · ${b.last_ignited.strong}/${b.last_ignited.n_px}</span>`:''}<span class="sp"></span>${sm&&sm.date?`<span class="help mono">${esc(sm.date.slice(5))}${sm.is_today?'':' (지난 봉)'}</span>`:''}
+    <button class="btn sm ghost" onclick="openBasket('${esc(b.id)}')">고치기</button></div>
+   ${b.note?`<div class="help">${esc(b.note)}</div>`:''}
+   ${end?'':`<div class="bk-ms">${(b.rows||[]).map(r=>`<a class="mc${r.chg_pct==null?' x':r.chg_pct>=up?' u s':r.chg_pct>0?' u':r.chg_pct<0?' d':''}" href="${tv(r.ticker)}" target="_blank" rel="noopener" title="${esc(r.ticker)}${hasLine(r.ticker)?' · 장부에 선 있음':''}">${hasLine(r.ticker)?'<i class="ld"></i>':''}${esc(r.name)}<span class="p mono">${pctTxt(r.chg_pct)}</span></a>`).join('')}</div>`}</div>`}
+function basketFormHTML(){const f=B.form;if(!f)return '';
+  return `<div class="fcard"><h2>${f._new?'테마 만들기':'테마 고치기'}</h2>
+   <div class="frow"><label>테마 이름<input id="b-nm" value="${esc(f.name)}" placeholder="한한령"></label><label style="grid-column:span 3">메모 (선택)<input id="b-nt" value="${esc(f.note||'')}" placeholder="왜 묶었는지"></label></div>
+   <label>종목 — 한 줄에 하나, "이름 티커"<textarea id="b-ms" placeholder="하이브 352820.KS&#10;에스엠 041510.KQ">${esc(f.text)}</textarea></label>
+   <span class="help">2~40종목 · 티커는 줄의 마지막 토막(코스피 .KS · 코스닥 .KQ, 미국은 그대로)</span>
+   ${B.msg?`<div class="msg">${esc(B.msg)}</div>`:''}
+   <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" onclick="saveBasket()">저장</button>
+    ${f._new?'':`<button class="btn" onclick="saveBasket('${f.status==='종료'?'추적':'종료'}')">${f.status==='종료'?'다시 추적':'추적 종료'}</button><button class="btn warn" onclick="delBasket()">${B.delAsk?'한 번 더 누르면 지워져':'지우기'}</button>`}
+    <button class="btn ghost" onclick="B.form=null;B.msg='';B.delAsk=null;renderThemes()">취소</button></div></div>`}
+function openBasket(id){B.msg='';B.delAsk=null;const b=B.baskets.find(x=>x.id===id);
+  B.form=b?{id:b.id,name:b.name,note:b.note||'',status:b.status||'추적',rev:b.rev,created_at:b.created_at,text:b.members.map(m=>m.name+' '+m.ticker).join('\n')}:{id:'tb_'+Date.now().toString(36),name:'',note:'',status:'추적',text:'',_new:true};renderThemes()}
+// 양식 글 → members(서버 theme_baskets.parse_members와 같은 규칙: 줄의 마지막 토막이 티커)
+function parseMembers(text){return String(text||'').replace(/,/g,'\n').split('\n').map(l=>l.trim().split(/\s+/).filter(Boolean)).filter(p=>p.length).map(p=>{const tk=p[p.length-1].toUpperCase();return {ticker:tk,name:p.slice(0,-1).join(' ')||tk}})}
+async function saveBasket(st){const f=B.form,g=id=>document.getElementById(id).value;f.name=g('b-nm').trim();f.note=g('b-nt').trim();f.text=g('b-ms');
+  const rec={id:f.id,name:f.name,note:f.note,status:st||f.status,members:parseMembers(f.text)};if(f.created_at)rec.created_at=f.created_at;
+  try{const r=await fetch('/api/theme-baskets/'+encodeURIComponent(rec.id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({record:rec,base_rev:f._new?null:f.rev})});
+    const j=await r.json();if(!j.ok){B.msg=j.error||('저장 실패 '+r.status);if(j.code==='conflict'||j.code==='gone'){B.form=null;await loadBaskets();B.err=B.msg}renderThemes();return}
+    B.form=null;B.msg='';B.loading=true;renderThemes();await loadBaskets()}catch(e){B.msg='저장 실패: '+e.message;renderThemes()}}
+async function delBasket(){if(!B.delAsk){B.delAsk=true;renderThemes();return}const id=B.form.id;B.delAsk=null;B.form=null;
+  try{const r=await fetch('/api/theme-baskets/'+encodeURIComponent(id),{method:'DELETE'});const j=await r.json();if(!j.ok)B.err=j.error||'삭제 실패'}catch(e){B.err='삭제 실패: '+e.message}await loadBaskets()}
+function renderThemes(){const r=B.rule;
+  document.getElementById('themeBox').innerHTML=`<div style="display:flex;flex-direction:column;gap:10px"><div class="th-hd"><h2>테마</h2><span class="sub">${r?`점화 = +${r.up_pct}% 이상 종목이 ${r.min_count}개 이상이면서 ${Math.round(r.min_frac*100)}% 이상 · 등락률은 애프터 포함 종가 기준(증권사 화면과 다를 수 있음) · 측정 전`:''}</span><span class="sp"></span><button class="btn sm" onclick="openBasket()">+ 테마</button></div>
+   ${basketFormHTML()}${B.err?`<div class="msg">${esc(B.err)}</div>`:''}${B.loading?'<div class="calm">테마 종목 가격 받는 중…</div>':B.baskets.length?B.baskets.map(basketHTML).join(''):(B.err?'':'<div class="calm">아직 테마가 없어. "+ 테마"로 묶어 봐.</div>')}
+   <div class="th-hd"><h2>내 선</h2></div></div>`}
 const LINE_COLORS=['#d98b3a','#2e9e6b','#8a5cd6','#c2477f','#3a8fd9','#8a8f98'];
 function refetchChart(){const tk=S.chart;S.chart=null;if(S.lines.some(l=>l.ticker===tk&&l.status!=='종료'))toggleChart(tk);else render()}
 async function toggleChart(tk){if(S.chart===tk){S.chart=null;render();return}S.chart=tk;render();
@@ -191,5 +244,5 @@ function render(){document.getElementById('np').textContent=S.near;document.getE
     +(nEnd?`<button class="tab${S.showEnd?' on':''}" onclick="S.showEnd=!S.showEnd;render()">종료한 선${S.showEnd?' 숨기기':' 보기'}<span>${nEnd}</span></button>`:'');
   document.getElementById('list').innerHTML=(S.err?`<div class="msg">${esc(S.err)}</div>`:'')+(G.length?`<div class="grid">${G.map(cardHTML).join('')}</div>`:(S.err?'':'<div class="empty">아직 등록한 선이 없어. 오른쪽 위 "+ 선 등록"으로 시작해.</div>'));
   document.querySelectorAll('.cscroll').forEach(e=>{e.scrollLeft=e.scrollWidth})}
-load();
+load();renderThemes();loadBaskets();
 </script></body></html>
