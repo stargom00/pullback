@@ -2,6 +2,7 @@
 
 사보타주 확인(2026-11-19, 전부 FAIL 확인 후 원복): 점화 조건에서 비율(MIN_FRAC) 제거 / 옛 봉 줄을 요약에 포함 /
 엔드포인트가 종료 바구니도 가격 조회 / basketLine에서 가격 실패 표시 제거.
+v5.395: 씨앗 marker 무시(지운 바구니 부활) / replaces가 rev 무시 / sortBaskets 점화 우선 제거 — FAIL 확인 후 원복.
 v5.394: 등락률 대신 전일 대비 금액을 읽음 / KR을 일봉으로 계산 / 실패도 캐시 — 전부 FAIL 확인 후 원복.
 """
 from __future__ import annotations
@@ -110,6 +111,9 @@ def test_basket_quote_kr_screen_ratio_us_bars(monkeypatch):
 def store(monkeypatch, tmp_path):
     monkeypatch.setattr(app, "THEME_BASKETS_PATH", str(tmp_path / "theme_baskets.json"))
     monkeypatch.setattr(app, "THEME_BASKETS_DELETE_LOG_PATH", str(tmp_path / "theme_baskets_deletions.log"))
+    monkeypatch.setattr(app, "THEME_BASKETS_SEEDED_PATH", str(tmp_path / "theme_baskets_seeded.json"))
+    monkeypatch.setattr(app, "THEME_BASKETS_SEED_PATH", str(tmp_path / "seed.json"))
+    json.dump([{"id": "tb_hanhanryeong", "name": "한한령", "members": SEED23}], open(tmp_path / "seed.json", "w"), ensure_ascii=False)
     monkeypatch.setattr(app, "TRACK_LINES_PATH", str(tmp_path / "track_lines.json"))
     calls = []
 
@@ -130,14 +134,41 @@ def _list(prices=1):
     return json.loads(asyncio.run(app.theme_baskets_list(prices)).body)
 
 
-def test_seed_is_valid_and_planted_once(store):
+SEED23 = [{"ticker": t, "name": t} for t in ["352820.KS", "041510.KQ", "035900.KQ", "122870.KQ"] + [f"{i:06d}.KS" for i in range(1, 20)]]
+
+
+def test_real_seed_file_is_valid():
     seed = json.load(open(os.path.join(ROOT, "theme_baskets_seed.json"), encoding="utf-8"))
-    assert all(tb.invalid(tb.clean(x)) is None for x in seed) and len(seed[0]["members"]) == 23
+    assert len(seed) == 11 and len({x["id"] for x in seed}) == 11 and len({x["name"] for x in seed}) == 11
+    for x in seed:
+        assert tb.invalid(tb.clean({k: v for k, v in x.items() if k != "replaces"})) is None, x["id"]
+        assert all(m["ticker"].endswith((".KS", ".KQ")) and m["name"] != m["ticker"] for m in x["members"]), x["id"]
+    assert [x["id"] for x in seed if x.get("replaces")] == ["tb_enter"]
+
+
+def test_seed_planted_once_per_id(store, tmp_path):
     j = _list(0)
     assert j["ok"] and [b["name"] for b in j["baskets"]] == ["한한령"] and j["baskets"][0]["rev"] == 1
     assert store == []                                   # prices=0이면 가격 조회 0건
     code, _ = _put({"id": "b2", "name": "전력", "members": _m(3)}, None)
-    assert code == 200 and [b["name"] for b in _list(0)["baskets"]] == ["한한령", "전력"]   # 파일이 있으면 다시 심지 않는다
+    assert code == 200 and [b["name"] for b in _list(0)["baskets"]] == ["한한령", "전력"]
+    # 씨앗이 늘면 새 id만 심는다. replaces는 손대지 않은(rev 1) 옛 씨앗만 치운다
+    json.dump([{"id": "tb_hanhanryeong", "name": "한한령", "members": SEED23},
+               {"id": "tb_enter", "name": "엔터", "members": SEED23[:4], "replaces": ["tb_hanhanryeong"]},
+               {"id": "tb_robot", "name": "로봇", "members": SEED23[4:8]}], open(tmp_path / "seed.json", "w"), ensure_ascii=False)
+    assert [b["name"] for b in _list(0)["baskets"]] == ["전력", "엔터", "로봇"]
+    # 지운 씨앗 바구니는 다시 살아나지 않는다
+    asyncio.run(app.theme_basket_delete("tb_robot", _Req()))
+    assert [b["name"] for b in _list(0)["baskets"]] == ["전력", "엔터"]
+    assert sorted(json.load(open(app.THEME_BASKETS_SEEDED_PATH))) == ["tb_enter", "tb_hanhanryeong", "tb_robot"]
+
+
+def test_seed_replace_keeps_edited_basket(store, tmp_path):
+    b = _list(0)["baskets"][0]
+    assert _put({"id": b["id"], "name": "한한령(내 목록)", "members": SEED23[:5]}, 1)[1]["record"]["rev"] == 2
+    json.dump([{"id": "tb_hanhanryeong", "name": "한한령", "members": SEED23},
+               {"id": "tb_enter", "name": "엔터", "members": SEED23[:4], "replaces": ["tb_hanhanryeong"]}], open(tmp_path / "seed.json", "w"), ensure_ascii=False)
+    assert [x["name"] for x in _list(0)["baskets"]] == ["한한령(내 목록)", "엔터"]      # 고친 바구니는 그대로 둔다
 
 
 def test_list_rows_summary_recent(store):
@@ -201,3 +232,8 @@ def test_page_basket_line_and_member_parser():
     assert out["ms"] == tb.parse_members(text)          # 화면과 서버가 같은 규칙으로 읽는다
     html = open(os.path.join(ROOT, "static", "track.html"), encoding="utf-8").read()
     assert html.count("loadBaskets()") >= 3 and 'id="themeBox"' in html
+    bs = [{"id": "q", "status": "추적", "summary": {"ignited": False, "avg_pct": 9}}, {"id": "e", "status": "종료", "summary": None},
+          {"id": "f1", "status": "추적", "summary": {"ignited": True, "avg_pct": 3}}, {"id": "f2", "status": "추적", "summary": {"ignited": True, "avg_pct": 8}},
+          {"id": "n", "status": "추적", "summary": {"ignited": False, "avg_pct": None}}]
+    js2 = _extract_js("sortBaskets") + "\nconsole.log(JSON.stringify(sortBaskets(" + json.dumps(bs) + ").map(b=>b.id)))"
+    assert json.loads(subprocess.run(["node", "-e", js2], capture_output=True, text=True, check=True).stdout) == ["f2", "f1", "q", "n", "e"]

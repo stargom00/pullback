@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.395 [테마를 나누고 종목 추가 — 사용자 2026-11-19 "테마를 나누고 종목을 추가해야할거같아. 네가 종목 찾을수잇어?"(11-18 테마 표 첨부)]
+  한한령 1개 → 엔터·콘텐츠·화장품·면세·카지노·여행 4개로 나누고, 로봇·반도체·제약바이오(아리바이오)·광통신·보안·우주항공·음식료 추가(11개, 130종목).
+  종목 코드·시장은 naver basic으로 하나씩 대조(거래정지 2개·이름 다른 1개 제외). 목록은 Claude가 고른 것 + 첨부 표.
+  씨앗 심기를 id마다 한 번으로(theme_baskets_seeded.json) — 지운 바구니를 되살리지 않는다. 옛 한한령 바구니는 손대지 않았을 때(rev 1)만 치운다.
 v5.394 [테마 바구니 등락률을 증권사 화면과 같은 값으로 — 사용자 2026-11-19 "등락률이 너무 다른데"]
   KR 등락률 = naver basic의 등락률(현재가 ÷ 전일 정규장 종가, naver_kr.fetch_quote). v5.393은 통합 일봉 종가끼리 나눠 화면과 크게 달랐다
   (스튜디오드래곤 화면 +29.96% vs +6.0% — 전날 애프터 상승이 일봉으론 전날 봉에 들어감). 지난 날짜의 화면 등락률은 naver가 안 줘서
@@ -9277,7 +9281,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.394"
+VERSION = "v5.395"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -22505,6 +22509,7 @@ async def track_line_delete(rid: str, request: Request):
 # ── v5.393 테마 바구니 — theme_baskets.py ────────────────────────────────────────────────
 THEME_BASKETS_PATH = _resolve_persistent_path("theme_baskets.json")
 THEME_BASKETS_DELETE_LOG_PATH = os.path.join(os.path.dirname(THEME_BASKETS_PATH), "theme_baskets_deletions.log")
+THEME_BASKETS_SEEDED_PATH = os.path.join(os.path.dirname(THEME_BASKETS_PATH), "theme_baskets_seeded.json")
 THEME_BASKETS_SEED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "theme_baskets_seed.json")
 _THEME_BASKETS_LOCK = _threading.RLock()
 _basket_px_cache: dict = {}         # ticker → (ts, (현재가, 등락률, 날짜)) — 5분 캐시(표시·알림용, 매매 판정 아님)
@@ -22512,22 +22517,43 @@ BASKET_PX_TTL = 300                 # 장중 점화 알림이 너무 늦지 않�
 
 
 def _theme_baskets_load() -> list:
-    """바구니 읽기. 파일이 아직 없으면 theme_baskets_seed.json(한한령)으로 한 번 만든다(rev 1)."""
+    """바구니 읽기 + theme_baskets_seed.json 심기(씨앗 id마다 **한 번만**).
+    심은 id는 theme_baskets_seeded.json에 적어 둔다 — 사용자가 지운 씨앗 바구니를 다시 살리지 않는다.
+    씨앗의 replaces = 이 씨앗이 대신하는 옛 씨앗 id: 그 바구니가 **rev 1(손대지 않은 상태)**일 때만 치운다(v5.395 한한령 → 4개로 나눔)."""
     import theme_baskets as tb
-    if os.path.exists(THEME_BASKETS_PATH):
-        return _rec_list_load(THEME_BASKETS_PATH)
-    out = []
-    for x in _rec_list_load(THEME_BASKETS_SEED_PATH):
-        rec = tb.clean(x)
+    baskets = _rec_list_load(THEME_BASKETS_PATH) if os.path.exists(THEME_BASKETS_PATH) else []
+    try:
+        with open(THEME_BASKETS_SEEDED_PATH, encoding="utf-8") as f:
+            seeded = set(_json.load(f))
+    except (OSError, ValueError):
+        seeded = set()
+    seed = _rec_list_load(THEME_BASKETS_SEED_PATH)
+    todo = [x for x in seed if x["id"] not in seeded]
+    if not todo:
+        return baskets
+    have, added, removed = {b["id"] for b in baskets}, [], []
+    for x in todo:
+        rec = tb.clean({k: v for k, v in x.items() if k != "replaces"})
         bad = tb.invalid(rec)
         if bad:
             raise ValueError(f"theme_baskets_seed.json {x.get('id')}: {bad}")
-        rec["created_at"] = _now_iso()
-        rec["rev"], rec["updated_at"] = 1, _now_iso()
-        out.append(rec)
-    _rec_list_write(THEME_BASKETS_PATH, out)
-    print(f"[theme-baskets] 새로 만듦 — 바구니 {len(out)}개", flush=True)
-    return out
+        for old in x.get("replaces") or []:
+            hit = next((b for b in baskets if b["id"] == old and int(b.get("rev") or 0) <= 1), None)
+            if hit:
+                baskets.remove(hit)
+                removed.append(old)
+        if rec["id"] not in have:
+            rec["created_at"] = _now_iso()
+            rec["rev"], rec["updated_at"] = 1, _now_iso()
+            baskets.append(rec)
+            added.append(rec["id"])
+    _rec_list_write(THEME_BASKETS_PATH, baskets)
+    tmp = THEME_BASKETS_SEEDED_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        _json.dump(sorted(seeded | {x["id"] for x in seed}), f, ensure_ascii=False)
+    os.replace(tmp, THEME_BASKETS_SEEDED_PATH)
+    print(f"[theme-baskets] 씨앗 심기 — 추가 {len(added)}개 {added} · 치움 {removed}", flush=True)
+    return baskets
 
 
 def _basket_quote(ticker: str):

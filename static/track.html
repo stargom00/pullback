@@ -86,7 +86,7 @@ input:focus,select:focus{outline:2px solid var(--n-accent);outline-offset:-1px}
 .empty{color:var(--n-muted);text-align:center;padding:40px 0}
 /* v5.393 테마 바구니 */
 .th-hd{display:flex;align-items:center;gap:10px;margin-top:6px}.th-hd h2{font-family:'Gowun Batang','Nanum Myeongjo',serif;font-size:20px;margin:0;color:var(--n-accent)}.th-hd .sp{flex:1}
-.bk{background:var(--n-card);border:1px solid var(--n-line2);border-radius:16px;padding:12px 14px;display:flex;flex-direction:column;gap:9px;box-shadow:0 1px 2px rgba(0,0,0,.04),0 4px 14px rgba(0,0,0,.04)}
+.bk{background:var(--n-card);border:1px solid var(--n-line2);border-radius:16px;padding:9px 14px;display:flex;flex-direction:column;gap:9px;box-shadow:0 1px 2px rgba(0,0,0,.04),0 4px 14px rgba(0,0,0,.04)}
 .bk.fire{border-color:var(--c-up);box-shadow:0 0 0 2px color-mix(in srgb,var(--c-up) 18%,transparent)}
 .bk-hd{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}.bk-hd .nm{font-size:17px;font-weight:700}.bk-hd .sp{flex:1}
 .bk-st{font-size:12px;font-weight:700;border-radius:999px;padding:2px 10px;background:var(--n-chip);color:var(--n-accent-fg)}.bk-st.fire{background:var(--c-up);color:#fff}
@@ -127,21 +127,24 @@ function groupStocks(lines,theme,showEnd){const by={};
     return {ticker:tk,name:L.find(l=>l.name)?.name||tk,theme:L.find(l=>l.theme)?.theme||'',close:v.close??null,date:v.value_date||'',lines:L,near,minDist:ds.length?Math.min(...ds):1e9}})
   .sort((a,b)=>a.minDist-b.minDist)}   // 선까지 가까운 순(근처 ±3% 종목은 정의상 맨 앞에 온다)
 // ── v5.393 테마 바구니 — 등락률·요약·점화 판정은 전부 서버(theme_baskets.py). 여기는 보여 주기와 양식만.
-const B={baskets:[],lined:[],rule:null,form:null,msg:'',err:'',loading:true,delAsk:null};
+const B={open:{},baskets:[],lined:[],rule:null,form:null,msg:'',err:'',loading:true,delAsk:null};
 async function loadBaskets(){try{const r=await fetch('/api/theme-baskets');const j=await r.json();if(!j.ok)throw new Error(j.error||r.status);
-  B.baskets=j.baskets;B.lined=j.lined||[];B.rule=j.rule;B.err=''}catch(e){B.err='테마를 불러오지 못했어: '+e.message}B.loading=false;renderThemes()}
+  B.baskets=sortBaskets(j.baskets);B.lined=j.lined||[];B.rule=j.rule;B.err=''}catch(e){B.err='테마를 불러오지 못했어: '+e.message}B.loading=false;renderThemes()}
+// 점화한 테마 먼저 → 평균 등락률 높은 순 → 종료는 맨 뒤. 순수 함수(테스트: test_theme_baskets.py)
+function sortBaskets(bs){const k=b=>b.status==='종료'?[2,0]:[b.summary&&b.summary.ignited?0:1,-((b.summary&&b.summary.avg_pct)??-999)];
+  return bs.slice().sort((a,b)=>{const x=k(a),y=k(b);return x[0]-y[0]||x[1]-y[1]})}
 const pctTxt=p=>p==null?'—':(p>0?'+':'')+p.toFixed(1)+'%';
 const hasLine=t=>B.lined.some(x=>x===t||(isKR(t)&&isKR(x)&&x.slice(0,6)===t.slice(0,6)));
 // 바구니 한 줄 요약 — 순수 함수(테스트: test_theme_baskets.py가 node로 그대로 실행)
 function basketLine(sm){if(!sm)return '';if(!sm.n_px)return '가격을 못 받았어';
   return `강한 종목 <b>${sm.strong}/${sm.n_px}</b> · 오른 종목 ${sm.up} · 평균 <b>${pctTxt(sm.avg_pct)}</b>`+(sm.leader?` · 대장 ${esc(sm.leader.name)} <b>${pctTxt(sm.leader.chg_pct)}</b>`:'')
     +(sm.n_failed?` · 가격 실패 ${sm.n_failed}`:'')+(sm.n_stale?` · 옛 봉 ${sm.n_stale}`:'')}
-function basketHTML(b){const sm=b.summary,end=b.status==='종료',fire=!end&&sm&&sm.ignited,up=B.rule?B.rule.up_pct:5;
+function basketHTML(b){const sm=b.summary,end=b.status==='종료',fire=!end&&sm&&sm.ignited,up=B.rule?B.rule.up_pct:5,op=B.open[b.id]??!!fire;
   return `<div class="bk${fire?' fire':''}"><div class="bk-hd"><span class="nm">${esc(b.name)}</span>${end?'<span class="bk-st">종료</span>':sm&&sm.n_px?`<span class="bk-st${fire?' fire':''}">${fire?'점화':'조용'}</span>`:''}
     <span class="bk-nums">${end?'':basketLine(sm)}</span><span class="sp"></span>${sm&&sm.date?`<span class="help mono">${esc(sm.date.slice(5))}${sm.is_today?'':' (지난 봉)'}</span>`:''}
-    <button class="btn sm ghost" onclick="openBasket('${esc(b.id)}')">고치기</button></div>
-   ${b.note?`<div class="help">${esc(b.note)}</div>`:''}
-   ${end?'':`<div class="bk-ms">${(b.rows||[]).map(r=>`<a class="mc${r.chg_pct==null?' x':r.chg_pct>=up?' u s':r.chg_pct>0?' u':r.chg_pct<0?' d':''}" href="${tv(r.ticker)}" target="_blank" rel="noopener" title="${esc(r.ticker)}${hasLine(r.ticker)?' · 장부에 선 있음':''}">${hasLine(r.ticker)?'<i class="ld"></i>':''}${esc(r.name)}<span class="p mono">${pctTxt(r.chg_pct)}</span></a>`).join('')}</div>`}</div>`}
+    ${end?'':`<button class="btn sm ghost" onclick="B.open['${esc(b.id)}']=${!op};renderThemes()">${op?'접기 ▴':`종목 ${b.members.length} ▾`}</button>`}<button class="btn sm ghost" onclick="openBasket('${esc(b.id)}')">고치기</button></div>
+   ${op&&b.note?`<div class="help">${esc(b.note)}</div>`:''}
+   ${end||!op?'':`<div class="bk-ms">${(b.rows||[]).map(r=>`<a class="mc${r.chg_pct==null?' x':r.chg_pct>=up?' u s':r.chg_pct>0?' u':r.chg_pct<0?' d':''}" href="${tv(r.ticker)}" target="_blank" rel="noopener" title="${esc(r.ticker)}${hasLine(r.ticker)?' · 장부에 선 있음':''}">${hasLine(r.ticker)?'<i class="ld"></i>':''}${esc(r.name)}<span class="p mono">${pctTxt(r.chg_pct)}</span></a>`).join('')}</div>`}</div>`}
 function basketFormHTML(){const f=B.form;if(!f)return '';
   return `<div class="fcard"><h2>${f._new?'테마 만들기':'테마 고치기'}</h2>
    <div class="frow"><label>테마 이름<input id="b-nm" value="${esc(f.name)}" placeholder="한한령"></label><label style="grid-column:span 3">메모 (선택)<input id="b-nt" value="${esc(f.note||'')}" placeholder="왜 묶었는지"></label></div>
