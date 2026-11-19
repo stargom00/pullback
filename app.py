@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.394 [테마 바구니 등락률을 증권사 화면과 같은 값으로 — 사용자 2026-11-19 "등락률이 너무 다른데"]
+  KR 등락률 = naver basic의 등락률(현재가 ÷ 전일 정규장 종가, naver_kr.fetch_quote). v5.393은 통합 일봉 종가끼리 나눠 화면과 크게 달랐다
+  (스튜디오드래곤 화면 +29.96% vs +6.0% — 전날 애프터 상승이 일봉으론 전날 봉에 들어감). 지난 날짜의 화면 등락률은 naver가 안 줘서
+  "최근 점화" 되짚기(recent·last_ignited)는 뺐다. US는 일봉 종가 ÷ 전 봉 종가 그대로. 얼마냐봇 v2.93 문구 맞춤.
 v5.393 [테마 바구니 + 테마 점화 — 사용자 2026-11-19 "국장엔 테마가있어 … 종목 추적이 잘안돼" 설계 2단계 → "이제 이거하자"]
   theme_baskets.py(순수) + GET /api/theme-baskets(봇 읽기) · PUT/DELETE /api/theme-baskets/{id}(rev·삭제 로그) · /track에 "테마" 구역.
   바구니 종목별 오늘 등락률(naver 통합 일봉 종가 ÷ 전 봉 통합 종가, 5분 캐시) → 강한 종목(+5%↑) 수·평균·대장. 점화 = 강한 종목 3개 이상이면서 30% 이상.
@@ -9273,7 +9277,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.393"
+VERSION = "v5.394"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -22503,7 +22507,7 @@ THEME_BASKETS_PATH = _resolve_persistent_path("theme_baskets.json")
 THEME_BASKETS_DELETE_LOG_PATH = os.path.join(os.path.dirname(THEME_BASKETS_PATH), "theme_baskets_deletions.log")
 THEME_BASKETS_SEED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "theme_baskets_seed.json")
 _THEME_BASKETS_LOCK = _threading.RLock()
-_basket_px_cache: dict = {}         # ticker → (ts, [(날짜, 종가)…]) — 5분 캐시(표시·알림용, 매매 판정 아님)
+_basket_px_cache: dict = {}         # ticker → (ts, (현재가, 등락률, 날짜)) — 5분 캐시(표시·알림용, 매매 판정 아님)
 BASKET_PX_TTL = 300                 # 장중 점화 알림이 너무 늦지 않게 — AI 어림값
 
 
@@ -22527,23 +22531,27 @@ def _theme_baskets_load() -> list:
 
 
 def _basket_quote(ticker: str):
-    """최근 봉 [(날짜, 종가), …] 오름차순(RECENT_DAYS+1개) — 매번 _fetch(KR은 naver 통합 일봉: 오늘 봉이 장중·애프터에 갱신된다). 실패면 [].
-    스캔 캐시는 쓰지 않는다 — 스캔 시각에 멈춘 값이라 장중 등락률이 낡는다."""
-    import theme_baskets as tb
+    """(현재가, 화면 등락률 %, 날짜) — KR은 naver basic(naver_kr.fetch_quote: 전일 정규장 종가 대비, 증권사 화면과 같은 값),
+    US는 마지막 일봉 종가 ÷ 전 봉 종가. 실패면 (None, None, None). 스캔 캐시는 쓰지 않는다(스캔 시각에 멈춘 값)."""
     t = ticker.upper().strip()
     hit = _basket_px_cache.get(t)
     if hit and time.time() - hit[0] < BASKET_PX_TTL:
         return hit[1]
+    out = (None, None, None)
     try:
-        df = _fetch(t + ".KS" if (len(t) == 6 and t[0].isdigit() and "." not in t) else t)
+        if naver_kr.is_kr(t) or (len(t) == 6 and t[0].isdigit() and "." not in t):
+            q = naver_kr.fetch_quote(t)
+            if q:
+                out = (q["close"], q["chg_pct"], q["date"])
+        else:
+            df = _fetch(t)
+            if df is not None and len(df) >= 2:
+                c = df["Close"].dropna()
+                out = (float(c.iloc[-1]), (float(c.iloc[-1]) / float(c.iloc[-2]) - 1) * 100, str(c.index[-1])[:10])
     except Exception as e:
         print(f"[theme-baskets] {t} 가격 조회 실패: {e}", flush=True)
-        df = None
-    if df is None or len(df) < 2:
-        return []
-    tail = df["Close"].dropna().iloc[-(tb.RECENT_DAYS + 1):]
-    out = [(str(d)[:10], float(c)) for d, c in tail.items()]
-    _basket_px_cache[t] = (time.time(), out)
+    if out[0] is not None:
+        _basket_px_cache[t] = (time.time(), out)
     return out
 
 
@@ -22577,22 +22585,18 @@ async def theme_baskets_list(prices: int = 1):
         px = dict(zip(tks, await asyncio.gather(*[loop.run_in_executor(_executor, _basket_quote, t) for t in tks])))
         for b in baskets:
             if b.get("status") == "종료":
-                out.append({**b, "rows": [], "summary": None, "recent": [], "last_ignited": None})
+                out.append({**b, "rows": [], "summary": None})
                 continue
-            days = tb.daily(b["members"], {m["ticker"]: px.get(m["ticker"]) or [] for m in b["members"]})
-            rows = days[0]["rows"] if days else [tb.member_row(m, None, None, None) for m in b["members"]]
-            sm = days[0]["summary"] if days else tb.summary(rows)
+            rows = [tb.member_row(m, *px.get(m["ticker"], (None, None, None))) for m in b["members"]]
+            sm = tb.summary(rows)
             sm["is_today"] = sm["date"] is not None and sm["date"] == _basket_today(b["members"])
             n_fail += sm["n_failed"]
             if sm["n_px"] == 0:
                 print(f"[theme-baskets] {b.get('name')} — 종목 {sm['n']}개 중 가격 받은 것 0개", flush=True)
-            recent = [{"date": d["date"], "strong": d["summary"]["strong"], "n_px": d["summary"]["n_px"],
-                       "avg_pct": d["summary"]["avg_pct"], "ignited": d["summary"]["ignited"]} for d in days]
-            out.append({**b, "rows": sorted(rows, key=lambda r: (r["chg_pct"] is None, -(r["chg_pct"] or 0))), "summary": sm,
-                        "recent": recent, "last_ignited": next((d for d in recent if d["ignited"]), None)})
+            out.append({**b, "rows": sorted(rows, key=lambda r: (r["chg_pct"] is None, -(r["chg_pct"] or 0))), "summary": sm})
     else:
         out = baskets
-    return JSONResponse(_clean_nan({"ok": True, "baskets": out, "n": len(out), "n_price_failed": n_fail, "lined": lined, "basis": "통합 종가(애프터 포함) ÷ 전 봉 통합 종가",
+    return JSONResponse(_clean_nan({"ok": True, "baskets": out, "n": len(out), "n_price_failed": n_fail, "lined": lined, "basis": "전일 정규장 종가 대비(증권사 화면과 같은 값)",
                                     "rule": {"up_pct": tb.IGNITE_UP_PCT, "min_count": tb.IGNITE_MIN_COUNT, "min_frac": tb.IGNITE_MIN_FRAC}}))
 
 

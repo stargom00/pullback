@@ -325,6 +325,8 @@ ABC 상태 줄이 저점일지에 남던 버그). 스캔형 탭 전용 요소를
 
 **현재 쓰는 JSON API(같은 벤더라 개편 위험은 남음)**: `api.finance.naver.com/siseJson.naver`(일봉 — 무거래일 OHLC=0 오염 있음, 위 v5.242 항목), `m.stock.naver.com/api/stock/{code}/integration`(현재가·`fundamentals.py`), `.../api/stock/{code}/finance/{annual,quarter}`(실적), `.../api/index/{code}/basic`(지수), `.../api/stocks/marketValue/{market}`(거래대금·시총 — itemCode를 그대로 줘서 알파벳 혼용 KR 코드 포함).
 
+**`.../api/stock/{code}/basic`** — 종목 이름·시장(`fetch_basic`)과 **화면 등락률**(`fetch_quote`, v5.394 테마 바구니). 등락률은 현재가 ÷ **전일 정규장 종가**(증권사 화면과 같은 값)라, 통합 일봉 종가끼리 나눈 값과 다르다 — 전날 애프터마켓에서 오른 종목은 일봉 기준이 훨씬 작게 나온다(2026-11-19 스튜디오드래곤 +29.96% vs +6.0%). 사용자가 화면과 맞춰 보는 **등락률 표시**는 이 값을, 지표·판정용 가격 시계열은 통합 일봉을 쓴다.
+
 **이 사고 유형의 공통 방어(3건 모두 같은 방식)**: 소스 상태를 매 스캔 TIMING에 남기고(`kr_universe_source`/`kr_mcap_filter_source`/`kr_earnings_source`), 0건·전량 실패면 경고 로그 + 상태줄 배지를 띄운다. **새 외부 소스를 붙일 때 이 세 가지(상태 필드·경고 로그·화면 배지)를 같이 넣을 것** — 조용한 빈 결과는 몇 달 뒤에나 발견된다.
 
 **점검 명령**: `grep -n "naver\.com" *.py`. 이 표에 없는 URL이 나오면 표를 갱신할 것.

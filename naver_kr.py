@@ -231,6 +231,33 @@ def fetch_basic(code: str) -> dict | None:
             "halted": (data.get("tradeStopType") or {}).get("name") not in (None, "TRADING")}
 
 
+def parse_quote(data) -> dict | None:
+    """`/api/stock/{code}/basic` 응답 → {close, chg_pct, date}. v5.394 테마 바구니용.
+    chg_pct = naver·증권사 화면의 등락률 그대로(현재가 ÷ **전일 정규장 종가**, 애프터마켓 중엔 애프터 현재가 기준).
+    일봉(siseJson) 종가끼리 나눈 값과 다르다 — 일봉 종가는 애프터 포함이라, 애프터에서 오른 다음 날은 일봉 기준 등락률이
+    화면보다 작게 나온다(실측 2026-11-19 스튜디오드래곤: 화면 +29.96% vs 일봉 기준 +6.0%). 값이 하나라도 없으면 None."""
+    if not isinstance(data, dict):
+        return None
+    close, chg, day = _to_num(data.get("closePrice")), _to_num(data.get("fluctuationsRatio")), str(data.get("localTradedAt") or "")[:10]
+    if close is None or chg is None or close <= 0 or len(day) != 10:
+        return None
+    return {"close": close, "chg_pct": chg, "date": day}
+
+
+def fetch_quote(code: str) -> dict | None:
+    """현재가·화면 등락률(parse_quote 참고). 실패·없는 코드면 None."""
+    code = to_code(code)
+    if not code:
+        return None
+    try:
+        resp = requests.get(f"https://m.stock.naver.com/api/stock/{code}/basic", headers=_HEADERS, timeout=_TIMEOUT)
+        if resp.status_code != 200:
+            return None
+        return parse_quote(resp.json())
+    except (requests.RequestException, ValueError):
+        return None
+
+
 def _market_suffix_from_autocomplete(code: str) -> str | None:
     """`sosok`이 없을 때의 2차 소스 — 자동완성 API의 typeCode(KOSPI/KOSDAQ)."""
     try:

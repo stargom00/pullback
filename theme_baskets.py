@@ -11,11 +11,13 @@
 - IGNITE_MIN_COUNT 3 · IGNITE_MIN_FRAC 0.3: 강한 종목이 3개 이상이면서 가격 받은 종목의 30% 이상이면 점화.
   한두 종목만 튄 것(개별 재료)과 테마가 같이 움직인 것을 가르려는 값.
 - MAX_MEMBERS 40: 한 바구니 종목 수 상한(가격 조회 부담).
-- RECENT_DAYS 5: "최근 점화"를 되짚어 보는 봉 수(한 주).
 
-등락률 기준: KR은 naver 통합 일봉 종가(애프터마켓 포함) ÷ 전 봉 통합 종가 — CLAUDE.md "KR 가격 기준". 증권사 화면의 등락률
-(전일 **정규장** 종가 대비)과 다를 수 있다. 실측 2026-11-19: 스튜디오드래곤 통합 +6.0% vs 화면 +29.96%(상한가) — 11-18 애프터마켓에서
-이미 29,050까지 올라 그 상승이 통합 기준으로는 11-18 봉에 들어갔다(한한령 23종목 중 19종목이 11-18 봉에서 +5% 이상).
+등락률 기준(v5.394 — 사용자 2026-11-19 "등락률이 너무 다른데"): **증권사·naver 화면과 같은 값**을 쓴다.
+- KR = naver `/api/stock/{code}/basic`의 등락률(현재가 ÷ 전일 정규장 종가, 애프터마켓 중엔 애프터 현재가) — naver_kr.fetch_quote.
+- US = 마지막 일봉 종가 ÷ 전 봉 종가(yfinance, 정규장).
+v5.393은 KR을 naver 통합 일봉 종가끼리 나눴는데 화면과 크게 달랐다. 실측 2026-11-19 스튜디오드래곤: 화면 +29.96%(상한가) vs
+일봉 기준 +6.0% — 11-18 애프터마켓에서 29,050까지 오른 것이 일봉으로는 11-18 봉에 들어갔기 때문. 지난 날짜의 화면 등락률은
+naver가 주지 않아(지난 일봉 줄은 통합 종가 기준) "최근 점화" 되짚기는 뺐다.
 """
 from __future__ import annotations
 
@@ -29,7 +31,6 @@ IGNITE_MIN_COUNT = 3
 IGNITE_MIN_FRAC = 0.3
 MAX_MEMBERS = 40
 MIN_MEMBERS = 2
-RECENT_DAYS = 5
 STATUSES = ("추적", "종료")
 
 
@@ -83,13 +84,11 @@ def clean(rec: dict) -> dict:
     return out
 
 
-def member_row(member: dict, close, prev_close, day) -> dict:
+def member_row(member: dict, close, chg_pct, day) -> dict:
     """한 종목의 오늘 줄. 가격을 못 받았으면 chg_pct None(요약에서 빠지고 화면에 드러난다)."""
-    ok = close is not None and prev_close is not None and prev_close > 0 and close > 0
+    ok = close is not None and chg_pct is not None and close > 0 and bool(day)
     return {"ticker": member["ticker"], "name": member.get("name") or member["ticker"],
-            "close": float(close) if ok else None,
-            "chg_pct": round((close / prev_close - 1) * 100, 2) if ok else None,
-            "date": day if ok else None}
+            "close": float(close) if ok else None, "chg_pct": round(float(chg_pct), 2) if ok else None, "date": day if ok else None}
 
 
 def summary(rows: list) -> dict:
@@ -106,17 +105,3 @@ def summary(rows: list) -> dict:
             "leader": {"ticker": lead["ticker"], "name": lead["name"], "chg_pct": lead["chg_pct"]} if lead else None,
             "ignited": bool(cur) and len(strong) >= need}
 
-
-def daily(members: list, series: dict, n: int = RECENT_DAYS) -> list:
-    """최근 n개 봉 날짜별 [{date, rows, summary}] — 최신이 맨 앞. series = {ticker: [(날짜, 종가), …] 오름차순}.
-    날짜 d의 줄 = 그 종목의 d 봉 종가 ÷ 바로 앞 봉 종가. d 봉이 없는 종목은 그날 가격 없음으로 센다. 내부 요구 봉 수: 종목당 2."""
-    days = sorted({d for v in series.values() for d, _ in (v or [])})[-n:]
-    out = []
-    for d in reversed(days):
-        rows = []
-        for m in members:
-            v = series.get(m["ticker"]) or []
-            i = next((k for k, (dd, _) in enumerate(v) if dd == d), None)
-            rows.append(member_row(m, v[i][1], v[i - 1][1], d) if i else member_row(m, None, None, None))
-        out.append({"date": d, "rows": rows, "summary": summary(rows)})
-    return out

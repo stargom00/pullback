@@ -1,7 +1,8 @@
-"""v5.393 테마 바구니 — theme_baskets.py(순수) + /api/theme-baskets + /track 화면 요약 줄.
+"""v5.393 테마 바구니(v5.394 등락률 = 증권사 화면 값) — theme_baskets.py(순수) + /api/theme-baskets + /track 화면 요약 줄.
 
 사보타주 확인(2026-11-19, 전부 FAIL 확인 후 원복): 점화 조건에서 비율(MIN_FRAC) 제거 / 옛 봉 줄을 요약에 포함 /
-daily가 전 봉 대신 같은 봉 종가로 나눔 / 엔드포인트가 종료 바구니도 가격 조회 / basketLine에서 가격 실패 표시 제거.
+엔드포인트가 종료 바구니도 가격 조회 / basketLine에서 가격 실패 표시 제거.
+v5.394: 등락률 대신 전일 대비 금액을 읽음 / KR을 일봉으로 계산 / 실패도 캐시 — 전부 FAIL 확인 후 원복.
 """
 from __future__ import annotations
 
@@ -34,7 +35,7 @@ def _m(n):
 
 
 def _rows(pcts, day="2026-11-19"):
-    return [tb.member_row(m, None if p is None else 100 * (1 + p / 100), None if p is None else 100, day) for m, p in zip(_m(len(pcts)), pcts)]
+    return [tb.member_row(m, None if p is None else 100.0, p, day) for m, p in zip(_m(len(pcts)), pcts)]
 
 
 def test_parse_members_and_validation():
@@ -69,7 +70,7 @@ def test_summary_ignite_needs_count_and_fraction():
 
 def test_summary_excludes_failed_and_stale_rows():
     rows = _rows([9, 8, 7, None, None])
-    rows.append(tb.member_row({"ticker": "999999.KS", "name": "정지"}, 150, 100, "2026-11-10"))   # 옛 봉 +50%
+    rows.append(tb.member_row({"ticker": "999999.KS", "name": "정지"}, 150, 50.0, "2026-11-10"))   # 옛 봉 +50%
     s = tb.summary(rows)
     assert (s["n"], s["n_px"], s["n_failed"], s["n_stale"], s["date"]) == (6, 3, 2, 1, "2026-11-19")
     assert s["strong"] == 3 and s["leader"]["chg_pct"] == 9.0   # 옛 봉 +50%는 대장·강한 종목에 안 들어간다
@@ -77,17 +78,32 @@ def test_summary_excludes_failed_and_stale_rows():
     assert empty["ignited"] is False and empty["avg_pct"] is None and empty["leader"] is None and empty["n_px"] == 0
 
 
-def test_daily_uses_previous_bar_and_orders_newest_first():
-    ms = _m(3)
-    ser = {ms[0]["ticker"]: [("2026-11-17", 100.0), ("2026-11-18", 110.0), ("2026-11-19", 121.0)],
-           ms[1]["ticker"]: [("2026-11-17", 50.0), ("2026-11-19", 55.0)],      # 11-18 봉 없음
-           ms[2]["ticker"]: []}                                                 # 가격 실패
-    d = tb.daily(ms, ser)
-    assert [x["date"] for x in d] == ["2026-11-19", "2026-11-18", "2026-11-17"]
-    assert [r["chg_pct"] for r in d[0]["rows"]] == [10.0, 10.0, None]
-    assert [r["chg_pct"] for r in d[1]["rows"]] == [10.0, None, None]
-    assert [r["chg_pct"] for r in d[2]["rows"]] == [None, None, None]         # 첫 봉은 앞 봉이 없어 등락률 없음
-    assert d[0]["summary"]["n_failed"] == 1 and len(tb.daily(ms, ser, n=2)) == 2
+def test_parse_quote_uses_screen_ratio():
+    """v5.394 — 등락률은 naver 화면 값(전일 정규장 종가 대비)을 그대로 쓴다. 실제 응답 모양(2026-11-19 스튜디오드래곤·코스맥스)."""
+    import naver_kr
+    q = naver_kr.parse_quote({"closePrice": "30,800", "compareToPreviousClosePrice": "7,100", "fluctuationsRatio": "29.96",
+                              "localTradedAt": "2026-11-19T19:24:21+09:00"})
+    assert q == {"close": 30800.0, "chg_pct": 29.96, "date": "2026-11-19"}
+    assert naver_kr.parse_quote({"closePrice": "289,000", "fluctuationsRatio": "-2.36", "localTradedAt": "2026-11-19T19:47:21+09:00"})["chg_pct"] == -2.36
+    for bad in (None, [], {}, {"closePrice": "30,800"}, {"closePrice": "0", "fluctuationsRatio": "1", "localTradedAt": "2026-11-19T1"},
+                {"closePrice": "30,800", "fluctuationsRatio": "", "localTradedAt": "2026-11-19T19:24:21+09:00"},
+                {"closePrice": "30,800", "fluctuationsRatio": "1.0", "localTradedAt": ""}):
+        assert naver_kr.parse_quote(bad) is None, bad
+
+
+def test_basket_quote_kr_screen_ratio_us_bars(monkeypatch):
+    import pandas as pd
+    monkeypatch.setattr(app, "_basket_px_cache", {})
+    seen = []
+    monkeypatch.setattr(app.naver_kr, "fetch_quote", lambda t: seen.append(t) or {"close": 30800.0, "chg_pct": 29.96, "date": "2026-11-19"})
+    df = pd.DataFrame({"Close": [100.0, 110.0]}, index=pd.to_datetime(["2026-11-17", "2026-11-18"]))
+    monkeypatch.setattr(app, "_fetch", lambda t: df if t == "NVDA" else (_ for _ in ()).throw(AssertionError("KR은 일봉으로 계산하지 않는다")))
+    assert app._basket_quote("253450.kq") == (30800.0, 29.96, "2026-11-19") and app._basket_quote("253450") == (30800.0, 29.96, "2026-11-19")
+    c, p, d = app._basket_quote("NVDA")
+    assert (c, round(p, 6), d) == (110.0, 10.0, "2026-11-18")
+    assert app._basket_quote("253450.KQ") == (30800.0, 29.96, "2026-11-19") and seen == ["253450.KQ", "253450"]   # 5분 캐시
+    monkeypatch.setattr(app.naver_kr, "fetch_quote", lambda t: None)
+    assert app._basket_quote("000001.KS") == (None, None, None) and "000001.KS" not in app._basket_px_cache    # 실패는 캐시 안 함
 
 
 @pytest.fixture
@@ -99,8 +115,7 @@ def store(monkeypatch, tmp_path):
 
     def quote(t):
         calls.append(t)
-        up = {"352820.KS": 1.16, "041510.KQ": 1.30, "035900.KQ": 1.10, "122870.KQ": 1.07}.get(t, 1.0)
-        return [("2026-11-17", 100.0), ("2026-11-18", 100.0 * up), ("2026-11-19", 100.0 * up * 0.99)]
+        return 100.0, {"352820.KS": 16.0, "041510.KQ": 30.0, "035900.KQ": 10.0, "122870.KQ": 7.0}.get(t, -1.0), "2026-11-19"
     monkeypatch.setattr(app, "_basket_quote", quote)
     monkeypatch.setattr(app, "_basket_today", lambda ms: "2026-11-19")
     return calls
@@ -130,21 +145,20 @@ def test_list_rows_summary_recent(store):
     j = _list(1)
     b = j["baskets"][0]
     assert b["summary"]["date"] == "2026-11-19" and b["summary"]["is_today"] is True and b["summary"]["ignited"] is False
-    assert b["rows"][0]["chg_pct"] == -1.0 and len(b["rows"]) == 23
-    assert [d["date"] for d in b["recent"]] == ["2026-11-19", "2026-11-18", "2026-11-17"]
-    # 11-18 봉: 4/23이 +5% 이상이지만 30%(7개) 미달 → 점화 아님
-    assert (b["recent"][1]["strong"], b["recent"][1]["ignited"]) == (4, False) and b["last_ignited"] is None
+    assert [r["chg_pct"] for r in b["rows"][:5]] == [30.0, 16.0, 10.0, 7.0, -1.0] and len(b["rows"]) == 23   # 많이 오른 순
+    # 4/23이 +5% 이상이지만 30%(7개) 미달 → 점화 아님
+    assert (b["summary"]["strong"], b["summary"]["need"]) == (4, 7) and "recent" not in b and "last_ignited" not in b
     assert j["rule"] == {"up_pct": tb.IGNITE_UP_PCT, "min_count": tb.IGNITE_MIN_COUNT, "min_frac": tb.IGNITE_MIN_FRAC}
     ended = j["baskets"][1]
     assert ended["summary"] is None and ended["rows"] == [] and not any(t.startswith("ENDED") for t in store)
 
 
-def test_last_ignited_and_put_rules(store):
+def test_ignited_basket_and_put_rules(store):
     ms = [{"ticker": t, "name": t} for t in ("352820.KS", "041510.KQ", "035900.KQ", "122870.KQ", "999999.KS")]
     code, j = _put({"id": "b4", "name": "엔터", "members": ms, "rows": [1]}, None)
     assert code == 200 and j["record"]["rev"] == 1 and "rows" not in j["record"]
     b = [x for x in _list(1)["baskets"] if x["id"] == "b4"][0]
-    assert b["summary"]["ignited"] is False and b["last_ignited"]["date"] == "2026-11-18" and b["last_ignited"]["strong"] == 4
+    assert b["summary"]["ignited"] is True and b["summary"]["strong"] == 4 and b["summary"]["leader"]["chg_pct"] == 30.0
     assert _put({"id": "b4", "name": "엔터", "members": ms[:1]}, 1)[0] == 400
     assert _put({"id": "b4", "name": "엔터2", "members": ms}, 7)[1]["code"] == "conflict"
     assert _put({"id": "b4", "name": "엔터2", "members": ms}, 1)[1]["record"]["rev"] == 2
@@ -174,7 +188,7 @@ def _extract_js(name: str) -> str:
 @pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
 def test_page_basket_line_and_member_parser():
     rows = _rows([9, 8, 7, None])
-    rows.append(tb.member_row({"ticker": "999999.KS", "name": "정지"}, 150, 100, "2026-11-10"))
+    rows.append(tb.member_row({"ticker": "999999.KS", "name": "정지"}, 150, 50.0, "2026-11-10"))
     sm = tb.summary(rows)
     text = "하이브 352820.ks\n\nJYP Ent. 035900.KQ\nnvda, 에스엠 041510.KQ"
     js = ("const esc=s=>String(s??'');const pctTxt=p=>p==null?'—':(p>0?'+':'')+p.toFixed(1)+'%';\n" + _extract_js("basketLine") + "\n"
