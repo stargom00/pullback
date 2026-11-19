@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.385 [지수 하락 구간에서 덜 빠진 종목 — 사용자 2026-11-19 "지수빠질때 덜빠지는 종목은 어떻게 선별해?" → "만들어줘"]
+  rs_drawdown.py(순수) + rs_drawdown_scan/GET /api/rs-drawdown(봇 읽기). 코스피·코스닥 각각 최근 60봉 고점→그 뒤 저점 구간에서
+  종목 하락률 − 지수 하락률(rel_dd) 순. 저점 유지(지수 저점 때 종목은 구간 신저가 안 감)·50일선 위·저점 이후 반등(rel_reb)·업종 표시.
+  확정 봉만. 관심 신호 · 측정 전(승률·우위 주장 금지). 상수 출처는 rs_drawdown.py docstring(60·−5%는 AI 어림값).
 v5.384 [코인 일지 진입 이유 칩(여러 개 선택) — 사용자 2026-11-15 "숏포지션 들어간게 구름두껍고 20선깨고내려가서야. 그런데 일지에 그런 옵션이없어"]
   coin_journal.ENTRY_REASONS(RSI 신호/구름 두꺼움/10선 돌파·이탈/20선 돌파·이탈/99선/스토캐스틱 0·100/추세 따라/채널 따라/기타 — 채널 판단 근거에서 Claude가 고른 목록) →
   레코드 reasons[]. 새 진입 폼·수정 폼에 칩, 카드에 "진입 이유" 줄. 목록 밖 값은 거부(그 기록에 이미 있던 옛 값만 허용). 메타 entry_reasons.
@@ -9050,6 +9054,8 @@ _BOT_READ_EXACT_PATHS = {
     # v5.125: 얼마냐봇이 재점화 알림을 보내려면 stock-alert(별도 레포) 쪽에도
     # 이 경로를 폴링하는 코드가 추가돼야 함 — 여기서는 데이터만 열어둠.
     "/api/reignition/confirmed",
+    # v5.385: 지수 하락 구간 상대강도(GET·읽기 전용, 쓰기 0건 — rs_drawdown_api 본문 확인).
+    "/api/rs-drawdown",
     # v5.141: Claude API 일일 상한 경고/차단 텔레그램 발송도 마찬가지로
     # stock-alert 쪽에 이 경로를 폴링하는 코드가 추가돼야 실제 발송이 된다 —
     # 여기서는 데이터(pending_alert)만 열어둠.
@@ -9239,7 +9245,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.384"
+VERSION = "v5.385"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -17611,6 +17617,57 @@ async def ma_cross_api(mode: str = "close"):
     body = ma_cross_scan(bundle.get("data") or {}, bundle.get("universe") or {}, mode, now)
     print(f"[ma-cross] kr/{mode} 세션 {body['session_date']} 대상 {body['n_checked']} · 돌파 {body['n_hits']} · "
           f"오늘 봉 없음 {body['n_stale_excluded']} · 봉 부족 {body['n_short_history']}", flush=True)
+    return JSONResponse(_clean_nan(body))
+
+
+def rs_drawdown_scan(data: dict, universe: dict, idx: dict, now: datetime, top: int = 20) -> dict:
+    """v5.385 KR 지수 하락 구간 상대강도(순수 계산 — 엔드포인트·테스트 공용). idx = {"KOSPI": Series, "KOSDAQ": Series}.
+    확정 봉만(ma_cross_scan close 모드와 같은 세션 규칙). 정의·상수 출처는 rs_drawdown.py docstring."""
+    import pandas as pd
+    import rs_drawdown as rd
+    fl = _lp_floor_mod()
+    session = _lp_watch_mod().confirmed_through("KR", now.isoformat())
+    cut = lambda s: s[pd.DatetimeIndex(s.index).strftime("%Y-%m-%d") <= session]
+    wins = {k: rd.index_window(cut(v)) for k, v in (idx or {}).items() if v is not None and len(v)}
+    rows, n_short = [], 0
+    for t, df in (data or {}).items():
+        if df is None or "Close" not in df or len(df) == 0 or fl.is_spac({"name": universe.get(t, t), "mkt": "KR"}):
+            continue
+        w = wins.get("KOSPI" if t.endswith(".KS") else "KOSDAQ")
+        if not w:
+            continue
+        r = rd.stock_row(cut(df), w)
+        if r is None:
+            n_short += 1
+            continue
+        rows.append({"ticker": t, "name": universe.get(t, t), "mkt": "KOSPI" if t.endswith(".KS") else "KOSDAQ",
+                     "sector": _sector_of(t), **r})
+    rows.sort(key=lambda r: -r["rel_dd"])
+    body = {"ok": True, "market": "kr", "asof": now.astimezone(KST).strftime("%Y-%m-%d %H:%M"), "session_date": session,
+            "index": wins, "n_checked": len(rows), "n_short_history": n_short,
+            "top": rows[:top], "sectors": rd.sector_table(rows)[:10],
+            "n_low_ok": sum(r["low_ok"] for r in rows), "n_ma50_ok": sum(r["ma50_ok"] for r in rows)}
+    if not wins:
+        body["reason"] = "no_index"
+    elif not rows:
+        body["reason"] = "no_rows"            # 0건과 "계산할 종목 자체가 없음"을 구분(침묵 ≠ 성공)
+    return body
+
+
+@app.get("/api/rs-drawdown")
+async def rs_drawdown_api(top: int = 20):
+    """v5.385 지수 하락 구간에서 덜 빠진 KR 종목 — 얼마냐봇 전용(GET·읽기). 지수 일봉 2건(naver)만 추가로 받는다."""
+    now = datetime.now(KST)
+    bundle = await _fetch_market_data("kr", wait_for_fresh=True) or {}
+    idx = {}
+    for code in ("KOSPI", "KOSDAQ"):
+        h = await asyncio.to_thread(naver_kr.fetch_index_history, code, 200)
+        idx[code] = h["Close"] if h is not None and "Close" in h else None
+    body = rs_drawdown_scan(bundle.get("data") or {}, bundle.get("universe") or {}, idx, now, max(5, min(int(top), 50)))
+    w = body.get("index") or {}
+    print(f"[rs-drawdown] 세션 {body['session_date']} 대상 {body['n_checked']} · 봉 부족 {body['n_short_history']} · "
+          + " · ".join(f"{k} {v['peak_date']}→{v['trough_date']} {v['dd']*100:+.1f}%" for k, v in w.items())
+          + (f" · reason {body.get('reason')}" if body.get("reason") else ""), flush=True)
     return JSONResponse(_clean_nan(body))
 
 
