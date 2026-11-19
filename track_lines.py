@@ -100,9 +100,10 @@ def invalid(rec: dict) -> "str | None":
 def view_row(rec: dict, close, on) -> dict:
     """화면·봇용 계산 필드. close 없으면(가격 조회 실패) value만. on = 그 종가의 날짜."""
     v = line_value(rec, on)
-    out = {"value": v, "value_date": str(on), "close": close, "dist_pct": None, "zone": "unknown"}
+    out = {"value": v, "value_date": str(on), "close": close, "dist_pct": None, "to_line_pct": None, "zone": "unknown"}
     if close:
         d = (float(close) / v - 1) * 100
         out["dist_pct"] = d
+        out["to_line_pct"] = (v / float(close) - 1) * 100      # v5.390 화면용: 지금 가격에서 선까지 가려면 몇 % (위 선 +, 아래 선 −)
         out["zone"] = "near" if abs(d) <= NEAR_PCT + 1e-9 else ("above" if d > 0 else "below")
     return out

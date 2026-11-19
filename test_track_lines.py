@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
+import subprocess
 import json
 import os
 
@@ -77,8 +79,10 @@ def test_view_zones():
     base = {"id": "f", "p1": ["2026-01-01", 100.0], "p2": ["2026-06-01", 100.0]}
     z = lambda c: tl.view_row(base, c, "2026-11-19")["zone"]
     assert [z(103.0), z(97.0), z(103.1), z(96.9)] == ["near", "near", "above", "below"]     # ±3% 경계 포함
+    up = tl.view_row(base, 80.0, "2026-11-19")                       # 선이 가격 위 → 선까지 +25%, 가격은 선 아래 −20%
+    assert abs(up["to_line_pct"] - 25.0) < 1e-9 and abs(up["dist_pct"] + 20.0) < 1e-9 and up["zone"] == "below"
     v = tl.view_row(base, None, "2026-11-19")
-    assert v["zone"] == "unknown" and v["dist_pct"] is None and v["value"] == 100.0
+    assert v["zone"] == "unknown" and v["dist_pct"] is None and v["to_line_pct"] is None and v["value"] == 100.0
 
 
 def test_seed_once_then_file_is_source(store):
@@ -139,3 +143,47 @@ def test_page_and_header_link():
     strip = idx[idx.index('id="hdrStrip"'):idx.index('id="themeToggle"')]
     assert 'class="hdr-track" href="/track"' in strip and "추적장부" in strip      # v5.389 헤더 띠의 채운 버튼(윗줄은 자리가 없어 탭이 가려진다)
     assert ".hdr-track{" in idx and "background:var(--n-accent)" in idx.split(".hdr-track{")[1].split("}")[0]
+
+
+# ── v5.390 화면: 종목별 묶기(production 원문을 node로 실행) ──────────────────────────
+# 사보타주 확인(2026-11-19, FAIL 확인 후 원복): ① 종료한 선 숨기기 조건 제거 ② 종목 정렬(가까운 순) 제거 ③ 선을 값 내림차순으로 정렬하는 줄 제거
+def _extract_js(name: str) -> str:
+    src = open(os.path.join(ROOT, "static", "track.html"), encoding="utf-8").read()
+    start = src.index(f"function {name}(")
+    i = src.index("{", start)
+    depth = 0
+    for j in range(i, len(src)):
+        depth += {"{": 1, "}": -1}.get(src[j], 0)
+        if depth == 0:
+            return src[start:j + 1]
+    raise AssertionError(name)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
+def test_group_stocks_order_and_filters():
+    L = [
+        {"id": "a1", "ticker": "AAA", "name": "에이", "theme": "", "status": "추적", "view": {"value": 90, "close": 100, "zone": "below", "to_line_pct": -10, "value_date": "2026-11-19"}},
+        {"id": "a2", "ticker": "AAA", "name": "에이", "theme": "", "status": "추적", "view": {"value": 130, "close": 100, "zone": "above", "to_line_pct": 30, "value_date": "2026-11-19"}},
+        {"id": "b1", "ticker": "BBB", "name": "비", "theme": "한한령", "status": "추적", "view": {"value": 51, "close": 50, "zone": "near", "to_line_pct": 2, "value_date": "2026-11-19"}},
+        {"id": "b2", "ticker": "BBB", "name": "비", "theme": "한한령", "status": "종료", "view": {"value": 70, "close": 50, "zone": "above", "to_line_pct": 40, "value_date": "2026-11-19"}},
+        {"id": "c1", "ticker": "CCC", "name": "씨", "theme": "", "status": "추적", "view": {"value": 10, "close": None, "zone": "unknown", "to_line_pct": None, "value_date": "2026-11-19"}},
+        {"id": "d1", "ticker": "DDD", "name": "디", "theme": "", "status": "추적", "view": {"value": 96, "close": 100, "zone": "above", "to_line_pct": -4, "value_date": "2026-11-19"}},
+    ]
+    src = (_extract_js("groupStocks") + f"\nconst L={json.dumps(L, ensure_ascii=False)};"
+           + "const pick=G=>G.map(g=>({t:g.ticker,ids:g.lines.map(l=>l.id),near:g.near.length,close:g.close}));"
+           + "console.log(JSON.stringify({all:pick(groupStocks(L,'',false)),end:pick(groupStocks(L,'',true)),th:pick(groupStocks(L,'한한령',false))}));")
+    out = subprocess.run(["node", "-e", src], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    r = json.loads(out.stdout)
+    assert [g["t"] for g in r["all"]] == ["BBB", "DDD", "AAA", "CCC"]        # 선까지 가까운 순(근처가 맨 앞) → 가격 못 받은 종목은 맨 뒤
+    assert r["all"][0]["ids"] == ["b1"] and r["all"][0]["near"] == 1          # 종료한 선은 기본 숨김
+    assert [g for g in r["all"] if g["t"] == "AAA"][0]["ids"] == ["a2", "a1"]  # 한 종목 안에서는 높은 선부터(사다리)
+    assert [g for g in r["end"] if g["t"] == "BBB"][0]["ids"] == ["b2", "b1"]  # "종료한 선 보기"면 같이
+    assert [g["t"] for g in r["th"]] == ["BBB"]
+    assert [g for g in r["all"] if g["t"] == "CCC"][0]["close"] is None
+
+
+def test_page_uses_scanner_theme_and_server_distance():
+    html = open(os.path.join(ROOT, "static", "track.html"), encoding="utf-8").read()
+    assert "localStorage.getItem('scannerTheme')" in html and ':root[data-theme="dark"]{' in html
+    assert "to_line_pct" in html and "value/close" not in html.replace(" ", "")   # 거리는 서버 값을 쓴다(화면에서 다시 계산 안 함)

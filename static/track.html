@@ -1,101 +1,150 @@
 <!DOCTYPE html>
 <html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>📐 추적 장부</title>
+<title>추적 장부</title>
+<script>
+// 스캐너와 같은 테마(localStorage 'scannerTheme', 기본 라이트) — CSS보다 먼저.
+try{document.documentElement.dataset.theme=localStorage.getItem('scannerTheme')==='dark'?'dark':'light'}catch(e){document.documentElement.dataset.theme='light'}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2330;--line:#30363d;--fg:#e6edf3;--muted:#8b949e;--green:#3fb950;--up:#f0626a;--dn:#5b9bf5;--warn:#e3b341}
+/* v5.390 다시 디자인(사용자 2026-11-19 "인터페이스 디자인이 너무 구려 … 한눈에 보기쉽게, 간단명료하면서 사용하기 편리하게").
+   스캐너 토큰(--n-*)을 그대로 쓴다. 선 하나 = 한 줄이던 목록을 **종목 카드 + 가격 사다리**로: 내 선들 사이에 지금 가격이 어디 있는지가 한눈에. */
+:root{--n-bg:#ffffff;--n-card:#fafafa;--n-line:#e6e8ec;--n-line2:#d5d9e0;--n-text:#1d2430;--n-sub:#3d4655;--n-muted:#606773;--n-accent:#d98b3a;--n-accent-fg:#a8610f;--n-chip:#f1f3f6;--n-row:#eef0f3;--n-bad:#cb1d22;--near-bg:#fdf3e3;--near-line:#e9c48e;--now-bg:#1d2430;--now-fg:#ffffff}
+:root[data-theme="dark"]{--n-bg:#0d1015;--n-card:#141820;--n-line:#1f252f;--n-line2:#2c333e;--n-text:#e7e9ee;--n-sub:#b4bbc7;--n-muted:#8e97a6;--n-accent:#e8a25c;--n-accent-fg:#e8a25c;--n-chip:#1c222b;--n-row:#1a1f27;--n-bad:#e5484d;--near-bg:#2e2413;--near-line:#6b5226;--now-bg:#e7e9ee;--now-fg:#0d1015}
 *{box-sizing:border-box}
-body{background:var(--bg);color:var(--fg);font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;margin:0;padding:20px 16px 60px;line-height:1.55}
-.wrap{max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
-h1{font-size:22px;margin:0}
-.top{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.top .sp{flex:1}
-.muted{color:var(--muted);font-size:13px}
-a{color:var(--green)}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
-.btn{font:inherit;font-size:14px;border:1px solid var(--line);background:var(--surface2);color:var(--fg);border-radius:9px;padding:7px 14px;cursor:pointer}
-.btn.pri{background:var(--green);border-color:var(--green);color:#04260f;font-weight:700}
-.btn.sm{font-size:12px;padding:4px 9px}.btn.warn{color:var(--up)}
-.form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
-.form label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted);font-weight:600}
-.form .w2{grid-column:span 2}.form .w4{grid-column:1/-1}
-input,select,textarea{font:inherit;font-size:14px;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 9px;width:100%;min-width:0}
-.pt{border:1px dashed var(--line);border-radius:10px;padding:8px 10px;display:grid;grid-template-columns:1fr 1fr;gap:8px;grid-column:span 2}
-.pt b{grid-column:1/-1;font-size:12px;color:var(--green)}
-.help{font-size:12px;color:var(--muted);grid-column:1/-1;background:var(--surface2);border-radius:8px;padding:7px 10px}
-.msg{color:var(--warn);font-size:13px}
+body{margin:0;background:var(--n-bg);color:var(--n-text);font-family:'IBM Plex Sans KR',-apple-system,sans-serif;font-size:14px;line-height:1.5}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+.wrap{max-width:1240px;margin:0 auto;padding:22px 20px 80px;display:flex;flex-direction:column;gap:16px}
+.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.top h1{font-size:22px;font-weight:700;margin:0}.top .sp{flex:1}
+.sub{color:var(--n-muted);font-size:13px}
+a.back{color:var(--n-muted);text-decoration:none;font-size:13px}a.back:hover{color:var(--n-text)}
+.btn{font:inherit;font-size:13px;font-weight:600;border:1px solid var(--n-line2);background:var(--n-bg);color:var(--n-text);border-radius:8px;padding:7px 13px;cursor:pointer}
+.btn:hover{border-color:var(--n-muted)}
+.btn.pri{background:var(--n-accent);border-color:var(--n-accent);color:#fff}
+.btn.sm{font-size:12px;padding:4px 9px;font-weight:500}.btn.ghost{border-color:transparent;background:transparent;color:var(--n-muted)}.btn.ghost:hover{background:var(--n-row);color:var(--n-text)}
+.btn.warn{color:var(--n-bad)}
+/* 오늘 볼 것 */
+.nearbox{background:var(--near-bg);border:1px solid var(--near-line);border-radius:14px;padding:12px 16px;display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center}
+.nearbox b.h{font-size:13px;margin-right:4px}
+.nchip{font:inherit;display:inline-flex;gap:8px;align-items:baseline;background:var(--n-bg);border:1px solid var(--near-line);border-radius:999px;padding:5px 12px;cursor:pointer;color:var(--n-text)}
+.nchip:hover{border-color:var(--n-accent)}.nchip .l{font-size:12px;color:var(--n-muted)}.nchip .p{font-weight:600;color:var(--n-accent-fg)}
+.calm{color:var(--n-muted);font-size:13px;border:1px dashed var(--n-line2);border-radius:14px;padding:10px 16px}
 .tabs{display:flex;flex-wrap:wrap;gap:6px}
-.tab{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:999px;padding:5px 12px;cursor:pointer}
-.tab.on{background:var(--green);border-color:var(--green);color:#04260f;font-weight:700}.tab span{opacity:.75;font-size:12px}
-h2{font-size:15px;margin:6px 0 0;display:flex;gap:8px;align-items:center}
-.grp{display:flex;flex-direction:column;gap:8px}
-.row{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 14px;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1.6fr) auto;gap:6px 14px;align-items:center}
-.row.near{border-color:var(--warn);background:#221c0c}
-.row.end{opacity:.55}
-.nm{font-weight:800;font-size:16px}.nm a{color:inherit;text-decoration:none}.nm a:hover{color:var(--green)}
-.chip{display:inline-block;font-size:11px;font-weight:600;border-radius:999px;padding:1px 8px;background:var(--surface2);border:1px solid var(--line);margin-left:4px;color:var(--muted)}
-.chip.th{color:var(--green);border-color:#234}
-.num{font-family:ui-monospace,Menlo,monospace;font-size:13px}
-.d{font-family:ui-monospace,Menlo,monospace;font-weight:800;font-size:16px}.d.up{color:var(--up)}.d.dn{color:var(--dn)}.d.nr{color:var(--warn)}
-.note{grid-column:1/-1;font-size:13px;color:var(--muted);border-top:1px dashed var(--line);padding-top:5px}
-.acts{display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap}
-@media (max-width:760px){.form{grid-template-columns:1fr 1fr}.pt,.form .w2{grid-column:1/-1}.row{grid-template-columns:1fr}.acts{justify-content:flex-start}}
+.tab{font:inherit;font-size:13px;border:1px solid var(--n-line2);background:var(--n-bg);color:var(--n-sub);border-radius:999px;padding:5px 12px;cursor:pointer}
+.tab.on{background:var(--n-text);border-color:var(--n-text);color:var(--n-bg);font-weight:600}.tab span{opacity:.6;font-size:12px;margin-left:2px}
+/* 종목 카드 */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;align-items:start}
+.card{background:var(--n-card);border:1px solid var(--n-line);border-radius:14px;overflow:hidden}
+.card.hasnear{border-color:var(--near-line);box-shadow:0 0 0 2px var(--near-bg)}
+.chd{display:flex;align-items:center;gap:8px;padding:12px 14px 10px}
+.chd .nm{font-size:16px;font-weight:700;color:var(--n-text);text-decoration:none}.chd .nm:hover{color:var(--n-accent-fg)}
+.chd .tk{font-size:11px;color:var(--n-muted)}
+.chip{font-size:11px;font-weight:600;border-radius:999px;padding:1px 8px;background:var(--n-chip);color:var(--n-sub)}
+.chd .sp{flex:1}
+.lad{display:flex;flex-direction:column}
+.ln{display:grid;grid-template-columns:76px 1fr auto;gap:10px;align-items:baseline;padding:7px 14px;border-top:1px solid var(--n-line);cursor:pointer;background:var(--n-bg)}
+.ln:hover{background:var(--n-row)}
+.ln .lb{font-size:12px;color:var(--n-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ln .px{font-weight:600}
+.ln .to{font-size:12px;color:var(--n-muted);min-width:64px;text-align:right}
+.ln.near{background:var(--near-bg)}.ln.near .to{color:var(--n-accent-fg);font-weight:600}.ln.near .lb{color:var(--n-accent-fg);font-weight:600}
+.ln.end{opacity:.5}
+.now{display:grid;grid-template-columns:76px 1fr auto;gap:10px;align-items:center;padding:6px 14px;background:var(--now-bg);color:var(--now-fg)}
+.now .lb{font-size:11px;font-weight:700;letter-spacing:.02em}.now .px{font-weight:600;font-size:15px}.now .to{font-size:11px;opacity:.75;text-align:right}
+.det{grid-column:1/-1;border-top:1px dashed var(--n-line2);margin-top:6px;padding-top:8px;display:flex;flex-direction:column;gap:6px;cursor:default}
+.det .note{font-size:13px;color:var(--n-sub)}.det .pts{font-size:11px;color:var(--n-muted)}
+.det .acts{display:flex;gap:4px;flex-wrap:wrap}
+.nopx{padding:6px 14px;font-size:12px;color:var(--n-bad);border-top:1px solid var(--n-line);background:var(--n-bg)}
+/* 양식 */
+.fcard{background:var(--n-card);border:1px solid var(--n-accent);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.fcard h2{margin:0;font-size:15px}
+.frow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.fcard label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--n-muted);font-weight:600}
+input,select{font:inherit;font-size:14px;color:var(--n-text);background:var(--n-bg);border:1px solid var(--n-line2);border-radius:8px;padding:7px 9px;width:100%;min-width:0}
+input:focus,select:focus{outline:2px solid var(--n-accent);outline-offset:-1px}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button{font:inherit;font-size:13px;border:1px solid var(--n-line2);background:var(--n-bg);color:var(--n-sub);border-radius:8px;padding:7px 12px;cursor:pointer}
+.seg button.on{background:var(--n-text);color:var(--n-bg);border-color:var(--n-text);font-weight:600}
+.help{font-size:12px;color:var(--n-muted)}
+.msg{color:var(--n-bad);font-size:13px}
+.empty{color:var(--n-muted);text-align:center;padding:40px 0}
+@media (max-width:760px){.frow{grid-template-columns:1fr 1fr}.wrap{padding:16px 14px 60px}.grid{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">
-<div class="top"><h1>📐 추적 장부</h1><span class="muted" id="sum"></span><span class="sp"></span><a href="/">← 스캐너</a><button class="btn pri" onclick="openForm()">+ 선 등록</button></div>
-<div class="muted">선을 그으면 여기 등록 → 얼마냐봇이 접근(±<span id="np">3</span>%)·종가 돌파·이탈을 알려 줘요. 봇에 <code>빗각</code>이라고 보내면 전체 현황. 표시·알림 전용(측정 전).</div>
+<div class="top"><h1>추적 장부</h1><span class="sub" id="sum"></span><span class="sp"></span><a class="back" href="/">← 스캐너</a><button class="btn pri" onclick="openForm()">+ 선 등록</button></div>
 <div id="formBox"></div>
+<div id="nearBox"></div>
 <div class="tabs" id="tabs"></div>
-<div id="list" class="grp"><div class="muted">불러오는 중…</div></div>
+<div id="list"><div class="empty">불러오는 중…</div></div>
+<div class="sub">선을 등록하면 얼마냐봇이 접근(±<span id="np">3</span>%)·종가 돌파·이탈을 알려 줘요 · 봇에 <code>빗각</code> = 전체 현황 · 거리 = 지금 종가에서 선까지 · 표시·알림 전용(측정 전)</div>
 </div>
 <script>
-// v5.386 추적 장부 — 값·거리 계산은 전부 서버(track_lines.py)가 한다. 여기는 양식과 묶어 보여 주기만.
-const S={lines:[],labels:['빗각','채널 상단','채널 하단','수평선','기타'],near:3,form:null,theme:'',msg:'',err:''};
+// v5.390 추적 장부 — 값·거리 계산은 전부 서버(track_lines.py view)가 한다. 여기는 묶어서 보여 주기와 양식만.
+const S={lines:[],labels:['빗각','채널 상단','채널 하단','수평선','기타'],near:3,form:null,theme:'',msg:'',err:'',open:null,showEnd:false,delAsk:null};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
 const isKR=t=>/^[0-9][0-9A-Z]{5}(\.K[SQ])?$/.test(t);
-const fmt=(v,t)=>v==null?'—':isKR(t)?'₩'+Math.round(v).toLocaleString('en-US'):'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmt=(v,t)=>v==null?'—':isKR(t)?Math.round(v).toLocaleString('en-US'):Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const cur=t=>isKR(t)?'₩':'$';
 const tv=t=>'https://www.tradingview.com/chart/?symbol='+encodeURIComponent(isKR(t)?'KRX:'+t.slice(0,6):t);
+const toTxt=p=>p==null?'':(p>=0?'↑ ':'↓ ')+Math.abs(p).toFixed(1)+'%';
 async function load(){try{const r=await fetch('/api/track-lines');const j=await r.json();if(!j.ok)throw new Error(j.error||r.status);
-  S.lines=j.lines;S.labels=j.labels||S.labels;S.near=j.near_pct||3;S.err=j.n_price_failed?`가격을 못 받은 선 ${j.n_price_failed}개 — 거리 없이 표시`:''}catch(e){S.err='장부를 불러오지 못했어: '+e.message}render()}
-function openForm(rec){S.msg='';const t=today(),m=new Date();m.setMonth(m.getMonth()-3);
-  S.form=rec?JSON.parse(JSON.stringify(rec)):{id:'tl_'+Date.now().toString(36),ticker:'',name:'',theme:S.theme||'',label:'빗각',scale:'log',p1:[`${m.getFullYear()}-${String(m.getMonth()+1).padStart(2,'0')}-${String(m.getDate()).padStart(2,'0')}`,''],p2:[t,''],note:'',status:'추적',_new:true};render();window.scrollTo({top:0,behavior:'smooth'})}
-function readForm(){const f=S.form,g=id=>document.getElementById(id).value;f.ticker=g('f-tk').trim().toUpperCase();f.name=g('f-nm').trim();f.theme=g('f-th').trim();f.label=g('f-lb');f.scale=g('f-sc');
-  f.p1=[g('f-d1'),g('f-p1')];f.p2=f.label==='수평선'?[g('f-d2')||today(),g('f-p1')]:[g('f-d2'),g('f-p2')];f.note=g('f-nt').trim()}
-function onLabel(){readForm();render()}
+  S.lines=j.lines;S.labels=j.labels||S.labels;S.near=j.near_pct||3;S.err=''}catch(e){S.err='장부를 불러오지 못했어: '+e.message}render()}
+// 종목별로 묶기 — 순수 함수(테스트: test_track_lines.py가 node로 그대로 실행)
+function groupStocks(lines,theme,showEnd){const by={};
+  for(const l of lines){if(theme&&l.theme!==theme)continue;if(l.status==='종료'&&!showEnd)continue;(by[l.ticker]=by[l.ticker]||[]).push(l)}
+  return Object.entries(by).map(([tk,L])=>{L.sort((a,b)=>(b.view?.value??0)-(a.view?.value??0));
+    const act=L.filter(l=>l.status!=='종료');const v=(act[0]||L[0]).view||{};
+    const near=act.filter(l=>(l.view||{}).zone==='near');const ds=act.map(l=>Math.abs((l.view||{}).to_line_pct??1e9));
+    return {ticker:tk,name:L.find(l=>l.name)?.name||tk,theme:L.find(l=>l.theme)?.theme||'',close:v.close??null,date:v.value_date||'',lines:L,near,minDist:ds.length?Math.min(...ds):1e9}})
+  .sort((a,b)=>a.minDist-b.minDist)}   // 선까지 가까운 순(근처 ±3% 종목은 정의상 맨 앞에 온다)
+function openForm(rec,pre){S.msg='';const t=today(),m=new Date();m.setMonth(m.getMonth()-3);
+  S.form=rec?JSON.parse(JSON.stringify(rec)):{id:'tl_'+Date.now().toString(36),ticker:'',name:'',theme:S.theme||'',label:'빗각',scale:'log',p1:[m.toISOString().slice(0,10),''],p2:[t,''],note:'',status:'추적',_new:true,...(pre||{})};render();window.scrollTo({top:0,behavior:'smooth'})}
+function readForm(){const f=S.form,g=id=>{const e=document.getElementById(id);return e?e.value:''};f.ticker=g('f-tk').trim().toUpperCase();f.name=g('f-nm').trim();f.theme=g('f-th').trim();
+  f.p1=[g('f-d1')||f.p1[0],g('f-p1')];f.p2=f.label==='수평선'?[today(),g('f-p1')]:[g('f-d2'),g('f-p2')];f.note=g('f-nt').trim()}
+function pick(k,v){readForm();S.form[k]=v;render()}
 async function save(more){readForm();const f=S.form;const num=v=>{const n=parseFloat(String(v).replace(/,/g,''));return isFinite(n)?n:null};
   const rec={id:f.id,ticker:f.ticker,name:f.name,theme:f.theme,label:f.label,scale:f.scale,p1:[f.p1[0],num(f.p1[1])],p2:[f.p2[0],num(f.p2[1])],note:f.note,status:f.status||'추적'};
   if(f.created_at)rec.created_at=f.created_at;
-  if(rec.label==='수평선'&&rec.p1[0]===rec.p2[0]){const d=new Date(rec.p2[0]);d.setDate(d.getDate()-30);rec.p1[0]=d.toISOString().slice(0,10)}
+  if(rec.label==='수평선'){const d=new Date(rec.p2[0]);d.setDate(d.getDate()-30);rec.p1[0]=d.toISOString().slice(0,10)}
   try{const r=await fetch('/api/track-lines/'+encodeURIComponent(rec.id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({record:rec,base_rev:f._new?null:f.rev})});
     const j=await r.json();if(!j.ok){S.msg=j.error||('저장 실패 '+r.status);if(j.code==='conflict'||j.code==='gone'){await load()}render();return}
-    if(more){const keep={ticker:rec.ticker,name:rec.name,theme:rec.theme,scale:rec.scale};S.form=null;await load();openForm();Object.assign(S.form,keep,{label:rec.label==='채널 상단'?'채널 하단':'채널 상단'});S.msg='저장했어 — 같은 종목의 다음 선을 입력해';render()}
-    else{S.form=null;await load()}}catch(e){S.msg='저장 실패: '+e.message;render()}}
+    S.form=null;await load();
+    if(more){openForm(null,{ticker:rec.ticker,name:rec.name,theme:rec.theme,scale:rec.scale,label:rec.label==='채널 상단'?'채널 하단':rec.label==='채널 하단'?'채널 상단':rec.label});S.msg='';render()}}catch(e){S.msg='저장 실패: '+e.message;render()}}
 async function setStatus(id,st){const x=S.lines.find(l=>l.id===id);if(!x)return;const rec=Object.fromEntries(Object.entries(x).filter(([k])=>!['view','rev','updated_at','kind'].includes(k)));rec.status=st;
   const r=await fetch('/api/track-lines/'+encodeURIComponent(id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({record:rec,base_rev:x.rev})});const j=await r.json();if(!j.ok)S.err=j.error||'변경 실패';await load()}
-async function del(id){if(S.delAsk!==id){S.delAsk=id;render();return}S.delAsk=null;const r=await fetch('/api/track-lines/'+encodeURIComponent(id),{method:'DELETE'});const j=await r.json();if(!j.ok)S.err=j.error||'삭제 실패';await load()}
+async function del(id){if(S.delAsk!==id){S.delAsk=id;render();return}S.delAsk=null;const r=await fetch('/api/track-lines/'+encodeURIComponent(id),{method:'DELETE'});const j=await r.json();if(!j.ok)S.err=j.error||'삭제 실패';S.open=null;await load()}
 function formHTML(){const f=S.form;if(!f)return '';const flat=f.label==='수평선';
-  return `<div class="card"><div class="form">
-   <label>종목 이름<input id="f-nm" value="${esc(f.name)}" placeholder="예: 하이브"></label>
-   <label>티커<input id="f-tk" value="${esc(f.ticker)}" placeholder="예: 352820 · NVDA" autocapitalize="characters"></label>
-   <label>테마<input id="f-th" value="${esc(f.theme||'')}" placeholder="예: 한한령" list="themes"><datalist id="themes">${[...new Set(S.lines.map(l=>l.theme).filter(Boolean))].map(t=>`<option value="${esc(t)}">`).join('')}</datalist></label>
-   <label>선 종류<select id="f-lb" onchange="onLabel()">${S.labels.map(l=>`<option${f.label===l?' selected':''}>${l}</option>`).join('')}</select></label>
-   <div class="pt"><b>${flat?'가격':'첫 점'}</b>${flat?'':`<label>날짜<input id="f-d1" type="date" value="${esc(f.p1[0])}"></label>`}<label>가격<input id="f-p1" inputmode="decimal" value="${esc(f.p1[1])}" placeholder="가격"></label>${flat?`<input id="f-d1" type="hidden" value="${esc(f.p1[0])}">`:''}</div>
-   ${flat?`<input id="f-d2" type="hidden" value="${esc(f.p2[0])}"><input id="f-p2" type="hidden" value="">`:`<div class="pt"><b>둘째 점</b><label>날짜<input id="f-d2" type="date" value="${esc(f.p2[0])}"></label><label>가격<input id="f-p2" inputmode="decimal" value="${esc(f.p2[1])}" placeholder="가격"></label></div>`}
-   <label>차트 스케일<select id="f-sc"><option value="log"${f.scale!=='linear'?' selected':''}>로그 (가격축 간격이 위로 갈수록 넓음)</option><option value="linear"${f.scale==='linear'?' selected':''}>일반 (가격축 간격이 일정)</option></select></label>
-   <label class="w2" style="grid-column:span 3">시나리오 · 메모<input id="f-nt" value="${esc(f.note||'')}" placeholder="예: 채널 상단 종가 돌파 시 진입 검토, 240일선 248,000이 다음 저항"></label>
-   ${flat?'':'<div class="help">트레이딩뷰에서 선을 더블클릭 → <b>Coordinates(좌표)</b> 탭 → 점 #1·#2의 <b>가격</b>과 <b>날짜</b>를 그대로 옮겨 적으면 돼요. 선을 그은 차트가 로그인지 일반인지도 맞춰 주세요.</div>'}
-   </div>${S.msg?`<div class="msg" style="margin-top:8px">${esc(S.msg)}</div>`:''}
-   <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="btn pri" onclick="save(false)">저장</button>${f._new?'<button class="btn" onclick="save(true)">저장하고 이 종목 선 하나 더</button>':''}<button class="btn" onclick="S.form=null;S.msg=\'\';render()">취소</button></div></div>`}
-function rowHTML(x){const v=x.view||{},z=x.status==='종료'?'end':v.zone;const d=v.dist_pct;
-  return `<div class="row ${z==='near'?'near':''} ${x.status==='종료'?'end':''}"><div><span class="nm"><a href="${tv(x.ticker)}" target="_blank" rel="noopener" title="트레이딩뷰에서 열기">${esc(x.name)}</a></span><span class="chip">${esc(x.label||'선')}</span>${x.theme?`<span class="chip th">${esc(x.theme)}</span>`:''}${x.scale==='linear'?'<span class="chip">일반 스케일</span>':''}</div>
-   <div class="num">선 <b>${fmt(v.value,x.ticker)}</b> · 종가 ${fmt(v.close,x.ticker)} <span class="muted">(${esc((v.value_date||'').slice(5))})</span> · <span class="d ${z==='near'?'nr':d>0?'up':'dn'}">${d==null?'—':(d>=0?'+':'')+d.toFixed(1)+'%'}</span></div>
-   <div class="acts"><button class="btn sm" onclick="openForm(S.lines.find(l=>l.id==='${esc(x.id)}'))">고치기</button><button class="btn sm" onclick="setStatus('${esc(x.id)}','${x.status==='종료'?'추적':'종료'}')">${x.status==='종료'?'다시 추적':'종료'}</button><button class="btn sm warn" onclick="del('${esc(x.id)}')">${S.delAsk===x.id?'한 번 더':'지우기'}</button></div>
-   ${x.note?`<div class="note">${esc(x.note)}</div>`:''}</div>`}
+  return `<div class="fcard"><h2>${f._new?'선 등록':'선 고치기'}</h2>
+   <div class="frow"><label>종목 이름<input id="f-nm" value="${esc(f.name)}" placeholder="하이브"></label><label>티커<input id="f-tk" value="${esc(f.ticker)}" placeholder="352820 · NVDA" autocapitalize="characters"></label>
+    <label>테마 (선택)<input id="f-th" value="${esc(f.theme||'')}" placeholder="한한령" list="themes"><datalist id="themes">${[...new Set(S.lines.map(l=>l.theme).filter(Boolean))].map(t=>`<option value="${esc(t)}">`).join('')}</datalist></label>
+    <label>메모 (선택)<input id="f-nt" value="${esc(f.note||'')}" placeholder="상단 종가 돌파 시 진입 검토"></label></div>
+   <div><div class="help" style="margin-bottom:4px;font-weight:600">선 종류</div><div class="seg">${S.labels.map(l=>`<button type="button" class="${f.label===l?'on':''}" onclick="pick('label','${l}')">${l}</button>`).join('')}</div></div>
+   <div class="frow">${flat?`<label>가격<input id="f-p1" inputmode="decimal" value="${esc(f.p1[1])}" placeholder="가격"></label>`
+     :`<label>첫 점 날짜<input id="f-d1" type="date" value="${esc(f.p1[0])}"></label><label>첫 점 가격<input id="f-p1" inputmode="decimal" value="${esc(f.p1[1])}" placeholder="가격"></label>
+       <label>둘째 점 날짜<input id="f-d2" type="date" value="${esc(f.p2[0])}"></label><label>둘째 점 가격<input id="f-p2" inputmode="decimal" value="${esc(f.p2[1])}" placeholder="가격"></label>`}</div>
+   ${flat?'':`<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap"><div class="seg"><button type="button" class="${f.scale!=='linear'?'on':''}" onclick="pick('scale','log')">로그 차트</button><button type="button" class="${f.scale==='linear'?'on':''}" onclick="pick('scale','linear')">일반 차트</button></div>
+     <span class="help">트레이딩뷰에서 선 더블클릭 → <b>Coordinates</b> 탭의 점 #1·#2 날짜와 가격을 옮겨 적기 · 가격축 간격이 위로 갈수록 넓으면 로그</span></div>`}
+   ${S.msg?`<div class="msg">${esc(S.msg)}</div>`:''}
+   <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" onclick="save(false)">저장</button>${f._new?'<button class="btn" onclick="save(true)">저장하고 이 종목 선 하나 더</button>':''}<button class="btn ghost" onclick="S.form=null;S.msg=\'\';render()">취소</button></div></div>`}
+function lineHTML(x){const v=x.view||{},end=x.status==='종료',near=!end&&v.zone==='near',op=S.open===x.id;
+  return `<div class="ln${near?' near':''}${end?' end':''}" onclick="S.open=S.open==='${esc(x.id)}'?null:'${esc(x.id)}';S.delAsk=null;render()" title="${esc(x.note||'')}">
+   <span class="lb">${esc(x.label||'선')}${near?' · 근처':''}${end?' · 종료':''}</span><span class="px mono">${fmt(v.value,x.ticker)}</span><span class="to mono">${end?'':toTxt(v.to_line_pct)}</span>
+   ${op?`<div class="det" onclick="event.stopPropagation()">${x.note?`<div class="note">${esc(x.note)}</div>`:''}<div class="pts mono">${esc(x.p1[0])} ${fmt(x.p1[1],x.ticker)} → ${esc(x.p2[0])} ${fmt(x.p2[1],x.ticker)}${x.scale==='linear'?' · 일반 차트':''}</div>
+     <div class="acts"><button class="btn sm" onclick="openForm(S.lines.find(l=>l.id==='${esc(x.id)}'))">고치기</button><button class="btn sm" onclick="setStatus('${esc(x.id)}','${end?'추적':'종료'}')">${end?'다시 추적':'추적 종료'}</button><button class="btn sm warn" onclick="del('${esc(x.id)}')">${S.delAsk===x.id?'한 번 더 누르면 지워져':'지우기'}</button></div></div>`:''}</div>`}
+function cardHTML(g){const above=g.lines.filter(l=>g.close==null||(l.view?.value??0)>=g.close),below=g.lines.filter(l=>g.close!=null&&(l.view?.value??0)<g.close);
+  return `<div class="card${g.near.length?' hasnear':''}" id="c-${esc(g.ticker)}"><div class="chd"><a class="nm" href="${tv(g.ticker)}" target="_blank" rel="noopener" title="트레이딩뷰에서 열기">${esc(g.name)}</a><span class="tk mono">${esc(g.ticker)}</span>${g.theme?`<span class="chip">${esc(g.theme)}</span>`:''}<span class="sp"></span>
+    <button class="btn sm ghost" title="이 종목에 선 추가" onclick="openForm(null,{ticker:'${esc(g.ticker)}',name:'${esc(g.name)}',theme:'${esc(g.theme)}'})">+ 선</button></div>
+   <div class="lad">${above.map(lineHTML).join('')}${g.close!=null?`<div class="now"><span class="lb">지금</span><span class="px mono">${cur(g.ticker)}${fmt(g.close,g.ticker)}</span><span class="to mono">${esc(g.date.slice(5))} 종가</span></div>`:'<div class="nopx">가격을 못 받았어 — 거리 없이 표시</div>'}${below.map(lineHTML).join('')}</div></div>`}
 function render(){document.getElementById('np').textContent=S.near;document.getElementById('formBox').innerHTML=formHTML();
-  const act=S.lines.filter(l=>l.status!=='종료'),themes=[...new Set(S.lines.map(l=>l.theme).filter(Boolean))];
-  document.getElementById('sum').textContent=`추적 ${act.length}개 · 종목 ${new Set(act.map(l=>l.ticker)).size}개`;
-  document.getElementById('tabs').innerHTML=themes.length?[['','전체']].concat(themes.map(t=>[t,t])).map(([k,n])=>`<button class="tab${S.theme===k?' on':''}" onclick="S.theme='${esc(k)}';render()">${esc(n)} <span>${(k?S.lines.filter(l=>l.theme===k):S.lines).length}</span></button>`).join(''):'';
-  const L=S.theme?S.lines.filter(l=>l.theme===S.theme):S.lines;const z=k=>L.filter(l=>l.status!=='종료'&&(l.view||{}).zone===k).sort((a,b)=>Math.abs(a.view.dist_pct)-Math.abs(b.view.dist_pct));
-  const G=[['🟡 선 근처 (±'+S.near+'%)',z('near')],['🔺 선 위',z('above')],['🔻 선 아래',z('below')],['❔ 가격 못 받음',L.filter(l=>l.status!=='종료'&&(l.view||{}).zone==='unknown')],['종료',L.filter(l=>l.status==='종료')]];
-  document.getElementById('list').innerHTML=(S.err?`<div class="msg">${esc(S.err)}</div>`:'')+(G.filter(([,a])=>a.length).map(([t,a])=>`<h2>${t} <span class="muted">${a.length}</span></h2>${a.map(rowHTML).join('')}`).join('')||'<div class="muted">아직 등록한 선이 없어. 오른쪽 위 "+ 선 등록"으로 시작해.</div>')}
+  const act=S.lines.filter(l=>l.status!=='종료'),nEnd=S.lines.length-act.length,themes=[...new Set(S.lines.map(l=>l.theme).filter(Boolean))];
+  document.getElementById('sum').textContent=`종목 ${new Set(act.map(l=>l.ticker)).size}개 · 선 ${act.length}개`;
+  const G=groupStocks(S.lines,S.theme,S.showEnd);const nears=G.flatMap(g=>g.near.map(l=>({g,l}))).sort((a,b)=>Math.abs(a.l.view.to_line_pct)-Math.abs(b.l.view.to_line_pct));
+  document.getElementById('nearBox').innerHTML=S.lines.length?(nears.length?`<div class="nearbox"><b class="h">오늘 볼 것 · 선 근처 ${nears.length}</b>${nears.map(({g,l})=>`<button class="nchip" onclick="S.open='${esc(l.id)}';render();document.getElementById('c-${esc(g.ticker)}').scrollIntoView({behavior:'smooth',block:'center'})"><b>${esc(g.name)}</b><span class="l">${esc(l.label||'선')}</span><span class="p mono">${toTxt(l.view.to_line_pct)}</span></button>`).join('')}</div>`:`<div class="calm">지금 선 근처(±${S.near}%)에 온 종목은 없어.</div>`):'';
+  document.getElementById('tabs').innerHTML=(themes.length?[['','전체']].concat(themes.map(t=>[t,t])).map(([k,n])=>`<button class="tab${S.theme===k?' on':''}" onclick="S.theme='${esc(k)}';render()">${esc(n)}<span>${new Set((k?S.lines.filter(l=>l.theme===k):S.lines).filter(l=>l.status!=='종료').map(l=>l.ticker)).size}</span></button>`).join(''):'')
+    +(nEnd?`<button class="tab${S.showEnd?' on':''}" onclick="S.showEnd=!S.showEnd;render()">종료한 선${S.showEnd?' 숨기기':' 보기'}<span>${nEnd}</span></button>`:'');
+  document.getElementById('list').innerHTML=(S.err?`<div class="msg">${esc(S.err)}</div>`:'')+(G.length?`<div class="grid">${G.map(cardHTML).join('')}</div>`:(S.err?'':'<div class="empty">아직 등록한 선이 없어. 오른쪽 위 "+ 선 등록"으로 시작해.</div>'))}
 load();
 </script></body></html>
