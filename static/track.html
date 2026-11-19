@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>📐 추적 장부</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2330;--line:#30363d;--fg:#e6edf3;--muted:#8b949e;--green:#3fb950;--up:#f0626a;--dn:#5b9bf5;--warn:#e3b341}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;margin:0;padding:20px 16px 60px;line-height:1.55}
+.wrap{max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+h1{font-size:22px;margin:0}
+.top{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.top .sp{flex:1}
+.muted{color:var(--muted);font-size:13px}
+a{color:var(--green)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.btn{font:inherit;font-size:14px;border:1px solid var(--line);background:var(--surface2);color:var(--fg);border-radius:9px;padding:7px 14px;cursor:pointer}
+.btn.pri{background:var(--green);border-color:var(--green);color:#04260f;font-weight:700}
+.btn.sm{font-size:12px;padding:4px 9px}.btn.warn{color:var(--up)}
+.form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.form label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted);font-weight:600}
+.form .w2{grid-column:span 2}.form .w4{grid-column:1/-1}
+input,select,textarea{font:inherit;font-size:14px;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 9px;width:100%;min-width:0}
+.pt{border:1px dashed var(--line);border-radius:10px;padding:8px 10px;display:grid;grid-template-columns:1fr 1fr;gap:8px;grid-column:span 2}
+.pt b{grid-column:1/-1;font-size:12px;color:var(--green)}
+.help{font-size:12px;color:var(--muted);grid-column:1/-1;background:var(--surface2);border-radius:8px;padding:7px 10px}
+.msg{color:var(--warn);font-size:13px}
+.tabs{display:flex;flex-wrap:wrap;gap:6px}
+.tab{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:999px;padding:5px 12px;cursor:pointer}
+.tab.on{background:var(--green);border-color:var(--green);color:#04260f;font-weight:700}.tab span{opacity:.75;font-size:12px}
+h2{font-size:15px;margin:6px 0 0;display:flex;gap:8px;align-items:center}
+.grp{display:flex;flex-direction:column;gap:8px}
+.row{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 14px;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1.6fr) auto;gap:6px 14px;align-items:center}
+.row.near{border-color:var(--warn);background:#221c0c}
+.row.end{opacity:.55}
+.nm{font-weight:800;font-size:16px}.nm a{color:inherit;text-decoration:none}.nm a:hover{color:var(--green)}
+.chip{display:inline-block;font-size:11px;font-weight:600;border-radius:999px;padding:1px 8px;background:var(--surface2);border:1px solid var(--line);margin-left:4px;color:var(--muted)}
+.chip.th{color:var(--green);border-color:#234}
+.num{font-family:ui-monospace,Menlo,monospace;font-size:13px}
+.d{font-family:ui-monospace,Menlo,monospace;font-weight:800;font-size:16px}.d.up{color:var(--up)}.d.dn{color:var(--dn)}.d.nr{color:var(--warn)}
+.note{grid-column:1/-1;font-size:13px;color:var(--muted);border-top:1px dashed var(--line);padding-top:5px}
+.acts{display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap}
+@media (max-width:760px){.form{grid-template-columns:1fr 1fr}.pt,.form .w2{grid-column:1/-1}.row{grid-template-columns:1fr}.acts{justify-content:flex-start}}
+</style></head><body><div class="wrap">
+<div class="top"><h1>📐 추적 장부</h1><span class="muted" id="sum"></span><span class="sp"></span><a href="/">← 스캐너</a><button class="btn pri" onclick="openForm()">+ 선 등록</button></div>
+<div class="muted">선을 그으면 여기 등록 → 얼마냐봇이 접근(±<span id="np">3</span>%)·종가 돌파·이탈을 알려 줘요. 봇에 <code>빗각</code>이라고 보내면 전체 현황. 표시·알림 전용(측정 전).</div>
+<div id="formBox"></div>
+<div class="tabs" id="tabs"></div>
+<div id="list" class="grp"><div class="muted">불러오는 중…</div></div>
+</div>
+<script>
+// v5.386 추적 장부 — 값·거리 계산은 전부 서버(track_lines.py)가 한다. 여기는 양식과 묶어 보여 주기만.
+const S={lines:[],labels:['빗각','채널 상단','채널 하단','수평선','기타'],near:3,form:null,theme:'',msg:'',err:''};
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
+const isKR=t=>/^[0-9][0-9A-Z]{5}(\.K[SQ])?$/.test(t);
+const fmt=(v,t)=>v==null?'—':isKR(t)?'₩'+Math.round(v).toLocaleString('en-US'):'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const tv=t=>'https://www.tradingview.com/chart/?symbol='+encodeURIComponent(isKR(t)?'KRX:'+t.slice(0,6):t);
+async function load(){try{const r=await fetch('/api/track-lines');const j=await r.json();if(!j.ok)throw new Error(j.error||r.status);
+  S.lines=j.lines;S.labels=j.labels||S.labels;S.near=j.near_pct||3;S.err=j.n_price_failed?`가격을 못 받은 선 ${j.n_price_failed}개 — 거리 없이 표시`:''}catch(e){S.err='장부를 불러오지 못했어: '+e.message}render()}
+function openForm(rec){S.msg='';const t=today(),m=new Date();m.setMonth(m.getMonth()-3);
+  S.form=rec?JSON.parse(JSON.stringify(rec)):{id:'tl_'+Date.now().toString(36),ticker:'',name:'',theme:S.theme||'',label:'빗각',scale:'log',p1:[`${m.getFullYear()}-${String(m.getMonth()+1).padStart(2,'0')}-${String(m.getDate()).padStart(2,'0')}`,''],p2:[t,''],note:'',status:'추적',_new:true};render();window.scrollTo({top:0,behavior:'smooth'})}
+function readForm(){const f=S.form,g=id=>document.getElementById(id).value;f.ticker=g('f-tk').trim().toUpperCase();f.name=g('f-nm').trim();f.theme=g('f-th').trim();f.label=g('f-lb');f.scale=g('f-sc');
+  f.p1=[g('f-d1'),g('f-p1')];f.p2=f.label==='수평선'?[g('f-d2')||today(),g('f-p1')]:[g('f-d2'),g('f-p2')];f.note=g('f-nt').trim()}
+function onLabel(){readForm();render()}
+async function save(more){readForm();const f=S.form;const num=v=>{const n=parseFloat(String(v).replace(/,/g,''));return isFinite(n)?n:null};
+  const rec={id:f.id,ticker:f.ticker,name:f.name,theme:f.theme,label:f.label,scale:f.scale,p1:[f.p1[0],num(f.p1[1])],p2:[f.p2[0],num(f.p2[1])],note:f.note,status:f.status||'추적'};
+  if(f.created_at)rec.created_at=f.created_at;
+  if(rec.label==='수평선'&&rec.p1[0]===rec.p2[0]){const d=new Date(rec.p2[0]);d.setDate(d.getDate()-30);rec.p1[0]=d.toISOString().slice(0,10)}
+  try{const r=await fetch('/api/track-lines/'+encodeURIComponent(rec.id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({record:rec,base_rev:f._new?null:f.rev})});
+    const j=await r.json();if(!j.ok){S.msg=j.error||('저장 실패 '+r.status);if(j.code==='conflict'||j.code==='gone'){await load()}render();return}
+    if(more){const keep={ticker:rec.ticker,name:rec.name,theme:rec.theme,scale:rec.scale};S.form=null;await load();openForm();Object.assign(S.form,keep,{label:rec.label==='채널 상단'?'채널 하단':'채널 상단'});S.msg='저장했어 — 같은 종목의 다음 선을 입력해';render()}
+    else{S.form=null;await load()}}catch(e){S.msg='저장 실패: '+e.message;render()}}
+async function setStatus(id,st){const x=S.lines.find(l=>l.id===id);if(!x)return;const rec=Object.fromEntries(Object.entries(x).filter(([k])=>!['view','rev','updated_at','kind'].includes(k)));rec.status=st;
+  const r=await fetch('/api/track-lines/'+encodeURIComponent(id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({record:rec,base_rev:x.rev})});const j=await r.json();if(!j.ok)S.err=j.error||'변경 실패';await load()}
+async function del(id){if(S.delAsk!==id){S.delAsk=id;render();return}S.delAsk=null;const r=await fetch('/api/track-lines/'+encodeURIComponent(id),{method:'DELETE'});const j=await r.json();if(!j.ok)S.err=j.error||'삭제 실패';await load()}
+function formHTML(){const f=S.form;if(!f)return '';const flat=f.label==='수평선';
+  return `<div class="card"><div class="form">
+   <label>종목 이름<input id="f-nm" value="${esc(f.name)}" placeholder="예: 하이브"></label>
+   <label>티커<input id="f-tk" value="${esc(f.ticker)}" placeholder="예: 352820 · NVDA" autocapitalize="characters"></label>
+   <label>테마<input id="f-th" value="${esc(f.theme||'')}" placeholder="예: 한한령" list="themes"><datalist id="themes">${[...new Set(S.lines.map(l=>l.theme).filter(Boolean))].map(t=>`<option value="${esc(t)}">`).join('')}</datalist></label>
+   <label>선 종류<select id="f-lb" onchange="onLabel()">${S.labels.map(l=>`<option${f.label===l?' selected':''}>${l}</option>`).join('')}</select></label>
+   <div class="pt"><b>${flat?'가격':'첫 점'}</b>${flat?'':`<label>날짜<input id="f-d1" type="date" value="${esc(f.p1[0])}"></label>`}<label>가격<input id="f-p1" inputmode="decimal" value="${esc(f.p1[1])}" placeholder="가격"></label>${flat?`<input id="f-d1" type="hidden" value="${esc(f.p1[0])}">`:''}</div>
+   ${flat?`<input id="f-d2" type="hidden" value="${esc(f.p2[0])}"><input id="f-p2" type="hidden" value="">`:`<div class="pt"><b>둘째 점</b><label>날짜<input id="f-d2" type="date" value="${esc(f.p2[0])}"></label><label>가격<input id="f-p2" inputmode="decimal" value="${esc(f.p2[1])}" placeholder="가격"></label></div>`}
+   <label>차트 스케일<select id="f-sc"><option value="log"${f.scale!=='linear'?' selected':''}>로그 (가격축 간격이 위로 갈수록 넓음)</option><option value="linear"${f.scale==='linear'?' selected':''}>일반 (가격축 간격이 일정)</option></select></label>
+   <label class="w2" style="grid-column:span 3">시나리오 · 메모<input id="f-nt" value="${esc(f.note||'')}" placeholder="예: 채널 상단 종가 돌파 시 진입 검토, 240일선 248,000이 다음 저항"></label>
+   ${flat?'':'<div class="help">트레이딩뷰에서 선을 더블클릭 → <b>Coordinates(좌표)</b> 탭 → 점 #1·#2의 <b>가격</b>과 <b>날짜</b>를 그대로 옮겨 적으면 돼요. 선을 그은 차트가 로그인지 일반인지도 맞춰 주세요.</div>'}
+   </div>${S.msg?`<div class="msg" style="margin-top:8px">${esc(S.msg)}</div>`:''}
+   <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="btn pri" onclick="save(false)">저장</button>${f._new?'<button class="btn" onclick="save(true)">저장하고 이 종목 선 하나 더</button>':''}<button class="btn" onclick="S.form=null;S.msg=\'\';render()">취소</button></div></div>`}
+function rowHTML(x){const v=x.view||{},z=x.status==='종료'?'end':v.zone;const d=v.dist_pct;
+  return `<div class="row ${z==='near'?'near':''} ${x.status==='종료'?'end':''}"><div><span class="nm"><a href="${tv(x.ticker)}" target="_blank" rel="noopener" title="트레이딩뷰에서 열기">${esc(x.name)}</a></span><span class="chip">${esc(x.label||'선')}</span>${x.theme?`<span class="chip th">${esc(x.theme)}</span>`:''}${x.scale==='linear'?'<span class="chip">일반 스케일</span>':''}</div>
+   <div class="num">선 <b>${fmt(v.value,x.ticker)}</b> · 종가 ${fmt(v.close,x.ticker)} <span class="muted">(${esc((v.value_date||'').slice(5))})</span> · <span class="d ${z==='near'?'nr':d>0?'up':'dn'}">${d==null?'—':(d>=0?'+':'')+d.toFixed(1)+'%'}</span></div>
+   <div class="acts"><button class="btn sm" onclick="openForm(S.lines.find(l=>l.id==='${esc(x.id)}'))">고치기</button><button class="btn sm" onclick="setStatus('${esc(x.id)}','${x.status==='종료'?'추적':'종료'}')">${x.status==='종료'?'다시 추적':'종료'}</button><button class="btn sm warn" onclick="del('${esc(x.id)}')">${S.delAsk===x.id?'한 번 더':'지우기'}</button></div>
+   ${x.note?`<div class="note">${esc(x.note)}</div>`:''}</div>`}
+function render(){document.getElementById('np').textContent=S.near;document.getElementById('formBox').innerHTML=formHTML();
+  const act=S.lines.filter(l=>l.status!=='종료'),themes=[...new Set(S.lines.map(l=>l.theme).filter(Boolean))];
+  document.getElementById('sum').textContent=`추적 ${act.length}개 · 종목 ${new Set(act.map(l=>l.ticker)).size}개`;
+  document.getElementById('tabs').innerHTML=themes.length?[['','전체']].concat(themes.map(t=>[t,t])).map(([k,n])=>`<button class="tab${S.theme===k?' on':''}" onclick="S.theme='${esc(k)}';render()">${esc(n)} <span>${(k?S.lines.filter(l=>l.theme===k):S.lines).length}</span></button>`).join(''):'';
+  const L=S.theme?S.lines.filter(l=>l.theme===S.theme):S.lines;const z=k=>L.filter(l=>l.status!=='종료'&&(l.view||{}).zone===k).sort((a,b)=>Math.abs(a.view.dist_pct)-Math.abs(b.view.dist_pct));
+  const G=[['🟡 선 근처 (±'+S.near+'%)',z('near')],['🔺 선 위',z('above')],['🔻 선 아래',z('below')],['❔ 가격 못 받음',L.filter(l=>l.status!=='종료'&&(l.view||{}).zone==='unknown')],['종료',L.filter(l=>l.status==='종료')]];
+  document.getElementById('list').innerHTML=(S.err?`<div class="msg">${esc(S.err)}</div>`:'')+(G.filter(([,a])=>a.length).map(([t,a])=>`<h2>${t} <span class="muted">${a.length}</span></h2>${a.map(rowHTML).join('')}`).join('')||'<div class="muted">아직 등록한 선이 없어. 오른쪽 위 "+ 선 등록"으로 시작해.</div>')}
+load();
+</script></body></html>

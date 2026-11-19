@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.386 [추적 장부 /track — 사용자 2026-11-19 "종목 추적이 잘안돼. 하이브도 내가 채널 다 그려놓고 까먹어서 매매못함" → "응 만들어"]
+  내가 그은 선(빗각·채널 상단/하단·수평선)을 화면에서 등록 → 얼마냐봇이 읽어 접근·돌파·이탈 알림. track_lines.py(순수: 값·검증) +
+  GET /api/track-lines(봇 읽기) · PUT/DELETE /api/track-lines/{id}(rev·삭제 로그) · static/track.html(양식 + 근접/위/아래 묶음).
+  장부가 없으면 봇 v2.56 trendlines.json 19개 선을 한 번 옮겨 심는다(track_lines_seed.json). scale log|linear(차트 스케일). 헤더에 "추적" 링크.
+  표시·알림 전용 · 측정 전.
 v5.385 [지수 하락 구간에서 덜 빠진 종목 — 사용자 2026-11-19 "지수빠질때 덜빠지는 종목은 어떻게 선별해?" → "만들어줘"]
   rs_drawdown.py(순수) + rs_drawdown_scan/GET /api/rs-drawdown(봇 읽기). 코스피·코스닥 각각 최근 60봉 고점→그 뒤 저점 구간에서
   종목 하락률 − 지수 하락률(rel_dd) 순. 저점 유지(지수 저점 때 종목은 구간 신저가 안 감)·50일선 위·저점 이후 반등(rel_reb)·업종 표시.
@@ -9056,6 +9061,8 @@ _BOT_READ_EXACT_PATHS = {
     "/api/reignition/confirmed",
     # v5.385: 지수 하락 구간 상대강도(GET·읽기 전용, 쓰기 0건 — rs_drawdown_api 본문 확인).
     "/api/rs-drawdown",
+    # v5.386: 추적 장부 읽기(GET만 — PUT/DELETE는 경로가 /api/track-lines/{id}라 여기 안 걸리고 세션이 필요하다).
+    "/api/track-lines",
     # v5.141: Claude API 일일 상한 경고/차단 텔레그램 발송도 마찬가지로
     # stock-alert 쪽에 이 경로를 폴링하는 코드가 추가돼야 실제 발송이 된다 —
     # 여기서는 데이터(pending_alert)만 열어둠.
@@ -9245,7 +9252,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.385"
+VERSION = "v5.386"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -22341,6 +22348,138 @@ async def user_event_delete(rid: str, request: Request):
         _rec_list_write(USER_EVENTS_PATH, events)
         _rev_store_delete_log(USER_EVENTS_DELETE_LOG_PATH, rid, request, removed, "user-events")
     return JSONResponse({"ok": True, "deleted": rid})
+
+
+# ── v5.386 추적 장부(내가 그은 선) — track_lines.py ─────────────────────────────────────────
+TRACK_LINES_PATH = _resolve_persistent_path("track_lines.json")
+TRACK_LINES_DELETE_LOG_PATH = os.path.join(os.path.dirname(TRACK_LINES_PATH), "track_lines_deletions.log")
+TRACK_LINES_SEED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "track_lines_seed.json")
+_TRACK_LINES_LOCK = _threading.RLock()
+_track_px_cache: dict = {}          # ticker → (ts, close, daykey) — 화면 표시용 10분 캐시(판정에 안 씀)
+TRACK_PX_TTL = 600
+
+
+def _track_lines_load() -> list:
+    """장부 읽기. 파일이 아직 없으면 봇 v2.56 trendlines.json 사본(track_lines_seed.json)으로 한 번 만든다(rev 1) — 옮겨 심기."""
+    import track_lines as tl
+    if os.path.exists(TRACK_LINES_PATH):
+        return _rec_list_load(TRACK_LINES_PATH)
+    seed = _rec_list_load(TRACK_LINES_SEED_PATH)
+    out = []
+    for x in seed:
+        rec = {"id": x["id"], "ticker": x["ticker"], "name": x.get("name") or x["ticker"], "theme": "",
+               "label": "수평선" if x.get("kind") == "flat" else "빗각", "scale": "log",
+               "p1": list(x["p1"]), "p2": list(x["p2"]), "note": x.get("note") or "", "status": "추적",
+               "created_at": _now_iso()}
+        rec["kind"] = tl.kind_of(rec)
+        bad = tl.invalid(rec)
+        if bad:
+            raise ValueError(f"track_lines_seed.json {x.get('id')}: {bad}")
+        rec["rev"], rec["updated_at"] = 1, _now_iso()
+        out.append(rec)
+    _rec_list_write(TRACK_LINES_PATH, out)
+    print(f"[track-lines] 장부 새로 만듦 — 봇 선 {len(out)}개 옮김", flush=True)
+    return out
+
+
+def _track_close(ticker: str):
+    """(종가, 그 봉 날짜) — 스캔 캐시 → 없으면 _fetch(/api/ma와 같은 순서). 실패면 (None, None)."""
+    t = ticker.upper().strip()
+    hit = _track_px_cache.get(t)
+    if hit and time.time() - hit[0] < TRACK_PX_TTL:
+        return hit[1], hit[2]
+    df = None
+    for key in ("data:kr", "data:us"):
+        bundle = _data_cache.get(key)
+        if bundle and t in bundle.get("data", {}):
+            df = bundle["data"][t]
+            break
+    if df is None:
+        try:
+            df = _fetch(t + ".KS" if (len(t) == 6 and t[0].isdigit() and "." not in t) else t)
+        except Exception as e:
+            print(f"[track-lines] {t} 가격 조회 실패: {e}", flush=True)
+            df = None
+    if df is None or len(df) == 0:
+        return None, None
+    close, day = float(df["Close"].iloc[-1]), _last_bar_daykey(df)
+    _track_px_cache[t] = (time.time(), close, day)
+    return close, day
+
+
+@app.get("/api/track-lines")
+async def track_lines_list(prices: int = 1):
+    """장부 전체(봇 읽기 개방 — GET·읽기 전용. 파일이 없을 때 한 번 옮겨 심는 것 말고는 쓰기 없음).
+    prices=1이면 종목 종가·오늘 선 값·거리(view)를 붙인다 — 화면용. 봇은 prices=0으로 선만 받아 자기 가격으로 판정한다."""
+    import track_lines as tl
+    with _TRACK_LINES_LOCK:
+        try:
+            lines = _track_lines_load()
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"장부 읽기 실패: {e}"}, status_code=500)
+    out, n_px_fail = [], 0
+    if prices:
+        loop = asyncio.get_event_loop()
+        tks = sorted({x["ticker"] for x in lines if x.get("status") != "종료"})
+        px = dict(zip(tks, await asyncio.gather(*[loop.run_in_executor(_executor, _track_close, t) for t in tks])))
+        today = datetime.now(KST).strftime("%Y-%m-%d")
+        for x in lines:
+            close, day = px.get(x["ticker"], (None, None))
+            if x.get("status") != "종료" and not close:
+                n_px_fail += 1
+            out.append({**x, "view": tl.view_row(x, close, day or today)})
+    else:
+        out = lines
+    return JSONResponse(_clean_nan({"ok": True, "lines": out, "n": len(out), "n_price_failed": n_px_fail,
+                                    "near_pct": tl.NEAR_PCT, "labels": tl.LABELS}))
+
+
+@app.put("/api/track-lines/{rid}")
+async def track_line_put(rid: str, request: Request):
+    import track_lines as tl
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "JSON 본문 필요"}, status_code=400)
+    rec = body.get("record") if isinstance(body, dict) else None
+    if not isinstance(rec, dict) or rec.get("id") != rid:
+        return JSONResponse({"ok": False, "error": "record.id가 경로 id와 같아야 함"}, status_code=400)
+    rec = {k: v for k, v in rec.items() if k != "view"}
+    bad = tl.invalid(rec)
+    if bad:
+        return JSONResponse({"ok": False, "error": bad}, status_code=400)
+    rec["kind"] = tl.kind_of(rec)
+    rec.setdefault("created_at", _now_iso())
+    with _TRACK_LINES_LOCK:
+        try:
+            lines = _track_lines_load()
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
+        status, payload, changed = _rev_store_put(lines, rid, rec, body.get("base_rev"))
+        if changed:
+            _rec_list_write(TRACK_LINES_PATH, lines)
+        return JSONResponse(payload, status_code=status)
+
+
+@app.delete("/api/track-lines/{rid}")
+async def track_line_delete(rid: str, request: Request):
+    with _TRACK_LINES_LOCK:
+        try:
+            lines = _track_lines_load()
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"읽기 실패: {e}"}, status_code=500)
+        idx = next((i for i, r in enumerate(lines) if r.get("id") == rid), None)
+        if idx is None:
+            return JSONResponse({"ok": True, "already_gone": True})
+        removed = lines.pop(idx)
+        _rec_list_write(TRACK_LINES_PATH, lines)
+        _rev_store_delete_log(TRACK_LINES_DELETE_LOG_PATH, rid, request, removed, "track-lines")
+    return JSONResponse({"ok": True, "deleted": rid})
+
+
+@app.get("/track")
+async def track_page():
+    return FileResponse("static/track.html", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/api/lowpoint/eval/auto/{code}")
