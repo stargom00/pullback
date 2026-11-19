@@ -107,3 +107,55 @@ def view_row(rec: dict, close, on) -> dict:
         out["to_line_pct"] = (v / float(close) - 1) * 100      # v5.390 화면용: 지금 가격에서 선까지 가려면 몇 % (위 선 +, 아래 선 −)
         out["zone"] = "near" if abs(d) <= NEAR_PCT + 1e-9 else ("above" if d > 0 else "below")
     return out
+
+
+# ── v5.391 차트(사용자 2026-11-19 "차트에 빗각, 수평선 그려진걸 추가하는건 어렵지?" → "응") ─────────────────
+# 종목 일봉 + 그 종목의 선들을 한 장에. 값은 전부 여기서 계산하고 화면은 그리기만 한다.
+CHART_MAX_DAILY = 320      # 일봉이 이보다 많으면 주봉으로 묶는다 — AI 어림값(가로 약 1,100px에서 봉 하나 3px 남짓이 한계), 표시 전용
+CHART_PAD_DAYS = 45        # 가장 이른 점보다 이만큼 앞에서 시작(달력 일수) — AI 어림값, 표시 전용
+CHART_FUTURE_FRAC = 0.12   # 오늘 뒤로 선을 늘려 그릴 폭(봉 수 비율, 최소 8봉) — AI 어림값, 표시 전용
+
+
+def chart_start(lines: list) -> date:
+    """차트가 시작할 날짜 = 선들의 가장 이른 점 − CHART_PAD_DAYS."""
+    from datetime import timedelta
+    first = min(min(_d(x["p1"][0]), _d(x["p2"][0])) for x in lines)
+    return first - timedelta(days=CHART_PAD_DAYS)
+
+
+def chart_payload(df, lines: list) -> dict:
+    """df(일봉 OHLC, 날짜 인덱스) + 선 목록 → {tf, bars, future, lines}.
+    bars = [[날짜, 시, 고, 저, 종]], future = 오늘 뒤 날짜들(선만 그림), lines[i].values = bars+future 날짜마다의 선 값
+    (그 선의 가장 이른 점보다 앞은 None — 선을 긋기 전 과거로는 늘리지 않는다). 내부 요구 봉 수: 1."""
+    import pandas as pd
+    start = chart_start(lines)
+    d = df[["Open", "High", "Low", "Close"]].dropna()
+    d = d[pd.DatetimeIndex(d.index).date >= start]
+    if len(d) == 0:
+        return {"tf": "day", "bars": [], "future": [], "lines": [], "start": str(start)}
+    tf = "day"
+    if len(d) > CHART_MAX_DAILY:
+        tf = "week"
+        idx = pd.DatetimeIndex(d.index)
+        key = [f"{y}-{w:02d}" for y, w in zip(idx.isocalendar().year, idx.isocalendar().week)]
+        g = d.assign(_k=key, _d=idx).groupby("_k", sort=False)
+        d = pd.DataFrame({"Open": g["Open"].first(), "High": g["High"].max(), "Low": g["Low"].min(),
+                          "Close": g["Close"].last()}).set_index(pd.DatetimeIndex(g["_d"].last().values))
+    days = [pd.Timestamp(x).date() for x in d.index]
+    step = pd.offsets.BDay(1) if tf == "day" else pd.offsets.Week(1)
+    n_f = max(8, int(len(days) * CHART_FUTURE_FRAC))
+    fut, cur = [], pd.Timestamp(days[-1])
+    for _ in range(n_f):
+        cur = cur + step
+        fut.append(cur.date())
+    out_lines = []
+    for x in lines:
+        first = min(_d(x["p1"][0]), _d(x["p2"][0]))
+        # 주봉이면 첫 점이 든 주의 봉부터(봉 날짜는 그 주의 마지막 거래일)
+        vals = [None if (dd < first and not (tf == "week" and (first - dd).days < 7 and dd.isocalendar()[:2] == first.isocalendar()[:2]))
+                else line_value(x, dd) for dd in days + fut]
+        out_lines.append({"id": x["id"], "label": x.get("label") or "선", "kind": kind_of(x), "values": vals,
+                          "p1": [str(_d(x["p1"][0])), float(x["p1"][1])], "p2": [str(_d(x["p2"][0])), float(x["p2"][1])]})
+    bars = [[str(dd), float(r.Open), float(r.High), float(r.Low), float(r.Close)] for dd, r in zip(days, d.itertuples())]
+    return {"tf": tf, "bars": bars, "future": [str(x) for x in fut], "lines": out_lines, "start": str(start),
+            "log": any(x.get("scale") != "linear" for x in lines)}

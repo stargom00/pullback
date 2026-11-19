@@ -187,3 +187,119 @@ def test_page_uses_scanner_theme_and_server_distance():
     html = open(os.path.join(ROOT, "static", "track.html"), encoding="utf-8").read()
     assert "localStorage.getItem('scannerTheme')" in html and ':root[data-theme="dark"]{' in html
     assert "to_line_pct" in html and "value/close" not in html.replace(" ", "")   # 거리는 서버 값을 쓴다(화면에서 다시 계산 안 함)
+
+
+# ── v5.391 차트 ──────────────────────────────────────────────────────────────
+# 사보타주 확인(2026-11-19, 전부 FAIL 확인 후 원복): 이름표 간격 제거 / 먼 선 축 제한 제거 / 주봉 종가를 first로 /
+# 첫 점 이전 None 제거 / 엔드포인트에서 종료 선 포함.
+def _bars(n, start="2026-01-05"):
+    import pandas as pd
+    idx = pd.bdate_range(start, periods=n)
+    c = [100.0 + i for i in range(n)]
+    return pd.DataFrame({"Open": c, "High": [v + 2 for v in c], "Low": [v - 2 for v in c], "Close": c}, index=idx)
+
+
+def _line(d1, p1, d2, p2, **kw):
+    return {"id": kw.pop("id", "L1"), "ticker": "T", "label": "빗각", "scale": "log", "p1": [d1, p1], "p2": [d2, p2], **kw}
+
+
+def test_chart_payload_daily_values_match_line_value():
+    from datetime import date
+    df = _bars(120)
+    ln = _line("2026-02-02", 100, "2026-03-02", 120)
+    p = tl.chart_payload(df, [ln])
+    assert p["tf"] == "day" and p["log"] is True
+    assert len(p["bars"]) == 120  # 첫 점 45일 전(2025-12-19)보다 뒤라 전부 들어간다
+    assert len(p["future"]) == max(8, int(120 * tl.CHART_FUTURE_FRAC))
+    vals = p["lines"][0]["values"]
+    assert len(vals) == len(p["bars"]) + len(p["future"])
+    days = [b[0] for b in p["bars"]] + p["future"]
+    for d, v in zip(days, vals):
+        if d < "2026-02-02":
+            assert v is None, d  # 선을 긋기 전 과거로는 늘리지 않는다
+        else:
+            assert v == pytest.approx(tl.line_value(ln, date.fromisoformat(d))), d
+    assert vals[-1] is not None and p["future"][0] > p["bars"][-1][0]
+    # 봉 값은 원본 그대로
+    assert p["bars"][0][1:] == [100.0, 102.0, 98.0, 100.0]
+
+
+def test_chart_payload_starts_pad_days_before_first_point():
+    df = _bars(300, start="2025-01-06")
+    p = tl.chart_payload(df, [_line("2025-12-01", 100, "2026-01-05", 110)])
+    assert p["start"] == "2025-10-17" and p["bars"][0][0] >= "2025-10-17"
+    assert p["tf"] == "day"
+
+
+def test_chart_payload_switches_to_weekly_above_limit():
+    df = _bars(tl.CHART_MAX_DAILY + 200, start="2024-01-01")
+    ln = _line("2024-03-06", 100, "2025-03-05", 200, scale="linear")
+    p = tl.chart_payload(df, [ln])
+    assert p["tf"] == "week" and p["log"] is False
+    assert len(p["bars"]) < tl.CHART_MAX_DAILY
+    # 주봉 = 그 주의 첫 시가·최고 고가·최저 저가·마지막 종가, 날짜는 그 주 마지막 거래일
+    w = df[(df.index >= "2024-01-22") & (df.index <= "2024-01-26")]  # 첫 점 45일 전 = 01-21
+    assert p["bars"][0] == ["2024-01-26", float(w.Open.iloc[0]), float(w.High.max()), float(w.Low.min()), float(w.Close.iloc[-1])]
+    # 첫 점(수요일)이 든 주의 봉(금요일 날짜)부터 값이 있다
+    days = [b[0] for b in p["bars"]]
+    i = days.index("2024-03-08")
+    assert p["lines"][0]["values"][i] is not None and p["lines"][0]["values"][i - 1] is None
+    # 미래는 주 단위
+    from datetime import date
+    assert (date.fromisoformat(p["future"][1]) - date.fromisoformat(p["future"][0])).days == 7
+
+
+def test_chart_payload_empty_window():
+    p = tl.chart_payload(_bars(10, start="2020-01-06"), [_line("2026-02-02", 100, "2026-03-02", 120)])
+    assert p["bars"] == [] and p["lines"] == []
+
+
+def test_chart_endpoint(store, monkeypatch):
+    _put({"id": "c1", "ticker": "005930.KS", "name": "삼성전자", "label": "빗각", "scale": "log",
+          "p1": ["2026-02-02", 100], "p2": ["2026-03-02", 120], "status": "추적"}, None)
+    _put({"id": "c2", "ticker": "005930.KS", "name": "삼성전자", "label": "수평선", "scale": "log",
+          "p1": ["2026-02-02", 90], "p2": ["2026-03-02", 90], "status": "종료"}, None)
+    seen = {}
+
+    def fake(t, start):
+        seen["t"], seen["start"] = t, start
+        return _bars(120)
+    monkeypatch.setattr(app, "_track_bars", fake)
+    r = asyncio.run(app.track_lines_chart("005930.ks"))
+    j = json.loads(r.body)
+    assert r.status_code == 200 and j["ok"] and j["ticker"] == "005930.KS"
+    assert [x["id"] for x in j["lines"]] == ["c1"]  # 종료한 선은 안 그린다
+    assert str(seen["start"]) == "2025-12-19"
+    # 일봉 실패는 조용한 빈 차트가 아니라 502
+    monkeypatch.setattr(app, "_track_bars", lambda t, s: None)
+    assert asyncio.run(app.track_lines_chart("005930.KS")).status_code == 502
+    assert asyncio.run(app.track_lines_chart("NOPE")).status_code == 404
+    # 봇 토큰으로는 안 열린다(세션 전용)
+    assert not any("chart" in p for p in app._BOT_READ_EXACT_PATHS)
+
+
+def test_chart_svg_draws_candles_and_lines():
+    if not shutil.which("node"):
+        pytest.skip("node 없음")
+    p = tl.chart_payload(_bars(60), [
+        _line("2026-02-02", 100, "2026-03-02", 120, id="a"),
+        _line("2026-02-02", 131, "2026-03-02", 131, id="b", label="수평선"),
+        _line("2026-02-02", 132, "2026-03-02", 132, id="c", label="채널 상단"),
+        _line("2026-02-02", 9000, "2026-03-02", 9000, id="far", label="먼 선")])
+    src = open(os.path.join(os.path.dirname(__file__), "static", "track.html"), encoding="utf-8").read()
+    colors = [l for l in src.splitlines() if l.startswith("const LINE_COLORS")][0]
+    js = colors + "\n" + _extract_js("chartSVG") + "\nconst p=" + json.dumps(p) + """;
+const s=chartSVG(p,0);const cnt=re=>(s.match(re)||[]).length;
+const ys=[...s.matchAll(/<text class="clb"[^>]* y="([\\d.]+)"[^>]*>([^<]+)</g)].map(m=>[parseFloat(m[1]),m[2]]);
+console.log(JSON.stringify({rect:cnt(/<rect class="c[ud]"/g),solid:cnt(/<path class="cl" /g),fut:cnt(/<path class="cl fut"/g),ys,nan:/NaN|undefined|Infinity/.test(s)}));"""
+    out = json.loads(subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout)
+    assert out["rect"] == 60 and out["nan"] is False
+    # 봉 범위 밖 멀리 있는 선(9000)은 축을 늘리지 않고 잘린다 → 그려지는 선 3개
+    assert out["solid"] == 3 and out["fut"] == 3
+    labels = out["ys"]
+    assert len(labels) == 3 and not any("먼 선" in t for _, t in labels)
+    ys = [y for y, _ in labels]
+    assert ys == sorted(ys) and all(b - a >= 13 - 1e-6 for a, b in zip(ys, ys[1:]))  # 안 겹치고 순서 유지
+    # 위에 있는 선(가격 큰 쪽)이 위 이름표
+    px = [float(t.split()[-1].replace(",", "")) for _, t in labels]
+    assert px == sorted(px, reverse=True) and {131.0, 132.0} <= set(px)

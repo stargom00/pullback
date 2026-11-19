@@ -5,6 +5,9 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.391 [추적 장부 차트 — 사용자 2026-11-19 "차트에 빗각, 수평선 그려진걸 추가하는건 어렵지?" → "응"]
+  종목 카드의 "차트"를 누르면 캔들(첫 점 45일 전부터, 320봉 넘으면 주봉) 위에 등록한 선을 그리고 오늘 뒤로 늘려 보여 준다.
+  GET /api/track-lines/chart/{ticker}(세션·읽기) — 값은 track_lines.chart_payload가 계산, 화면은 그리기만. 표시 전용.
 v5.390 [추적 장부 다시 디자인 — 사용자 2026-11-19 "인터페이스 디자인이 너무 구려 … 한눈에 보기쉽게, 간단명료하면서 사용하기 편리하게"]
   선 하나 = 한 줄이던 목록 → 종목 카드 + 가격 사다리(위 선들 / 지금 종가 / 아래 선들, 선까지 ↑↓ %). 맨 위 "오늘 볼 것 · 선 근처" 칩(누르면 그 카드로).
   근처 종목 먼저 → 가까운 순. 메모·고치기·종료·지우기는 선을 눌렀을 때만. 종료한 선은 기본 숨김. 스캐너 테마(라이트/다크)·글꼴을 그대로 쓴다.
@@ -9260,7 +9263,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.390"
+VERSION = "v5.391"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -22483,6 +22486,54 @@ async def track_line_delete(rid: str, request: Request):
         _rec_list_write(TRACK_LINES_PATH, lines)
         _rev_store_delete_log(TRACK_LINES_DELETE_LOG_PATH, rid, request, removed, "track-lines")
     return JSONResponse({"ok": True, "deleted": rid})
+
+
+_track_chart_cache: dict = {}       # (ticker, 시작일) → (ts, df) — 10분, 표시 전용
+
+
+def _track_bars(ticker: str, start):
+    """차트용 일봉(시작일부터). KR = naver 통합 시세(_downcast 정제), US = yfinance(auto_adjust=True — 장부의 종가·봇과 같은 기준).
+    스캔 캐시는 2년치뿐이라 선의 첫 점이 그보다 오래된 경우(예: 2020년)를 위해 따로 받는다."""
+    t = ticker.upper().strip()
+    key = (t, str(start))
+    hit = _track_chart_cache.get(key)
+    if hit and time.time() - hit[0] < TRACK_PX_TTL:
+        return hit[1]
+    days = (datetime.now(KST).date() - start).days + 10
+    if naver_kr.is_kr(t) or (len(t) == 6 and t[0].isdigit()):
+        df = naver_kr.fetch_history(t if "." in t else t + ".KS", days=max(days, 60))
+    else:
+        df = yf.Ticker(t).history(start=str(start), interval="1d", auto_adjust=True)
+    if df is None or len(df) == 0:
+        return None
+    df = _downcast(df)
+    _track_chart_cache[key] = (time.time(), df)
+    return df
+
+
+@app.get("/api/track-lines/chart/{ticker}")
+async def track_lines_chart(ticker: str):
+    """v5.391 그 종목 일봉(길면 주봉) + 추적 중인 선 값 — 화면 차트용(세션 필요, 읽기 전용)."""
+    import track_lines as tl
+    t = ticker.upper().strip()
+    with _TRACK_LINES_LOCK:
+        try:
+            lines = [x for x in _track_lines_load() if x.get("ticker") == t and x.get("status") != "종료"]
+        except (OSError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": f"장부 읽기 실패: {e}"}, status_code=500)
+    if not lines:
+        return JSONResponse({"ok": False, "error": "이 종목에 추적 중인 선이 없어요"}, status_code=404)
+    try:
+        df = await asyncio.get_event_loop().run_in_executor(_executor, _track_bars, t, tl.chart_start(lines))
+    except Exception as e:
+        print(f"[track-lines] {t} 차트 일봉 조회 실패: {e}", flush=True)
+        df = None
+    if df is None:
+        return JSONResponse({"ok": False, "error": "일봉을 못 받았어요 — 잠시 뒤 다시"}, status_code=502)
+    body = tl.chart_payload(df, lines)
+    if not body["bars"]:
+        return JSONResponse({"ok": False, "error": "그 기간의 일봉이 없어요"}, status_code=502)
+    return JSONResponse(_clean_nan({"ok": True, "ticker": t, **body}))
 
 
 @app.get("/track")

@@ -57,6 +57,18 @@ a.back{color:var(--n-muted);text-decoration:none;font-size:13px}a.back:hover{col
 .det{grid-column:1/-1;border-top:1px dashed var(--n-line2);margin-top:6px;padding-top:8px;display:flex;flex-direction:column;gap:6px;cursor:default}
 .det .note{font-size:13px;color:var(--n-sub)}.det .pts{font-size:11px;color:var(--n-muted)}
 .det .acts{display:flex;gap:4px;flex-wrap:wrap}
+.card.wide{grid-column:1/-1}
+.chart{border-top:1px solid var(--n-line);background:var(--n-bg);padding:10px 12px 6px}
+.chart svg{display:block;width:100%;height:auto}.chart .cscroll{overflow-x:auto}@media(max-width:700px){.chart svg{width:780px;max-width:none}}
+.chart .cap{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--n-muted);padding:0 2px 6px}
+.chart .cap i{display:inline-block;width:14px;height:0;border-top:2px solid;vertical-align:middle;margin-right:4px}
+.chart .wait,.chart .cerr{font-size:13px;color:var(--n-muted);padding:26px 0;text-align:center}.chart .cerr{color:var(--n-bad)}
+.cg{stroke:var(--n-line);stroke-width:1}.ct{font:10px 'IBM Plex Mono',monospace;fill:var(--n-muted)}
+.cu{fill:#d13b3b;stroke:#d13b3b}.cd{fill:#2d5ccc;stroke:#2d5ccc}
+.cl{fill:none;stroke-width:1.8}.cl.fut{stroke-dasharray:5 4;opacity:.8}
+.clb{font:600 11px 'IBM Plex Sans KR',sans-serif;paint-order:stroke;stroke:var(--n-bg);stroke-width:3px}
+.cnow{stroke:var(--n-text);stroke-width:1;stroke-dasharray:2 3;opacity:.55}
+.cfut{fill:var(--n-row);opacity:.6}
 .nopx{padding:6px 14px;font-size:12px;color:var(--n-bad);border-top:1px solid var(--n-line);background:var(--n-bg)}
 /* 양식 */
 .fcard{background:var(--n-card);border:1px solid var(--n-accent);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px}
@@ -82,7 +94,7 @@ input:focus,select:focus{outline:2px solid var(--n-accent);outline-offset:-1px}
 </div>
 <script>
 // v5.390 추적 장부 — 값·거리 계산은 전부 서버(track_lines.py view)가 한다. 여기는 묶어서 보여 주기와 양식만.
-const S={lines:[],labels:['빗각','채널 상단','채널 하단','수평선','기타'],near:3,form:null,theme:'',msg:'',err:'',open:null,showEnd:false,delAsk:null};
+const S={lines:[],labels:['빗각','채널 상단','채널 하단','수평선','기타'],near:3,form:null,theme:'',msg:'',err:'',open:null,showEnd:false,delAsk:null,chart:null,charts:{}};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
 const isKR=t=>/^[0-9][0-9A-Z]{5}(\.K[SQ])?$/.test(t);
@@ -100,6 +112,34 @@ function groupStocks(lines,theme,showEnd){const by={};
     const near=act.filter(l=>(l.view||{}).zone==='near');const ds=act.map(l=>Math.abs((l.view||{}).to_line_pct??1e9));
     return {ticker:tk,name:L.find(l=>l.name)?.name||tk,theme:L.find(l=>l.theme)?.theme||'',close:v.close??null,date:v.value_date||'',lines:L,near,minDist:ds.length?Math.min(...ds):1e9}})
   .sort((a,b)=>a.minDist-b.minDist)}   // 선까지 가까운 순(근처 ±3% 종목은 정의상 맨 앞에 온다)
+const LINE_COLORS=['#d98b3a','#2e9e6b','#8a5cd6','#c2477f','#3a8fd9','#8a8f98'];
+function refetchChart(){const tk=S.chart;S.chart=null;if(S.lines.some(l=>l.ticker===tk&&l.status!=='종료'))toggleChart(tk);else render()}
+async function toggleChart(tk){if(S.chart===tk){S.chart=null;render();return}S.chart=tk;render();
+  if(S.charts[tk]&&!S.charts[tk].error){document.getElementById('c-'+tk)?.scrollIntoView({behavior:'smooth',block:'nearest'});return}
+  try{const r=await fetch('/api/track-lines/chart/'+encodeURIComponent(tk));const j=await r.json();S.charts[tk]=j.ok?j:{error:j.error||('차트 실패 '+r.status)}}catch(e){S.charts[tk]={error:'차트를 불러오지 못했어: '+e.message}}
+  render();document.getElementById('c-'+tk)?.scrollIntoView({behavior:'smooth',block:'nearest'})}
+// 캔들 + 선 SVG — 순수 함수(값은 서버가 준 것만 쓴다). 테스트: test_track_lines.py가 node로 그대로 실행.
+function chartSVG(p,dec){const W=1100,H=380,L=8,R=74,T=10,B=22,n=p.bars.length,m=n+p.future.length;
+  const vals=[];for(const b of p.bars){vals.push(b[2],b[3])}
+  // 선은 봉 범위의 위아래 60%까지만 축에 넣는다(멀리 있는 선 하나가 캔들을 납작하게 만들지 않게) — 밖의 선은 잘려 보인다
+  const lo0=Math.min(...vals),hi0=Math.max(...vals);const f=p.log?(v=>Math.log(v)):(v=>v);
+  let a=f(lo0),z=f(hi0);const span=z-a||1;const capLo=a-span*.6,capHi=z+span*.6;
+  for(const l of p.lines)for(const v of l.values){if(v==null||!(v>0))continue;const y=f(v);if(y>=capLo&&y<=capHi){a=Math.min(a,y);z=Math.max(z,y)}}
+  const pad=(z-a)*.04||1;a-=pad;z+=pad;
+  const X=i=>L+(i+.5)*(W-L-R)/m,Y=v=>T+(z-f(v))*(H-T-B)/(z-a),bw=Math.max(1,Math.min(9,(W-L-R)/m*.62));
+  const inv=y=>p.log?Math.exp(y):y,num=v=>Number(v).toLocaleString('en-US',{minimumFractionDigits:dec,maximumFractionDigits:dec});
+  let o=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="캔들 차트와 내 선"><rect class="cfut" x="${X(n-.5)}" y="${T}" width="${X(m-.5)-X(n-.5)}" height="${H-T-B}"/>`;
+  for(let k=0;k<=4;k++){const yv=a+(z-a)*k/4,y=T+(z-yv)*(H-T-B)/(z-a);o+=`<line class="cg" x1="${L}" x2="${W-R}" y1="${y}" y2="${y}"/><text class="ct" x="${W-R+6}" y="${y+3}">${num(inv(yv))}</text>`}
+  const all=p.bars.map(b=>b[0]).concat(p.future);let last='';const stepLbl=p.tf==='week'?(d=>d.slice(0,4)):(d=>d.slice(0,7));const everyN=Math.ceil(m/9);let lastX=-99;
+  for(let i=0;i<m;i++){const k=stepLbl(all[i]);if(k!==last){last=k;if(X(i)-lastX>70){lastX=X(i);o+=`<text class="ct" x="${X(i)}" y="${H-6}" text-anchor="middle">${p.tf==='week'?k:k.slice(2)}</text>`}}}
+  for(let i=0;i<n;i++){const [,op,hi,lw,cl]=p.bars[i],up=cl>=op,x=X(i);o+=`<line class="${up?'cu':'cd'}" x1="${x}" x2="${x}" y1="${Y(hi)}" y2="${Y(lw)}"/><rect class="${up?'cu':'cd'}" x="${x-bw/2}" y="${Y(Math.max(op,cl))}" width="${bw}" height="${Math.max(1,Math.abs(Y(op)-Y(cl)))}"/>`}
+  const lc=p.bars[n-1][4];o+=`<line class="cnow" x1="${L}" x2="${W-R}" y1="${Y(lc)}" y2="${Y(lc)}"/>`;
+  const labs=[];p.lines.forEach((l,li)=>{const col=LINE_COLORS[li%LINE_COLORS.length];const seg=(from,to)=>{let d='',pen=false;for(let i=from;i<to;i++){const v=l.values[i];if(v==null||!(v>0)){pen=false;continue}const y=Y(v);if(y<T-40||y>H-B+40){pen=false;continue}d+=(pen?'L':'M')+X(i).toFixed(1)+' '+y.toFixed(1);pen=true}return d};
+    const d1=seg(0,n),d2=seg(Math.max(0,n-1),m);if(d1)o+=`<path class="cl" stroke="${col}" d="${d1}"/>`;if(d2)o+=`<path class="cl fut" stroke="${col}" d="${d2}"/>`;
+    const v=l.values[n-1];if(v!=null&&v>0){const y=Y(v);if(y>T&&y<H-B)labs.push({y,col,t:l.label+' '+num(v)})}});
+  // 이름표는 위에서부터 순서를 지키며 13px씩 벌린다(가격 순서가 뒤바뀌어 보이지 않게)
+  labs.sort((p1,p2)=>p1.y-p2.y);let prev=-99;for(const b of labs){const y=Math.max(b.y,prev+13);prev=y;o+=`<text class="clb" fill="${b.col}" x="${W-R-4}" y="${y-4}" text-anchor="end">${b.t}</text>`}
+  return o+'</svg>'}
 function openForm(rec,pre){S.msg='';const t=today(),m=new Date();m.setMonth(m.getMonth()-3);
   S.form=rec?JSON.parse(JSON.stringify(rec)):{id:'tl_'+Date.now().toString(36),ticker:'',name:'',theme:S.theme||'',label:'빗각',scale:'log',p1:[m.toISOString().slice(0,10),''],p2:[t,''],note:'',status:'추적',_new:true,...(pre||{})};render();window.scrollTo({top:0,behavior:'smooth'})}
 function readForm(){const f=S.form,g=id=>{const e=document.getElementById(id);return e?e.value:''};f.ticker=g('f-tk').trim().toUpperCase();f.name=g('f-nm').trim();f.theme=g('f-th').trim();
@@ -111,11 +151,11 @@ async function save(more){readForm();const f=S.form;const num=v=>{const n=parseF
   if(rec.label==='수평선'){const d=new Date(rec.p2[0]);d.setDate(d.getDate()-30);rec.p1[0]=d.toISOString().slice(0,10)}
   try{const r=await fetch('/api/track-lines/'+encodeURIComponent(rec.id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({record:rec,base_rev:f._new?null:f.rev})});
     const j=await r.json();if(!j.ok){S.msg=j.error||('저장 실패 '+r.status);if(j.code==='conflict'||j.code==='gone'){await load()}render();return}
-    S.form=null;await load();
+    S.form=null;S.charts={};await load();if(S.chart)refetchChart();
     if(more){openForm(null,{ticker:rec.ticker,name:rec.name,theme:rec.theme,scale:rec.scale,label:rec.label==='채널 상단'?'채널 하단':rec.label==='채널 하단'?'채널 상단':rec.label});S.msg='';render()}}catch(e){S.msg='저장 실패: '+e.message;render()}}
 async function setStatus(id,st){const x=S.lines.find(l=>l.id===id);if(!x)return;const rec=Object.fromEntries(Object.entries(x).filter(([k])=>!['view','rev','updated_at','kind'].includes(k)));rec.status=st;
-  const r=await fetch('/api/track-lines/'+encodeURIComponent(id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({record:rec,base_rev:x.rev})});const j=await r.json();if(!j.ok)S.err=j.error||'변경 실패';await load()}
-async function del(id){if(S.delAsk!==id){S.delAsk=id;render();return}S.delAsk=null;const r=await fetch('/api/track-lines/'+encodeURIComponent(id),{method:'DELETE'});const j=await r.json();if(!j.ok)S.err=j.error||'삭제 실패';S.open=null;await load()}
+  const r=await fetch('/api/track-lines/'+encodeURIComponent(id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({record:rec,base_rev:x.rev})});const j=await r.json();if(!j.ok)S.err=j.error||'변경 실패';S.charts={};await load();if(S.chart)refetchChart()}
+async function del(id){if(S.delAsk!==id){S.delAsk=id;render();return}S.delAsk=null;const r=await fetch('/api/track-lines/'+encodeURIComponent(id),{method:'DELETE'});const j=await r.json();if(!j.ok)S.err=j.error||'삭제 실패';S.open=null;S.charts={};await load();if(S.chart)refetchChart()}
 function formHTML(){const f=S.form;if(!f)return '';const flat=f.label==='수평선';
   return `<div class="fcard"><h2>${f._new?'선 등록':'선 고치기'}</h2>
    <div class="frow"><label>종목 이름<input id="f-nm" value="${esc(f.name)}" placeholder="하이브"></label><label>티커<input id="f-tk" value="${esc(f.ticker)}" placeholder="352820 · NVDA" autocapitalize="characters"></label>
@@ -135,8 +175,11 @@ function lineHTML(x){const v=x.view||{},end=x.status==='종료',near=!end&&v.zon
    ${op?`<div class="det" onclick="event.stopPropagation()">${x.note?`<div class="note">${esc(x.note)}</div>`:''}<div class="pts mono">${esc(x.p1[0])} ${fmt(x.p1[1],x.ticker)} → ${esc(x.p2[0])} ${fmt(x.p2[1],x.ticker)}${x.scale==='linear'?' · 일반 차트':''}</div>
      <div class="acts"><button class="btn sm" onclick="openForm(S.lines.find(l=>l.id==='${esc(x.id)}'))">고치기</button><button class="btn sm" onclick="setStatus('${esc(x.id)}','${end?'추적':'종료'}')">${end?'다시 추적':'추적 종료'}</button><button class="btn sm warn" onclick="del('${esc(x.id)}')">${S.delAsk===x.id?'한 번 더 누르면 지워져':'지우기'}</button></div></div>`:''}</div>`}
 function cardHTML(g){const above=g.lines.filter(l=>g.close==null||(l.view?.value??0)>=g.close),below=g.lines.filter(l=>g.close!=null&&(l.view?.value??0)<g.close);
-  return `<div class="card${g.near.length?' hasnear':''}" id="c-${esc(g.ticker)}"><div class="chd"><a class="nm" href="${tv(g.ticker)}" target="_blank" rel="noopener" title="트레이딩뷰에서 열기">${esc(g.name)}</a><span class="tk mono">${esc(g.ticker)}</span>${g.theme?`<span class="chip">${esc(g.theme)}</span>`:''}<span class="sp"></span>
+  const co=S.chart===g.ticker,cd=S.charts[g.ticker];
+  return `<div class="card${g.near.length?' hasnear':''}${co?' wide':''}" id="c-${esc(g.ticker)}"><div class="chd"><a class="nm" href="${tv(g.ticker)}" target="_blank" rel="noopener" title="트레이딩뷰에서 열기">${esc(g.name)}</a><span class="tk mono">${esc(g.ticker)}</span>${g.theme?`<span class="chip">${esc(g.theme)}</span>`:''}<span class="sp"></span>
+    <button class="btn sm${co?'':' ghost'}" title="캔들 위에 내 선을 그려 보기" onclick="toggleChart('${esc(g.ticker)}')">${co?'차트 닫기':'차트'}</button>
     <button class="btn sm ghost" title="이 종목에 선 추가" onclick="openForm(null,{ticker:'${esc(g.ticker)}',name:'${esc(g.name)}',theme:'${esc(g.theme)}'})">+ 선</button></div>
+   ${co?`<div class="chart">${!cd?'<div class="wait">차트 불러오는 중…</div>':cd.error?`<div class="cerr">${esc(cd.error)}</div>`:`<div class="cap"><span>${cd.tf==='week'?'주봉':'일봉'} · ${esc(cd.bars[0][0])} ~ ${esc(cd.bars[cd.bars.length-1][0])}${cd.log?' · 로그':''}</span>${cd.lines.map((l,i)=>`<span><i style="border-color:${LINE_COLORS[i%LINE_COLORS.length]}"></i>${esc(l.label)}</span>`).join('')}<span>점선 = 오늘 뒤로 늘린 선</span></div><div class="cscroll">${chartSVG(cd,isKR(g.ticker)?0:2)}</div>`}</div>`:''}
    <div class="lad">${above.map(lineHTML).join('')}${g.close!=null?`<div class="now"><span class="lb">지금</span><span class="px mono">${cur(g.ticker)}${fmt(g.close,g.ticker)}</span><span class="to mono">${esc(g.date.slice(5))} 종가</span></div>`:'<div class="nopx">가격을 못 받았어 — 거리 없이 표시</div>'}${below.map(lineHTML).join('')}</div></div>`}
 function render(){document.getElementById('np').textContent=S.near;document.getElementById('formBox').innerHTML=formHTML();
   const act=S.lines.filter(l=>l.status!=='종료'),nEnd=S.lines.length-act.length,themes=[...new Set(S.lines.map(l=>l.theme).filter(Boolean))];
@@ -145,6 +188,7 @@ function render(){document.getElementById('np').textContent=S.near;document.getE
   document.getElementById('nearBox').innerHTML=S.lines.length?(nears.length?`<div class="nearbox"><b class="h">오늘 볼 것 · 선 근처 ${nears.length}</b>${nears.map(({g,l})=>`<button class="nchip" onclick="S.open='${esc(l.id)}';render();document.getElementById('c-${esc(g.ticker)}').scrollIntoView({behavior:'smooth',block:'center'})"><b>${esc(g.name)}</b><span class="l">${esc(l.label||'선')}</span><span class="p mono">${toTxt(l.view.to_line_pct)}</span></button>`).join('')}</div>`:`<div class="calm">지금 선 근처(±${S.near}%)에 온 종목은 없어.</div>`):'';
   document.getElementById('tabs').innerHTML=(themes.length?[['','전체']].concat(themes.map(t=>[t,t])).map(([k,n])=>`<button class="tab${S.theme===k?' on':''}" onclick="S.theme='${esc(k)}';render()">${esc(n)}<span>${new Set((k?S.lines.filter(l=>l.theme===k):S.lines).filter(l=>l.status!=='종료').map(l=>l.ticker)).size}</span></button>`).join(''):'')
     +(nEnd?`<button class="tab${S.showEnd?' on':''}" onclick="S.showEnd=!S.showEnd;render()">종료한 선${S.showEnd?' 숨기기':' 보기'}<span>${nEnd}</span></button>`:'');
-  document.getElementById('list').innerHTML=(S.err?`<div class="msg">${esc(S.err)}</div>`:'')+(G.length?`<div class="grid">${G.map(cardHTML).join('')}</div>`:(S.err?'':'<div class="empty">아직 등록한 선이 없어. 오른쪽 위 "+ 선 등록"으로 시작해.</div>'))}
+  document.getElementById('list').innerHTML=(S.err?`<div class="msg">${esc(S.err)}</div>`:'')+(G.length?`<div class="grid">${G.map(cardHTML).join('')}</div>`:(S.err?'':'<div class="empty">아직 등록한 선이 없어. 오른쪽 위 "+ 선 등록"으로 시작해.</div>'));
+  document.querySelectorAll('.cscroll').forEach(e=>{e.scrollLeft=e.scrollWidth})}
 load();
 </script></body></html>
