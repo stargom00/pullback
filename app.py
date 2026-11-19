@@ -5,6 +5,8 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.392 [추적 장부 색을 매매 훈련 홈(일지)과 맞춤 — 사용자 2026-11-19 "색상을 이거랑 맞춰줘. 그리고 이 창이 더 보기좋아"]
+  static/track.html 토큰만 교체(연녹 바탕·흰 카드·녹색 강조·명조 제목, 값은 훈련 홈 :root 그대로). 표시만.
 v5.391 [추적 장부 차트 — 사용자 2026-11-19 "차트에 빗각, 수평선 그려진걸 추가하는건 어렵지?" → "응"]
   종목 카드의 "차트"를 누르면 캔들(첫 점 45일 전부터, 320봉 넘으면 주봉) 위에 등록한 선을 그리고 오늘 뒤로 늘려 보여 준다.
   GET /api/track-lines/chart/{ticker}(세션·읽기) — 값은 track_lines.chart_payload가 계산, 화면은 그리기만. 표시 전용.
@@ -9263,7 +9265,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.391"
+VERSION = "v5.392"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
