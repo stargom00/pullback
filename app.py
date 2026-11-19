@@ -9,7 +9,7 @@ v5.393 [테마 바구니 + 테마 점화 — 사용자 2026-11-19 "국장엔 테
   theme_baskets.py(순수) + GET /api/theme-baskets(봇 읽기) · PUT/DELETE /api/theme-baskets/{id}(rev·삭제 로그) · /track에 "테마" 구역.
   바구니 종목별 오늘 등락률(naver 통합 일봉 종가 ÷ 전 봉 통합 종가, 5분 캐시) → 강한 종목(+5%↑) 수·평균·대장. 점화 = 강한 종목 3개 이상이면서 30% 이상.
   최근 5봉을 되짚어 "최근 점화" 날짜도 준다. 증권사 화면 등락률(전일 정규장 종가 대비)과 다를 수 있다 — 실측은 theme_baskets.py docstring.
-  첫 바구니 한한령 23종목(theme_baskets_seed.json — Claude가 고른 목록). 얼마냐봇 v2.91이 점화 알림·`테마` 명령.
+  첫 바구니 한한령 23종목(theme_baskets_seed.json — Claude가 고른 목록). 얼마냐봇 v2.92가 점화 알림·`테마` 명령.
   상수 전부 AI 어림값(theme_baskets.py docstring). 관심 신호 · 측정 전.
 v5.392 [추적 장부 색을 매매 훈련 홈(일지)과 맞춤 — 사용자 2026-11-19 "색상을 이거랑 맞춰줘. 그리고 이 창이 더 보기좋아"]
   static/track.html 토큰만 교체(연녹 바탕·흰 카드·녹색 강조·명조 제목, 값은 훈련 홈 :root 그대로). 표시만.
