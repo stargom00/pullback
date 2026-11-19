@@ -136,5 +136,6 @@ def test_page_and_header_link():
     assert html.count("/api/track-lines") >= 4 and "Coordinates" in html
     idx = open(os.path.join(ROOT, "static", "index.html"), encoding="utf-8").read()
     assert idx.count('href="/track"') == 1
-    util = idx[idx.index('id="utilTabs"'):idx.index("</nav>", idx.index('id="utilTabs"'))]
-    assert 'href="/track"' in util and "추적장부" in util            # v5.388 기록 탭 줄(코인일지 옆)에 있어야 눈에 띈다
+    strip = idx[idx.index('id="hdrStrip"'):idx.index('id="themeToggle"')]
+    assert 'class="hdr-track" href="/track"' in strip and "추적장부" in strip      # v5.389 헤더 띠의 채운 버튼(윗줄은 자리가 없어 탭이 가려진다)
+    assert ".hdr-track{" in idx and "background:var(--n-accent)" in idx.split(".hdr-track{")[1].split("}")[0]

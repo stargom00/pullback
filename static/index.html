@@ -1066,6 +1066,9 @@ header.hdr{display:block;padding:0;gap:0;background:var(--n-bg);border-bottom:1p
    글자 크기·탭 높이(44px)는 그대로 두고 좌우 여백만 줄였다(메인 14→12px, 오른쪽 12→9px). */
 .hdr-main .tab{padding:10px 12px;font-size:14px;color:var(--n-sub)}
 .hdr-util .tab{padding:10px 9px;font-size:13px;color:var(--n-muted)}
+/* v5.389 추적장부 버튼 — 강조색 테두리 알약(사용자 2026-11-19 "버튼 눈에띄게") */
+.hdr-track{padding:5px 14px;font-size:13px;font-weight:700;color:#fff;background:var(--n-accent);border:1.5px solid var(--n-accent);border-radius:999px;text-decoration:none;white-space:nowrap}
+.hdr-track:hover{filter:brightness(1.08)}
 /* v5.305: 활성 탭 = 굵은 글자 + 앰버 밑줄 3px(상자 대신) */
 .hdr-main .tab.active,.hdr-util .tab.active,.hdr-more.has-active{background:none;color:var(--n-text);font-weight:700;box-shadow:inset 0 -3px 0 var(--n-accent);border-radius:8px 8px 0 0}
 .hdr-sep{width:1px;height:20px;background:var(--c-gray-bg7);flex-shrink:0}
@@ -1506,7 +1509,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.388</span>
+      <span class="ver mono" id="verBadge">v5.389</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -1530,8 +1533,6 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
         <button class="tab" data-mode="lowpoint_track" title="저점종목 매매 기록 — 현재가·수익률·목표가, 일지와 별도 저장">저점일지</button>
         <!-- v5.347 바이낸스 선물 연습 기록 — 주식 일지와 별개 파일(coin_journal.json) -->
         <button class="tab" data-mode="coin_journal" title="바이낸스 BTCUSDT 선물 연습 기록 — 1차·추가 진입·덜어내기·종료, 주식 일지와 별도 저장">코인일지</button>
-        <!-- v5.388 추적 장부(/track, 새 탭) — 버전 옆 작은 링크를 못 찾아서(사용자 2026-11-19 "추적이어딧어 못찾아") 기록 탭 줄로 옮김. 탭 전환이 아니라 링크라 data-mode 없음. -->
-        <a class="tab" href="/track" target="_blank" rel="noopener" title="추적 장부 — 내가 그은 선을 등록하면 봇이 접근·돌파·이탈을 알려 줌" style="text-decoration:none">추적장부 ↗</a>
       </nav>
     </div>
     <div class="hdr-right">
@@ -1590,6 +1591,8 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <span class="hdr-strip-meta mono" id="scanMeta"></span>
   <!-- v5.304(사용자 지시) 테마 토글. 헤더 윗줄은 1440px에서도 탭 줄이 이미 41px 모자라(탭 609px / 자리 568px)
        버튼을 더 넣으면 '저점' 탭이 가려진다 — 그래서 헤더 띠 오른쪽 끝에 둔다. -->
+  <!-- v5.389 추적 장부(/track, 새 탭). 헤더 윗줄은 자리가 없어(위 v5.304 메모 — 브랜드 옆·탭 줄 둘 다 시험해 보니 저점일지·코인일지가 가려졌다) 띠에 강조색 채운 버튼으로. -->
+  <a class="hdr-track" href="/track" target="_blank" rel="noopener" title="추적 장부 — 내가 그은 선을 등록하면 봇이 접근·돌파·이탈을 알려 줌">추적장부 ↗</a>
   <button type="button" class="hdr-theme" id="themeToggle" onclick="toggleTheme()" title="라이트/다크 테마 전환"><span data-theme-btn="light">라이트</span>/<span data-theme-btn="dark">다크</span></button>
 </div>
 <!-- v5.297(사용자 지시): 탭 전용 필터(주도주만·손절좁은순·손절폭▾·적격만·매집순·슈퍼대장만·숨김)
