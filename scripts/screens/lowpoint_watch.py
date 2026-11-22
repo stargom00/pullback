@@ -16,6 +16,7 @@
   invalid_line·departure_high·stage_date·stage_close·last_checked_date·departure_volume·last_volume·stage_warning
   departure_vol_mult·departure_close_pos·departure_upper_wick·departure_atr_mult — 출발일 모양(표시 전용, departure_shape)
   setup_type(bottom|pullback|unknown)·setup_a·setup_b·setup_b_quality·setup_reason — v5.343 유형(표시·필터 전용, setup_type)
+  stir·stir_parts·stir_date·stir_gap_pct·stir_ema — v5.398 일봉 준비(세력 꿈틀이 검색식, 표시 전용, daily_ready)
 
 판정(v5.333): 기준일 **이후** 거래일의 **정규장 고가** ≥ 기준가 × (1 + REACH_PCT/100) → 도달(정확히 1.05배도 도달).
 기준일 당일·이전은 보지 않는다. KR 정규장 고가 = naver 분봉 09:00~15:30 최고가(장외 체결 제외 — 아래 REACH_RULE 주석,
@@ -449,6 +450,16 @@ def setup_type(daily: "pd.DataFrame | None", through: "str | None", mkt: "str | 
     return {**res, "setup_class": setup_class(res)}
 
 
+def daily_ready(daily: "pd.DataFrame | None", through: "str | None") -> dict:
+    """v5.398 일봉 준비(세력 꿈틀이 검색식, stir_screen.stir_check) — 확정 봉(≤ through)까지 정제한 일봉으로. 표시 전용."""
+    import stir_screen
+    from app import _downcast
+    d = _confirmed_daily(daily, through)
+    if d is None or d.empty:
+        return stir_screen.stir_check(None)
+    return stir_screen.stir_check(_downcast(d))
+
+
 def _us_period(earliest: str, today: date) -> str:
     """기준일을 덮는 가장 짧은 yfinance period(기준일 이후 일봉만 필요)."""
     days = (today - date.fromisoformat(earliest)).days
@@ -508,6 +519,7 @@ def track(records: list, today: date, now_iso: str, fetch=fetch_daily, fetch_min
         u = {"last_close": last["last_close"], "last_date": last["last_date"], "checked_at": now_iso, "reach_rule": REACH_RULE}
         thru = confirmed_through(r.get("mkt"), now_iso)
         tag = f"{r['code']}({r.get('label')} {r.get('tf')})"
+        u.update(daily_ready(daily, thru))                              # v5.398 일봉 준비 — 표시 전용(판정은 이 값을 안 본다)
         u.update(setup_type(daily, thru, r.get("mkt"), now_iso))       # v5.343 유형(v5.345 눌림 분리) — 표시·필터 전용(판정은 이 값을 안 본다)
         rc = None
         if was_reached and r.get("reach_rule") == PREV_REACH_RULE:

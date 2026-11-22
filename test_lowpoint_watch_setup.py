@@ -102,11 +102,13 @@ def test_stage_values_unchanged_by_setup_and_longer_window(monkeypatch):
                              fetch=lambda r, t: {"407400.KQ": df}, fetch_min=fm)[0]
     full = run(d)
     monkeypatch.setattr(w, "setup_type", lambda daily, through, mkt=None, now_iso=None: {})
+    monkeypatch.setattr(w, "daily_ready", lambda daily, through: {})                       # v5.398 일봉 준비 — 표시 전용
     no_setup = run(d)
     short = run(d[d.index >= "2026-06-01"])                                               # 예전(v5.342) 조회 창 정도
     setup_keys = {"setup_type", "setup_reason", "setup_a", "setup_b", "setup_b_quality", "setup_checked_date",
                   "setup_ref_low", "setup_ref_basis", "setup_ref_date",                     # v5.344 무효 참고 — 표시 전용
-                  "setup_pullback_class", "setup_class"}                                    # v5.345 눌림 분리 — 표시 전용
+                  "setup_pullback_class", "setup_class",                                    # v5.345 눌림 분리 — 표시 전용
+                  "stir", "stir_parts", "stir_date", "stir_gap_pct", "stir_ema"}            # v5.398 일봉 준비 — 표시 전용
     shape = {"departure_vol_mult"}                                                        # 50일 평균 — 짧은 창이면 원래 None(창 확대 전에도 같은 규칙)
     for rid in full:
         assert {k: v for k, v in full[rid].items() if k not in setup_keys} == no_setup[rid]

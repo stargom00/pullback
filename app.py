@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.398 [저점 관찰 "일봉 준비" 칩(세력 꿈틀이 검색식) + 측정 사전등록 — 사용자 2026-11-23 "이게 내가 하는 저점종목매수랑 연결시킬수잇을것 같아 … 이건 이제 막 움직이려는 거잖아" → "2번까지 같이해"]
+  scripts/screens/stir_screen.py(순수): 지수이평 20<60<115 · (1봉전 5봉 평균거래량 ≥ 55,555 or 금일 제외 5일 평균거래대금 ≥ 50백만) ·
+  종가 > 20 지수이평 · 단순 20·60 간격 ≤ 2% — Threads @jtdj_official2 키움 조건식 슬라이드 그대로(숫자는 사용자 확인). 11-20 재현 20종목,
+  작가 화면에 보이는 9종목 전부 포함. 관찰 추적(lowpoint_watch.track)이 확정 봉으로 계산해 레코드에 stir·stir_parts 등을 남기고 화면은 칩만.
+  표시 전용 · 측정 전 — 측정 docs/lowpoint_stir_filter.md(2026-11-23_lowpoint_stir_filter).
 v5.397 [홈 "섹터별 특징 종목" 머리줄에 "내 테마 · 추적장부 ↗" 링크 — 사용자 2026-11-22 "추적장부가 어딘지모르겠네"]
   헤더 띠의 추적장부 버튼은 스크롤하면 안 보였다. 업종 자동 분류(이 구역)와 내가 묶은 테마(/track)가 헷갈려서 여기서 바로 가게. 표시만.
 v5.396 [테마 종목 늘림 — 사용자 2026-11-20 "종목이 너무 적은데?"]
@@ -9288,7 +9293,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.397"
+VERSION = "v5.398"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -21489,6 +21494,10 @@ def _lp_watch_job_blocking(tf: str, now: "datetime") -> dict:
     print(f"[lowpoint-watch] 추적 — 활성 {summary['active']}건 · 재판정 {summary['rejudged']}건 · 조회 {summary['fetched']}종목 · "
           f"새 도달 {summary['reached_new']}건 · 판정 보류 {len(summary['pending'])}건 · 조회 실패 {len(summary['failed'])}건 · "
           f"갱신 {changed}건", flush=True)
+    # v5.398 일봉 준비(세력 꿈틀이 검색식) — 0건이어도 남긴다(침묵 ≠ 성공)
+    _stir = [u for u in updates.values() if "stir" in u]
+    print(f"[lowpoint-watch] 일봉 준비 {sum(1 for u in _stir if u['stir'])}건 / 판정 {sum(1 for u in _stir if u['stir'] is not None)}건 "
+          f"(봉 부족 {sum(1 for u in _stir if u['stir'] is None)}건) — 표시 전용", flush=True)
     # v5.333: 정규장 고가로 다시 판정해 미도달이라 관찰로 되돌린 목록 — 0건이어도 남긴다(침묵 ≠ 성공)
     print(f"[lowpoint-watch] 정규장 고가 재판정 → 관찰 복귀 {len(summary['reverted'])}건: "
           f"{', '.join(summary['reverted']) or '없음'}", flush=True)
