@@ -1509,7 +1509,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.396</span>
+      <span class="ver mono" id="verBadge">v5.397</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -6349,7 +6349,9 @@ function renderHomeSectors() {
   else if (d.error) body = `<span class="st-warn">섹터 불러오기 실패</span>`;
   else body = homeSectorGridHtml((d.panels || {})[homeSectorPanel], homeSectorPanel === 'US', HOME_SECTOR_MAX);
   const meta = d && d.asof ? `${String(d.asof).slice(5)} KST 수집 · 마지막 봉 등락` : '';
-  box.innerHTML = `<section class="bf-sec" aria-label="섹터별 특징 종목">${_briefHead(5, '섹터별 특징 종목', meta, tabs)}${body}</section>`;
+  // v5.397(사용자 "추적장부가 어딘지모르겠네"): 내가 묶은 테마·내 선은 /track에 있다 — 이 구역(업종 자동 분류)과 헷갈려서 여기서 바로 가게 한다.
+  const trackLink = `<a class="hdr-track" href="/track" target="_blank" rel="noopener" title="내가 묶은 테마 18개(엔터·반도체·로봇 …)와 내가 그은 선">내 테마 · 추적장부 ↗</a>`;
+  box.innerHTML = `<section class="bf-sec" aria-label="섹터별 특징 종목">${_briefHead(5, '섹터별 특징 종목', meta, tabs + trackLink)}${body}</section>`;
 }
 async function loadHomeSectors(force) {
   if (!force && _homeSectors && !_homeSectors.pending && Date.now() - _homeSectorsTs < 300000) return renderHomeSectors();

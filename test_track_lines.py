@@ -139,7 +139,9 @@ def test_page_and_header_link():
     html = open(os.path.join(ROOT, "static", "track.html"), encoding="utf-8").read()
     assert html.count("/api/track-lines") >= 4 and "Coordinates" in html
     idx = open(os.path.join(ROOT, "static", "index.html"), encoding="utf-8").read()
-    assert idx.count('href="/track"') == 1
+    assert idx.count('href="/track"') == 2      # 헤더 띠 + v5.397 홈 "섹터별 특징 종목" 머리줄
+    fn = idx[idx.index("function renderHomeSectors()"):idx.index("function renderHomeSectors()") + 2500]
+    assert 'class="hdr-track" href="/track"' in fn and "tabs + trackLink" in fn
     strip = idx[idx.index('id="hdrStrip"'):idx.index('id="themeToggle"')]
     assert 'class="hdr-track" href="/track"' in strip and "추적장부" in strip      # v5.389 헤더 띠의 채운 버튼(윗줄은 자리가 없어 탭이 가려진다)
     assert ".hdr-track{" in idx and "background:var(--n-accent)" in idx.split(".hdr-track{")[1].split("}")[0]
