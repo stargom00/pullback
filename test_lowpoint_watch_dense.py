@@ -168,3 +168,16 @@ def test_rest_table_departure_date_column():
     assert cells[1:3] == ["2일", "10-05"]                                       # 경과(10-05 → 10-07) 옆에 출발일
     ended = [x for x in html.split('<section class="n-card lpw-card">')[1:] if "종료 ·" in x][0]
     assert "2026-10-06" in ended                                                  # 종료 표도 같은 필드(reached_date)
+
+
+def test_phone_hides_only_mhide_chips():
+    """v5.401: 좁은 화면에서 숨기는 건 lpw-mhide(종료 후보·보유 종류) 둘뿐 — 유형·일봉 준비·다이버전스 칩은 휴대폰에서도 보인다.
+    (v5.327~v5.400은 .lpw-hitchip 전체를 숨겨 사용자가 휴대폰에서 칩을 못 봤다.)"""
+    css = re.sub(r"/\*.*?\*/", "", SRC[SRC.index("/* v5.326 저점 관찰 압축 표"):SRC.index("/* /v5.326 */")], flags=re.S)
+    hidden = [sel.strip() for m in re.finditer(r"@media[^{]*\{(.*?\})\s*\}", css, flags=re.S)
+              for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", m.group(1)) if "display:none" in body.replace(" ", "")]
+    assert hidden and all(not s.endswith(".lpw-hitchip") for s in hidden), hidden
+    assert any(s.endswith(".lpw-mhide") for s in hidden)
+    assert SRC.count("lpw-hitchip lpw-mhide") == 2
+    for fn in ("lpwSetupChipHtml", "lpwStirChipHtml", "lpwDivChipHtml", "lpwDivEntryChipHtml"):
+        assert "lpw-mhide" not in _fn(fn)

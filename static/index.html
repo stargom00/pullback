@@ -1304,7 +1304,7 @@ table.jr-table.lpw-table th.lpw-sort{cursor:pointer;user-select:none}
 .lpw-rbar{position:relative;height:8px;border-radius:4px;background:var(--n-chip)}
 .lpw-rbar>i{position:absolute;top:-2px;bottom:-2px;width:3px;margin-left:-1.5px;border-radius:2px;background:var(--n-text)}
 .lpw-info .lpw-defs{flex-basis:100%;margin:0;padding-left:16px;font-size:11.5px;line-height:1.5}
-@media (max-width:480px){.lpw-table .lpw-pxcell{display:none}.lpw-table .lpw-hitchip{display:none}}   /* v5.327: 좁은 화면은 종료 후보 칩 대신 행 강조만 */
+@media (max-width:480px){.lpw-table .lpw-pxcell{display:none}.lpw-table .lpw-mhide{display:none}.lpw-table .lpw-hitchip{font-size:10px;padding:0 5px}}   /* v5.327: 좁은 화면은 종료 후보 칩 대신 행 강조만 — v5.401: 그 칩(lpw-mhide)만 숨긴다(예전엔 lpw-hitchip 전체를 숨겨 유형·일봉 준비·다이버전스 칩이 휴대폰에서 안 보였다) */
 /* /v5.326 */
 /* v5.343 유형 칩 — 색은 기존 토큰(바닥형 강조·눌림형 흐림) */
 .lpw-hitchip.lpw-type-bottom{color:var(--n-accent)}.lpw-hitchip.lpw-stir{color:var(--c-red-fg4);font-weight:700}.lpw-hitchip.lpw-div{color:var(--c-blue-fg4);font-weight:700}.lpw-hitchip.lpw-dentry{color:#fff;background:var(--c-blue-fg4);border-color:var(--c-blue-fg4);font-weight:700}
@@ -1509,7 +1509,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.400</span>
+      <span class="ver mono" id="verBadge">v5.401</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -8697,7 +8697,7 @@ function renderLowpointHold() {
       const tip = x.ret == null ? '현재가 없음 — 지금 갱신' : `평단 대비 ${x.ret >= 0 ? '+' : ''}${x.ret.toFixed(2)}% · 목표 +${x.goal}%(${_lptFmt(x.target, r.mkt)})까지 ${(x.goal - x.ret).toFixed(2)}%p`;
       const bar = `<div class="lpw-bar" title="${tip}" role="img" aria-label="${tip}">${b.side === 'none' ? '' : `<i class="${b.side}" style="width:${(b.width / 2).toFixed(1)}%"></i>`}</div>`;
       const row = `<tr class="${x.hit ? 'lpt-hit' : ''}">
-        <td class="lpw-sym"><a class="name-link" href="${tvUrl(r.code, r.mkt)}" target="_blank" rel="noopener" title="${_escapeHtml(r.name || '')} — 트레이딩뷰">${_escapeHtml(lpDisplayName(r))}</a>${x.hit ? ' <span class="chip accent lpw-hitchip" title="현재가 ≥ 목표가 — 자동 종료는 하지 않아요">종료 후보</span>' : ''}</td>
+        <td class="lpw-sym"><a class="name-link" href="${tvUrl(r.code, r.mkt)}" target="_blank" rel="noopener" title="${_escapeHtml(r.name || '')} — 트레이딩뷰">${_escapeHtml(lpDisplayName(r))}</a>${x.hit ? ' <span class="chip accent lpw-hitchip lpw-mhide" title="현재가 ≥ 목표가 — 자동 종료는 하지 않아요">종료 후보</span>' : ''}</td>
         <td class="r lpw-pxcell"><span class="lpw-px" title="${x.curDate ? '종가 ' + x.curDate : ''}">${_lptFmt(r.buyPrice, r.mkt)} → ${x.cur != null ? _lptFmt(x.cur, r.mkt) : '—'}</span></td>
         <td class="r">${_lptPct(x.ret)}</td>
         <td class="lpw-barcell">${bar}</td>
@@ -8717,7 +8717,7 @@ function renderLowpointHold() {
     const b = lpwBar(x.ret, x.goal);
     const tip = x.ret == null ? '현재가 없음 — 지금 갱신' : `기준가 대비 ${x.ret >= 0 ? '+' : ''}${x.ret.toFixed(2)}% · ${r.kind} 목표 +${x.goal}%까지 ${(x.goal - x.ret).toFixed(2)}%p`;
     return `<tr>
-        <td class="lpw-sym"><a class="name-link" href="${tvUrl(r.code, r.mkt)}" target="_blank" rel="noopener" title="${_escapeHtml(r.name || '')} — 트레이딩뷰">${_escapeHtml(lpDisplayName(r))}</a> <span class="chip lpw-hitchip">${r.kind}</span></td>
+        <td class="lpw-sym"><a class="name-link" href="${tvUrl(r.code, r.mkt)}" target="_blank" rel="noopener" title="${_escapeHtml(r.name || '')} — 트레이딩뷰">${_escapeHtml(lpDisplayName(r))}</a> <span class="chip lpw-hitchip lpw-mhide">${r.kind}</span></td>
         <td class="r lpw-pxcell"><span class="lpw-px" title="기준 ${_escapeHtml(r.baseDate)} 종가${x.curDate ? ' · 현재 ' + x.curDate + ' 종가' : ''}">${_lptFmt(r.basePrice, r.mkt)} → ${x.cur != null ? _lptFmt(x.cur, r.mkt) : '—'}</span></td>
         <td class="r">${_lptPct(x.ret)}</td>
         <td class="lpw-barcell"><div class="lpw-bar" title="${tip}" role="img" aria-label="${tip}">${b.side === 'none' ? '' : `<i class="${b.side}" style="width:${(b.width / 2).toFixed(1)}%"></i>`}</div></td>

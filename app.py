@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.401 [휴대폰에서 저점 관찰 칩이 안 보이던 문제 — 사용자 2026-11-24 "엠로 찾앗는데 없잖아 표시가"]
+  원인: v5.327 좁은 화면(≤480px) 규칙 `.lpw-table .lpw-hitchip{display:none}`이 "종료 후보" 칩만 숨기려던 것인데, 유형·일봉 준비·
+  다이버전스·🎯 칩도 같은 lpw-hitchip 클래스라 휴대폰에서 전부 숨겨졌다. 숨길 칩 둘(종료 후보·보유 종류)에만 lpw-mhide를 달고 그것만
+  숨긴다. 좁은 화면에선 칩 글자를 10px로 줄임. 재발 방지: test_lowpoint_watch_dense가 lpw-hitchip 전체 숨김 규칙이 다시 생기면 FAIL.
 v5.400 [저점 관찰 "🎯 다이버전스+양봉" 칩 — 사용자 2026-11-24 "표시를 붙여줘"]
   측정 docs/lowpoint_entry_timing.md(2026-11-24) 후보 B 채택: 같은 주봉 신호를 직후에 산 것보다 20거래일 안 +5% 54.5%→70.1%
   (짝 288, z 4.32, 반분 양쪽 +), 묶임 10.4%→4.9%. divergence.entry_signal이 측정과 같은 정의(신호 뒤 120거래일 안, 확정 다이버전스
@@ -9303,7 +9307,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.400"
+VERSION = "v5.401"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
