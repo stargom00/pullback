@@ -78,7 +78,7 @@ def test_watch_daily_ready_uses_confirmed_bars_only():
 def test_track_writes_stir_fields():
     src = open(os.path.join(ROOT, "scripts", "screens", "lowpoint_watch.py"), encoding="utf-8").read()
     body = src[src.index("def track("):]
-    assert body.count("u.update(daily_ready(daily, thru))") == 1
+    assert body.count("u.update(daily_ready(daily, thru, r.get(\"base_date\")))") == 1
 
 
 def _extract_js(src, name):

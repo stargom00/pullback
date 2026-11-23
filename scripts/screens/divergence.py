@@ -63,6 +63,37 @@ def bull_div(close: "pd.Series | None", tf: str, rsi: "pd.Series | None" = None)
             "b_confirmed": b < n - PIVOT_K, "last_rsi": round(float(r.iloc[-1]), 1)}
 
 
+# v5.400 다이버전스 + 양봉 진입 자리 — 사용자 2026-11-24 "표시를 붙여줘"(측정 docs/lowpoint_entry_timing.md 후보 B 채택 직후).
+# 측정과 같은 정의(사본 없음 — 측정 스크립트의 B 트리거와 같은 날을 고른다는 것을 test_divergence가 실데이터로 고정):
+# 신호 봉 다음 봉부터 ENTRY_WINDOW봉 안에서, 그날까지의 종가로 본 일봉 다이버전스의 최근 저점이 확정(오른쪽 3봉)이고 신호 봉 뒤이며
+# 그날이 양봉(종가 > 시가)인 **첫** 날. 측정 조건: 주봉 저점 신호 · 상장 1년(신호 봉까지 LISTED_MIN봉) · 다음 날 시가 매수
+# (시가 ≥ 그날 종가 × 1.05면 측정에서 제외).
+ENTRY_WINDOW = 120      # 측정 §1.2 창(사용자 확인 "120거래일 (Recommended)")
+LISTED_MIN = 250        # 측정 §1.1 상장 1년(사용자 조건 "상장 후 1년이 지난 종목")
+
+
+def entry_signal(daily: "pd.DataFrame | None", base_date: "str | None") -> "dict | None":
+    """정제·확정된 일봉 + 신호 봉 날짜 → {date, close, b_date, bars_after, listed_ok} 또는 None(아직 없음·창 지남·판정 불가)."""
+    if daily is None or daily.empty or not base_date:
+        return None
+    idx = daily.index
+    jb = int(idx.searchsorted(pd.Timestamp(base_date), side="right")) - 1
+    if jb < 0 or pd.Timestamp(idx[jb]).date() != pd.Timestamp(base_date).date():
+        return None
+    c = daily["Close"].astype(float)
+    o = daily["Open"].astype(float)
+    rsi = lp.rsi_wilder_sma(c)
+    base_ts = idx[jb]
+    for t in range(jb + 1, min(len(daily) - 1, jb + ENTRY_WINDOW) + 1):
+        if not c.iloc[t] > o.iloc[t]:
+            continue
+        d = bull_div(c.iloc[:t + 1], "day", rsi=rsi)
+        if d and d["b_confirmed"] and pd.Timestamp(d["b_date"]) > base_ts:
+            return {"date": str(pd.Timestamp(idx[t]).date()), "close": round(float(c.iloc[t]), 4), "b_date": d["b_date"],
+                    "bars_after": t - jb, "listed_ok": jb + 1 >= LISTED_MIN}
+    return None
+
+
 def weekly_closed(close: pd.Series, through: "str | None") -> pd.Series:
     """확정 일봉 → 다 끝난 주봉 종가만(W-FRI). 주 라벨(금요일)이 through보다 뒤면 그 주는 아직 진행 중이라 뺀다
     (금요일이 휴장인 주는 다음 확정일이 지나야 들어간다 — 하루 늦을 뿐 미확정 봉은 안 쓴다)."""

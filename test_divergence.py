@@ -90,3 +90,58 @@ def test_chip():
     assert ">다이버전스 일·주<" in out[0] and "미확정" in out[0]
     assert ">다이버전스 일<" in out[1] and ">다이버전스 주<" in out[2] and "미확정" not in out[2]
     assert out[3] == "" and out[4] == ""
+
+
+# ── v5.400 다이버전스+양봉 진입 자리 — 측정(2026-11-24_lowpoint_entry_timing) 후보 B 트리거와 같은 날을 고르는가 ──
+PAR = json.load(gzip.open(os.path.join(ROOT, "test_fixtures", "div_entry_parity.json.gz"), "rt"))
+
+
+def _pdf(x):
+    return pd.DataFrame({"Open": x["open"], "Close": x["close"]}, index=pd.to_datetime(x["index"]))
+
+
+@pytest.mark.parametrize("x", PAR["pos"], ids=lambda x: x["ticker"] + "@" + x["base_date"])
+def test_entry_matches_measurement_trigger(x):
+    """측정 결과 JSON의 B 트리거 6건(실데이터, 정제 일봉 전체 이력 — RSI 시드를 맞추려고 앞을 자르지 않음)."""
+    e = dv.entry_signal(_pdf(x), x["base_date"])
+    assert e is not None and e["date"] == x["trigger_date"] and e["listed_ok"] is True
+    assert e["b_date"] > x["base_date"] and e["bars_after"] <= dv.ENTRY_WINDOW
+
+
+@pytest.mark.parametrize("x", PAR["neg"], ids=lambda x: x["ticker"] + "@" + x["base_date"])
+def test_entry_none_when_measurement_had_no_trigger(x):
+    assert dv.entry_signal(_pdf(x), x["base_date"]) is None
+
+
+def test_entry_no_lookahead_and_bad_base():
+    x = PAR["pos"][0]
+    df = _pdf(x)
+    cut = df[df.index < x["trigger_date"]]
+    assert dv.entry_signal(cut, x["base_date"]) is None                  # 트리거 날 봉이 없으면 아직 없음
+    assert dv.entry_signal(df, "1999-01-01") is None and dv.entry_signal(None, x["base_date"]) is None
+    assert dv.entry_signal(df, None) is None
+
+
+def test_watch_daily_ready_carries_entry():
+    x = PAR["pos"][2]
+    d = _pdf(x).assign(High=lambda f: f[["Open", "Close"]].max(axis=1), Low=lambda f: f[["Open", "Close"]].min(axis=1), Volume=1e6)
+    out = w.daily_ready(d, x["index"][-1], x["base_date"])
+    assert out["div_entry"]["date"] == x["trigger_date"]
+    assert w.daily_ready(d, x["index"][-1])["div_entry"] is None and w.daily_ready(None, x["index"][-1])["div_entry"] is None
+    src = open(os.path.join(ROOT, "scripts", "screens", "lowpoint_watch.py"), encoding="utf-8").read()
+    assert src.count('daily_ready(daily, thru, r.get("base_date"))') == 1
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
+def test_entry_chip():
+    src = open(os.path.join(ROOT, "static", "index.html"), encoding="utf-8").read()
+    assert src.count("${lpwDivEntryChipHtml(r)}") == 2
+    js = "const _escapeHtml=s=>String(s);" + _extract_js(src, "lpwDivEntryChip") + _extract_js(src, "lpwDivEntryChipHtml") + \
+        "const e={date:'2026-11-20',close:1000,b_date:'2026-11-17',bars_after:5,listed_ok:true};" \
+        "console.log(JSON.stringify([lpwDivEntryChipHtml({tf:'week',div_entry:e}),lpwDivEntryChipHtml({tf:'month',div_entry:e})," \
+        "lpwDivEntryChipHtml({tf:'week',div_entry:{...e,listed_ok:false}}),lpwDivEntryChipHtml({tf:'week',div_entry:null}),lpwDivEntryChipHtml({tf:'week'})]))"
+    out = json.loads(subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout)
+    assert "lpw-dentry" in out[0] and "🎯 다이버전스+양봉 11/20" in out[0] and "70.1%" in out[0]
+    assert "lpw-dentry" not in out[1] and "월봉 신호는 측정 밖" in out[1]
+    assert "lpw-dentry" not in out[2] and "상장 1년 미만" in out[2]
+    assert out[3] == "" and out[4] == ""
