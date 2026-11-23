@@ -28,7 +28,11 @@ def summ(rows):
             "mdd_le_-50": sum(x <= -0.50 for x in dd) / len(rows),
             "ret_end_median": statistics.median(re_), "ret_end_mean": statistics.mean(re_),
             "loss_at_end": sum(x < 0 for x in re_) / len(rows), "end_le_-50": sum(x <= -0.50 for x in re_) / len(rows),
-            "hit_-30_before_double": (sum(r["dd30_first"] for r in ok) / len(ok)) if ok else None}
+            "hit_-30_before_double": (sum(r["dd30_first"] for r in ok) / len(ok)) if ok else None,
+            # 실행 뒤 추가(기록, 사전등록 밖): 사용자 규칙대로 +100%에서 팔고 아니면 250일 뒤 종가 — 매수가 대비 평균·중앙
+            "rule100_mean": statistics.mean(1.0 if r["ok"] else r["ret_end"] for r in rows),
+            "rule100_median": statistics.median(1.0 if r["ok"] else r["ret_end"] for r in rows),
+            "nondouble_end_median": statistics.median([r["ret_end"] for r in rows if not r["ok"]]) if len(ok) < len(rows) else None}
 
 
 def main():
