@@ -30,15 +30,17 @@ RSI_GAP = 3.0                        # RSI가 이만큼 이상 높아야 (AI 어
 RSI_A_MAX = 35.0                     # 앞 저점 RSI가 과매도권일 때만 (AI 어림값)
 
 
-def bull_div(close: "pd.Series | None", tf: str) -> "dict | None":
-    """확정 봉 종가(마지막 = 판정 봉) → {a_date, a_close, a_rsi, b_date, b_close, b_rsi, b_confirmed, last_rsi} 또는 None."""
+def bull_div(close: "pd.Series | None", tf: str, rsi: "pd.Series | None" = None) -> "dict | None":
+    """확정 봉 종가(마지막 = 판정 봉) → {a_date, a_close, a_rsi, b_date, b_close, b_rsi, b_confirmed, last_rsi} 또는 None.
+    rsi: 같은 종가에서 미리 계산한 lowpoint.rsi_wilder_sma(측정이 날마다 다시 계산하지 않게 — 2026-11-23 저점 진입 타이밍 측정).
+    넘기면 close의 날짜로 맞춰 쓴다(rsi는 인과적이라 접두 구간 값이 같다). 운영 경로는 넘기지 않는다."""
     if close is None:
         return None
     c = close.dropna().astype(float)
     n = len(c)
     if n < PIVOT_K * 2 + 2:
         return None
-    r = lp.rsi_wilder_sma(c)
+    r = lp.rsi_wilder_sma(c) if rsi is None else rsi.reindex(c.index)
     piv = [i for i in range(max(PIVOT_K, n - LOOKBACK[tf]), n - PIVOT_K)
            if c.iloc[i] == c.iloc[i - PIVOT_K:i + PIVOT_K + 1].min()]
     piv += [i for i in range(max(PIVOT_K, n - PIVOT_K), n) if c.iloc[i] == c.iloc[i - PIVOT_K:].min()]
