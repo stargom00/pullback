@@ -43,7 +43,7 @@ def _state_line():
 
 FNS = ("lpwBar", "lpwSortRows", "lpwDays", "lpwGroups", "lpReturnPct", "lpDisplayName", "_lptFmt", "_lptPct",
        "_lptCode", "lpwPendingHtml", "lpwEndedLabel", "lpwDepHigh", "lpwRestPos", "lpwVolRatio", "lpwStageSplit",
-       "lpwShapeText", "lpwRestartText", "lpwTypeLabel", "lpwClassOf", "lpwSetupChip", "lpwSetupChipHtml", "lpwStirChip", "lpwStirChipHtml", "lpwDivChip", "lpwDivChipHtml", "lpwDivEntryChip", "lpwDivEntryChipHtml", "lpwFilterKey", "lpwTypeFilters",
+       "lpwShapeText", "lpwRestartText", "lpwTypeLabel", "lpwClassOf", "lpwSetupChip", "lpwSetupChipHtml", "lpwStirChip", "lpwStirChipHtml", "lpwDivChip", "lpwDivChipHtml", "lpwDivEntryChip", "lpwDivEntryChipHtml", "lpwDblChip", "lpwDblChipHtml", "lpwFilterKey", "lpwTypeFilters",
        "lpwTypeFilter", "lpwRefLow",
        "renderLowpointWatch")
 
@@ -179,5 +179,5 @@ def test_phone_hides_only_mhide_chips():
     assert hidden and all(not s.endswith(".lpw-hitchip") for s in hidden), hidden
     assert any(s.endswith(".lpw-mhide") for s in hidden)
     assert SRC.count("lpw-hitchip lpw-mhide") == 2
-    for fn in ("lpwSetupChipHtml", "lpwStirChipHtml", "lpwDivChipHtml", "lpwDivEntryChipHtml"):
+    for fn in ("lpwSetupChipHtml", "lpwStirChipHtml", "lpwDivChipHtml", "lpwDivEntryChipHtml", "lpwDblChipHtml"):
         assert "lpw-mhide" not in _fn(fn)

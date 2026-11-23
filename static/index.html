@@ -1307,7 +1307,7 @@ table.jr-table.lpw-table th.lpw-sort{cursor:pointer;user-select:none}
 @media (max-width:480px){.lpw-table .lpw-pxcell{display:none}.lpw-table .lpw-mhide{display:none}.lpw-table .lpw-hitchip{font-size:10px;padding:0 5px}}   /* v5.327: 좁은 화면은 종료 후보 칩 대신 행 강조만 — v5.401: 그 칩(lpw-mhide)만 숨긴다(예전엔 lpw-hitchip 전체를 숨겨 유형·일봉 준비·다이버전스 칩이 휴대폰에서 안 보였다) */
 /* /v5.326 */
 /* v5.343 유형 칩 — 색은 기존 토큰(바닥형 강조·눌림형 흐림) */
-.lpw-hitchip.lpw-type-bottom{color:var(--n-accent)}.lpw-hitchip.lpw-stir{color:var(--c-red-fg4);font-weight:700}.lpw-hitchip.lpw-div{color:var(--c-blue-fg4);font-weight:700}.lpw-hitchip.lpw-dentry{color:#fff;background:var(--c-blue-fg4);border-color:var(--c-blue-fg4);font-weight:700}
+.lpw-hitchip.lpw-type-bottom{color:var(--n-accent)}.lpw-hitchip.lpw-stir{color:var(--c-red-fg4);font-weight:700}.lpw-hitchip.lpw-div{color:var(--c-blue-fg4);font-weight:700}.lpw-hitchip.lpw-dentry{color:#fff;background:var(--c-blue-fg4);border-color:var(--c-blue-fg4);font-weight:700}.lpw-hitchip.lpw-dbl1{color:var(--c-red-fg4)}.lpw-hitchip.lpw-dbl2{color:#fff;background:var(--c-red-fg4);border-color:var(--c-red-fg4);font-weight:700}
 .lpw-hitchip.lpw-type-unknown{opacity:max(.7,var(--fade-floor))}
 .lpw-hitchip.lpw-type-down{color:var(--c-blue-fg4)}
 /* v5.341 저점 순위 분류 표 — .lpr-table 아래로 한정 */
@@ -1509,7 +1509,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.401</span>
+      <span class="ver mono" id="verBadge">v5.402</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -8415,6 +8415,25 @@ function lpwDivEntryChipHtml(r) {
   const c = lpwDivEntryChip(r);
   return c ? ` <span class="chip lpw-hitchip ${c.pass ? 'lpw-dentry' : 'lpw-div'}" title="${_escapeHtml(c.title)}">${_escapeHtml(c.text)}</span>` : '';
 }
+// v5.402(사용자 "응" — 1년 +100% 특징 칩 제안) 신호 봉 당시 두 특징 — 서버 double_traits.traits가 정한 값을 칩으로만. 표시 전용.
+// 측정(docs/lowpoint_double_features.md·lowpoint_double_downside.md, KR 주봉 신호·상장 1년+, 상장폐지 없음): 1년 안 +100% 전체 17.7% ·
+// 둘 다 37.7% — 대신 −50% 이하를 찍은 비율 21.2%(전체 12.0%).
+function lpwDblChip(r) {
+  const d = r && r.dbl;
+  if (!d || !d.n_ok) return null;
+  const inScope = r.tf === 'week' && d.listed_ok;
+  const pct = v => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(0)}%`;
+  const parts = [d.f4_ok ? `200일선 ${pct(d.f4)}` : null, d.f7_ok ? `60일 출렁임 ${pct(d.f7)}` : null].filter(Boolean);
+  const rate = d.n_ok === 2 ? '37.7%' : (d.f4_ok ? '32.0%' : '30.6%');
+  return { text: `${d.n_ok === 2 && inScope ? '🚀 ' : ''}두 배 조건 ${d.n_ok}/2`, strong: d.n_ok === 2 && inScope,
+           title: `신호 봉 당시 ${parts.join(' · ')}. `
+             + (inScope ? `측정(KR 주봉 신호 1,514건): 이 조건이면 1년 안 +100% ${rate}(전체 17.7%). 대신 중간에 −50% 이하를 찍은 비율도 약 21%(전체 12%) — 크게 오르는 만큼 크게 빠진다. 상장폐지 종목이 빠진 측정이라 실제 위험은 더 크다. 표시 전용.`
+                        : (r.tf !== 'week' ? '월봉 신호는 측정 밖' : '상장 1년 미만은 측정 밖') + ' — 표시만.') };
+}
+function lpwDblChipHtml(r) {
+  const c = lpwDblChip(r);
+  return c ? ` <span class="chip lpw-hitchip ${c.strong ? 'lpw-dbl2' : 'lpw-dbl1'}" title="${_escapeHtml(c.title)}">${_escapeHtml(c.text)}</span>` : '';
+}
 function lpwSetupChipHtml(r) {
   const c = lpwSetupChip(r);
   return c ? ` <span class="chip lpw-hitchip lpw-type-${c.cls}" title="${_escapeHtml(c.title)}">${_escapeHtml(c.text)}</span>` : '';
@@ -8776,7 +8795,7 @@ function renderLowpointWatch() {
     const act = lpwSortRows(g.active, _lpw.sortKey, _lpw.sortDir, today).map(r => {
       const p = lpReturnPct(r.last_close, Number(r.base_price));
       return `<tr>
-        <td class="lpw-sym">${name(r)}${lpwSetupChipHtml(r)}${lpwStirChipHtml(r)}${lpwDivChipHtml(r)}${lpwDivEntryChipHtml(r)}${lpwPendingHtml(r)}</td>
+        <td class="lpw-sym">${name(r)}${lpwSetupChipHtml(r)}${lpwStirChipHtml(r)}${lpwDivChipHtml(r)}${lpwDivEntryChipHtml(r)}${lpwDblChipHtml(r)}${lpwPendingHtml(r)}</td>
         <td class="r lpw-pxcell"><span class="lpw-px">${_lptFmt(r.base_price, r.mkt)} → ${r.last_close != null ? _lptFmt(r.last_close, r.mkt) : '—'}</span></td>
         <td class="r">${_lptPct(p)}</td>
         <td class="lpw-barcell">${bar(p)}</td>
@@ -8802,7 +8821,7 @@ function renderLowpointWatch() {
     const st = r.stage === 'resting' ? '' : ` <span class="chip lpw-hitchip" title="${r.stage ? '출발 다음 거래일 종가가 아직 없어요 — 숨고르기 0일' : '다음 추적 때 단계를 분류해요'}">${r.stage ? '출발' : '분류 전'}</span>`;
     const tip = rp.pos == null ? '현재가·무효선 없음' : `무효선 ${_lptFmt(r.invalid_line, r.mkt)} ~ 출발 고가 ${_lptFmt(hi, r.mkt)} 사이 ${rp.pos.toFixed(0)}% · 무효선까지 ${rp.dist >= 0 ? '+' : ''}${rp.dist.toFixed(2)}%`;
     return `<tr>
-        <td class="lpw-sym">${name(r)} ${coh(r)}${lpwSetupChipHtml(r)}${lpwStirChipHtml(r)}${lpwDivChipHtml(r)}${lpwDivEntryChipHtml(r)}${st}${warn(r)}${lpwPendingHtml(r)}</td>
+        <td class="lpw-sym">${name(r)} ${coh(r)}${lpwSetupChipHtml(r)}${lpwStirChipHtml(r)}${lpwDivChipHtml(r)}${lpwDivEntryChipHtml(r)}${lpwDblChipHtml(r)}${st}${warn(r)}${lpwPendingHtml(r)}</td>
         <td class="num r" title="출발일 ${_escapeHtml(r.reached_date || '')}부터">${lpwDays(r.reached_date, today) ?? '—'}일</td>
         <td class="num r" title="${_escapeHtml(r.reached_date || '')}">${r.reached_date ? _escapeHtml(String(r.reached_date).slice(5)) : '—'}</td>
         <td class="num r">${r.invalid_line != null ? _lptFmt(r.invalid_line, r.mkt) : '—'}</td>

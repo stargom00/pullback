@@ -18,6 +18,7 @@
   setup_type(bottom|pullback|unknown)·setup_a·setup_b·setup_b_quality·setup_reason — v5.343 유형(표시·필터 전용, setup_type)
   stir·stir_parts·stir_date·stir_gap_pct·stir_ema — v5.398 일봉 준비(세력 꿈틀이 검색식, 표시 전용, daily_ready)
   div_day·div_week — v5.399 RSI 상승 다이버전스(일봉·주봉, divergence.bull_div, 표시 전용, daily_ready)
+  dbl — v5.402 1년 +100% 특징(double_traits.traits: 신호 봉 200일선 거리·60일 범위, 표시 전용)
   div_entry — v5.400 다이버전스+양봉 진입 자리(divergence.entry_signal — 측정 lowpoint_entry_timing 후보 B, 표시 전용)
 
 판정(v5.333): 기준일 **이후** 거래일의 **정규장 고가** ≥ 기준가 × (1 + REACH_PCT/100) → 도달(정확히 1.05배도 도달).
@@ -455,14 +456,16 @@ def setup_type(daily: "pd.DataFrame | None", through: "str | None", mkt: "str | 
 def daily_ready(daily: "pd.DataFrame | None", through: "str | None", base_date: "str | None" = None) -> dict:
     """v5.398 일봉 준비(세력 꿈틀이 검색식, stir_screen.stir_check) — 확정 봉(≤ through)까지 정제한 일봉으로. 표시 전용."""
     import divergence
+    import double_traits
     import stir_screen
     from app import _downcast
     d = _confirmed_daily(daily, through)
     if d is None or d.empty:
-        return {**stir_screen.stir_check(None), **divergence.div_fields(None, through), "div_entry": None}
+        return {**stir_screen.stir_check(None), **divergence.div_fields(None, through), "div_entry": None, "dbl": None}
     d = _downcast(d)
     return {**stir_screen.stir_check(d), **divergence.div_fields(d, through),   # v5.399 다이버전스 — 표시 전용
-            "div_entry": divergence.entry_signal(d, base_date)}                   # v5.400 다이버전스+양봉 — 측정 통과(주봉), 표시 전용
+            "div_entry": divergence.entry_signal(d, base_date),                   # v5.400 다이버전스+양봉 — 측정 통과(주봉), 표시 전용
+            "dbl": double_traits.traits(d, base_date)}                            # v5.402 1년 +100% 특징(신호 봉 당시) — 표시 전용
 
 
 def _us_period(earliest: str, today: date) -> str:

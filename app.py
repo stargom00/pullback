@@ -5,6 +5,10 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.402 [저점 관찰 "두 배 조건" 칩 — 사용자 2026-11-24 "응"(1년 +100% 특징 칩 제안)]
+  측정 docs/lowpoint_double_features.md(확인 2개: 신호 봉 200일선 −38%↓ 30.5% vs 9.1% z 5.21 · 60일 종가 범위 65%↑ 30.7% vs 9.0% z 5.06)와
+  하락 쪽 docs/lowpoint_double_downside.md(둘 다 37.7% · 대신 −50% 이하 찍음 21.2% vs 전체 12.0%). double_traits.traits가 측정 F4·F7과 같은
+  식으로 신호 봉 당시 값을 남기고(관찰 dbl), 화면은 "두 배 조건 n/2"(둘 다 + 측정 범위면 🚀 빨간 배경). 툴팁에 하락 위험 같이. 표시 전용.
 v5.401 [휴대폰에서 저점 관찰 칩이 안 보이던 문제 — 사용자 2026-11-24 "엠로 찾앗는데 없잖아 표시가"]
   원인: v5.327 좁은 화면(≤480px) 규칙 `.lpw-table .lpw-hitchip{display:none}`이 "종료 후보" 칩만 숨기려던 것인데, 유형·일봉 준비·
   다이버전스·🎯 칩도 같은 lpw-hitchip 클래스라 휴대폰에서 전부 숨겨졌다. 숨길 칩 둘(종료 후보·보유 종류)에만 lpw-mhide를 달고 그것만
@@ -9307,7 +9311,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.401"
+VERSION = "v5.402"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -21513,7 +21517,7 @@ def _lp_watch_job_blocking(tf: str, now: "datetime") -> dict:
     print(f"[lowpoint-watch] 일봉 준비 {sum(1 for u in _stir if u['stir'])}건 / 판정 {sum(1 for u in _stir if u['stir'] is not None)}건 "
           f"(봉 부족 {sum(1 for u in _stir if u['stir'] is None)}건) — 표시 전용", flush=True)
     print(f"[lowpoint-watch] 다이버전스 일봉 {sum(1 for u in _stir if u.get('div_day'))}건 / 주봉 {sum(1 for u in _stir if u.get('div_week'))}건 "
-          f"/ 다이버전스+양봉 {sum(1 for u in _stir if u.get('div_entry'))}건 / 대상 {len(_stir)}건 — 표시 전용", flush=True)
+          f"/ 다이버전스+양봉 {sum(1 for u in _stir if u.get('div_entry'))}건 / 두 배 조건 2/2 {sum(1 for u in _stir if (u.get('dbl') or {}).get('n_ok') == 2)}건 / 대상 {len(_stir)}건 — 표시 전용", flush=True)
     # v5.333: 정규장 고가로 다시 판정해 미도달이라 관찰로 되돌린 목록 — 0건이어도 남긴다(침묵 ≠ 성공)
     print(f"[lowpoint-watch] 정규장 고가 재판정 → 관찰 복귀 {len(summary['reverted'])}건: "
           f"{', '.join(summary['reverted']) or '없음'}", flush=True)
