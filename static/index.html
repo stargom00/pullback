@@ -1307,7 +1307,7 @@ table.jr-table.lpw-table th.lpw-sort{cursor:pointer;user-select:none}
 @media (max-width:480px){.lpw-table .lpw-pxcell{display:none}.lpw-table .lpw-hitchip{display:none}}   /* v5.327: 좁은 화면은 종료 후보 칩 대신 행 강조만 */
 /* /v5.326 */
 /* v5.343 유형 칩 — 색은 기존 토큰(바닥형 강조·눌림형 흐림) */
-.lpw-hitchip.lpw-type-bottom{color:var(--n-accent)}.lpw-hitchip.lpw-stir{color:var(--c-red-fg4);font-weight:700}
+.lpw-hitchip.lpw-type-bottom{color:var(--n-accent)}.lpw-hitchip.lpw-stir{color:var(--c-red-fg4);font-weight:700}.lpw-hitchip.lpw-div{color:var(--c-blue-fg4);font-weight:700}
 .lpw-hitchip.lpw-type-unknown{opacity:max(.7,var(--fade-floor))}
 .lpw-hitchip.lpw-type-down{color:var(--c-blue-fg4)}
 /* v5.341 저점 순위 분류 표 — .lpr-table 아래로 한정 */
@@ -1509,7 +1509,7 @@ details.rowmenu>summary:hover{background:var(--c-blue-bg1)}
   <div class="hdr-row">
     <div class="hdr-brand">
       <span class="hdr-title">눌림목 스캐너</span>
-      <span class="ver mono" id="verBadge">v5.398</span>
+      <span class="ver mono" id="verBadge">v5.399</span>
       <a class="hdr-guide" href="/guide" target="_blank" title="활용 가이드 — 챕터별 탭 사용법·매매 규칙·루틴">가이드</a>
     </div>
     <div class="hdr-navs">
@@ -8380,6 +8380,23 @@ function lpwStirChipHtml(r) {
   const c = lpwStirChip(r);
   return c ? ` <span class="chip lpw-hitchip lpw-stir" title="${_escapeHtml(c.title)}">${_escapeHtml(c.text)}</span>` : '';
 }
+// v5.399(사용자 "저점종목 중 다이버전스가 나타나는 종목 찾을 수있어?" → "응 붙여줘") RSI 상승 다이버전스 —
+// 서버(divergence.bull_div: 가격은 더 낮은 저점, 고전 Wilder RSI14는 3 이상 높은 저점)가 정한 값을 칩으로만. 표시 전용 · 측정 전.
+function lpwDivChip(r) {
+  if (!r) return null;
+  const d = r.div_day, w = r.div_week;
+  if (!d && !w) return null;
+  const won = x => Number(x).toLocaleString('ko-KR');
+  const line = (nm, x) => `${nm}: ${x.a_date} ${won(x.a_close)}(RSI ${x.a_rsi}) → ${x.b_date} ${won(x.b_close)}(RSI ${x.b_rsi})`
+    + (x.b_confirmed ? '' : ' · 최근 저점 미확정(다음 봉이 더 내려가면 바뀜)');
+  const parts = [d ? line('일봉', d) : null, w ? line('주봉', w) : null].filter(Boolean);
+  return { text: `다이버전스 ${[d ? '일' : null, w ? '주' : null].filter(Boolean).join('·')}`,
+           title: `RSI 상승 다이버전스 — 가격은 더 낮은데 RSI는 높아짐(하락 속도 둔화, 반등 확정 아님). ${parts.join(' / ')}. 표시 전용 · 측정 전` };
+}
+function lpwDivChipHtml(r) {
+  const c = lpwDivChip(r);
+  return c ? ` <span class="chip lpw-hitchip lpw-div" title="${_escapeHtml(c.title)}">${_escapeHtml(c.text)}</span>` : '';
+}
 function lpwSetupChipHtml(r) {
   const c = lpwSetupChip(r);
   return c ? ` <span class="chip lpw-hitchip lpw-type-${c.cls}" title="${_escapeHtml(c.title)}">${_escapeHtml(c.text)}</span>` : '';
@@ -8741,7 +8758,7 @@ function renderLowpointWatch() {
     const act = lpwSortRows(g.active, _lpw.sortKey, _lpw.sortDir, today).map(r => {
       const p = lpReturnPct(r.last_close, Number(r.base_price));
       return `<tr>
-        <td class="lpw-sym">${name(r)}${lpwSetupChipHtml(r)}${lpwStirChipHtml(r)}${lpwPendingHtml(r)}</td>
+        <td class="lpw-sym">${name(r)}${lpwSetupChipHtml(r)}${lpwStirChipHtml(r)}${lpwDivChipHtml(r)}${lpwPendingHtml(r)}</td>
         <td class="r lpw-pxcell"><span class="lpw-px">${_lptFmt(r.base_price, r.mkt)} → ${r.last_close != null ? _lptFmt(r.last_close, r.mkt) : '—'}</span></td>
         <td class="r">${_lptPct(p)}</td>
         <td class="lpw-barcell">${bar(p)}</td>
@@ -8767,7 +8784,7 @@ function renderLowpointWatch() {
     const st = r.stage === 'resting' ? '' : ` <span class="chip lpw-hitchip" title="${r.stage ? '출발 다음 거래일 종가가 아직 없어요 — 숨고르기 0일' : '다음 추적 때 단계를 분류해요'}">${r.stage ? '출발' : '분류 전'}</span>`;
     const tip = rp.pos == null ? '현재가·무효선 없음' : `무효선 ${_lptFmt(r.invalid_line, r.mkt)} ~ 출발 고가 ${_lptFmt(hi, r.mkt)} 사이 ${rp.pos.toFixed(0)}% · 무효선까지 ${rp.dist >= 0 ? '+' : ''}${rp.dist.toFixed(2)}%`;
     return `<tr>
-        <td class="lpw-sym">${name(r)} ${coh(r)}${lpwSetupChipHtml(r)}${lpwStirChipHtml(r)}${st}${warn(r)}${lpwPendingHtml(r)}</td>
+        <td class="lpw-sym">${name(r)} ${coh(r)}${lpwSetupChipHtml(r)}${lpwStirChipHtml(r)}${lpwDivChipHtml(r)}${st}${warn(r)}${lpwPendingHtml(r)}</td>
         <td class="num r" title="출발일 ${_escapeHtml(r.reached_date || '')}부터">${lpwDays(r.reached_date, today) ?? '—'}일</td>
         <td class="num r" title="${_escapeHtml(r.reached_date || '')}">${r.reached_date ? _escapeHtml(String(r.reached_date).slice(5)) : '—'}</td>
         <td class="num r">${r.invalid_line != null ? _lptFmt(r.invalid_line, r.mkt) : '—'}</td>

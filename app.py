@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.399 [저점 관찰 "다이버전스" 칩 — 사용자 2026-11-23 "저점종목 중 다이버전스가 나타나는 종목 찾을 수있어?" → "응 붙여줘"]
+  scripts/screens/divergence.py(순수): 최근 저점 종가 < 바로 앞 저점 종가인데 고전 Wilder RSI14는 3 이상 높고 앞 저점 RSI < 35 —
+  일봉(60봉 창·최근 15봉 안) · 주봉(40주 창·최근 8주 안, 진행 중 주 제외). 숫자는 전부 AI 어림값(측정 없음).
+  관찰 추적(daily_ready)이 확정·정제 일봉으로 div_day·div_week를 남기고 화면은 "다이버전스 일·주" 칩만. 최근 저점이 아직
+  오른쪽 3봉을 못 채웠으면 툴팁에 "미확정". 표시 전용 · 측정 전.
 v5.398 [저점 관찰 "일봉 준비" 칩(세력 꿈틀이 검색식) + 측정 사전등록 — 사용자 2026-11-23 "이게 내가 하는 저점종목매수랑 연결시킬수잇을것 같아 … 이건 이제 막 움직이려는 거잖아" → "2번까지 같이해"]
   scripts/screens/stir_screen.py(순수): 지수이평 20<60<115 · (1봉전 5봉 평균거래량 ≥ 55,555 or 금일 제외 5일 평균거래대금 ≥ 50백만) ·
   종가 > 20 지수이평 · 단순 20·60 간격 ≤ 2% — Threads @jtdj_official2 키움 조건식 슬라이드 그대로(숫자는 사용자 확인). 11-20 재현 20종목,
@@ -9293,7 +9298,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.398"
+VERSION = "v5.399"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -21498,6 +21503,8 @@ def _lp_watch_job_blocking(tf: str, now: "datetime") -> dict:
     _stir = [u for u in updates.values() if "stir" in u]
     print(f"[lowpoint-watch] 일봉 준비 {sum(1 for u in _stir if u['stir'])}건 / 판정 {sum(1 for u in _stir if u['stir'] is not None)}건 "
           f"(봉 부족 {sum(1 for u in _stir if u['stir'] is None)}건) — 표시 전용", flush=True)
+    print(f"[lowpoint-watch] 다이버전스 일봉 {sum(1 for u in _stir if u.get('div_day'))}건 / 주봉 {sum(1 for u in _stir if u.get('div_week'))}건 "
+          f"/ 대상 {len(_stir)}건 — 표시 전용", flush=True)
     # v5.333: 정규장 고가로 다시 판정해 미도달이라 관찰로 되돌린 목록 — 0건이어도 남긴다(침묵 ≠ 성공)
     print(f"[lowpoint-watch] 정규장 고가 재판정 → 관찰 복귀 {len(summary['reverted'])}건: "
           f"{', '.join(summary['reverted']) or '없음'}", flush=True)

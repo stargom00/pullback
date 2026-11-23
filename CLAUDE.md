@@ -298,7 +298,11 @@ v5.374까지는 키움 조건식 원문(30 하향돌파: RSI[1] < 30 AND RSI[2] 
 **일봉 준비(v5.398, 2026-11-23 사용자 지시) — 표시 전용 · 측정 전.** 관찰 레코드의 `stir`(scripts/screens/stir_screen.stir_check =
 Threads @jtdj_official2 "세력 꿈틀이 검색기" 키움 조건식: 지수이평 20<60<115 · 1봉전 5봉 평균거래량 ≥ 55,555 or 금일 제외 5일 평균거래대금
 ≥ 50백만 · 종가 > 20 지수이평 · 단순 20·60 간격 ≤ 2%). 확정 봉 + app._downcast 정제(daily_ready). 저점·관찰·순위 판정에 넣지 말 것 —
-측정(docs/lowpoint_stir_filter.md) 결과가 나오기 전엔 칩만.
+측정(docs/lowpoint_stir_filter.md) 결과: 판단 불가(표본 부족 32건, 방향은 통과가 나쁨) — 칩만.
+
+**다이버전스(v5.399, 2026-11-23 사용자 지시 "응 붙여줘") — 표시 전용 · 측정 전.** 관찰 레코드의 `div_day`·`div_week`
+(scripts/screens/divergence.bull_div: 최근 저점 종가 < 앞 저점, 고전 Wilder RSI14 +3 이상, 앞 저점 RSI < 35 — 숫자 전부 AI 어림값).
+daily_ready가 stir와 같은 확정·정제 일봉으로 계산, 주봉은 through 뒤 라벨(진행 중 주) 제외. 판정에 넣지 말 것.
 
 **저점 매매 종료 사유(v5.345)**: 새로 종료하는 저장은 사유 필수(서버 `_lp_trade_exit_rule` + 프론트 `lpSplitSell`), 옛 종료는
 "미기록"으로 두고 수정으로 채운다. 선택지는 `LP_TRADE_EXIT_REASONS` 한 곳(목록 API로 화면에 전달).
