@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.403 [거래대금 상위 순위 기록 — 사용자 2026-11-26 "응 붙여줘"(트레이더 율 채널 "0186 거래대금 상위 1~10위가 순위를 유지하는지 매일 기록")]
+  거래일 KR 종가 확정(20:10 KST) 뒤 한 번 naver marketValue 전 종목을 훑어 ETF·ETN 뺀 거래대금 상위 20을 저장(turnover_rank.json,
+  90일). GET /api/turnover-rank(봇 읽기)가 상위 10 · 전일 대비 순위 이동 · 새 진입 · 연속 일수 · 빠진 종목 · 최근 10일 흐름표를 준다.
+  추적 장부(/track) 위쪽에 "거래대금 상위 10" 칸. naver_kr.fetch_market_pages로 테마 바구니 시세와 페이지 훑기를 공유(사본 없음).
+  키움 0186과 값이 조금 다를 수 있다(naver 집계). 표시 전용 · 측정 전.
 v5.402 [저점 관찰 "두 배 조건" 칩 — 사용자 2026-11-24 "응"(1년 +100% 특징 칩 제안)]
   측정 docs/lowpoint_double_features.md(확인 2개: 신호 봉 200일선 −38%↓ 30.5% vs 9.1% z 5.21 · 60일 종가 범위 65%↑ 30.7% vs 9.0% z 5.06)와
   하락 쪽 docs/lowpoint_double_downside.md(둘 다 37.7% · 대신 −50% 이하 찍음 21.2% vs 전체 12.0%). double_traits.traits가 측정 F4·F7과 같은
@@ -9122,6 +9127,8 @@ _BOT_READ_EXACT_PATHS = {
     "/api/track-lines",
     # v5.393: 테마 바구니 읽기(GET만 — PUT/DELETE는 /api/theme-baskets/{id}라 세션이 필요하다).
     "/api/theme-baskets",
+    # v5.403: 거래대금 상위 순위 읽기(GET·읽기 전용 — turnover_rank_api 본문에 쓰기 없음).
+    "/api/turnover-rank",
     # v5.141: Claude API 일일 상한 경고/차단 텔레그램 발송도 마찬가지로
     # stock-alert 쪽에 이 경로를 폴링하는 코드가 추가돼야 실제 발송이 된다 —
     # 여기서는 데이터(pending_alert)만 열어둠.
@@ -9311,7 +9318,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.402"
+VERSION = "v5.403"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -13646,6 +13653,7 @@ async def _scheduler_loop():
             await _maybe_run_jongga_snapshot()
             _maybe_refresh_macro_calendar()   # v5.108: 캘린더 탭 매크로 일정, 주 1회
             await _maybe_run_weekly_money_flow()   # v5.147: 돈의흐름 주 1회 전환
+            await _maybe_record_turnover_rank()   # v5.403: 거래대금 상위 순위 하루 1회(KR 종가 확정 뒤)
             _journal_daily_backup()   # v5.300: 날짜별 일지 사본(그날 없을 때만)
             _daily_backup(LP_TRADES_PATH, "lowpoint_trades", lock=_LP_TRADES_LOCK)   # v5.302
             _daily_backup(LP_EVALS_PATH, "lowpoint_evals", lock=_LP_EVALS_LOCK)      # v5.317
@@ -22543,6 +22551,85 @@ async def track_line_delete(rid: str, request: Request):
 
 
 # ── v5.393 테마 바구니 — theme_baskets.py ────────────────────────────────────────────────
+# ── v5.403 거래대금 상위 순위 기록 — 사용자 2026-11-26 "응 붙여줘"(트레이더 율 채널: 0186 거래대금 상위 1~10위의 순위 유지·변동을
+# 매일 기록). KR 종가 확정(KR_CLOSE_CONFIRMED_HM) 뒤 거래일마다 한 번 naver marketValue 전 종목을 훑어 상위 20을 저장한다. 표시·알림 전용.
+TURNOVER_RANK_PATH = _resolve_persistent_path("turnover_rank.json")
+_TURNOVER_RANK_LOCK = _threading.RLock()
+_turnover_rank_running = False
+
+
+def _turnover_rank_load() -> dict:
+    if not os.path.exists(TURNOVER_RANK_PATH):
+        return {}
+    with open(TURNOVER_RANK_PATH, encoding="utf-8") as f:
+        return (_json.load(f) or {}).get("days") or {}
+
+
+def _turnover_rank_write(days: dict) -> None:
+    tmp = TURNOVER_RANK_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        _json.dump({"days": days}, f, ensure_ascii=False)
+    os.replace(tmp, TURNOVER_RANK_PATH)
+
+
+def _turnover_rank_record_blocking(today: str) -> str:
+    """오늘 순위를 받아 저장 — 결과 한 줄(로그용). 시세 날짜가 오늘이 아니면(휴장·지연) 저장하지 않는다."""
+    import turnover_rank as tr
+    rows, st = naver_kr.fetch_market_rows()
+    day, top = tr.snapshot(rows)
+    if not top:
+        return f"받은 종목 0건(페이지 실패 {st['failed_pages']}) — 저장 안 함"
+    if day != today:
+        return f"시세 날짜 {day} ≠ 오늘 {today} — 저장 안 함"
+    with _TURNOVER_RANK_LOCK:
+        days = _turnover_rank_load()
+        days[day] = top
+        _turnover_rank_write(tr.trim(days))
+    a = tr.analyze(days, day)
+    news = [r["name"] for r in a["top"] if r["new"]]
+    return (f"{day} 기록 — 상위 {len(top)} · 1위 {top[0]['name']} · 새로 10위 안 {len(news)}건({', '.join(news) or '없음'}) · "
+            f"전 종목 {st['rows']}건 · 페이지 실패 {st['failed_pages']}")
+
+
+async def _maybe_record_turnover_rank():
+    """스케줄러(4분마다) — 거래일 KR_CLOSE_CONFIRMED_HM 뒤, 오늘 기록이 없을 때만. 유료 API 아님(naver)."""
+    global _turnover_rank_running
+    now = datetime.now(KST)
+    today = now.strftime("%Y-%m-%d")
+    if _turnover_rank_running or now.hour * 60 + now.minute < KR_CLOSE_CONFIRMED_HM or not is_trading_day("kr", today):
+        return
+    try:
+        if today in _turnover_rank_load():
+            return
+    except (OSError, ValueError) as e:
+        print(f"[turnover-rank] 파일 읽기 실패: {e}", flush=True)
+        return
+    _turnover_rank_running = True
+    try:
+        msg = await asyncio.get_event_loop().run_in_executor(_executor, _turnover_rank_record_blocking, today)
+        print(f"[turnover-rank] {msg}", flush=True)
+    except Exception as e:
+        print(f"[turnover-rank] 기록 실패: {type(e).__name__}: {e}", flush=True)
+    finally:
+        _turnover_rank_running = False
+
+
+@app.get("/api/turnover-rank")
+async def turnover_rank_api(day: str = "", hist: int = 10):
+    """거래대금 상위 순위(봇 읽기 개방 — GET·읽기 전용, 쓰기 0건). day 없으면 마지막 기록일.
+    hist = 최근 기록일 수만큼 날짜별 상위 10 이름(순위 흐름 표)."""
+    import turnover_rank as tr
+    try:
+        days = _turnover_rank_load()
+    except (OSError, ValueError) as e:
+        return JSONResponse({"ok": False, "error": f"순위 기록 읽기 실패: {e}"}, status_code=500)
+    a = tr.analyze(days, day or None)
+    order = sorted(days)[-max(1, min(int(hist or 10), 30)):]
+    grid = [{"day": d, "top": [{"rank": r["rank"], "code": r["code"], "name": r["name"]} for r in days[d][:tr.SHOW_TOP]]} for d in order]
+    return JSONResponse(_clean_nan({"ok": True, "analysis": a, "grid": grid,
+                                    "rule": {"show": tr.SHOW_TOP, "keep": tr.KEEP_TOP, "record_after_hm": KR_CLOSE_CONFIRMED_HM}}))
+
+
 THEME_BASKETS_PATH = _resolve_persistent_path("theme_baskets.json")
 THEME_BASKETS_DELETE_LOG_PATH = os.path.join(os.path.dirname(THEME_BASKETS_PATH), "theme_baskets_deletions.log")
 THEME_BASKETS_SEEDED_PATH = os.path.join(os.path.dirname(THEME_BASKETS_PATH), "theme_baskets_seeded.json")

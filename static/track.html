@@ -84,6 +84,13 @@ input:focus,select:focus{outline:2px solid var(--n-accent);outline-offset:-1px}
 .help{font-size:12px;color:var(--n-muted)}
 .msg{color:var(--n-bad);font-size:13px}
 .empty{color:var(--n-muted);text-align:center;padding:40px 0}
+/* v5.403 거래대금 상위 순위 */
+.rk{background:var(--n-card);border:1px solid var(--n-line2);border-radius:16px;padding:10px 14px;display:flex;flex-direction:column;gap:8px}
+.rk table{width:100%;border-collapse:collapse;font-size:13px}.rk th{font-size:11px;color:var(--n-muted);font-weight:600;text-align:left;padding:3px 6px;border-bottom:1px solid var(--n-line)}
+.rk td{padding:5px 6px;border-bottom:1px solid var(--n-line)}.rk td.r,.rk th.r{text-align:right}.rk a{color:var(--n-text);text-decoration:none;font-weight:600}
+.rk .mv{font-size:12px;font-weight:700}.rk .mv.up{color:var(--c-up)}.rk .mv.dn{color:var(--c-dn)}.rk .mv.new{color:#fff;background:var(--c-up);border-radius:6px;padding:1px 6px}
+.rk .stk{font-size:12px;color:var(--n-sub)}.rk .drop{font-size:12px;color:var(--n-sub)}.rk .scroll{overflow-x:auto}
+.rk .grid10{font-size:11px;border-collapse:collapse;white-space:nowrap}.rk .grid10 td,.rk .grid10 th{padding:2px 6px;border:1px solid var(--n-line)}.rk .grid10 .hl{background:color-mix(in srgb,var(--c-up) 12%,transparent);font-weight:700}
 /* v5.393 테마 바구니 */
 .th-hd{display:flex;align-items:center;gap:10px;margin-top:6px}.th-hd h2{font-family:'Gowun Batang','Nanum Myeongjo',serif;font-size:20px;margin:0;color:var(--n-accent)}.th-hd .sp{flex:1}
 .bk{background:var(--n-card);border:1px solid var(--n-line2);border-radius:16px;padding:9px 14px;display:flex;flex-direction:column;gap:9px;box-shadow:0 1px 2px rgba(0,0,0,.04),0 4px 14px rgba(0,0,0,.04)}
@@ -101,6 +108,7 @@ textarea{font:inherit;font-size:14px;color:var(--n-text);background:var(--n-pane
 <div class="top"><h1>추적 장부</h1><span class="sub" id="sum"></span><span class="sp"></span><a class="back" href="/">← 스캐너</a><button class="btn pri" onclick="openForm()">+ 선 등록</button></div>
 <div id="formBox"></div>
 <div id="nearBox"></div>
+<div id="rankBox"></div>
 <div id="themeBox"></div>
 <div class="tabs" id="tabs"></div>
 <div id="list"><div class="empty">불러오는 중…</div></div>
@@ -128,6 +136,24 @@ function groupStocks(lines,theme,showEnd){const by={};
   .sort((a,b)=>a.minDist-b.minDist)}   // 선까지 가까운 순(근처 ±3% 종목은 정의상 맨 앞에 온다)
 // ── v5.393 테마 바구니 — 등락률·요약·점화 판정은 전부 서버(theme_baskets.py). 여기는 보여 주기와 양식만.
 const B={open:{},baskets:[],lined:[],rule:null,form:null,msg:'',err:'',loading:true,delAsk:null};
+// v5.403 거래대금 상위 10 — 서버(turnover_rank.analyze)가 계산한 값을 그리기만. 표시 전용 · 측정 전.
+const R={data:null,err:'',flow:false,pick:null};
+async function loadRank(){try{const r=await fetch('/api/turnover-rank');const j=await r.json();if(!j.ok)throw new Error(j.error||r.status);R.data=j;R.err=''}catch(e){R.err='거래대금 순위를 불러오지 못했어: '+e.message}renderRank()}
+// 순위 변화 글자 — 순수 함수(테스트: test_turnover_rank.py가 node로 그대로 실행)
+function rankMove(r){if(r.new)return {cls:'new',txt:r.prev_rank?`NEW ${r.prev_rank}→`:'NEW'};if(r.move==null)return {cls:'',txt:'–'};
+  if(r.move>0)return {cls:'up',txt:'▲'+r.move};if(r.move<0)return {cls:'dn',txt:'▼'+(-r.move)};return {cls:'',txt:'='}}
+function rankHTML(d){if(!d||!d.analysis)return `<div class="rk"><div class="th-hd"><h2>거래대금 상위 10</h2></div><div class="help">아직 기록이 없어 — 거래일 20:10(한국 시간) 뒤에 처음 쌓여.</div></div>`;
+  const a=d.analysis,eok=v=>Math.round(v/100).toLocaleString('en-US');
+  const rows=a.top.map(r=>{const m=rankMove(r);return `<tr><td class="mono">${r.rank}</td><td><a href="${tv(r.ticker)}" target="_blank" rel="noopener">${esc(r.name)}</a></td>
+    <td class="r mono" style="color:${r.chg_pct>0?'var(--c-up)':r.chg_pct<0?'var(--c-dn)':'inherit'}">${pctTxt(r.chg_pct)}</td><td class="r mono">${eok(r.value_mil)}억</td>
+    <td><span class="mv ${m.cls}">${m.txt}</span></td><td class="stk">${r.streak>1?r.streak+'일째':''}${r.in_top_20d>r.streak?` <span class="help">(20일 중 ${r.in_top_20d})</span>`:''}</td></tr>`}).join('');
+  const drop=a.dropped.length?`<div class="drop">빠진 종목: ${a.dropped.map(x=>`${esc(x.name)} ${x.prev_rank}위→${x.rank?x.rank+'위':'20위 밖'}`).join(' · ')}</div>`:'';
+  const flow=R.flow&&d.grid&&d.grid.length?`<div class="scroll"><table class="grid10"><tr><th>순위</th>${d.grid.map(g=>`<th>${esc(g.day.slice(5))}</th>`).join('')}</tr>${[...Array(10).keys()].map(i=>`<tr><td>${i+1}</td>${d.grid.map(g=>{const x=g.top[i];return x?`<td class="${R.pick===x.code?'hl':''}" onclick="R.pick=R.pick==='${esc(x.code)}'?null:'${esc(x.code)}';renderRank()">${esc(x.name)}</td>`:'<td></td>'}).join('')}</tr>`).join('')}</table></div><div class="help">이름을 누르면 같은 종목이 날짜마다 표시돼</div>`:'';
+  return `<div class="rk"><div class="th-hd"><h2>거래대금 상위 10</h2><span class="help mono">${esc(a.day.slice(5))}${a.prev_day?' · 전 기록 '+esc(a.prev_day.slice(5)):''}</span><span class="sp"></span>
+    ${d.grid&&d.grid.length>1?`<button class="btn sm ghost" onclick="R.flow=!R.flow;renderRank()">${R.flow?'흐름 닫기':'순위 흐름 '+d.grid.length+'일'}</button>`:''}</div>
+   <div class="scroll"><table><tr><th>#</th><th>종목</th><th class="r">등락</th><th class="r">거래대금</th><th>전일 대비</th><th>상위 10 연속</th></tr>${rows}</table></div>${drop}${flow}
+   <div class="help">장 마감 후(20:10) 매일 기록 · naver 기준(키움 0186과 조금 다를 수 있음) · ETF·ETN 제외 · 기록 ${a.n_days}일째(${esc(a.first_day.slice(5))}부터)</div></div>`}
+function renderRank(){document.getElementById('rankBox').innerHTML=R.err?`<div class="msg">${esc(R.err)}</div>`:R.data?rankHTML(R.data):''}
 async function loadBaskets(){try{const r=await fetch('/api/theme-baskets');const j=await r.json();if(!j.ok)throw new Error(j.error||r.status);
   B.baskets=sortBaskets(j.baskets);B.lined=j.lined||[];B.rule=j.rule;B.err=''}catch(e){B.err='테마를 불러오지 못했어: '+e.message}B.loading=false;renderThemes()}
 // 점화한 테마 먼저 → 평균 등락률 높은 순 → 종료는 맨 뒤. 순수 함수(테스트: test_theme_baskets.py)
@@ -247,5 +273,5 @@ function render(){document.getElementById('np').textContent=S.near;document.getE
     +(nEnd?`<button class="tab${S.showEnd?' on':''}" onclick="S.showEnd=!S.showEnd;render()">종료한 선${S.showEnd?' 숨기기':' 보기'}<span>${nEnd}</span></button>`:'');
   document.getElementById('list').innerHTML=(S.err?`<div class="msg">${esc(S.err)}</div>`:'')+(G.length?`<div class="grid">${G.map(cardHTML).join('')}</div>`:(S.err?'':'<div class="empty">아직 등록한 선이 없어. 오른쪽 위 "+ 선 등록"으로 시작해.</div>'));
   document.querySelectorAll('.cscroll').forEach(e=>{e.scrollLeft=e.scrollWidth})}
-load();renderThemes();loadBaskets();
+load();renderThemes();loadBaskets();loadRank();
 </script></body></html>
