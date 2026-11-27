@@ -353,6 +353,8 @@ ABC 상태 줄이 저점일지에 남던 버그). 스캔형 탭 전용 요소를
 
 **거래대금 상위 순위(v5.403, 2026-11-26 사용자 "응 붙여줘" — 트레이더 율 채널 "0186 거래대금 상위 1~10위 순위 유지 매일 기록")** — `marketValue` 전 종목 페이지 훑기는 `naver_kr.fetch_market_pages` 하나를 테마 바구니 시세(`fetch_market_quotes`)와 순위(`fetch_market_rows`)가 같이 쓴다. 거래대금 = `accumulatedTradingValue`(백만 원), ETF·ETN은 `stockEndType != "stock"` 또는 이름으로 뺀다. 거래일 KR 종가 확정 뒤 한 번 `turnover_rank.json`에 상위 20 저장(시세 날짜가 오늘이 아니면 저장 안 함), `/api/turnover-rank`(봇 읽기)·추적 장부 "거래대금 상위 10". 키움 0186과 집계 기준이 같은지는 확인 안 함. 표시 전용.
 
+**두 종목 비교 `/compare`(v5.404, 2026-11-27 사용자 "두 종목 비교로하자. 티커나 종목명 넣으면 볼수있게")** — 표시 전용, 판정 없음. KR만(이름 검색 = `marketValue` 전 종목 목록, `ac.stock.naver.com`은 이 컨테이너에서 막힘). 확정 봉까지 자른 통합 일봉 + 투자자별 20일(기관 세부 없음). **주의: `app._lp_watch_mod()`가 `scripts/measurements`를 sys.path 앞에 넣어서 그 폴더의 `investor_flow.py`가 루트 `investor_flow.py`를 가린다** — `stock_compare.py`는 그래서 `investor_flow`를 먼저 import하고 screens 경로는 뒤에 붙인다. 같은 이름의 모듈을 새로 만들 때 이 가림을 확인할 것.
+
 **`.../api/stocks/theme`·`.../api/stocks/theme/{no}`** — 네이버 테마 목록·구성 종목. 테마 바구니 씨앗(`theme_baskets_seed.json`)을 만들 때 **한 번** 읽었다(v5.396) — 운영 코드는 부르지 않는다. 테마 바구니 등락률은 `marketValue` 목록을 전 종목 훑어 얻는다(`naver_kr.fetch_market_quotes`, 5분 캐시).
 
 **이 사고 유형의 공통 방어(3건 모두 같은 방식)**: 소스 상태를 매 스캔 TIMING에 남기고(`kr_universe_source`/`kr_mcap_filter_source`/`kr_earnings_source`), 0건·전량 실패면 경고 로그 + 상태줄 배지를 띄운다. **새 외부 소스를 붙일 때 이 세 가지(상태 필드·경고 로그·화면 배지)를 같이 넣을 것** — 조용한 빈 결과는 몇 달 뒤에나 발견된다.

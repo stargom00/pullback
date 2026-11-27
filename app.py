@@ -5,6 +5,11 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.404 [두 종목 비교 점검표 /compare — 사용자 2026-11-27 "지금 이 전체 항목들을 체크할수있는 페이지 붙여줘. 두 종목 비교로하자. 티커나 종목명 넣으면 볼수있게."]
+  바이넥스·아남전자 비교에서 쓴 항목 그대로: 고점·저점 대비 위치, 이평 거리·기울기(20·60·120·240·600), 바닥 폭(60·120·8일),
+  위 매물대(abc_screener.supply_profile — ABC 탭과 같은 함수), 일·주·월 RSI(고전 Wilder), ATR·1.5 ATR 손절, 거래대금(평균·중앙값·120일·
+  최근 5일), 투자자별 20일(naver trend — 기관·외국인·개인 합계·순매수 일수·거래량 대비·외국인 보유율), 꿈틀이·다이버전스, 선택 입력
+  매수가·손절·목표 → 손익비. 계산은 stock_compare.py(순수). KR만. 확정 봉(20:10 KST)까지. 판정 없음 — 숫자만 나란히. 표시 전용.
 v5.403 [거래대금 상위 순위 기록 — 사용자 2026-11-26 "응 붙여줘"(트레이더 율 채널 "0186 거래대금 상위 1~10위가 순위를 유지하는지 매일 기록")]
   거래일 KR 종가 확정(20:10 KST) 뒤 한 번 naver marketValue 전 종목을 훑어 ETF·ETN 뺀 거래대금 상위 20을 저장(turnover_rank.json,
   90일). GET /api/turnover-rank(봇 읽기)가 상위 10 · 전일 대비 순위 이동 · 새 진입 · 연속 일수 · 빠진 종목 · 최근 10일 흐름표를 준다.
@@ -9318,7 +9323,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.403"
+VERSION = "v5.404"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -22553,6 +22558,97 @@ async def track_line_delete(rid: str, request: Request):
 # ── v5.393 테마 바구니 — theme_baskets.py ────────────────────────────────────────────────
 # ── v5.403 거래대금 상위 순위 기록 — 사용자 2026-11-26 "응 붙여줘"(트레이더 율 채널: 0186 거래대금 상위 1~10위의 순위 유지·변동을
 # 매일 기록). KR 종가 확정(KR_CLOSE_CONFIRMED_HM) 뒤 거래일마다 한 번 naver marketValue 전 종목을 훑어 상위 20을 저장한다. 표시·알림 전용.
+# ── v5.404 두 종목 비교 점검표 — 사용자 2026-11-27 "지금 이 전체 항목들을 체크할수있는 페이지 붙여줘. 두 종목 비교로하자.
+# 티커나 종목명 넣으면 볼수있게." 계산은 stock_compare.py(순수), 여기는 이름 찾기·데이터 받기·캐시만. KR만(투자자별 매매가 KR 소스뿐).
+_KR_NAME_INDEX = {"ts": 0.0, "rows": []}
+_COMPARE_CACHE: dict = {}          # {(ticker, through): (ts, block)}
+_COMPARE_TTL = 600
+
+
+def _kr_name_rows() -> list:
+    """전 종목 이름 목록(naver marketValue — 거래대금 순위와 같은 페이지 훑기). 6시간 메모리 캐시."""
+    if time.time() - _KR_NAME_INDEX["ts"] > 6 * 3600 or not _KR_NAME_INDEX["rows"]:
+        rows, _st = naver_kr.fetch_market_rows()
+        if rows:
+            _KR_NAME_INDEX.update(ts=time.time(), rows=[{"name": r["name"], "ticker": r["ticker"], "value": r["value_mil"]} for r in rows])
+    return _KR_NAME_INDEX["rows"]
+
+
+def _compare_resolve(q: str) -> dict:
+    """종목명 또는 6자리 코드 → {ticker, name} 또는 {error, candidates}. 이름은 정확히 같은 것 → 앞부분 일치 → 포함 순(거래대금 큰 순)."""
+    q = (q or "").strip()
+    if not q:
+        return {"error": "종목명이나 코드를 넣어 줘"}
+    code = q.upper().split(".")[0]
+    if len(code) == 6 and code[0].isdigit() and code.isalnum():
+        b = naver_kr.fetch_basic(code)
+        return {"ticker": code + b["suffix"], "name": b["name"]} if b and b.get("suffix") else {"error": f"{q}: 종목을 찾지 못했어"}
+    rows = _kr_name_rows()
+    key = q.replace(" ", "").lower()
+    norm = lambda n: n.replace(" ", "").lower()
+    for test in (lambda n: n == key, lambda n: n.startswith(key), lambda n: key in n):
+        hit = sorted((r for r in rows if test(norm(r["name"]))), key=lambda r: -(r["value"] or 0))
+        if hit:
+            return {"ticker": hit[0]["ticker"], "name": hit[0]["name"], "candidates": [h["name"] for h in hit[1:6]]}
+    return {"error": f"{q}: 종목을 찾지 못했어(KR만 — 미국 종목은 아직 안 돼)"}
+
+
+def _compare_block_blocking(ticker: str, through: str) -> dict:
+    import pandas as pd
+    _lp_watch_mod()                     # scripts/screens를 sys.path에(stock_compare가 lowpoint·divergence·stir_screen을 쓴다)
+    import stock_compare as sc
+    hit = _COMPARE_CACHE.get((ticker, through))
+    if hit and time.time() - hit[0] < _COMPARE_TTL:
+        return hit[1]
+    df = naver_kr.fetch_history(ticker, days=1900)
+    df = _downcast(df) if df is not None and not df.empty else None
+    if df is None or df.empty:
+        return {"error": f"{ticker}: 일봉을 받지 못했어"}
+    df = df[pd.to_datetime(df.index).normalize() <= pd.Timestamp(through)]
+    if len(df) < 130:
+        return {"error": f"{ticker}: 확정 일봉이 {len(df)}개뿐이라(130개 미만) 비교하지 않아"}
+    blk = sc.price_block(df)
+    raw = naver_kr.fetch_investor_trend(ticker, days=20)
+    blk["flow"] = sc.flow_block(sc.parse_flow_rows(raw))
+    blk["flow_error"] = None if raw is not None else "투자자별 매매를 받지 못했어"
+    _COMPARE_CACHE[(ticker, through)] = (time.time(), blk)
+    return blk
+
+
+def _num_or_none(x):
+    try:
+        v = float(str(x).replace(",", ""))
+        return v if v > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+@app.get("/api/compare")
+async def compare_api(a: str = "", b: str = "", pa: str = "", sa: str = "", ta: str = "", pb: str = "", sb: str = "", tb: str = ""):
+    """두 종목 비교(GET·읽기 전용 — 저장 없음). pa/sa/ta = A의 매수가·손절·목표(선택), pb/sb/tb = B."""
+    through = _lp_watch_mod().confirmed_through("KR", datetime.now(KST).isoformat())
+    import stock_compare as sc
+    loop = asyncio.get_event_loop()
+    out = []
+    for q, px, st, tg in ((a, pa, sa, ta), (b, pb, sb, tb)):
+        r = await loop.run_in_executor(_executor, _compare_resolve, q)
+        if r.get("error"):
+            out.append({"query": q, "error": r["error"]})
+            continue
+        blk = await loop.run_in_executor(_executor, _compare_block_blocking, r["ticker"], through)
+        if blk.get("error"):
+            out.append({"query": q, **r, "error": blk["error"]})
+            continue
+        plan = sc.plan_block(_num_or_none(px), _num_or_none(st), _num_or_none(tg), (blk.get("atr") or {}).get("atr"))
+        out.append({"query": q, **r, **blk, "plan": plan})
+    return JSONResponse(_clean_nan({"ok": True, "through": through, "items": out}))
+
+
+@app.get("/compare")
+async def compare_page():
+    return FileResponse("static/compare.html", headers=_NO_CACHE_HEADERS)
+
+
 TURNOVER_RANK_PATH = _resolve_persistent_path("turnover_rank.json")
 _TURNOVER_RANK_LOCK = _threading.RLock()
 _turnover_rank_running = False

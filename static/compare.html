@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>두 종목 비교</title>
+<script>
+try{document.documentElement.dataset.theme=localStorage.getItem('scannerTheme')==='dark'?'dark':'light'}catch(e){document.documentElement.dataset.theme='light'}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@700&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* v5.404 두 종목 비교 점검표 — 사용자 2026-11-27 "지금 이 전체 항목들을 체크할수있는 페이지 붙여줘. 두 종목 비교로하자. 티커나 종목명 넣으면 볼수있게."
+   색은 추적 장부와 같은 토큰(매매 훈련 홈 색). 숫자만 나란히 — 어느 쪽이 낫다는 판정은 하지 않는다. */
+:root{--n-bg:#f1f3ef;--n-panel:#ffffff;--n-line:#e5e9e3;--n-line2:#d6dbd5;--n-text:#1b2320;--n-sub:#3f4a45;--n-muted:#5f6b65;--n-accent:#1d6b58;--n-row:#eef1ec;--n-bad:#b8352a;--c-up:#d13b3b;--c-dn:#2d5ccc;--on:#ffffff}
+:root[data-theme="dark"]{--n-bg:#111513;--n-panel:#181e1b;--n-line:#222a26;--n-line2:#2b3430;--n-text:#e4eae6;--n-sub:#bcc6c1;--n-muted:#97a39d;--n-accent:#5ec2a4;--n-row:#1b221f;--n-bad:#ff7a6b;--c-up:#ff6464;--c-dn:#5f8fff;--on:#0d1a15;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--n-bg);color:var(--n-text);font-family:'IBM Plex Sans KR',-apple-system,sans-serif;font-size:14px;line-height:1.5}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.wrap{max-width:980px;margin:0 auto;padding:20px max(16px,env(safe-area-inset-left)) 80px;display:flex;flex-direction:column;gap:14px}
+.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.top h1{font-family:'Gowun Batang',serif;font-size:26px;margin:0;color:var(--n-accent)}.sp{flex:1}
+a.back{color:var(--n-muted);text-decoration:none;font-size:13px}
+form{background:var(--n-panel);border:1px solid var(--n-line2);border-radius:14px;padding:12px 14px;display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}
+form .col{display:flex;flex-direction:column;gap:6px;min-width:0}
+form .lab{font-size:12px;font-weight:700;color:var(--n-accent)}
+form input{font:inherit;width:100%;min-width:0;border:1px solid var(--n-line2);background:var(--n-bg);color:var(--n-text);border-radius:8px;padding:7px 9px}
+form .row3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+form .row3 input{font-size:13px;padding:6px 7px}
+form .act{grid-column:1/-1;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.btn{font:inherit;font-weight:600;border:1px solid var(--n-accent);background:var(--n-accent);color:var(--on);border-radius:8px;padding:7px 16px;cursor:pointer}
+.help{color:var(--n-muted);font-size:12px}
+.msg{color:var(--n-bad);font-size:13px}
+.box{background:var(--n-panel);border:1px solid var(--n-line2);border-radius:14px;overflow:hidden}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th,td{padding:7px 10px;border-bottom:1px solid var(--n-line);vertical-align:top;text-align:left}
+thead th{font-size:13px;background:var(--n-row);position:sticky;top:0}
+thead th a{color:var(--n-text);text-decoration:none}
+tr.sec td{background:var(--n-row);font-weight:700;font-size:12px;color:var(--n-accent);letter-spacing:.02em}
+td.k{width:34%;font-size:13px}td.k .h{display:block;font-size:11px;color:var(--n-muted)}
+td.v{width:33%;font-size:13px}
+.up{color:var(--c-up)}.dn{color:var(--c-dn)}.mut{color:var(--n-muted)}
+@media (max-width:560px){form{grid-template-columns:1fr}td.k{width:30%}th,td{padding:6px 7px}}
+</style></head><body>
+<div class="wrap">
+  <div class="top"><h1>두 종목 비교</h1><span class="sp"></span><a class="back" href="/track">추적 장부</a><a class="back" href="/">← 스캐너</a></div>
+  <form id="f" onsubmit="go(event)">
+    <div class="col"><span class="lab">A</span><input id="a" placeholder="종목명 또는 코드 (예: 바이넥스)" autocomplete="off">
+      <div class="row3"><input id="pa" inputmode="decimal" placeholder="매수가"><input id="sa" inputmode="decimal" placeholder="손절"><input id="ta" inputmode="decimal" placeholder="1차 목표"></div></div>
+    <div class="col"><span class="lab">B</span><input id="b" placeholder="종목명 또는 코드 (예: 아남전자)" autocomplete="off">
+      <div class="row3"><input id="pb" inputmode="decimal" placeholder="매수가"><input id="sb" inputmode="decimal" placeholder="손절"><input id="tb" inputmode="decimal" placeholder="1차 목표"></div></div>
+    <div class="act"><button class="btn" type="submit">비교</button><span class="help">매수가·손절·목표는 넣으면 손익비까지 계산 · KR만 · 확정 종가(20:10) 기준</span><span class="msg" id="msg"></span></div>
+  </form>
+  <div id="out"></div>
+  <p class="help">숫자만 나란히 놓은 표야 — 어느 쪽이 낫다는 판정은 하지 않아. 매물대 = 최근 250일 종가를 10구간으로 나눠 거래량을 더한 것(ABC 탭과 같은 방식). 투자자별 매매는 네이버 최근 20거래일(기관 세부는 없음). RSI는 고전 Wilder 14. 측정 전 · 표시 전용.</p>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+// ── 순수 함수(테스트: test_stock_compare.py가 node로 그대로 실행) ──
+function fmtPct(x,d=1){if(x==null||!isFinite(x))return '—';const v=x*100;return `<span class="${v>0?'up':v<0?'dn':''}">${v>0?'+':''}${v.toFixed(d)}%</span>`}
+function fmtNum(x){if(x==null||!isFinite(x))return '—';return Math.abs(x)>=100?Math.round(x).toLocaleString('en-US'):(+x).toLocaleString('en-US',{maximumFractionDigits:2})}
+function fmtEok(x){return x==null?'—':`${(+x).toFixed(1)}억`}
+function cmpRows(it){
+  const R=[],sec=t=>R.push({sec:t}),row=(k,h,f)=>R.push({k,h,v:it.map(x=>{if(!x||x.error)return '';try{return f(x)}catch(e){return '—'}})});
+  sec('위치');
+  row('종가','기준일 확정 종가',x=>`${fmtNum(x.close)} <span class="mut">${esc(x.date)}</span>`);
+  row('1년 고점 대비','최근 250일 고가',x=>`${fmtPct(x.pos['250'].from_high)} <span class="mut">고점 ${fmtNum(x.pos['250'].high)} (${esc(x.pos['250'].high_date)})</span>`);
+  row('3년 고점 대비','최근 750일 고가',x=>`${fmtPct(x.pos['750'].from_high)} <span class="mut">${fmtNum(x.pos['750'].high)}</span>`);
+  row('1년 저점 대비','최근 250일 저가',x=>`${fmtPct(x.pos['250'].from_low)} <span class="mut">저점 ${fmtNum(x.pos['250'].low)}</span>`);
+  row('수익률 5·20·60일','',x=>`${fmtPct(x.ret['5'])} · ${fmtPct(x.ret['20'])} · ${fmtPct(x.ret['60'])}`);
+  sec('이동평균 (단순)');
+  for(const n of ['20','60','120','240','600'])row(`${n}일선`,'거리 · 20일 기울기',x=>x.ma[n]?`${fmtPct(x.ma[n].gap)} <span class="mut">${fmtNum(x.ma[n].ma)} · 기울기 ${fmtPct(x.ma[n].slope20)}</span>`:'<span class="mut">봉 부족</span>');
+  sec('바닥 모양');
+  row('60일 종가 범위','최고 ÷ 최저 − 1 (좁을수록 조용한 횡보)',x=>fmtPct(x.base.range60,0));
+  row('120일 종가 범위','',x=>fmtPct(x.base.range120,0));
+  row('최근 8일 범위','고가·저가',x=>`${fmtNum(x.base.low8)} ~ ${fmtNum(x.base.high8)} <span class="mut">(종가 ${fmtPct(x.base.range8)})</span>`);
+  row('월봉 12개월','고가~저가 · 거래량',x=>x.monthly.slice(-6).map(m=>`<span class="mut">${esc(m.m.slice(2))}</span> ${fmtNum(m.low)}~${fmtNum(m.high)} · ${fmtNum(m.vol/1e4)}만주`).join('<br>'));
+  sec('위에 물린 물량');
+  row('매물대','현재가 위 구간 중 거래량 최대 · 평균 구간의 몇 배',x=>x.supply?`${fmtNum(x.supply.lo)} ~ ${fmtNum(x.supply.hi)} <span class="mut">(${fmtPct(x.supply.dist,0)} 위 · 거래량 ${x.supply.vol_share_pct}% · ${x.supply.x_avg_bin}배)</span>`:'<span class="mut">현재가 위 구간 없음</span>');
+  row('위 구간 전부','가까운 구간부터 · 1년 거래량 비중',x=>(x.supply_above||[]).length?x.supply_above.map(b=>`${fmtNum(b.lo)}~${fmtNum(b.hi)} <span class="mut">${b.share_pct}%</span>`).join('<br>'):'—');
+  sec('RSI (고전 Wilder 14)');
+  row('일봉','',x=>fmtNum(x.rsi.day));
+  row('주봉 최근 4주','왼쪽이 오래된 것 · 이번 주는 진행 중',x=>x.rsi.week4.join(' → '));
+  row('월봉 최근 3개월','',x=>x.rsi.month3.join(' → '));
+  sec('변동성 · 손절');
+  row('ATR(14)','하루에 보통 흔들리는 폭',x=>`${fmtNum(x.atr.atr)} <span class="mut">(${fmtPct(x.atr.atr_pct)})</span>`);
+  row('1.5 ATR 손절','종가 − 1.5 ATR',x=>fmtNum(x.atr.stop_1_5));
+  row('내 계획','매수가 · 손절 · 목표',x=>{const p=x.plan;if(!p)return '<span class="mut">입력 없음</span>';
+    return [`매수 ${fmtNum(p.px)}`,p.stop_pct!=null?`손절 ${fmtPct(p.stop_pct)} (${p.stop_atr??'—'} ATR)`:'',p.target_pct!=null?`목표 ${fmtPct(p.target_pct)}`:'',p.rr!=null?`<b>손익비 ${p.rr}</b>`:''].filter(Boolean).join('<br>')});
+  sec('거래대금 (하루)');
+  row('20일 평균','',x=>fmtEok(x.turnover.avg20));
+  row('20일 중앙값','평소 수준 — 급등 며칠이 평균을 끌어올리면 중앙값이 낮다',x=>fmtEok(x.turnover.median20));
+  row('120일 평균','',x=>fmtEok(x.turnover.avg120));
+  row('최근 5일','',x=>x.turnover.last5.map(v=>(+v).toFixed(1)).join(' · '));
+  row('거래량 20일 ÷ 120일','1보다 크면 최근 거래가 늘었다',x=>x.turnover.vol20_120??'—');
+  sec('투자자별 매매 (최근 20거래일)');
+  const fl=(x,k)=>x.flow?`${fmtEok(x.flow[k].eok)} <span class="mut">· ${x.flow[k].buy_days}/${x.flow.days}일 순매수 · 거래량의 ${fmtPct(x.flow[k].share_of_volume)}</span>`:`<span class="mut">${esc(x.flow_error||'없음')}</span>`;
+  row('기관','',x=>fl(x,'organ'));row('외국인','',x=>fl(x,'foreign'));row('개인','',x=>fl(x,'individual'));
+  row('외국인 보유율','기간 처음 → 끝',x=>x.flow&&x.flow.foreign_hold?`${x.flow.foreign_hold.first}% → ${x.flow.foreign_hold.last}%`:'—');
+  row('기관 최근 10일 (주)','',x=>x.flow?x.flow.organ.last10.map(v=>`<span class="${v>0?'up':v<0?'dn':''}">${fmtNum(v)}</span>`).join(' '):'—');
+  sec('저점 관찰 칩과 같은 판정');
+  row('꿈틀이 (일봉 준비)','A 정배열 · B/C 거래 · D 20선 위 · E 20·60 수렴',x=>`${x.chips.stir?'충족':'미충족'} <span class="mut">${Object.entries(x.chips.stir_parts||{}).map(([k,v])=>`${k}${v?'○':'✕'}`).join(' ')}</span>`);
+  row('다이버전스','일봉·주봉',x=>[x.chips.div_day?`일봉 ${esc(x.chips.div_day.a_date.slice(5))}→${esc(x.chips.div_day.b_date.slice(5))}`:'',x.chips.div_week?`주봉 ${esc(x.chips.div_week.b_date.slice(5))}`:''].filter(Boolean).join(' · ')||'없음');
+  return R;
+}
+function tableHTML(j){
+  const it=j.items,head=it.map(x=>x.error?`<th class="mut">${esc(x.query)}</th>`:`<th><a href="https://www.tradingview.com/chart/?symbol=KRX:${esc(x.ticker.slice(0,6))}" target="_blank" rel="noopener">${esc(x.name)}</a> <span class="mut mono">${esc(x.ticker)}</span>${x.candidates&&x.candidates.length?`<div class="help">다른 후보: ${x.candidates.map(esc).join(', ')}</div>`:''}</th>`).join('');
+  const errs=it.filter(x=>x.error).map(x=>`<div class="msg">${esc(x.error)}</div>`).join('');
+  const rows=cmpRows(it).map(r=>r.sec?`<tr class="sec"><td colspan="3">${esc(r.sec)}</td></tr>`:`<tr><td class="k">${esc(r.k)}${r.h?`<span class="h">${esc(r.h)}</span>`:''}</td>${r.v.map(v=>`<td class="v mono">${v}</td>`).join('')}</tr>`).join('');
+  return `${errs}<div class="box scroll"><table><thead><tr><th>항목 <span class="help">기준일 ${esc(j.through||'')}</span></th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`}
+// ── 화면 ──
+const F=['a','pa','sa','ta','b','pb','sb','tb'];
+async function go(e){if(e)e.preventDefault();const q=new URLSearchParams();for(const k of F){const v=$(k).value.trim();if(v)q.set(k,v)}
+  if(!q.get('a')||!q.get('b')){$('msg').textContent='두 종목을 다 넣어 줘';return}
+  $('msg').textContent='';$('out').innerHTML='<p class="help">불러오는 중… (처음엔 10초쯤 걸려)</p>';
+  try{history.replaceState(null,'','?'+q.toString())}catch(_){}
+  try{const r=await fetch('/api/compare?'+q.toString());const j=await r.json();if(!j.ok)throw new Error(j.error||r.status);$('out').innerHTML=tableHTML(j)}
+  catch(err){$('out').innerHTML='';$('msg').textContent='불러오지 못했어: '+err.message}}
+(function init(){const q=new URLSearchParams(location.search);let any=false;for(const k of F){if(q.get(k)){$(k).value=q.get(k);any=true}}if(any&&q.get('a')&&q.get('b'))go()})();
+</script>
+</body></html>
