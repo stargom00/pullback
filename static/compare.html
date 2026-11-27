@@ -46,7 +46,7 @@ td.v{width:33%;font-size:13px}
   <form id="f" onsubmit="go(event)">
     <div class="col"><span class="lab">A</span><input id="a" placeholder="종목명 또는 코드 (예: 바이넥스)" autocomplete="off">
       <div class="row3"><input id="pa" inputmode="decimal" placeholder="매수가"><input id="sa" inputmode="decimal" placeholder="손절"><input id="ta" inputmode="decimal" placeholder="1차 목표"></div></div>
-    <div class="col"><span class="lab">B</span><input id="b" placeholder="종목명 또는 코드 (예: 아남전자)" autocomplete="off">
+    <div class="col"><span class="lab">B</span><input id="b" placeholder="비교할 종목 (비워도 됨)" autocomplete="off">
       <div class="row3"><input id="pb" inputmode="decimal" placeholder="매수가"><input id="sb" inputmode="decimal" placeholder="손절"><input id="tb" inputmode="decimal" placeholder="1차 목표"></div></div>
     <div class="act"><button class="btn" type="submit">비교</button><span class="help">매수가·손절·목표는 넣으면 손익비까지 계산 · KR만 · 확정 종가(20:10) 기준</span><span class="msg" id="msg"></span></div>
   </form>
@@ -106,16 +106,16 @@ function cmpRows(it){
 function tableHTML(j){
   const it=j.items,head=it.map(x=>x.error?`<th class="mut">${esc(x.query)}</th>`:`<th><a href="https://www.tradingview.com/chart/?symbol=KRX:${esc(x.ticker.slice(0,6))}" target="_blank" rel="noopener">${esc(x.name)}</a> <span class="mut mono">${esc(x.ticker)}</span>${x.candidates&&x.candidates.length?`<div class="help">다른 후보: ${x.candidates.map(esc).join(', ')}</div>`:''}</th>`).join('');
   const errs=it.filter(x=>x.error).map(x=>`<div class="msg">${esc(x.error)}</div>`).join('');
-  const rows=cmpRows(it).map(r=>r.sec?`<tr class="sec"><td colspan="3">${esc(r.sec)}</td></tr>`:`<tr><td class="k">${esc(r.k)}${r.h?`<span class="h">${esc(r.h)}</span>`:''}</td>${r.v.map(v=>`<td class="v mono">${v}</td>`).join('')}</tr>`).join('');
+  const rows=cmpRows(it).map(r=>r.sec?`<tr class="sec"><td colspan="${it.length+1}">${esc(r.sec)}</td></tr>`:`<tr><td class="k">${esc(r.k)}${r.h?`<span class="h">${esc(r.h)}</span>`:''}</td>${r.v.map(v=>`<td class="v mono">${v}</td>`).join('')}</tr>`).join('');
   return `${errs}<div class="box scroll"><table><thead><tr><th>항목 <span class="help">기준일 ${esc(j.through||'')}</span></th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`}
 // ── 화면 ──
 const F=['a','pa','sa','ta','b','pb','sb','tb'];
 async function go(e){if(e)e.preventDefault();const q=new URLSearchParams();for(const k of F){const v=$(k).value.trim();if(v)q.set(k,v)}
-  if(!q.get('a')||!q.get('b')){$('msg').textContent='두 종목을 다 넣어 줘';return}
+  if(!q.get('a')&&!q.get('b')){$('msg').textContent='종목을 하나 이상 넣어 줘';return}
   $('msg').textContent='';$('out').innerHTML='<p class="help">불러오는 중… (처음엔 10초쯤 걸려)</p>';
   try{history.replaceState(null,'','?'+q.toString())}catch(_){}
   try{const r=await fetch('/api/compare?'+q.toString());const j=await r.json();if(!j.ok)throw new Error(j.error||r.status);$('out').innerHTML=tableHTML(j)}
   catch(err){$('out').innerHTML='';$('msg').textContent='불러오지 못했어: '+err.message}}
-(function init(){const q=new URLSearchParams(location.search);let any=false;for(const k of F){if(q.get(k)){$(k).value=q.get(k);any=true}}if(any&&q.get('a')&&q.get('b'))go()})();
+(function init(){const q=new URLSearchParams(location.search);let any=false;for(const k of F){if(q.get(k)){$(k).value=q.get(k);any=true}}if(any&&(q.get('a')||q.get('b')))go()})();
 </script>
 </body></html>

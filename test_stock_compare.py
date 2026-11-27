@@ -118,3 +118,30 @@ def test_atr_stop_is_one_and_half_atr():
     a = out["atr"]["atr"]
     assert 10 <= a <= 11
     assert abs(out["atr"]["stop_1_5"] - (out["close"] - 1.5 * a)) < 0.02
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
+def test_page_render_single():
+    """v5.405: 한 종목만 — 열 1개, 구분 줄 colspan 2, 다른 종목 이름 없음."""
+    src = open(os.path.join(ROOT, "static", "compare.html"), encoding="utf-8").read()
+    js = ("const esc=s=>String(s??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'})[c]);"
+          + "".join(_fn(src, n) for n in ("fmtPct", "fmtNum", "fmtEok", "cmpRows", "tableHTML"))
+          + f"const j={json.dumps(FX, ensure_ascii=False)};const one={{ok:true,through:j.through,items:[j.items[0]]}};"
+          + "console.log(JSON.stringify(tableHTML(one)))")
+    h = json.loads(subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout)
+    assert "바이넥스" in h and "아남전자" not in h
+    assert h.count('colspan="2"') == 9 and 'colspan="3"' not in h
+    assert "if(!q.get('a')&&!q.get('b'))" in src and "q.get('a')||q.get('b')" in src
+
+
+def test_api_single_and_empty(monkeypatch):
+    """v5.405: b를 비우면 한 종목만 조회, 둘 다 비우면 ok=False."""
+    calls = []
+    monkeypatch.setattr(app, "_compare_resolve", lambda q: calls.append(q) or {"ticker": "053030.KQ", "name": "바이넥스"})
+    monkeypatch.setattr(app, "_compare_block_blocking", lambda t, th: {k: v for k, v in FX["items"][0].items() if k not in ("query", "ticker", "name", "plan")})
+    r = json.loads(asyncio.run(app.compare_api(a="바이넥스", b="  ")).body)
+    assert r["ok"] and len(r["items"]) == 1 and calls == ["바이넥스"]
+    r = json.loads(asyncio.run(app.compare_api(b="바이넥스")).body)
+    assert r["ok"] and len(r["items"]) == 1
+    r = json.loads(asyncio.run(app.compare_api()).body)
+    assert r["ok"] is False and len(calls) == 2

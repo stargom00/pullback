@@ -5,6 +5,7 @@ RS 모멘텀: 3개월 수익률 백분위 - 12개월 수익률 백분위 (시장
 실행: uvicorn app:app --host 0.0.0.0 --port 8000
 
 [변경 이력]
+v5.405 [/compare 한 종목만 넣어도 조회 — 사용자 2026-11-27 "한종목만 적어도 검색되게 해줘". B 칸은 비워도 되고, 둘 다 비면 안내.]
 v5.404 [두 종목 비교 점검표 /compare — 사용자 2026-11-27 "지금 이 전체 항목들을 체크할수있는 페이지 붙여줘. 두 종목 비교로하자. 티커나 종목명 넣으면 볼수있게."]
   바이넥스·아남전자 비교에서 쓴 항목 그대로: 고점·저점 대비 위치, 이평 거리·기울기(20·60·120·240·600), 바닥 폭(60·120·8일),
   위 매물대(abc_screener.supply_profile — ABC 탭과 같은 함수), 일·주·월 RSI(고전 Wilder), ATR·1.5 ATR 손절, 거래대금(평균·중앙값·120일·
@@ -9323,7 +9324,7 @@ async def _auth_gate(request: Request, call_next):
     return RedirectResponse("/login", status_code=302)
 
 
-VERSION = "v5.404"
+VERSION = "v5.405"
 CACHE_TTL = 600              # 모드별 결과 캐시 (10분)
 DATA_TTL = 600              # 시장별 원본 데이터 캐시 (10분) — 모드 전환 시 재호출 안 함
 REUSE_TTL = int(os.environ.get("REUSE_TTL", "1800"))  # 증분 재사용 허용 시간(30분) — 이보다 오래된 캐시는 전체 재수집
@@ -22625,12 +22626,15 @@ def _num_or_none(x):
 
 @app.get("/api/compare")
 async def compare_api(a: str = "", b: str = "", pa: str = "", sa: str = "", ta: str = "", pb: str = "", sb: str = "", tb: str = ""):
-    """두 종목 비교(GET·읽기 전용 — 저장 없음). pa/sa/ta = A의 매수가·손절·목표(선택), pb/sb/tb = B."""
+    """두 종목 비교(GET·읽기 전용 — 저장 없음). 한 종목만 넣으면 그 종목만(v5.405). pa/sa/ta = A의 매수가·손절·목표(선택), pb/sb/tb = B."""
     through = _lp_watch_mod().confirmed_through("KR", datetime.now(KST).isoformat())
     import stock_compare as sc
     loop = asyncio.get_event_loop()
     out = []
-    for q, px, st, tg in ((a, pa, sa, ta), (b, pb, sb, tb)):
+    pairs = [p for p in ((a, pa, sa, ta), (b, pb, sb, tb)) if (p[0] or "").strip()]   # v5.405: 한 종목만 넣어도 된다
+    if not pairs:
+        return JSONResponse({"ok": False, "error": "종목명이나 코드를 하나 이상 넣어 줘"})
+    for q, px, st, tg in pairs:
         r = await loop.run_in_executor(_executor, _compare_resolve, q)
         if r.get("error"):
             out.append({"query": q, "error": r["error"]})
